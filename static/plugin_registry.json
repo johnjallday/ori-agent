@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "TimeTool",
+      "description": "Returns the current server time",
+      "path": "plugins/time_tool.so"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "agents": {
+    "53w5": {
+      "Settings": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.7
+      },
+      "Plugins": {
+        "get_weather": {
+          "Definition": {
+            "name": "get_weather",
+            "description": "Get weather for a given location",
+            "parameters": {
+              "properties": {
+                "location": {
+                  "description": "Location to get weather for",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "location"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/weather.so"
+        },
+        "math": {
+          "Definition": {
+            "name": "math",
+            "description": "Perform basic math operations: add, subtract, multiply, divide",
+            "parameters": {
+              "properties": {
+                "a": {
+                  "description": "First operand",
+                  "type": "number"
+                },
+                "b": {
+                  "description": "Second operand",
+                  "type": "number"
+                },
+                "operation": {
+                  "description": "Operation to perform: add, subtract, multiply, divide",
+                  "enum": [
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "divide"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation",
+                "a",
+                "b"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
+        }
+      }
+    },
+    "default": {
+      "Settings": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.7
+      },
+      "Plugins": {}
+    }
+  },
+  "current": "53w5"
+}
