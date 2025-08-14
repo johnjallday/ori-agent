@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"plugin"
 	"strings"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/openai/openai-go/v2/option"
 
 	agenthttp "github.com/johnjallday/dolphin-agent/internal/agenthttp"
+	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
@@ -73,7 +72,7 @@ func main() {
 
 	// Other existing endpoints kept here for now (plugins, registry, settings, chat)
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler)
-	mux.HandleFunc("/api/plugins", pluginsHandler)
+	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
 
@@ -146,100 +145,6 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-// Plugins
-func pluginsHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		_, current := st.ListAgents()
-		ag, ok := st.GetAgent(current)
-		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
-			return
-		}
-		plist := make([]map[string]string, 0, len(ag.Plugins))
-		for name, pl := range ag.Plugins {
-			plist = append(plist, map[string]string{"name": name, "description": pl.Definition.Description.String()})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
-
-	case http.MethodPost:
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		file, header, err := r.FormFile("plugin")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		defer file.Close()
-
-		tmpFile := filepath.Join(os.TempDir(), header.Filename)
-		out, err := os.Create(tmpFile)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if _, err := io.Copy(out, file); err != nil {
-			out.Close()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		out.Close()
-
-		p, err := plugin.Open(tmpFile)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		sym, err := p.Lookup("Tool")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		tool, ok := sym.(pluginapi.Tool)
-		if !ok {
-			http.Error(w, "invalid plugin type", http.StatusBadRequest)
-			return
-		}
-		def := tool.Definition()
-
-		_, current := st.ListAgents()
-		ag, ok := st.GetAgent(current)
-		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
-			return
-		}
-		if ag.Plugins == nil {
-			ag.Plugins = map[string]types.LoadedPlugin{}
-		}
-		ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: tmpFile}
-		if err := st.SetAgent(current, ag); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-
-	case http.MethodDelete:
-		name := r.URL.Query().Get("name")
-		_, current := st.ListAgents()
-		ag, ok := st.GetAgent(current)
-		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
-			return
-		}
-		delete(ag.Plugins, name)
-		if err := st.SetAgent(current, ag); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
