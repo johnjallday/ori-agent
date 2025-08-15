@@ -1,9 +1,15 @@
 {
   "plugins": [
     {
-      "name": "TimeTool",
+      "name": "Math",
       "description": "Returns the current server time",
-      "path": "plugins/time_tool.so"
+      "path": "plugins/math/math.so"
+    },
+    {
+
+      "name": "Weather",
+      "description": "Returns Current Weather (just for test)",
+      "path": "plugins/weather/weather.so"
     }
   ]
 }

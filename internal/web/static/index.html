@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Chatbot</title>
+  <title>Dolphin Agent Chatbot</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     /* Dark mode overrides (in addition to Bootstrap data-bs-theme) */
@@ -42,7 +42,8 @@
       <button class="btn btn-outline-light me-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <a class="navbar-brand" href="#">Chatbot</a>
+      <a class="navbar-brand" href="#">Dolphin Agent Chatbot</a>
+      <span id="currentAgentDisplay" class="navbar-text text-light ms-3" style="cursor:pointer;" title="Click to view agent details"></span>
       <button id="darkModeToggle" class="btn btn-outline-light ms-auto">🌙 Dark Mode</button>
     </div>
   </nav>
@@ -120,6 +121,22 @@
     </div>
   </div>
 
+  <!-- Agent Info Modal -->
+  <div class="modal fade" id="agentInfoModal" tabindex="-1" aria-labelledby="agentInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="agentInfoModalLabel">Agent: <span id="agentInfoModalTitle"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <h6>Loaded Plugins</h6>
+          <ul id="agentModalPlugins" class="list-group"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts (load Bootstrap once, then your app JS) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -151,6 +168,9 @@
       const res = await fetch('/api/agents');
       const data = await res.json();
       currentAgent = data.current;
+      // display current agent in navbar
+      const disp = document.getElementById('currentAgentDisplay');
+      if (disp) disp.textContent = `Agent: ${currentAgent}`;
       const ul = document.getElementById('agentsList');
       ul.innerHTML = '';
       data.agents.forEach(a => {
@@ -214,10 +234,15 @@
         btn.className = 'btn btn-sm btn-outline-success';
         btn.textContent = 'Load';
         btn.onclick = async () => {
-          await fetch('/api/plugin-registry', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
+          const res = await fetch('/api/plugin-registry', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ name: p.name }),
           });
+          if (!res.ok) {
+            const text = await res.text();
+            return alert(`Error loading plugin: ${text || res.statusText}`);
+          }
           await refreshPlugins();
           await refreshRegistry();
         };
@@ -237,23 +262,44 @@
     };
 
     // ---- Chat ----
+
     document.getElementById('sendBtn').onclick = async () => {
       const input = document.getElementById('input');
       const q = input.value.trim();
       if (!q) return;
+      // Slash commands (handled client-side)
+      if (q === '/agent') {
+        input.value = '';
+        addChat('System', `Agent: ${currentAgent}`);
+        const resP = await fetch('/api/plugins');
+        const dp = await resP.json();
+        const names = (dp.plugins || []).map(p => p.name);
+        addChat('System', names.length > 0
+          ? `Plugins: ${names.join(', ')}`
+          : 'Plugins: (none)');
+        return;
+      }
       addChat('User', q);
       input.value = '';
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q }),
-      });
-      const data = await res.json();
-      if (data.toolCall) {
-        addChat(data.toolCall.function, data.toolCall.result);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: q }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          addChat('Assistant', `Error: ${text || res.statusText}`);
+          return;
+        }
+
+        const data = await res.json();
+        if (data.toolCall) addChat(data.toolCall.function, data.toolCall.result);
+        addChat('Assistant', data.response || '(no response)');
+      } catch (e) {
+        addChat('Assistant', `Network error: ${e}`);
       }
-      addChat('Assistant', data.response);
-      input.focus();
     };
 
     // Enter-to-send + IME-safe handling
@@ -308,7 +354,26 @@
       document.getElementById('tempInput').value = s.temperature;
     }
 
-    window.onload = init;
+    window.onload = async () => {
+      await init();
+      // Show agent info modal on navbar click
+      const disp = document.getElementById('currentAgentDisplay');
+      disp?.addEventListener('click', async () => {
+        document.getElementById('agentInfoModalTitle').textContent = currentAgent;
+        const ul = document.getElementById('agentModalPlugins');
+        ul.innerHTML = '';
+        const res = await fetch('/api/plugins');
+        const data = await res.json();
+        (data.plugins || []).forEach(p => {
+          const li = document.createElement('li');
+          li.className = 'list-group-item';
+          li.textContent = p.name + ': ' + p.description;
+          ul.appendChild(li);
+        });
+        const modal = new bootstrap.Modal(document.getElementById('agentInfoModal'));
+        modal.show();
+      });
+    };
   </script>
 </body>
 </html>

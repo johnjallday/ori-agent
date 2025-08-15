@@ -23,7 +23,7 @@
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/weather.so"
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/weather/weather.so"
         },
         "math": {
           "Definition": {
@@ -68,6 +68,92 @@
         "temperature": 0.7
       },
       "Plugins": {}
+    },
+    "se": {
+      "Settings": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.7
+      },
+      "Plugins": {
+        "math": {
+          "Definition": {
+            "name": "math",
+            "description": "Perform basic math operations: add, subtract, multiply, divide",
+            "parameters": {
+              "properties": {
+                "a": {
+                  "description": "First operand",
+                  "type": "number"
+                },
+                "b": {
+                  "description": "Second operand",
+                  "type": "number"
+                },
+                "operation": {
+                  "description": "Operation to perform: add, subtract, multiply, divide",
+                  "enum": [
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "divide"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation",
+                "a",
+                "b"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
+        }
+      }
+    },
+    "testw": {
+      "Settings": {
+        "model": "gpt-4o-mini",
+        "temperature": 0.7
+      },
+      "Plugins": {
+        "math": {
+          "Definition": {
+            "name": "math",
+            "description": "Perform basic math operations: add, subtract, multiply, divide",
+            "parameters": {
+              "properties": {
+                "a": {
+                  "description": "First operand",
+                  "type": "number"
+                },
+                "b": {
+                  "description": "Second operand",
+                  "type": "number"
+                },
+                "operation": {
+                  "description": "Operation to perform: add, subtract, multiply, divide",
+                  "enum": [
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "divide"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation",
+                "a",
+                "b"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
+        }
+      }
     }
   },
   "current": "53w5"

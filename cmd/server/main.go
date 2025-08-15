@@ -10,6 +10,9 @@ import (
 	"os"
 	"plugin"
 	"strings"
+	"time"
+
+	"path/filepath"
 
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
@@ -34,18 +37,131 @@ var (
 	tmpl *template.Template
 )
 
+// loadPluginRegistry reads the registry dynamically with fallbacks.
+// Returns: registry, baseDir (for resolving relative plugin paths), error.
+func loadPluginRegistry() (types.PluginRegistry, string, error) {
+	var reg types.PluginRegistry
+
+	// 1) Env override
+	if p := os.Getenv("PLUGIN_REGISTRY_PATH"); p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			if err := json.Unmarshal(b, &reg); err != nil {
+				return reg, "", fmt.Errorf("parse %s: %w", p, err)
+			}
+			return reg, filepath.Dir(p), nil
+		}
+	}
+
+	// 2) Local files
+	for _, p := range []string{
+		"plugin_registry.json",
+		filepath.Join("internal", "web", "static", "plugin_registry.json"),
+	} {
+		if b, err := os.ReadFile(p); err == nil {
+			if err := json.Unmarshal(b, &reg); err != nil {
+				return reg, "", fmt.Errorf("parse %s: %w", p, err)
+			}
+			return reg, filepath.Dir(p), nil
+		}
+	}
+	fmt.Println("plugin registry load complete")
+
+	// 3) Embedded fallback
+	b, err := web.Static.ReadFile("static/plugin_registry.json")
+	if err != nil {
+		return reg, "", fmt.Errorf("embedded plugin_registry.json not found: %w", err)
+	}
+	if err := json.Unmarshal(b, &reg); err != nil {
+		return reg, "", fmt.Errorf("parse embedded plugin_registry.json: %w", err)
+	}
+	// baseDir empty -> relative paths are treated as-is
+	return reg, "", nil
+}
+
+// resolvePluginPath resolves an entry's Path against the registry base dir.
+// If the plugin path is absolute, returns it directly. Otherwise, it first tries
+// to resolve relative to baseDir, and if that file does not exist, falls back
+// to using the path as-is (relative to working directory).
+func resolvePluginPath(baseDir, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	// Try resolving relative to baseDir if provided.
+	if baseDir != "" {
+		candidate := filepath.Join(baseDir, p)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	// Fallback to p relative to current working directory.
+	return p
+}
+
 func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		log.Fatal("OPENAI_API_KEY environment variable is required")
 	}
-	client = openai.NewClient(option.WithAPIKey(apiKey))
+
+	// NEW: http client with sane timeouts for OpenAI calls
+	httpClient := &http.Client{
+		Timeout: 60 * time.Second, // hard cap per request
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+	client = openai.NewClient(
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(httpClient), // <- important
+	)
+	//client = openai.NewClient(option.WithAPIKey(apiKey))
 
 	// init store (persists agents/plugins/settings; not messages)
 	var err error
-	st, err = store.NewFileStore("agents.json", defaultConf)
+	// Determine agent store path (absolute by default, override via AGENT_STORE_PATH)
+	storePath := "agents.json"
+	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
+		storePath = p
+	} else if abs, err2 := filepath.Abs(storePath); err2 == nil {
+		storePath = abs
+	}
+	log.Printf("Using agent store: %s", storePath)
+	st, err = store.NewFileStore(storePath, defaultConf)
 	if err != nil {
 		log.Fatalf("store init: %v", err)
+	}
+	// restore plugin Tool instances for any persisted plugins
+	// so that Chat handlers can invoke them after a restart
+	names, _ := st.ListAgents()
+	for _, agName := range names {
+		ag, ok := st.GetAgent(agName)
+		if !ok {
+			continue
+		}
+		for key, lp := range ag.Plugins {
+			p, err := plugin.Open(lp.Path)
+			if err != nil {
+				log.Printf("failed to open plugin %s for agent %s: %v", lp.Path, agName, err)
+				continue
+			}
+			sym, err := p.Lookup("Tool")
+			if err != nil {
+				log.Printf("missing Tool symbol in plugin %s: %v", lp.Path, err)
+				continue
+			}
+			tool, ok := sym.(pluginapi.Tool)
+			if !ok {
+				log.Printf("invalid plugin type in %s", lp.Path)
+				continue
+			}
+			lp.Tool = tool
+			ag.Plugins[key] = lp
+		}
+		if err := st.SetAgent(agName, ag); err != nil {
+			log.Printf("failed to restore plugins for agent %s: %v", agName, err)
+		}
 	}
 
 	// load plugin registry from embedded FS
@@ -78,7 +194,16 @@ func main() {
 
 	addr := ":8080"
 	log.Printf("Listening on http://localhost%s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second, // allow for model latency + tool calls
+		IdleTimeout:       90 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // ---------- Handlers below still use the Store (no package-level agents/currentAgent) ----------
@@ -91,7 +216,13 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		_ = json.NewEncoder(w).Encode(pluginReg)
+		reg, _, err := loadPluginRegistry()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(reg)
+
 	case http.MethodPost:
 		var req struct {
 			Name string `json:"name"`
@@ -100,11 +231,41 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(req.Name) == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+
+		reg, baseDir, err := loadPluginRegistry()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// find entry by name
 		var entryPath string
 		var found bool
-		for _, e := range pluginReg.Plugins {
+		for _, e := range reg.Plugins {
 			if e.Name == req.Name {
-				entryPath, found = e.Path, true
+				// resolve plugin path (possibly relative) and canonicalize to absolute
+				p := resolvePluginPath(baseDir, e.Path)
+				if abs, err := filepath.Abs(p); err == nil {
+					entryPath = abs
+				} else {
+					entryPath = p
+				}
+				// skip if already loaded for current agent (avoid duplicate plugin.Open errors)
+				_, current := st.ListAgents()
+				ag, ok := st.GetAgent(current)
+				if ok {
+					for _, lp := range ag.Plugins {
+						if strings.EqualFold(lp.Definition.Name, e.Name) {
+							w.WriteHeader(http.StatusOK)
+							return
+						}
+					}
+				}
+				found = true
 				break
 			}
 		}
@@ -112,9 +273,11 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "plugin not found in registry", http.StatusBadRequest)
 			return
 		}
+
+		// load plugin
 		p, err := plugin.Open(entryPath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("open %s: %v", entryPath, err), http.StatusInternalServerError)
 			return
 		}
 		sym, err := p.Lookup("Tool")
@@ -145,6 +308,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -187,7 +351,10 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Chat (same logic as yours; now pulls state from Store; messages stay in-memory)
+
 func chatHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
 	var req struct {
 		Question string `json:"question"`
 	}
@@ -195,8 +362,19 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Printf("Chat question received")
+	q := strings.TrimSpace(req.Question)
+	if q == "" {
+		http.Error(w, "empty question", http.StatusBadRequest)
+		return
+	}
 
+	log.Printf("Chat question received")
+	// Context with timeout per request (prevents indefinite hang)
+	base := r.Context()
+	ctx, cancel := context.WithTimeout(base, 45*time.Second)
+	defer cancel()
+
+	// Load agent
 	_, current := st.ListAgents()
 	ag, ok := st.GetAgent(current)
 	if !ok {
@@ -204,43 +382,55 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
-	ag.Messages = append(ag.Messages, openai.UserMessage(req.Question))
-
-	// tools from plugins
+	// Build tools
 	tools := []openai.ChatCompletionToolUnionParam{}
 	for _, pl := range ag.Plugins {
 		tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
 	}
 
+	// Prepare and call the model
+	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 	params := openai.ChatCompletionNewParams{
 		Model:       ag.Settings.Model,
 		Temperature: openai.Float(ag.Settings.Temperature),
 		Messages:    ag.Messages,
 		Tools:       tools,
 	}
+
+	start := time.Now()
 	resp, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// surface timeout/cancel clearly to the client
+		http.Error(w, fmt.Sprintf("chat completion error: %v", err), http.StatusBadGateway)
+		return
+	}
+	if resp == nil || len(resp.Choices) == 0 {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response": "I couldn’t generate a reply just now. Please try again.",
+		})
 		return
 	}
 	choice := resp.Choices[0].Message
 
-	var callInfo map[string]string
-
+	// Fallback if model answered with an empty assistant message and no tool calls
 	if len(choice.ToolCalls) == 0 && strings.TrimSpace(choice.Content) == "" {
-		respFB, errFB := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		// fresh timeout for fallback, so we don’t reuse a nearly-expired ctx
+		fbCtx, fbCancel := context.WithTimeout(base, 20*time.Second)
+		defer fbCancel()
+
+		respFB, errFB := client.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
 				openai.SystemMessage("Answer directly in plain text. Do not call any tools."),
 			),
 		})
-		if errFB == nil && len(respFB.Choices) > 0 {
+		if errFB == nil && respFB != nil && len(respFB.Choices) > 0 {
 			choice = respFB.Choices[0].Message
 		}
 	}
 
+	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
 		tc := choice.ToolCalls[0]
 		name := tc.Function.Name
@@ -248,40 +438,66 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 
 		pl, ok := ag.Plugins[name]
 		if !ok || pl.Tool == nil {
-			http.Error(w, fmt.Errorf("plugin %q not loaded", name).Error(), http.StatusInternalServerError)
-			return
-		}
-		result, err := pl.Tool.Call(ctx, args)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
 			return
 		}
 
+		// Execute tool with its own reasonable timeout
+		toolCtx, toolCancel := context.WithTimeout(base, 20*time.Second)
+		defer toolCancel()
+
+		result, err := pl.Tool.Call(toolCtx, args)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
+			return
+		}
+
+		// Append the tool call + result to history
 		ag.Messages = append(ag.Messages, choice.ToParam())
 		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
 
+		// Ask model again with tool output
 		resp2, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages:    ag.Messages,
 		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
+			// If second turn fails, still return the tool result as a best-effort reply
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"response": result,
+				"toolCall": map[string]string{
+					"function": name,
+					"args":     args,
+					"result":   result,
+				},
+			})
 			return
 		}
 		final := resp2.Choices[0].Message
 		ag.Messages = append(ag.Messages, final.ToParam())
 
-		callInfo = map[string]string{"function": name, "args": args, "result": result}
-		log.Printf("Chat response (with tool)")
-		// save back in-memory state only (persists settings/plugins, not messages)
-		_ = st.SetAgent(current, ag)
-		_ = json.NewEncoder(w).Encode(map[string]any{"response": final.Content, "toolCall": callInfo})
+		log.Printf("Chat (with tool) in %s", time.Since(start))
+		_ = st.SetAgent(current, ag) // persists settings/plugins only
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response": final.Content,
+			"toolCall": map[string]string{
+				"function": name,
+				"args":     args,
+				"result":   result,
+			},
+		})
 		return
 	}
 
+	// Plain answer path
+	text := strings.TrimSpace(choice.Content)
+	if text == "" {
+		text = "I couldn’t generate a reply just now. Please try again."
+	}
 	ag.Messages = append(ag.Messages, choice.ToParam())
-	log.Printf("Chat response")
+
+	log.Printf("Chat response in %s", time.Since(start))
 	_ = st.SetAgent(current, ag) // persists settings/plugins only
-	_ = json.NewEncoder(w).Encode(map[string]any{"response": choice.Content})
+	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
