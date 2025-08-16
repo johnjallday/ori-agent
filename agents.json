@@ -1,135 +1,27 @@
 {
   "agents": {
-    "desa": {
+    "default": {
       "Settings": {
         "model": "gpt-4.1-nano",
-        "temperature": 1
+        "temperature": 0
       },
       "Plugins": {
-        "get_weather": {
+        "reaper_manager": {
           "Definition": {
-            "name": "get_weather",
-            "description": "Get weather for a given location",
+            "name": "reaper_manager",
+            "description": "Manage REAPER ReaScripts: list available scripts or launch them",
             "parameters": {
               "properties": {
-                "location": {
-                  "description": "Location to get weather for",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "location"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/weather/weather.so"
-        },
-        "math": {
-          "Definition": {
-            "name": "math",
-            "description": "Perform basic math operations: add, subtract, multiply, divide",
-            "parameters": {
-              "properties": {
-                "a": {
-                  "description": "First operand",
-                  "type": "number"
-                },
-                "b": {
-                  "description": "Second operand",
-                  "type": "number"
-                },
                 "operation": {
-                  "description": "Operation to perform: add, subtract, multiply, divide",
+                  "description": "Operation to perform: 'list' to see available scripts, 'run' to launch a script",
                   "enum": [
-                    "add",
-                    "subtract",
-                    "multiply",
-                    "divide"
+                    "list",
+                    "run"
                   ],
                   "type": "string"
-                }
-              },
-              "required": [
-                "operation",
-                "a",
-                "b"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/math/math.so"
-        }
-      }
-    },
-    "wer": {
-      "Settings": {
-        "model": "gpt-4.1-nano",
-        "temperature": 1
-      },
-      "Plugins": {
-        "get_weather": {
-          "Definition": {
-            "name": "get_weather",
-            "description": "Get weather for a given location",
-            "parameters": {
-              "properties": {
-                "location": {
-                  "description": "Location to get weather for",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "location"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/weather/weather.so"
-        },
-        "math": {
-          "Definition": {
-            "name": "math",
-            "description": "Perform basic math operations: add, subtract, multiply, divide",
-            "parameters": {
-              "properties": {
-                "a": {
-                  "description": "First operand",
-                  "type": "number"
                 },
-                "b": {
-                  "description": "Second operand",
-                  "type": "number"
-                },
-                "operation": {
-                  "description": "Operation to perform: add, subtract, multiply, divide",
-                  "enum": [
-                    "add",
-                    "subtract",
-                    "multiply",
-                    "divide"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "operation",
-                "a",
-                "b"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/math/math.so"
-        },
-        "reaper_run_script": {
-          "Definition": {
-            "name": "reaper_run_script",
-            "description": "Launch a custom REAPER ReaScript (.lua) from your Scripts folder",
-            "parameters": {
-              "properties": {
                 "script": {
-                  "description": "Base name of the ReaScript (without .lua). If not listed in enum, it will be looked up by name.",
+                  "description": "Base name of the ReaScript (without .lua). Required only for 'run' operation.",
                   "enum": [
                     "add_4_bar_region",
                     "auto_color_tracks",
@@ -148,34 +40,15 @@
                 }
               },
               "required": [
-                "script"
+                "operation"
               ],
               "type": "object"
             }
           },
           "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/reascript_launcher.so"
-        },
-        "test_function": {
-          "Definition": {
-            "name": "test_function",
-            "description": "A simple test function",
-            "parameters": {
-              "properties": {
-                "message": {
-                  "description": "A test message",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "message"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/test_simple.so"
         }
       }
     }
   },
-  "current": "wer"
+  "current": "default"
 }

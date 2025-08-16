@@ -11,7 +11,8 @@
       "Bash(GOOS=darwin GOARCH=amd64 go build -o server cmd/server/main.go)",
       "Bash(GOWORK=off go run cmd/server/main.go)",
       "Bash(go build:*)",
-      "Bash(GOWORK=off go run /Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/cmd/server/main.go)"
+      "Bash(GOWORK=off go run /Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/cmd/server/main.go)",
+      "Bash(rm:*)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

@@ -15,6 +15,7 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 - **Responsive Layout**: Works perfectly on desktop and mobile devices
 - **Real-time Updates**: Live status indicators and dynamic content
 - **Interactive Chat**: Modern message bubbles with timestamps and avatars
+- **Structured Content**: Intelligent markdown rendering with interactive tables
 
 ### 🔌 Extensible Plugin System
 - **Hot-loadable Plugins**: Add functionality without restarting the server
@@ -31,6 +32,14 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 - **Multiple AI Models**: Support for GPT-4o, GPT-4.1, GPT-5 series
 - **Temperature Control**: Fine-tune response creativity and focus
 - **Model Restrictions**: Automatic validation (e.g., GPT-5 requires temperature=1)
+
+### 📊 Structured Content Rendering
+- **Smart Detection**: Automatically identifies tables, lists, and formatted content
+- **Markdown Support**: Full GitHub Flavored Markdown rendering
+- **Interactive Tables**: Click-to-copy cells, row selection, hover effects
+- **Code Highlighting**: Syntax highlighting for code blocks and inline code
+- **Table Analytics**: Row/column counts and usage hints
+- **Copy Everything**: One-click table copying with proper formatting
 
 ## 🚀 Quick Start
 
