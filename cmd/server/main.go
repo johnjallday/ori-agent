@@ -8,18 +8,18 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"plugin"
 	"strings"
 	"time"
 
 	"path/filepath"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 
 	agenthttp "github.com/johnjallday/dolphin-agent/internal/agenthttp"
+	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
+	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
@@ -31,10 +31,13 @@ var (
 	// runtime state (moved behind Store)
 	st          store.Store
 	pluginReg   types.PluginRegistry
-	defaultConf = types.Settings{Model: openai.ChatModelGPT4oMini, Temperature: 0.7}
+	defaultConf = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
 
 	// template
 	tmpl *template.Template
+
+	// plugin downloader for external plugins
+	pluginDownloader *plugindownloader.PluginDownloader
 )
 
 // loadPluginRegistry reads the registry dynamically with fallbacks.
@@ -132,6 +135,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("store init: %v", err)
 	}
+
+	// init plugin downloader
+	pluginCacheDir := "plugin_cache"
+	if p := os.Getenv("PLUGIN_CACHE_DIR"); p != "" {
+		pluginCacheDir = p
+	} else if abs, err2 := filepath.Abs(pluginCacheDir); err2 == nil {
+		pluginCacheDir = abs
+	}
+	log.Printf("Using plugin cache: %s", pluginCacheDir)
+	pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
 	// restore plugin Tool instances for any persisted plugins
 	// so that Chat handlers can invoke them after a restart
 	names, _ := st.ListAgents()
@@ -141,19 +154,18 @@ func main() {
 			continue
 		}
 		for key, lp := range ag.Plugins {
-			p, err := plugin.Open(lp.Path)
-			if err != nil {
-				log.Printf("failed to open plugin %s for agent %s: %v", lp.Path, agName, err)
+			// If tool is already set, just add it to cache
+			if lp.Tool != nil {
+				absPath, err := filepath.Abs(lp.Path)
+				if err == nil {
+					pluginloader.AddToCache(absPath, lp.Tool)
+				}
 				continue
 			}
-			sym, err := p.Lookup("Tool")
+
+			tool, err := pluginloader.LoadWithCache(lp.Path)
 			if err != nil {
-				log.Printf("missing Tool symbol in plugin %s: %v", lp.Path, err)
-				continue
-			}
-			tool, ok := sym.(pluginapi.Tool)
-			if !ok {
-				log.Printf("invalid plugin type in %s", lp.Path)
+				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
 				continue
 			}
 			lp.Tool = tool
@@ -188,6 +200,7 @@ func main() {
 
 	// Other existing endpoints kept here for now (plugins, registry, settings, chat)
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler)
+	mux.HandleFunc("/api/plugin-updates", pluginUpdatesHandler)
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
@@ -236,7 +249,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		reg, baseDir, err := loadPluginRegistry()
+		reg, _, err := loadPluginRegistry()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -247,18 +260,30 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		var found bool
 		for _, e := range reg.Plugins {
 			if e.Name == req.Name {
-				// resolve plugin path (possibly relative) and canonicalize to absolute
-				p := resolvePluginPath(baseDir, e.Path)
-				if abs, err := filepath.Abs(p); err == nil {
+				// Use plugin downloader to get the plugin (handles both local and remote)
+				var err error
+				entryPath, err = pluginDownloader.GetPlugin(e)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err), http.StatusInternalServerError)
+					return
+				}
+
+				// Ensure path is absolute
+				if abs, err := filepath.Abs(entryPath); err == nil {
 					entryPath = abs
-				} else {
-					entryPath = p
 				}
 				// skip if already loaded for current agent (avoid duplicate plugin.Open errors)
 				_, current := st.ListAgents()
 				ag, ok := st.GetAgent(current)
 				if ok {
 					for _, lp := range ag.Plugins {
+						// Check if plugin is already loaded from the same file path
+						lpAbsPath, err1 := filepath.Abs(lp.Path)
+						if err1 == nil && lpAbsPath == entryPath {
+							w.WriteHeader(http.StatusOK)
+							return
+						}
+						// Also check by definition name for backward compatibility
 						if strings.EqualFold(lp.Definition.Name, e.Name) {
 							w.WriteHeader(http.StatusOK)
 							return
@@ -274,20 +299,10 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// load plugin
-		p, err := plugin.Open(entryPath)
+		// load plugin using cache
+		tool, err := pluginloader.LoadWithCache(entryPath)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("open %s: %v", entryPath, err), http.StatusInternalServerError)
-			return
-		}
-		sym, err := p.Lookup("Tool")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		tool, ok := sym.(pluginapi.Tool)
-		if !ok {
-			http.Error(w, "invalid plugin type", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("load plugin %s: %v", entryPath, err), http.StatusInternalServerError)
 			return
 		}
 		def := tool.Definition()
@@ -500,4 +515,81 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Chat response in %s", time.Since(start))
 	_ = st.SetAgent(current, ag) // persists settings/plugins only
 	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
+}
+
+// Plugin Updates Handler
+func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Check for available updates
+		reg, _, err := loadPluginRegistry()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		updates, err := pluginDownloader.CheckForUpdates(reg)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"available_updates": updates,
+			"count":             len(updates),
+		})
+
+	case http.MethodPost:
+		// Trigger update for specific plugins or all
+		var req struct {
+			PluginNames []string `json:"plugin_names,omitempty"` // Empty = update all
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		reg, _, err := loadPluginRegistry()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var updated []string
+		var errors []string
+
+		for _, entry := range reg.Plugins {
+			// Skip if specific plugins requested and this isn't one of them
+			if len(req.PluginNames) > 0 {
+				found := false
+				for _, name := range req.PluginNames {
+					if name == entry.Name {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+
+			// Only update plugins with URLs and auto-update enabled
+			if entry.URL != "" && entry.AutoUpdate {
+				_, err := pluginDownloader.GetPlugin(entry)
+				if err != nil {
+					errors = append(errors, fmt.Sprintf("%s: %v", entry.Name, err))
+				} else {
+					updated = append(updated, entry.Name)
+				}
+			}
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"updated": updated,
+			"errors":  errors,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
 }

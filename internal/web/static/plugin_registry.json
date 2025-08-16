@@ -2,14 +2,21 @@
   "plugins": [
     {
       "name": "Math",
-      "description": "Returns the current server time",
+      "description": "Perform basic math operations: add, subtract, multiply, divide",
       "path": "plugins/math/math.so"
     },
     {
-
       "name": "Weather",
       "description": "Returns Current Weather (just for test)",
       "path": "plugins/weather/weather.so"
+    },
+    {
+      "name": "ExternalExample",
+      "description": "Example external plugin with auto-update",
+      "url": "https://example.com/plugins/external-plugin.so",
+      "version": "1.0.0",
+      "checksum": "sha256_hash_here",
+      "auto_update": true
     }
   ]
 }

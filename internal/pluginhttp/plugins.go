@@ -2,15 +2,14 @@ package pluginhttp
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"plugin"
 
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 
+	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 )
@@ -24,19 +23,7 @@ type ToolLoader interface {
 type NativeLoader struct{}
 
 func (NativeLoader) Load(path string) (pluginapi.Tool, error) {
-	p, err := plugin.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	sym, err := p.Lookup("Tool")
-	if err != nil {
-		return nil, err
-	}
-	tool, ok := sym.(pluginapi.Tool)
-	if !ok {
-		return nil, errors.New("invalid plugin type: symbol Tool does not implement pluginapi.Tool")
-	}
-	return tool, nil
+	return pluginloader.LoadWithCache(path)
 }
 
 // Handler serves /api/plugins (GET list, POST upload+load, DELETE unload).

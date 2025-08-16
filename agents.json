@@ -1,9 +1,9 @@
 {
   "agents": {
-    "53w5": {
+    "desa": {
       "Settings": {
-        "model": "gpt-4o-mini",
-        "temperature": 0.7
+        "model": "gpt-4.1-nano",
+        "temperature": 1
       },
       "Plugins": {
         "get_weather": {
@@ -58,23 +58,35 @@
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/math/math.so"
         }
       }
     },
-    "default": {
+    "wer": {
       "Settings": {
-        "model": "gpt-4o-mini",
-        "temperature": 0.7
-      },
-      "Plugins": {}
-    },
-    "se": {
-      "Settings": {
-        "model": "gpt-4o-mini",
-        "temperature": 0.7
+        "model": "gpt-4.1-nano",
+        "temperature": 1
       },
       "Plugins": {
+        "get_weather": {
+          "Definition": {
+            "name": "get_weather",
+            "description": "Get weather for a given location",
+            "parameters": {
+              "properties": {
+                "location": {
+                  "description": "Location to get weather for",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "location"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/weather/weather.so"
+        },
         "math": {
           "Definition": {
             "name": "math",
@@ -108,53 +120,62 @@
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
-        }
-      }
-    },
-    "testw": {
-      "Settings": {
-        "model": "gpt-4o-mini",
-        "temperature": 0.7
-      },
-      "Plugins": {
-        "math": {
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/plugins/math/math.so"
+        },
+        "reaper_run_script": {
           "Definition": {
-            "name": "math",
-            "description": "Perform basic math operations: add, subtract, multiply, divide",
+            "name": "reaper_run_script",
+            "description": "Launch a custom REAPER ReaScript (.lua) from your Scripts folder",
             "parameters": {
               "properties": {
-                "a": {
-                  "description": "First operand",
-                  "type": "number"
-                },
-                "b": {
-                  "description": "Second operand",
-                  "type": "number"
-                },
-                "operation": {
-                  "description": "Operation to perform: add, subtract, multiply, divide",
+                "script": {
+                  "description": "Base name of the ReaScript (without .lua). If not listed in enum, it will be looked up by name.",
                   "enum": [
-                    "add",
-                    "subtract",
-                    "multiply",
-                    "divide"
+                    "add_4_bar_region",
+                    "auto_color_tracks",
+                    "auto_create_markers",
+                    "auto_name_tracks",
+                    "get_status",
+                    "loop_mode",
+                    "rearrange_tracks",
+                    "remove_empty_tracks",
+                    "remove_markers",
+                    "render_mp3",
+                    "render_stems",
+                    "render_wav"
                   ],
                   "type": "string"
                 }
               },
               "required": [
-                "operation",
-                "a",
-                "b"
+                "script"
               ],
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/math.so"
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/reascript_launcher.so"
+        },
+        "test_function": {
+          "Definition": {
+            "name": "test_function",
+            "description": "A simple test function",
+            "parameters": {
+              "properties": {
+                "message": {
+                  "description": "A test message",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/test_simple.so"
         }
       }
     }
   },
-  "current": "53w5"
+  "current": "wer"
 }
