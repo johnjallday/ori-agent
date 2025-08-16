@@ -46,6 +46,40 @@
             }
           },
           "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/reascript_launcher.so"
+        },
+        "result_handler": {
+          "Definition": {
+            "name": "result_handler",
+            "description": "Handle actions on chat results like opening directories, files, or URLs",
+            "parameters": {
+              "properties": {
+                "action": {
+                  "description": "Action to perform",
+                  "enum": [
+                    "open_directory",
+                    "open_file",
+                    "open_url",
+                    "reveal_in_finder"
+                  ],
+                  "type": "string"
+                },
+                "context": {
+                  "description": "Optional context about what triggered this action (e.g., 'reaper_scripts', 'config_file')",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "File path, directory path, or URL to open",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action",
+                "path"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/result-handler.so"
         }
       }
     }
