@@ -526,6 +526,15 @@
             </button>
           </li>
           <li class="nav-item flex-fill" role="presentation">
+            <button class="nav-link modern-btn w-100" id="pills-updates-tab" data-bs-toggle="pill" data-bs-target="#pills-updates" type="button" role="tab" style="border-radius: var(--radius-md); margin: 0; font-weight: 500;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Updates
+            </button>
+          </li>
+          <li class="nav-item flex-fill" role="presentation">
             <button class="nav-link modern-btn w-100" id="pills-settings-tab" data-bs-toggle="pill" data-bs-target="#pills-settings" type="button" role="tab" style="border-radius: var(--radius-md); margin: 0; font-weight: 500;">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
                 <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -600,6 +609,76 @@
             <ul id="plugins" class="list-group"></ul>
             <div id="noPluginsMessage" class="text-muted small" style="display: none;">
               No plugins loaded for this agent.
+            </div>
+          </div>
+        </div>
+        <div class="tab-pane fade" id="pills-updates" role="tabpanel">
+          <!-- Current Version Section -->
+          <div class="mb-3">
+            <h6 class="fw-bold mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                <path d="M9 12L2 5L5 2L12 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Current Version
+            </h6>
+            <div class="modern-card p-3 mb-2" style="background: var(--bg-primary);">
+              <div class="d-flex align-items-center justify-content-between">
+                <div>
+                  <div class="fw-medium" id="currentVersion">Loading...</div>
+                  <div class="text-muted small" id="currentRepository">Repository: Loading...</div>
+                </div>
+                <button id="checkUpdatesBtn" class="modern-btn modern-btn-primary">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                    <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Check for Updates
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Update Status Section -->
+          <div class="mb-3" id="updateStatusSection" style="display: none;">
+            <h6 class="fw-bold mb-2">Update Status</h6>
+            <div id="updateStatus" class="modern-card p-3" style="background: var(--bg-primary);">
+              <!-- Update status will be populated here -->
+            </div>
+          </div>
+
+          <!-- Release History Section -->
+          <div class="mb-3">
+            <h6 class="fw-bold mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                <path d="M9 11H15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 15H12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M16 3H5C4.46957 3 3.96086 3.21071 3.58579 3.58579C3.21071 3.96086 3 4.46957 3 5V19C3 19.5304 3.21071 20.0391 3.58579 20.4142C3.96086 20.7893 4.46957 21 5 21H16M16 3L21 8V21C21 19.8954 20.1046 19 19 19H16V3Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Release History 
+              <span id="releaseCount" class="badge bg-secondary"></span>
+            </h6>
+            <div class="mb-2">
+              <button id="listReleasesBtn" class="modern-btn modern-btn-secondary me-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                  <path d="M8 6H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M8 12H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M8 18H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M3 6H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M3 12H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M3 18H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                List Releases
+              </button>
+              <label class="form-check-label me-2">
+                <input type="checkbox" id="includePrereleases" class="form-check-input me-1"> Include Pre-releases
+              </label>
+            </div>
+            <div id="releasesList" class="modern-card p-3" style="background: var(--bg-primary); display: none;">
+              <!-- Release list will be populated here -->
+            </div>
+            <div id="noReleasesMessage" class="text-muted small" style="display: none;">
+              No releases loaded. Click "List Releases" to view available versions.
             </div>
           </div>
         </div>
@@ -1412,10 +1491,199 @@
       });
     }
 
+    // ---- Update Management Functions ----
+    async function refreshUpdateInfo() {
+      try {
+        const res = await fetch('/api/updates/version');
+        const versionInfo = await res.json();
+        document.getElementById('currentVersion').textContent = versionInfo.version;
+        document.getElementById('currentRepository').textContent = `Repository: ${versionInfo.repository}`;
+      } catch (error) {
+        console.error('Failed to fetch version info:', error);
+        document.getElementById('currentVersion').textContent = 'Error loading version';
+        document.getElementById('currentRepository').textContent = 'Repository: Error';
+      }
+    }
+
+    async function checkForUpdates() {
+      const btn = document.getElementById('checkUpdatesBtn');
+      const statusSection = document.getElementById('updateStatusSection');
+      const statusContainer = document.getElementById('updateStatus');
+      
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Checking...';
+      
+      try {
+        const includePrerelease = document.getElementById('includePrereleases')?.checked || false;
+        const res = await fetch(`/api/updates/check?prerelease=${includePrerelease}`);
+        const updateInfo = await res.json();
+        
+        statusSection.style.display = 'block';
+        
+        const statusIcon = updateInfo.updateAvailable ? '🆕' : '✅';
+        const statusText = updateInfo.updateAvailable ? 'Update Available' : 'Up to Date';
+        const statusClass = updateInfo.updateAvailable ? 'text-warning' : 'text-success';
+        
+        statusContainer.innerHTML = `
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+              <h6 class="mb-1 ${statusClass}">${statusIcon} ${statusText}</h6>
+              <div class="text-muted small">Latest: ${updateInfo.latestVersion} • Current: ${updateInfo.currentVersion}</div>
+            </div>
+            ${updateInfo.updateAvailable ? `
+              <button class="modern-btn modern-btn-success" onclick="downloadUpdate('${updateInfo.latestVersion}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                  <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Download ${updateInfo.latestVersion}
+              </button>
+            ` : ''}
+          </div>
+          ${updateInfo.releaseNotes ? `
+            <div class="mb-3">
+              <h6 class="fw-bold mb-2">Release Notes</h6>
+              <div class="release-notes p-2" style="background: var(--bg-tertiary); border-radius: var(--radius-sm); max-height: 200px; overflow-y: auto;">
+                ${updateInfo.releaseNotes.split('\\n').slice(0, 10).join('<br>')}
+                ${updateInfo.releaseNotes.split('\\n').length > 10 ? '<br><em>... and more</em>' : ''}
+              </div>
+            </div>
+          ` : ''}
+          <div class="d-flex justify-content-between text-muted small">
+            <span>Release Date: ${new Date(updateInfo.releaseDate).toLocaleDateString()}</span>
+            <span>Assets: ${updateInfo.assets.length} files</span>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Failed to check for updates:', error);
+        statusSection.style.display = 'block';
+        statusContainer.innerHTML = `
+          <div class="text-danger">
+            <h6 class="mb-1">❌ Check Failed</h6>
+            <div class="text-muted small">Unable to check for updates. Please check your internet connection.</div>
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Check for Updates
+        `;
+      }
+    }
+
+    async function listReleases() {
+      const btn = document.getElementById('listReleasesBtn');
+      const releasesContainer = document.getElementById('releasesList');
+      const countBadge = document.getElementById('releaseCount');
+      const noReleasesMsg = document.getElementById('noReleasesMessage');
+      
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Loading...';
+      
+      try {
+        const includePrerelease = document.getElementById('includePrereleases')?.checked || false;
+        const res = await fetch(`/api/updates/releases?prerelease=${includePrerelease}&limit=10`);
+        const data = await res.json();
+        
+        if (data.releases && data.releases.length > 0) {
+          countBadge.textContent = data.count;
+          releasesContainer.style.display = 'block';
+          noReleasesMsg.style.display = 'none';
+          
+          releasesContainer.innerHTML = `
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Assets</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.releases.map(release => `
+                    <tr>
+                      <td>
+                        <code>${release.version}</code>
+                        ${release.prerelease ? '<span class="badge bg-warning text-dark ms-1">Pre</span>' : ''}
+                      </td>
+                      <td class="text-truncate" style="max-width: 150px;" title="${release.name}">${release.name}</td>
+                      <td class="text-muted small">${new Date(release.date).toLocaleDateString()}</td>
+                      <td><span class="badge bg-secondary">${release.assetCount}</span></td>
+                      <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadUpdate('${release.version}')">
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } else {
+          releasesContainer.style.display = 'none';
+          noReleasesMsg.style.display = 'block';
+          countBadge.textContent = '0';
+        }
+      } catch (error) {
+        console.error('Failed to list releases:', error);
+        releasesContainer.style.display = 'block';
+        noReleasesMsg.style.display = 'none';
+        releasesContainer.innerHTML = '<div class="text-danger">Failed to load releases. Please try again.</div>';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+            <path d="M8 6H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 12H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 18H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 6H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 12H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 18H3.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          List Releases
+        `;
+      }
+    }
+
+    async function downloadUpdate(version) {
+      if (!confirm(`Download update ${version}?\\n\\nThis will download the update file to a temporary location. Manual installation is required for security.`)) {
+        return;
+      }
+      
+      try {
+        const res = await fetch('/api/updates/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ version })
+        });
+        
+        const result = await res.json();
+        
+        if (result.success) {
+          alert(`✅ Update downloaded successfully!\\n\\nFile: ${result.filePath}\\n\\n⚠️ Manual installation required for security.`);
+        } else {
+          alert(`❌ Download failed: ${result.message || 'Unknown error'}`);
+        }
+      } catch (error) {
+        console.error('Failed to download update:', error);
+        alert(`❌ Download failed: ${error.message}`);
+      }
+    }
+
     async function init() {
       await refreshAgents();
       await refreshPlugins();
       await refreshRegistry();
+      await refreshUpdateInfo();
       const res = await fetch('/api/settings');
       const s = await res.json();
       document.getElementById('modelSelect').value = s.model;
@@ -1486,6 +1754,11 @@
 
     window.onload = async () => {
       await init();
+      
+      // Update management event listeners
+      document.getElementById('checkUpdatesBtn').onclick = checkForUpdates;
+      document.getElementById('listReleasesBtn').onclick = listReleases;
+      
       // Show agent info modal on navbar click
       const disp = document.getElementById('currentAgentDisplay');
       disp?.addEventListener('click', async () => {

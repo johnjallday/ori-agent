@@ -22,6 +22,8 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/dolphin-agent/internal/updatehttp"
+	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
 )
 
@@ -38,6 +40,9 @@ var (
 
 	// plugin downloader for external plugins
 	pluginDownloader *plugindownloader.PluginDownloader
+	
+	// update manager for software updates
+	updateMgr *updatemanager.Manager
 )
 
 // loadPluginRegistry reads the registry dynamically with fallbacks.
@@ -145,6 +150,9 @@ func main() {
 	}
 	log.Printf("Using plugin cache: %s", pluginCacheDir)
 	pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
+	
+	// init update manager
+	updateMgr = updatemanager.NewManager("v1.0.0", "johnjallday", "dolphin-agent")
 	// restore plugin Tool instances for any persisted plugins
 	// so that Chat handlers can invoke them after a restart
 	names, _ := st.ListAgents()
@@ -204,6 +212,13 @@ func main() {
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
+	
+	// Update management endpoints
+	updateHandler := updatehttp.NewHandler(updateMgr)
+	mux.HandleFunc("/api/updates/check", updateHandler.CheckUpdatesHandler)
+	mux.HandleFunc("/api/updates/releases", updateHandler.ListReleasesHandler)
+	mux.HandleFunc("/api/updates/download", updateHandler.DownloadUpdateHandler)
+	mux.HandleFunc("/api/updates/version", updateHandler.GetVersionHandler)
 
 	addr := ":8080"
 	log.Printf("Listening on http://localhost%s", addr)

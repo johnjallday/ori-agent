@@ -184,4 +184,3 @@ func getFileManagerName() string {
 
 // Tool is the exported symbol the host looks up via plugin.Open().Lookup("Tool")
 var Tool = resultHandlerTool{}
-
