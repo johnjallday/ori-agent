@@ -380,6 +380,27 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
+func getClientForAgent(ag *types.Agent) openai.Client {
+	if ag.Settings.APIKey != "" {
+		// Create client with agent-specific API key
+		httpClient := &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
+		return openai.NewClient(
+			option.WithAPIKey(ag.Settings.APIKey),
+			option.WithHTTPClient(httpClient),
+		)
+	}
+	// Use global client (with env API key)
+	return client
+}
+
 // Chat (same logic as yours; now pulls state from Store; messages stay in-memory)
 
 func chatHandler(w http.ResponseWriter, r *http.Request) {
@@ -418,6 +439,9 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
 	}
 
+	// Get appropriate client for this agent
+	agentClient := getClientForAgent(ag)
+
 	// Prepare and call the model
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 	params := openai.ChatCompletionNewParams{
@@ -428,7 +452,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	resp, err := client.Chat.Completions.New(ctx, params)
+	resp, err := agentClient.Chat.Completions.New(ctx, params)
 	if err != nil {
 		// surface timeout/cancel clearly to the client
 		http.Error(w, fmt.Sprintf("chat completion error: %v", err), http.StatusBadGateway)
@@ -448,7 +472,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		fbCtx, fbCancel := context.WithTimeout(base, 20*time.Second)
 		defer fbCancel()
 
-		respFB, errFB := client.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
+		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
@@ -487,7 +511,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
 
 		// Ask model again with tool output
-		resp2, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages:    ag.Messages,

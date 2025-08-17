@@ -43,7 +43,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.list(w, r)
 
 	case http.MethodPost:
-		h.uploadAndLoad(w, r)
+		h.uploadAndRegister(w, r)
 
 	case http.MethodDelete:
 		h.unload(w, r)
@@ -70,7 +70,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
 }
 
-func (h *Handler) uploadAndLoad(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -82,8 +82,15 @@ func (h *Handler) uploadAndLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	tmpFile := filepath.Join(os.TempDir(), header.Filename)
-	out, err := os.Create(tmpFile)
+	// Create a permanent directory for uploaded plugins
+	uploadsDir := "uploaded_plugins"
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	pluginFile := filepath.Join(uploadsDir, header.Filename)
+	out, err := os.Create(pluginFile)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -95,28 +102,74 @@ func (h *Handler) uploadAndLoad(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Close()
 
-	tool, err := h.Loader.Load(tmpFile)
+	// Load plugin to get its definition and validate it
+	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Clean up the file if plugin is invalid
+		os.Remove(pluginFile)
+		http.Error(w, "Invalid plugin: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	def := tool.Definition()
 
-	_, current := h.State.ListAgents()
-	ag, ok := h.State.GetAgent(current)
-	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+	// Add to plugin registry
+	if err := h.addToRegistry(def.Name, def.Description.String(), pluginFile); err != nil {
+		// Clean up the file if registry update fails
+		os.Remove(pluginFile)
+		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if ag.Plugins == nil {
-		ag.Plugins = map[string]types.LoadedPlugin{}
+
+	// Return success with plugin info
+	response := map[string]any{
+		"success":     true,
+		"name":        def.Name,
+		"description": def.Description.String(),
+		"path":        pluginFile,
+		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
 	}
-	ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: tmpFile}
-	if err := h.State.SetAgent(current, ag); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) addToRegistry(name, description, path string) error {
+	// Read current registry
+	registryPath := "plugin_registry.json"
+	var registry types.PluginRegistry
+	
+	if data, err := os.ReadFile(registryPath); err == nil {
+		if err := json.Unmarshal(data, &registry); err != nil {
+			return err
+		}
 	}
-	w.WriteHeader(http.StatusOK)
+
+	// Check if plugin already exists in registry
+	for i, plugin := range registry.Plugins {
+		if plugin.Name == name {
+			// Update existing entry
+			registry.Plugins[i].Path = path
+			registry.Plugins[i].Description = description
+			return h.saveRegistry(registryPath, registry)
+		}
+	}
+
+	// Add new entry
+	newEntry := types.PluginRegistryEntry{
+		Name:        name,
+		Description: description,
+		Path:        path,
+	}
+	registry.Plugins = append(registry.Plugins, newEntry)
+	
+	return h.saveRegistry(registryPath, registry)
+}
+
+func (h *Handler) saveRegistry(path string, registry types.PluginRegistry) error {
+	data, err := json.MarshalIndent(registry, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {

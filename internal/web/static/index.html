@@ -592,11 +592,12 @@
           <!-- Upload Section -->
           <div class="mb-3">
             <h6 class="fw-bold mb-2">Upload Plugin</h6>
-            <p class="text-muted small mb-2">Upload and load a plugin file (.so) directly</p>
+            <p class="text-muted small mb-2">Upload a plugin file (.so) to register it in the plugin registry</p>
             <div class="input-group">
               <input type="file" id="pluginfile" class="form-control" accept=".so" />
-              <button id="loadBtn" class="btn btn-success">Load</button>
+              <button id="uploadBtn" class="btn btn-primary">Upload & Register</button>
             </div>
+            <div id="uploadStatus" class="mt-2" style="display: none;"></div>
           </div>
           
           <!-- Current Agent's Loaded Plugins -->
@@ -708,6 +709,22 @@
               <label class="form-label fw-medium" style="color: var(--text-primary); margin-bottom: 0.5rem;">Temperature:</label>
               <input type="number" id="tempInput" class="modern-input w-100" step="0.1" min="0" max="2" placeholder="0.0 - 2.0" />
               <small class="text-muted">Controls randomness: 0 = focused, 2 = creative</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-medium" style="color: var(--text-primary); margin-bottom: 0.5rem;">OpenAI API Key:</label>
+              <div class="input-group">
+                <input type="password" id="apiKeyInput" class="modern-input" placeholder="sk-..." style="border-radius: var(--radius-md) 0 0 var(--radius-md);" />
+                <button type="button" id="toggleApiKey" class="btn btn-outline-secondary" style="border-radius: 0 var(--radius-md) var(--radius-md) 0;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1 12S5 4 12 4S23 12 23 12S19 20 12 20S1 12 1 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+              </div>
+              <small class="text-muted">
+                Optional: Leave empty to use environment variable OPENAI_API_KEY
+                <br><span class="text-warning">⚠️ API key is stored locally and visible to this browser session</span>
+              </small>
             </div>
             <button id="saveSettings" class="modern-btn modern-btn-primary w-100">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -990,13 +1007,55 @@
       }
     }
 
-    document.getElementById('loadBtn').onclick = async () => {
+    document.getElementById('uploadBtn').onclick = async () => {
       const fileInput = document.getElementById('pluginfile');
-      if (fileInput.files.length === 0) return alert('Select a plugin .so file');
-      const form = new FormData();
-      form.append('plugin', fileInput.files[0]);
-      await fetch('/api/plugins', { method: 'POST', body: form });
-      await refreshPlugins();
+      const uploadBtn = document.getElementById('uploadBtn');
+      const uploadStatus = document.getElementById('uploadStatus');
+      
+      if (fileInput.files.length === 0) {
+        uploadStatus.style.display = 'block';
+        uploadStatus.className = 'mt-2 text-danger';
+        uploadStatus.textContent = 'Please select a plugin .so file';
+        return;
+      }
+      
+      // Show loading state
+      uploadBtn.disabled = true;
+      uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Uploading...';
+      uploadStatus.style.display = 'none';
+      
+      try {
+        const form = new FormData();
+        form.append('plugin', fileInput.files[0]);
+        const response = await fetch('/api/plugins', { method: 'POST', body: form });
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+          uploadStatus.style.display = 'block';
+          uploadStatus.className = 'mt-2 text-success';
+          uploadStatus.innerHTML = `
+            <strong>✅ ${result.name}</strong> uploaded successfully!<br>
+            <small>${result.description}</small><br>
+            <small class="text-muted">You can now load this plugin from the registry above.</small>
+          `;
+          
+          // Clear file input
+          fileInput.value = '';
+          
+          // Refresh registry to show the new plugin
+          await refreshRegistry();
+        } else {
+          throw new Error(result.message || 'Upload failed');
+        }
+      } catch (error) {
+        uploadStatus.style.display = 'block';
+        uploadStatus.className = 'mt-2 text-danger';
+        uploadStatus.textContent = `❌ Upload failed: ${error.message}`;
+      } finally {
+        // Reset button
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = 'Upload & Register';
+      }
     };
 
     // ---- Chat ----
@@ -1008,13 +1067,7 @@
       // Slash commands (handled client-side)
       if (q === '/agent') {
         input.value = '';
-        addChat('System', `Agent: ${currentAgent}`);
-        const resP = await fetch('/api/plugins');
-        const dp = await resP.json();
-        const names = (dp.plugins || []).map(p => p.name);
-        addChat('System', names.length > 0
-          ? `Plugins: ${names.join(', ')}`
-          : 'Plugins: (none)');
+        await showAgentDashboard();
         return;
       }
       addChat('User', q);
@@ -1141,6 +1194,58 @@
       chatArea.scrollTop = chatArea.scrollHeight;
     }
     
+    async function showAgentDashboard() {
+      try {
+        // Fetch current agent info
+        const agentsRes = await fetch('/api/agents');
+        const agentsData = await agentsRes.json();
+        
+        // Fetch plugins for current agent
+        const pluginsRes = await fetch('/api/plugins');
+        const pluginsData = await pluginsRes.json();
+        
+        // Fetch settings
+        const settingsRes = await fetch('/api/settings');
+        const settingsData = await settingsRes.json();
+        
+        // Fetch version info
+        const versionRes = await fetch('/api/updates/version');
+        const versionData = await versionRes.json();
+        
+        // Create dashboard data structure
+        const dashboardData = {
+          type: "agent_dashboard",
+          title: "🤖 Agent Dashboard",
+          agent: {
+            name: agentsData.current || 'Unknown',
+            total_agents: agentsData.agents ? agentsData.agents.length : 0,
+            available_agents: agentsData.agents || []
+          },
+          plugins: {
+            loaded: pluginsData.plugins || [],
+            count: pluginsData.plugins ? pluginsData.plugins.length : 0
+          },
+          settings: {
+            model: settingsData.model || 'Unknown',
+            temperature: settingsData.temperature || 0
+          },
+          system: {
+            version: versionData.version || 'Unknown',
+            repository: versionData.repository || 'Unknown'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send structured data to chat
+        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(dashboardData);
+        addChat('System', structuredOutput);
+        
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+        addChat('System', '❌ Failed to load agent dashboard. Please try again.');
+      }
+    }
+    
     function isStructuredContent(text) {
       // Check for special structured data prefix
       if (text.startsWith('STRUCTURED_DATA:')) {
@@ -1208,6 +1313,9 @@
       switch (data.type) {
         case 'reaper_script_list':
           renderScriptList(container, data);
+          break;
+        case 'agent_dashboard':
+          renderAgentDashboard(container, data);
           break;
         default:
           // Unknown structured data type, render as JSON
@@ -1353,6 +1461,177 @@
       instruction.style.fontStyle = 'italic';
       instruction.textContent = `💡 ${data.instruction}`;
       container.appendChild(instruction);
+    }
+    
+    function renderAgentDashboard(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-dashboard';
+      indicator.textContent = 'Agent Dashboard';
+      indicator.style.background = 'linear-gradient(135deg, var(--primary-color), var(--primary-light))';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create dashboard title with timestamp
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create dashboard grid
+      const grid = document.createElement('div');
+      grid.style.display = 'grid';
+      grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(250px, 1fr))';
+      grid.style.gap = '1rem';
+      grid.style.marginBottom = '1rem';
+      
+      // Agent card
+      const agentCard = createDashboardCard('👤 Current Agent', [
+        { label: 'Name', value: data.agent.name, highlight: true },
+        { label: 'Total Agents', value: data.agent.total_agents },
+        { label: 'Available', value: data.agent.available_agents.join(', ') || 'None' }
+      ]);
+      grid.appendChild(agentCard);
+      
+      // Plugins card
+      const pluginsCard = createDashboardCard('🔌 Loaded Plugins', [
+        { label: 'Count', value: data.plugins.count, highlight: true },
+        { label: 'Plugins', value: data.plugins.loaded.map(p => p.name).join(', ') || 'None' }
+      ]);
+      grid.appendChild(pluginsCard);
+      
+      // Settings card
+      const settingsCard = createDashboardCard('⚙️ Configuration', [
+        { label: 'Model', value: data.settings.model, highlight: true },
+        { label: 'Temperature', value: data.settings.temperature }
+      ]);
+      grid.appendChild(settingsCard);
+      
+      // System card
+      const systemCard = createDashboardCard('💻 System Info', [
+        { label: 'Version', value: data.system.version, highlight: true },
+        { label: 'Repository', value: data.system.repository }
+      ]);
+      grid.appendChild(systemCard);
+      
+      container.appendChild(grid);
+      
+      // Add plugins details if any are loaded
+      if (data.plugins.loaded.length > 0) {
+        const pluginsTitle = document.createElement('h3');
+        pluginsTitle.textContent = '🔌 Plugin Details';
+        pluginsTitle.style.color = 'var(--text-primary)';
+        pluginsTitle.style.marginTop = '1.5rem';
+        pluginsTitle.style.marginBottom = '1rem';
+        pluginsTitle.style.fontSize = '1.25rem';
+        pluginsTitle.style.fontWeight = '600';
+        container.appendChild(pluginsTitle);
+        
+        const pluginsTable = document.createElement('div');
+        pluginsTable.style.background = 'var(--bg-secondary)';
+        pluginsTable.style.borderRadius = 'var(--radius-md)';
+        pluginsTable.style.overflow = 'hidden';
+        
+        data.plugins.loaded.forEach((plugin, index) => {
+          const pluginRow = document.createElement('div');
+          pluginRow.style.padding = '0.75rem 1rem';
+          pluginRow.style.borderBottom = index < data.plugins.loaded.length - 1 ? '1px solid var(--border-color)' : 'none';
+          pluginRow.style.display = 'flex';
+          pluginRow.style.justifyContent = 'space-between';
+          pluginRow.style.alignItems = 'center';
+          
+          const pluginInfo = document.createElement('div');
+          
+          const pluginName = document.createElement('strong');
+          pluginName.textContent = plugin.name;
+          pluginName.style.color = 'var(--primary-color)';
+          
+          const pluginDesc = document.createElement('div');
+          pluginDesc.textContent = plugin.description;
+          pluginDesc.style.color = 'var(--text-muted)';
+          pluginDesc.style.fontSize = '0.875rem';
+          
+          pluginInfo.appendChild(pluginName);
+          pluginInfo.appendChild(pluginDesc);
+          
+          const pluginBadge = document.createElement('span');
+          pluginBadge.textContent = 'Active';
+          pluginBadge.style.background = 'var(--success-color)';
+          pluginBadge.style.color = 'white';
+          pluginBadge.style.padding = '0.25rem 0.5rem';
+          pluginBadge.style.borderRadius = 'var(--radius-sm)';
+          pluginBadge.style.fontSize = '0.75rem';
+          pluginBadge.style.fontWeight = '500';
+          
+          pluginRow.appendChild(pluginInfo);
+          pluginRow.appendChild(pluginBadge);
+          pluginsTable.appendChild(pluginRow);
+        });
+        
+        container.appendChild(pluginsTable);
+      }
+    }
+    
+    function createDashboardCard(title, items) {
+      const card = document.createElement('div');
+      card.style.background = 'var(--bg-primary)';
+      card.style.border = '1px solid var(--border-color)';
+      card.style.borderRadius = 'var(--radius-md)';
+      card.style.padding = '1rem';
+      card.style.boxShadow = 'var(--shadow-sm)';
+      
+      const cardTitle = document.createElement('h4');
+      cardTitle.textContent = title;
+      cardTitle.style.color = 'var(--text-primary)';
+      cardTitle.style.fontSize = '1rem';
+      cardTitle.style.fontWeight = '600';
+      cardTitle.style.margin = '0 0 0.75rem 0';
+      card.appendChild(cardTitle);
+      
+      items.forEach(item => {
+        const itemRow = document.createElement('div');
+        itemRow.style.display = 'flex';
+        itemRow.style.justifyContent = 'space-between';
+        itemRow.style.alignItems = 'center';
+        itemRow.style.marginBottom = '0.5rem';
+        
+        const label = document.createElement('span');
+        label.textContent = item.label + ':';
+        label.style.color = 'var(--text-secondary)';
+        label.style.fontSize = '0.875rem';
+        
+        const value = document.createElement('span');
+        value.textContent = item.value;
+        value.style.color = item.highlight ? 'var(--primary-color)' : 'var(--text-primary)';
+        value.style.fontWeight = item.highlight ? '600' : '400';
+        value.style.fontSize = '0.875rem';
+        value.style.wordBreak = 'break-all';
+        value.style.textAlign = 'right';
+        value.style.maxWidth = '60%';
+        
+        itemRow.appendChild(label);
+        itemRow.appendChild(value);
+        card.appendChild(itemRow);
+      });
+      
+      return card;
     }
     
     function renderGenericStructuredData(container, data) {
@@ -1688,6 +1967,7 @@
       const s = await res.json();
       document.getElementById('modelSelect').value = s.model;
       document.getElementById('tempInput').value = s.temperature;
+      document.getElementById('apiKeyInput').value = s.api_key || '';
       
       // Apply GPT-5 temperature restriction on load
       const tempInput = document.getElementById('tempInput');
@@ -1719,6 +1999,7 @@
     document.getElementById('saveSettings').onclick = async () => {
       const model = document.getElementById('modelSelect').value;
       let temperature = parseFloat(document.getElementById('tempInput').value);
+      const apiKey = document.getElementById('apiKeyInput').value.trim();
       
       // GPT-5 series models require temperature = 1
       if (model.startsWith('gpt-5')) {
@@ -1732,11 +2013,22 @@
         }
       }
       
+      // Validate API key format if provided
+      if (apiKey && !apiKey.startsWith('sk-')) {
+        alert('OpenAI API key should start with "sk-"');
+        return;
+      }
+      
       try {
+        const settings = { model, temperature };
+        if (apiKey) {
+          settings.api_key = apiKey;
+        }
+        
         const res = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, temperature })
+          body: JSON.stringify(settings)
         });
         
         if (res.ok) {
@@ -1758,6 +2050,31 @@
       // Update management event listeners
       document.getElementById('checkUpdatesBtn').onclick = checkForUpdates;
       document.getElementById('listReleasesBtn').onclick = listReleases;
+      
+      // API key toggle visibility
+      document.getElementById('toggleApiKey').onclick = () => {
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const toggleBtn = document.getElementById('toggleApiKey');
+        
+        if (apiKeyInput.type === 'password') {
+          apiKeyInput.type = 'text';
+          toggleBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M17.94 17.94C16.2306 19.2719 14.1491 20.0027 12 20C5 20 1 12 1 12C2.24389 9.68192 3.96914 7.65663 6.06 6.06L17.94 17.94Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9.9 4.24C10.5883 4.0789 11.2931 3.99836 12 4C19 4 23 12 23 12C22.393 13.1356 21.6691 14.2048 20.84 15.19L9.9 4.24Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M1 1L23 23" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          `;
+        } else {
+          apiKeyInput.type = 'password';
+          toggleBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1 12S5 4 12 4S23 12 23 12S19 20 12 20S1 12 1 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          `;
+        }
+      };
       
       // Show agent info modal on navbar click
       const disp = document.getElementById('currentAgentDisplay');

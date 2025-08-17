@@ -3,7 +3,7 @@
     "default": {
       "Settings": {
         "model": "gpt-4.1-nano",
-        "temperature": 0
+        "temperature": 1
       },
       "Plugins": {
         "reaper_manager": {
@@ -80,40 +80,6 @@
             }
           },
           "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/result-handler.so"
-        },
-        "update_manager": {
-          "Definition": {
-            "name": "update_manager",
-            "description": "Check for software updates from GitHub releases and manage update installation",
-            "parameters": {
-              "properties": {
-                "action": {
-                  "description": "Action to perform",
-                  "enum": [
-                    "check_updates",
-                    "list_releases",
-                    "install_update",
-                    "get_current_version"
-                  ],
-                  "type": "string"
-                },
-                "include_prerelease": {
-                  "default": false,
-                  "description": "Include pre-release versions in results (default: false)",
-                  "type": "boolean"
-                },
-                "version": {
-                  "description": "Specific version to install (required for install_update action)",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "action"
-              ],
-              "type": "object"
-            }
-          },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/update-manager.so"
         }
       }
     }

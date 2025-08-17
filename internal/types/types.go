@@ -8,6 +8,7 @@ import (
 type Settings struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
+	APIKey      string  `json:"api_key,omitempty"` // OpenAI API key (optional, falls back to env var)
 }
 
 type LoadedPlugin struct {
