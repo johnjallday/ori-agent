@@ -65,19 +65,21 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
    export OPENAI_API_KEY="your-openai-api-key"
    ```
 
-4. **Build included plugins**
+4. **Build the project**
    ```bash
-   # Math plugin
-   cd plugins/math
-   go build -buildmode=plugin -o math.so math.go
+   # Build server and all plugins
+   ./scripts/build.sh
    
-   # Weather plugin
-   cd ../weather
-   go build -buildmode=plugin -o weather.so weather.go
+   # Or build components separately:
+   ./scripts/build-server.sh        # Server only
+   ./scripts/build-plugins.sh       # Plugins only
+   ./scripts/build-external-plugins.sh  # External plugins
    ```
 
 5. **Run the server**
    ```bash
+   ./bin/dolphin-agent
+   # Or during development:
    go run cmd/server/main.go
    ```
 
@@ -215,7 +217,129 @@ The project includes several example plugins:
 ### Chat
 - `POST /api/chat` - Send message to current agent
 
-## 🏗️ Architecture
+## 🏗️ Technology Stack
+
+### Backend Technologies
+
+#### Core Language & Runtime
+- **Go 1.24+** - Primary programming language
+  - High-performance concurrent server
+  - Native plugin system support
+  - Excellent standard library
+  - Cross-platform compilation
+
+#### Web Framework & HTTP
+- **Native `net/http`** - Go standard library HTTP server
+  - Custom multiplexer for routing
+  - RESTful API design
+  - JSON-based communication
+  - CORS support for web interface
+
+#### AI & Machine Learning
+- **OpenAI Go SDK v2** - Official OpenAI client
+  - GPT-4o, GPT-4.1, GPT-5 series support
+  - Function calling for tool integration
+  - Streaming responses (future)
+  - Temperature and parameter control
+
+#### Plugin System
+- **Go Plugin Package** - Native dynamic loading
+  - Shared library (`.so`) compilation
+  - Hot-reloadable plugins
+  - Interface-based architecture
+  - Plugin caching and version management
+
+#### Data Storage
+- **JSON Files** - Configuration and state
+  - `agents.json` - Agent configurations
+  - `plugin_registry.json` - Plugin metadata
+  - File-based persistence for simplicity
+  - Easy backup and version control
+
+### Frontend Technologies
+
+#### Core Web Technologies
+- **HTML5** - Modern semantic markup
+- **CSS3** - Advanced styling with custom properties
+- **Vanilla JavaScript ES6+** - No framework dependencies
+  - Async/await for API calls
+  - Modern DOM manipulation
+  - Event-driven architecture
+
+#### UI Framework & Design
+- **Bootstrap 5.3** - Responsive framework
+  - Grid system for layouts
+  - Component library
+  - Utility classes
+- **Custom CSS** - Modern design system
+  - CSS Custom Properties (variables)
+  - Glassmorphism effects
+  - Dark/light theme support
+  - Smooth animations and transitions
+
+#### Fonts & Icons
+- **Inter Font Family** - Modern typography
+- **Custom SVG Icons** - Lightweight vector graphics
+- **Responsive Typography** - Fluid scale system
+
+### Development & Build Tools
+
+#### Build System
+- **Custom Shell Scripts** - Automated building
+  - `scripts/build.sh` - Complete project build
+  - `scripts/build-plugins.sh` - Plugin compilation
+  - `scripts/build-release.sh` - Cross-platform releases
+  - Version embedding and Git integration
+
+#### Plugin Development
+- **Go Build Mode Plugin** - Native plugin compilation
+  - Interface-based contracts (`pluginapi.Tool`)
+  - Version compatibility checking
+  - Semantic versioning support
+
+#### Development Tools
+- **Go Modules** - Dependency management
+- **Git** - Version control with comprehensive `.gitignore`
+- **Cross-compilation** - Multiple platform support
+  - Linux (amd64, arm64)
+  - macOS (amd64, arm64)
+  - Windows (amd64)
+
+### External Integrations
+
+#### AI Services
+- **OpenAI API** - Primary AI provider
+  - Chat completions
+  - Function calling
+  - Model parameter control
+- **Future**: Anthropic, Google, Ollama support
+
+#### External Plugin Ecosystem
+- **Plugin Registry** - Local and remote plugins
+  - SHA256 checksum verification
+  - Auto-update capabilities
+  - Version management
+- **Example Integrations**:
+  - REAPER DAW automation
+  - Weather services
+  - Mathematical operations
+  - File system operations
+
+### Architecture Patterns
+
+#### Design Patterns
+- **Plugin Architecture** - Extensible system
+- **Repository Pattern** - Data access abstraction
+- **Handler Pattern** - HTTP request processing
+- **Factory Pattern** - Plugin instantiation
+- **Observer Pattern** - Real-time updates (future)
+
+#### Security & Performance
+- **Input Validation** - All API endpoints
+- **Error Handling** - Comprehensive error management
+- **Caching** - Plugin and resource caching
+- **Concurrent Processing** - Go routines for performance
+- **Memory Safety** - Go's built-in safety features
 
 ### Project Structure
 ```
@@ -226,13 +350,19 @@ dolphin-agent/
 │   ├── pluginhttp/      # Plugin HTTP handlers
 │   ├── pluginloader/    # Plugin loading and caching
 │   ├── plugindownloader/# External plugin downloading
+│   ├── store/           # Data persistence layer
 │   ├── types/           # Shared data structures
+│   ├── updatemanager/   # Plugin update management
+│   ├── version/         # Version information
 │   └── web/             # Web server and static files
 ├── plugins/
 │   ├── math/            # Example math plugin
-│   └── weather/         # Example weather plugin
+│   ├── weather/         # Example weather plugin
+│   └── result-handler/  # File/URL handler plugin
 ├── pluginapi/           # Plugin interface definition
-└── go.mod
+├── scripts/             # Build and maintenance scripts
+├── uploaded_plugins/    # Compiled plugin binaries
+└── go.mod               # Go module definition
 ```
 
 ### Key Components
@@ -242,6 +372,8 @@ dolphin-agent/
 - **Plugin Downloader**: Secure downloading and caching of external plugins
 - **Web Interface**: Modern SPA with real-time updates
 - **HTTP Handlers**: RESTful API for all operations
+- **Update Manager**: Plugin versioning and update system
+- **Build System**: Automated compilation and release management
 
 ## 🛡️ Security
 
