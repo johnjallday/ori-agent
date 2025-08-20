@@ -99,23 +99,24 @@ fi
 # Clean up build artifact
 rm -f server
 
-# Update version in update manager (if needed)
-UPDATE_MANAGER_FILE="internal/updatemanager/manager.go"
-if [ -f "$UPDATE_MANAGER_FILE" ]; then
-  print_status "Updating version in update manager..."
-  # Update the version in the NewManager call in main.go
-  sed -i.bak "s/NewManager(\"v[0-9]\+\.[0-9]\+\.[0-9]\+\"/NewManager(\"$VERSION\"/" cmd/server/main.go
-
-  if git diff --quiet cmd/server/main.go; then
-    print_warning "Version in main.go was not updated (already correct or pattern not found)"
+# Update version in VERSION file
+VERSION_FILE="VERSION"
+if [ -f "$VERSION_FILE" ]; then
+  print_status "Updating version in VERSION file..."
+  echo "$VERSION" > "$VERSION_FILE"
+  
+  if git diff --quiet "$VERSION_FILE"; then
+    print_warning "Version in VERSION file was not updated (already correct)"
   else
-    print_status "Updated version in cmd/server/main.go"
-    git add cmd/server/main.go
+    print_status "Updated version in VERSION file"
+    git add "$VERSION_FILE"
     git commit -m "chore: bump version to $VERSION"
   fi
-
-  # Clean up backup file
-  rm -f cmd/server/main.go.bak
+else
+  print_status "Creating VERSION file..."
+  echo "$VERSION" > "$VERSION_FILE"
+  git add "$VERSION_FILE"
+  git commit -m "chore: create VERSION file with version $VERSION"
 fi
 
 # Create git tag

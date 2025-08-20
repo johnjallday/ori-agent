@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/types"
 	"github.com/johnjallday/dolphin-agent/internal/updatehttp"
 	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
+	"github.com/johnjallday/dolphin-agent/internal/version"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
 )
 
@@ -40,7 +41,7 @@ var (
 
 	// plugin downloader for external plugins
 	pluginDownloader *plugindownloader.PluginDownloader
-	
+
 	// update manager for software updates
 	updateMgr *updatemanager.Manager
 )
@@ -56,7 +57,7 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 			if err := json.Unmarshal(b, &reg); err != nil {
 				return reg, "", fmt.Errorf("parse %s: %w", p, err)
 			}
-			return reg, filepath.Dir(p), nil
+			return reg, p, nil
 		}
 	}
 
@@ -69,7 +70,7 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 			if err := json.Unmarshal(b, &reg); err != nil {
 				return reg, "", fmt.Errorf("parse %s: %w", p, err)
 			}
-			return reg, filepath.Dir(p), nil
+			return reg, p, nil
 		}
 	}
 	fmt.Println("plugin registry load complete")
@@ -150,9 +151,10 @@ func main() {
 	}
 	log.Printf("Using plugin cache: %s", pluginCacheDir)
 	pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
-	
+
 	// init update manager
-	updateMgr = updatemanager.NewManager("v1.0.0", "johnjallday", "dolphin-agent")
+	currentVersion := version.GetVersion()
+	updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "dolphin-agent")
 	// restore plugin Tool instances for any persisted plugins
 	// so that Chat handlers can invoke them after a restart
 	names, _ := st.ListAgents()
@@ -212,7 +214,7 @@ func main() {
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
-	
+
 	// Update management endpoints
 	updateHandler := updatehttp.NewHandler(updateMgr)
 	mux.HandleFunc("/api/updates/check", updateHandler.CheckUpdatesHandler)
@@ -332,11 +334,75 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		if ag.Plugins == nil {
 			ag.Plugins = map[string]types.LoadedPlugin{}
 		}
-		ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: entryPath}
+		version := pluginloader.GetPluginVersion(tool)
+		ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: entryPath, Version: version}
 		if err := st.SetAgent(current, ag); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		w.WriteHeader(http.StatusOK)
+
+	case http.MethodDelete:
+		name := r.URL.Query().Get("name")
+		if strings.TrimSpace(name) == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		
+		reg, registryPath, err := loadPluginRegistry()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		// Find and remove the plugin from registry
+		var foundIndex = -1
+		var pluginToDelete types.PluginRegistryEntry
+		for i, plugin := range reg.Plugins {
+			if plugin.Name == name {
+				foundIndex = i
+				pluginToDelete = plugin
+				break
+			}
+		}
+		
+		if foundIndex == -1 {
+			http.Error(w, "plugin not found in registry", http.StatusNotFound)
+			return
+		}
+		
+		// Remove plugin from registry
+		reg.Plugins = append(reg.Plugins[:foundIndex], reg.Plugins[foundIndex+1:]...)
+		
+		// Save updated registry
+		data, err := json.MarshalIndent(reg, "", "  ")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		// Optionally remove the plugin file if it's in uploaded_plugins directory
+		if pluginToDelete.Path != "" && strings.Contains(pluginToDelete.Path, "uploaded_plugins") {
+			if err := os.Remove(pluginToDelete.Path); err != nil {
+				// Log the error but don't fail the request - registry entry is already removed
+				log.Printf("Warning: Failed to remove plugin file %s: %v", pluginToDelete.Path, err)
+			}
+		}
+		
+		// Also unload the plugin from current agent if it's loaded
+		_, current := st.ListAgents()
+		ag, ok := st.GetAgent(current)
+		if ok && ag.Plugins != nil {
+			delete(ag.Plugins, name)
+			if err := st.SetAgent(current, ag); err != nil {
+				log.Printf("Warning: Failed to unload plugin %s from agent: %v", name, err)
+			}
+		}
+		
 		w.WriteHeader(http.StatusOK)
 
 	default:
@@ -442,6 +508,20 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	// Get appropriate client for this agent
 	agentClient := getClientForAgent(ag)
 
+	// Add system message for better tool usage guidance
+	if len(ag.Messages) == 0 {
+		systemPrompt := "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
+		if len(tools) > 0 {
+			systemPrompt += " Available tools: "
+			var toolNames []string
+			for _, pl := range ag.Plugins {
+				toolNames = append(toolNames, pl.Definition.Name)
+			}
+			systemPrompt += strings.Join(toolNames, ", ") + "."
+		}
+		ag.Messages = append(ag.Messages, openai.SystemMessage(systemPrompt))
+	}
+
 	// Prepare and call the model
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 	params := openai.ChatCompletionNewParams{
@@ -510,11 +590,13 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		ag.Messages = append(ag.Messages, choice.ToParam())
 		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
 
-		// Ask model again with tool output
+		// Ask model again with tool output, with guidance to focus on the tool result
 		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
-			Messages:    ag.Messages,
+			Messages: append(ag.Messages,
+				openai.SystemMessage("The tool was executed successfully. Provide a brief, direct response acknowledging the tool result. Do not provide additional information unless specifically requested."),
+			),
 		})
 		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
 			// If second turn fails, still return the tool result as a best-effort reply

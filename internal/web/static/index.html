@@ -984,10 +984,14 @@
             '<span class="badge bg-info me-2">External</span>' : 
             '<span class="badge bg-success me-2">Local</span>';
           info.innerHTML = typeIndicator + '<strong>' + p.name + '</strong>: ' + p.description;
-          const btn = document.createElement('button');
-          btn.className = 'btn btn-sm btn-outline-success';
-          btn.textContent = 'Load';
-          btn.onclick = async () => {
+          
+          const btnContainer = document.createElement('div');
+          btnContainer.className = 'd-flex gap-2';
+          
+          const loadBtn = document.createElement('button');
+          loadBtn.className = 'btn btn-sm btn-outline-success';
+          loadBtn.textContent = 'Load';
+          loadBtn.onclick = async () => {
             const res = await fetch('/api/plugin-registry', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
@@ -1000,8 +1004,28 @@
             await refreshPlugins();
             await refreshRegistry();
           };
+          
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'btn btn-sm btn-outline-danger';
+          deleteBtn.textContent = 'Delete';
+          deleteBtn.onclick = async () => {
+            if (confirm(`Are you sure you want to delete plugin "${p.name}" from the registry?\n\nThis will:\n- Remove it from the registry\n- Delete the plugin file (if uploaded)\n- Unload it from the current agent\n\nThis action cannot be undone.`)) {
+              const res = await fetch('/api/plugin-registry?name=' + encodeURIComponent(p.name), {
+                method: 'DELETE'
+              });
+              if (!res.ok) {
+                const text = await res.text();
+                return alert(`Error deleting plugin: ${text || res.statusText}`);
+              }
+              await refreshPlugins();
+              await refreshRegistry();
+            }
+          };
+          
+          btnContainer.appendChild(loadBtn);
+          btnContainer.appendChild(deleteBtn);
           item.appendChild(info);
-          item.appendChild(btn);
+          item.appendChild(btnContainer);
           container.appendChild(item);
         });
       }
@@ -1068,6 +1092,11 @@
       if (q === '/agent') {
         input.value = '';
         await showAgentDashboard();
+        return;
+      }
+      if (q === '/plugins') {
+        input.value = '';
+        await showPluginRegistry();
         return;
       }
       addChat('User', q);
@@ -1245,6 +1274,60 @@
         addChat('System', '❌ Failed to load agent dashboard. Please try again.');
       }
     }
+
+    async function showPluginRegistry() {
+      try {
+        // Fetch plugin registry
+        const registryRes = await fetch('/api/plugin-registry');
+        const registryData = await registryRes.json();
+        
+        // Fetch currently loaded plugins for current agent
+        const loadedPluginsRes = await fetch('/api/plugins');
+        const loadedPluginsData = await loadedPluginsRes.json();
+        
+        // Create loaded plugins map for quick lookup
+        const loadedPluginsMap = {};
+        (loadedPluginsData.plugins || []).forEach(plugin => {
+          loadedPluginsMap[plugin.name] = true;
+        });
+        
+        // Process registry data
+        const registryPlugins = (registryData.plugins || []).map(plugin => ({
+          name: plugin.name,
+          description: plugin.description,
+          path: plugin.path || 'N/A',
+          url: plugin.url || null,
+          version: plugin.version || 'N/A',
+          auto_update: plugin.auto_update || false,
+          type: plugin.url ? 'Remote' : 'Local',
+          loaded: !!loadedPluginsMap[plugin.name],
+          size: plugin.path ? 'Unknown' : 'N/A'
+        }));
+        
+        // Create plugin registry data structure
+        const pluginRegistryData = {
+          type: "plugin_registry",
+          title: "🔌 Plugin Registry",
+          summary: {
+            total_plugins: registryPlugins.length,
+            loaded_plugins: Object.keys(loadedPluginsMap).length,
+            remote_plugins: registryPlugins.filter(p => p.type === 'Remote').length,
+            local_plugins: registryPlugins.filter(p => p.type === 'Local').length,
+            auto_update_enabled: registryPlugins.filter(p => p.auto_update).length
+          },
+          plugins: registryPlugins,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send structured data to chat
+        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(pluginRegistryData);
+        addChat('System', structuredOutput);
+        
+      } catch (error) {
+        console.error('Failed to fetch plugin registry:', error);
+        addChat('System', '❌ Failed to load plugin registry. Please try again.');
+      }
+    }
     
     function isStructuredContent(text) {
       // Check for special structured data prefix
@@ -1316,6 +1399,9 @@
           break;
         case 'agent_dashboard':
           renderAgentDashboard(container, data);
+          break;
+        case 'plugin_registry':
+          renderPluginRegistry(container, data);
           break;
         default:
           // Unknown structured data type, render as JSON
@@ -1586,6 +1672,216 @@
         });
         
         container.appendChild(pluginsTable);
+      }
+    }
+
+    function renderPluginRegistry(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-table';
+      indicator.textContent = 'Plugin Registry';
+      indicator.style.background = 'linear-gradient(135deg, #4f46e5, #7c3aed)';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create title with timestamp
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create summary cards grid
+      const summaryGrid = document.createElement('div');
+      summaryGrid.style.display = 'grid';
+      summaryGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
+      summaryGrid.style.gap = '1rem';
+      summaryGrid.style.marginBottom = '1.5rem';
+      
+      // Summary cards
+      const summaryCards = [
+        { label: '📦 Total', value: data.summary.total_plugins, color: '#3b82f6' },
+        { label: '✅ Loaded', value: data.summary.loaded_plugins, color: '#10b981' },
+        { label: '🌐 Remote', value: data.summary.remote_plugins, color: '#8b5cf6' },
+        { label: '💽 Local', value: data.summary.local_plugins, color: '#f59e0b' },
+        { label: '🔄 Auto-Update', value: data.summary.auto_update_enabled, color: '#06b6d4' }
+      ];
+      
+      summaryCards.forEach(card => {
+        const cardEl = document.createElement('div');
+        cardEl.style.background = 'var(--bg-primary)';
+        cardEl.style.border = '1px solid var(--border-color)';
+        cardEl.style.borderRadius = 'var(--radius-md)';
+        cardEl.style.padding = '1rem';
+        cardEl.style.textAlign = 'center';
+        cardEl.style.boxShadow = 'var(--shadow-sm)';
+        
+        const label = document.createElement('div');
+        label.textContent = card.label;
+        label.style.color = 'var(--text-muted)';
+        label.style.fontSize = '0.875rem';
+        label.style.marginBottom = '0.25rem';
+        
+        const value = document.createElement('div');
+        value.textContent = card.value;
+        value.style.color = card.color;
+        value.style.fontSize = '1.5rem';
+        value.style.fontWeight = '700';
+        
+        cardEl.appendChild(label);
+        cardEl.appendChild(value);
+        summaryGrid.appendChild(cardEl);
+      });
+      
+      container.appendChild(summaryGrid);
+      
+      // Create plugins table
+      if (data.plugins.length > 0) {
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.background = 'var(--bg-primary)';
+        table.style.border = '1px solid var(--border-color)';
+        table.style.borderRadius = 'var(--radius-md)';
+        table.style.overflow = 'hidden';
+        table.style.boxShadow = 'var(--shadow-sm)';
+        
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.style.background = 'var(--bg-secondary)';
+        
+        const headers = ['Plugin', 'Type', 'Status', 'Version', 'Description'];
+        headers.forEach(headerText => {
+          const th = document.createElement('th');
+          th.textContent = headerText;
+          th.style.padding = '0.75rem';
+          th.style.textAlign = 'left';
+          th.style.borderBottom = '1px solid var(--border-color)';
+          th.style.color = 'var(--text-primary)';
+          th.style.fontWeight = '600';
+          th.style.fontSize = '0.875rem';
+          headerRow.appendChild(th);
+        });
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        
+        // Create body
+        const tbody = document.createElement('tbody');
+        data.plugins.forEach((plugin, index) => {
+          const row = document.createElement('tr');
+          row.style.borderBottom = index < data.plugins.length - 1 ? '1px solid var(--border-color)' : 'none';
+          row.style.transition = 'background-color 0.2s ease';
+          
+          // Plugin name
+          const nameCell = document.createElement('td');
+          nameCell.style.padding = '0.75rem';
+          nameCell.style.fontWeight = '600';
+          nameCell.style.color = 'var(--text-primary)';
+          nameCell.textContent = plugin.name;
+          
+          // Type
+          const typeCell = document.createElement('td');
+          typeCell.style.padding = '0.75rem';
+          const typeBadge = document.createElement('span');
+          typeBadge.textContent = plugin.type;
+          typeBadge.style.padding = '0.25rem 0.5rem';
+          typeBadge.style.borderRadius = 'var(--radius-sm)';
+          typeBadge.style.fontSize = '0.75rem';
+          typeBadge.style.fontWeight = '600';
+          if (plugin.type === 'Remote') {
+            typeBadge.style.background = '#ddd6fe';
+            typeBadge.style.color = '#7c3aed';
+          } else {
+            typeBadge.style.background = '#fef3c7';
+            typeBadge.style.color = '#d97706';
+          }
+          typeCell.appendChild(typeBadge);
+          
+          // Status
+          const statusCell = document.createElement('td');
+          statusCell.style.padding = '0.75rem';
+          const statusBadge = document.createElement('span');
+          statusBadge.textContent = plugin.loaded ? 'Loaded' : 'Available';
+          statusBadge.style.padding = '0.25rem 0.5rem';
+          statusBadge.style.borderRadius = 'var(--radius-sm)';
+          statusBadge.style.fontSize = '0.75rem';
+          statusBadge.style.fontWeight = '600';
+          if (plugin.loaded) {
+            statusBadge.style.background = '#d1fae5';
+            statusBadge.style.color = '#059669';
+          } else {
+            statusBadge.style.background = '#e5e7eb';
+            statusBadge.style.color = '#6b7280';
+          }
+          statusCell.appendChild(statusBadge);
+          
+          // Version
+          const versionCell = document.createElement('td');
+          versionCell.style.padding = '0.75rem';
+          versionCell.style.color = 'var(--text-muted)';
+          versionCell.style.fontSize = '0.875rem';
+          versionCell.textContent = plugin.version;
+          
+          // Description
+          const descCell = document.createElement('td');
+          descCell.style.padding = '0.75rem';
+          descCell.style.color = 'var(--text-muted)';
+          descCell.style.fontSize = '0.875rem';
+          descCell.style.maxWidth = '200px';
+          descCell.style.overflow = 'hidden';
+          descCell.style.textOverflow = 'ellipsis';
+          descCell.style.whiteSpace = 'nowrap';
+          descCell.textContent = plugin.description;
+          descCell.title = plugin.description; // Show full text on hover
+          
+          row.appendChild(nameCell);
+          row.appendChild(typeCell);
+          row.appendChild(statusCell);
+          row.appendChild(versionCell);
+          row.appendChild(descCell);
+          
+          // Add hover effect
+          row.addEventListener('mouseenter', () => {
+            row.style.background = 'var(--bg-secondary)';
+          });
+          row.addEventListener('mouseleave', () => {
+            row.style.background = 'transparent';
+          });
+          
+          tbody.appendChild(row);
+        });
+        
+        table.appendChild(tbody);
+        container.appendChild(table);
+      } else {
+        // No plugins message
+        const noPlugins = document.createElement('div');
+        noPlugins.style.textAlign = 'center';
+        noPlugins.style.padding = '2rem';
+        noPlugins.style.color = 'var(--text-muted)';
+        noPlugins.style.background = 'var(--bg-primary)';
+        noPlugins.style.border = '1px solid var(--border-color)';
+        noPlugins.style.borderRadius = 'var(--radius-md)';
+        noPlugins.textContent = '📦 No plugins found in registry';
+        container.appendChild(noPlugins);
       }
     }
     

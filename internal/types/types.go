@@ -15,6 +15,7 @@ type LoadedPlugin struct {
 	Tool       pluginapi.Tool                 `json:"-"`
 	Definition openai.FunctionDefinitionParam `json:"Definition"`
 	Path       string                         `json:"Path"`
+	Version    string                         `json:"Version,omitempty"`
 }
 
 type Agent struct {

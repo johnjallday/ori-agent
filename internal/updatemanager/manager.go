@@ -330,3 +330,4 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 
 	return filePath, nil
 }
+

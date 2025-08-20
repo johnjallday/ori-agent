@@ -45,7 +45,8 @@
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/reascript_launcher.so"
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/reascript_launcher.so",
+          "Version": "0.0.1"
         },
         "result_handler": {
           "Definition": {
@@ -79,10 +80,81 @@
               "type": "object"
             }
           },
-          "Path": "/var/folders/8y/t445pvfn6635s67wsw97hdbw0000gn/T/result-handler.so"
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/result-handler.so",
+          "Version": "0.0.1"
+        }
+      }
+    },
+    "reaper": {
+      "Settings": {
+        "model": "gpt-4.1-nano",
+        "temperature": 1
+      },
+      "Plugins": {
+        "get_weather": {
+          "Definition": {
+            "name": "get_weather",
+            "description": "Get weather for a given location",
+            "parameters": {
+              "properties": {
+                "location": {
+                  "description": "Location to get weather for",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "location"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/weather.so",
+          "Version": "1.0.0"
+        },
+        "reaper_manager": {
+          "Definition": {
+            "name": "reaper_manager",
+            "description": "Manage REAPER ReaScripts: list available scripts or launch them",
+            "parameters": {
+              "properties": {
+                "operation": {
+                  "description": "Operation to perform: 'list' to see available scripts, 'run' to launch a script",
+                  "enum": [
+                    "list",
+                    "run"
+                  ],
+                  "type": "string"
+                },
+                "script": {
+                  "description": "Base name of the ReaScript (without .lua). Required only for 'run' operation.",
+                  "enum": [
+                    "add_4_bar_region",
+                    "auto_color_tracks",
+                    "auto_create_markers",
+                    "auto_name_tracks",
+                    "get_status",
+                    "loop_mode",
+                    "rearrange_tracks",
+                    "remove_empty_tracks",
+                    "remove_markers",
+                    "render_mp3",
+                    "render_stems",
+                    "render_wav"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation"
+              ],
+              "type": "object"
+            }
+          },
+          "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/reascript_launcher.so",
+          "Version": "0.0.1"
         }
       }
     }
   },
-  "current": "default"
+  "current": "reaper"
 }

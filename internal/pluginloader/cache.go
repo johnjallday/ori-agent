@@ -112,3 +112,12 @@ func AddToCache(absPath string, tool pluginapi.Tool) {
 	nameToPathCache[def.Name] = absPath
 	nameToPathMu.Unlock()
 }
+
+// GetPluginVersion extracts version information from a plugin tool.
+// Returns empty string if the plugin doesn't implement VersionedTool.
+func GetPluginVersion(tool pluginapi.Tool) string {
+	if versionedTool, ok := tool.(pluginapi.VersionedTool); ok {
+		return versionedTool.Version()
+	}
+	return ""
+}

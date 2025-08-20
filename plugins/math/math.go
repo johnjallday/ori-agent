@@ -13,8 +13,9 @@ import (
 // mathTool implements pluginapi.Tool for basic arithmetic operations.
 type mathTool struct{}
 
-// ensure mathTool implements pluginapi.Tool at compile time
+// ensure mathTool implements pluginapi.Tool and pluginapi.VersionedTool at compile time
 var _ pluginapi.Tool = (*mathTool)(nil)
+var _ pluginapi.VersionedTool = (*mathTool)(nil)
 
 // Definition returns the OpenAI function definition for the math operation.
 func (m *mathTool) Definition() openai.FunctionDefinitionParam {
@@ -70,6 +71,11 @@ func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("unknown operation %q", p.Operation)
 	}
 	return fmt.Sprintf("%g", result), nil
+}
+
+// Version returns the plugin version.
+func (m *mathTool) Version() string {
+	return "1.0.0"
 }
 
 // Tool is the exported symbol that the host application will look up.

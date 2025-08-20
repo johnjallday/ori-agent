@@ -1,19 +1,21 @@
 {
   "plugins": [
     {
-      "name": "reaper_manager",
-      "description": "Manage REAPER ReaScripts: list available scripts or launch them",
-      "path": "uploaded_plugins/reascript_launcher.so"
-    },
-    {
       "name": "math",
       "description": "Perform basic math operations: add, subtract, multiply, divide",
-      "path": "uploaded_plugins/math.so"
+      "path": "uploaded_plugins/math.so",
+      "version": "1.0.0"
     },
     {
       "name": "get_weather",
       "description": "Get weather for a given location",
-      "path": "uploaded_plugins/weather.so"
+      "path": "uploaded_plugins/weather.so",
+      "version": "1.0.0"
+    },
+    {
+      "name": "reaper_manager",
+      "description": "Manage REAPER ReaScripts: list available scripts or launch them",
+      "path": "uploaded_plugins/reascript_launcher.so"
     }
   ]
 }

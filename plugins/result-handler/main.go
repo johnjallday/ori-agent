@@ -17,6 +17,7 @@ type resultHandlerTool struct{}
 
 // Ensure compile-time conformance
 var _ pluginapi.Tool = resultHandlerTool{}
+var _ pluginapi.VersionedTool = resultHandlerTool{}
 
 func (t resultHandlerTool) Definition() openai.FunctionDefinitionParam {
 	return openai.FunctionDefinitionParam{
@@ -180,6 +181,11 @@ func getFileManagerName() string {
 	default:
 		return "file manager"
 	}
+}
+
+// Version returns the plugin version.
+func (t resultHandlerTool) Version() string {
+	return "0.0.1"
 }
 
 // Tool is the exported symbol the host looks up via plugin.Open().Lookup("Tool")
