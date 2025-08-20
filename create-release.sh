@@ -89,22 +89,19 @@ if ! go test ./...; then
   exit 1
 fi
 
-# Build the application
-print_status "Building application..."
-if ! go build ./cmd/server/; then
-  print_error "Build failed. Fix build errors before creating a release."
+# Build cross-platform release binaries
+print_status "Building cross-platform release binaries..."
+if ! ./scripts/build-release.sh; then
+  print_error "Cross-platform build failed. Fix build errors before creating a release."
   exit 1
 fi
-
-# Clean up build artifact
-rm -f server
 
 # Update version in VERSION file
 VERSION_FILE="VERSION"
 if [ -f "$VERSION_FILE" ]; then
   print_status "Updating version in VERSION file..."
-  echo "$VERSION" > "$VERSION_FILE"
-  
+  echo "$VERSION" >"$VERSION_FILE"
+
   if git diff --quiet "$VERSION_FILE"; then
     print_warning "Version in VERSION file was not updated (already correct)"
   else
@@ -114,7 +111,7 @@ if [ -f "$VERSION_FILE" ]; then
   fi
 else
   print_status "Creating VERSION file..."
-  echo "$VERSION" > "$VERSION_FILE"
+  echo "$VERSION" >"$VERSION_FILE"
   git add "$VERSION_FILE"
   git commit -m "chore: create VERSION file with version $VERSION"
 fi
@@ -150,11 +147,38 @@ $(git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s" | head -20)
 🤖 Release created automatically with create-release.sh"
   fi
 
+  # Upload release assets
+  print_status "Uploading release binaries..."
+  UPLOAD_SUCCESS=true
+
+  # Upload all platform binaries from dist/
+  if [ -d "dist" ]; then
+    for asset in dist/*.tar.gz dist/*.zip; do
+      if [ -f "$asset" ]; then
+        print_status "Uploading $(basename "$asset")..."
+        if ! gh release upload "$VERSION" "$asset"; then
+          print_error "Failed to upload $(basename "$asset")"
+          UPLOAD_SUCCESS=false
+        fi
+      fi
+    done
+  else
+    print_error "dist/ directory not found. Build may have failed."
+    UPLOAD_SUCCESS=false
+  fi
+
   # Create the release
   if gh release create "$VERSION" \
     --title "Dolphin Agent $VERSION" \
     --notes "$RELEASE_NOTES"; then
     print_success "GitHub release created successfully!"
+
+    if [ "$UPLOAD_SUCCESS" = true ]; then
+      print_success "All release binaries uploaded successfully!"
+    else
+      print_warning "Some binaries failed to upload. Check the release page."
+    fi
+
     print_status "View release at: $(gh repo view --web --json url -q .url)/releases/tag/$VERSION"
   else
     print_error "Failed to create GitHub release"
@@ -172,4 +196,3 @@ print_status "Next steps:"
 print_status "  1. Review the release on GitHub"
 print_status "  2. Add any additional release notes if needed"
 print_status "  3. Update documentation if necessary"
-
