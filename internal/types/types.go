@@ -32,6 +32,8 @@ type PluginRegistryEntry struct {
 	Version     string `json:"version,omitempty"`     // Plugin version
 	Checksum    string `json:"checksum,omitempty"`    // SHA256 checksum for verification
 	AutoUpdate  bool   `json:"auto_update,omitempty"` // Whether to auto-update this plugin
+	GitHubRepo  string `json:"github_repo,omitempty"` // GitHub repository (user/repo format)
+	DownloadURL string `json:"download_url,omitempty"` // Direct download URL for GitHub releases
 }
 
 type PluginRegistry struct {

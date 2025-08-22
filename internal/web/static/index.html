@@ -263,6 +263,28 @@
       box-shadow: var(--shadow-xl);
     }
     
+    /* Improved offcanvas sidebar width */
+    .offcanvas-start {
+      --bs-offcanvas-width: 450px;
+    }
+    
+    /* Responsive offcanvas width */
+    @media (max-width: 576px) {
+      .offcanvas-start {
+        --bs-offcanvas-width: 85vw;
+      }
+    }
+    
+    /* Plugin registry button styling */
+    #registryList .list-group-item {
+      padding: 1rem 1.25rem;
+    }
+    
+    #registryList .btn-sm {
+      min-width: 80px;
+      white-space: nowrap;
+    }
+    
     .modal-header {
       border-bottom: 1px solid var(--border-color);
       background: var(--bg-secondary);
@@ -956,6 +978,15 @@
     async function refreshRegistry() {
       const res = await fetch('/api/plugin-registry');
       const data = await res.json();
+      
+      // Fetch currently loaded plugins to check status
+      const loadedRes = await fetch('/api/plugins');
+      const loadedData = await loadedRes.json();
+      const loadedPluginsMap = {};
+      (loadedData.plugins || []).forEach(plugin => {
+        loadedPluginsMap[plugin.name] = true;
+      });
+      
       const container = document.getElementById('registryList');
       const noRegistryMessage = document.getElementById('noRegistryMessage');
       const registryCount = document.getElementById('registryCount');
@@ -979,31 +1010,117 @@
           const item = document.createElement('div');
           item.className = 'list-group-item d-flex justify-content-between align-items-center';
           const info = document.createElement('div');
-          // Add plugin type indicator (local vs external)
-          const typeIndicator = p.url ? 
-            '<span class="badge bg-info me-2">External</span>' : 
-            '<span class="badge bg-success me-2">Local</span>';
-          info.innerHTML = typeIndicator + '<strong>' + p.name + '</strong>: ' + p.description;
+          
+          // Add plugin type indicator (local vs external/GitHub)
+          let typeIndicator = '';
+          if (p.github_repo) {
+            typeIndicator = '<span class="badge bg-primary me-2">GitHub</span>';
+          } else if (p.url) {
+            typeIndicator = '<span class="badge bg-info me-2">External</span>';
+          } else {
+            typeIndicator = '<span class="badge bg-success me-2">Local</span>';
+          }
+          
+          let pluginInfo = typeIndicator + '<strong>' + p.name + '</strong>: ' + p.description;
+          
+          // Add loaded status indicator
+          if (loadedPluginsMap[p.name]) {
+            pluginInfo += ' <span class="badge bg-success ms-1">✓ Loaded</span>';
+          }
+          
+          // Add version if available
+          if (p.version) {
+            pluginInfo += ' <span class="badge bg-secondary ms-1">v' + p.version + '</span>';
+          }
+          
+          // Add GitHub link if available
+          if (p.github_repo) {
+            pluginInfo += '<br><small class="text-muted">Repository: <a href="https://github.com/' + p.github_repo + '" target="_blank" class="text-decoration-none">' + p.github_repo + '</a></small>';
+          }
+          
+          info.innerHTML = pluginInfo;
           
           const btnContainer = document.createElement('div');
-          btnContainer.className = 'd-flex gap-2';
+          btnContainer.className = 'd-flex gap-2 flex-wrap align-items-center justify-content-end';
+          
+          // Download button for GitHub plugins
+          if (p.download_url && p.github_repo) {
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'btn btn-sm btn-outline-primary';
+            downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download';
+            downloadBtn.title = 'Download to uploaded_plugins folder';
+            downloadBtn.onclick = async () => {
+              downloadBtn.disabled = true;
+              downloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Downloading...';
+              
+              try {
+                const res = await fetch('/api/plugins/download', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({ name: p.name }),
+                });
+                
+                const result = await res.json();
+                
+                if (!res.ok) {
+                  throw new Error(result.message || res.statusText);
+                }
+                
+                // Show success message
+                downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Downloaded';
+                downloadBtn.className = 'btn btn-sm btn-success';
+                
+                // Reset button after 2 seconds
+                setTimeout(() => {
+                  downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download';
+                  downloadBtn.className = 'btn btn-sm btn-outline-primary';
+                  downloadBtn.disabled = false;
+                }, 2000);
+                
+              } catch (error) {
+                console.error('Download failed:', error);
+                downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Failed';
+                downloadBtn.className = 'btn btn-sm btn-danger';
+                
+                // Show error message
+                alert(`Download failed: ${error.message}`);
+                
+                // Reset button after 2 seconds
+                setTimeout(() => {
+                  downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download';
+                  downloadBtn.className = 'btn btn-sm btn-outline-primary';
+                  downloadBtn.disabled = false;
+                }, 2000);
+              }
+            };
+            btnContainer.appendChild(downloadBtn);
+          }
           
           const loadBtn = document.createElement('button');
-          loadBtn.className = 'btn btn-sm btn-outline-success';
-          loadBtn.textContent = 'Load';
-          loadBtn.onclick = async () => {
-            const res = await fetch('/api/plugin-registry', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ name: p.name }),
-            });
-            if (!res.ok) {
-              const text = await res.text();
-              return alert(`Error loading plugin: ${text || res.statusText}`);
-            }
-            await refreshPlugins();
-            await refreshRegistry();
-          };
+          
+          // Check if plugin is already loaded
+          if (loadedPluginsMap[p.name]) {
+            loadBtn.className = 'btn btn-sm btn-success';
+            loadBtn.textContent = 'Already Loaded';
+            loadBtn.disabled = true;
+            loadBtn.title = 'This plugin is already loaded in the current agent';
+          } else {
+            loadBtn.className = 'btn btn-sm btn-outline-success';
+            loadBtn.textContent = 'Load';
+            loadBtn.onclick = async () => {
+              const res = await fetch('/api/plugin-registry', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: p.name }),
+              });
+              if (!res.ok) {
+                const text = await res.text();
+                return alert(`Error loading plugin: ${text || res.statusText}`);
+              }
+              await refreshPlugins();
+              await refreshRegistry();
+            };
+          }
           
           const deleteBtn = document.createElement('button');
           deleteBtn.className = 'btn btn-sm btn-outline-danger';

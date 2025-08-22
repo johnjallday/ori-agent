@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -211,6 +212,7 @@ func main() {
 	// Other existing endpoints kept here for now (plugins, registry, settings, chat)
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler)
 	mux.HandleFunc("/api/plugin-updates", pluginUpdatesHandler)
+	mux.HandleFunc("/api/plugins/download", pluginDownloadHandler)
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
@@ -279,10 +281,15 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			if e.Name == req.Name {
 				// Use plugin downloader to get the plugin (handles both local and remote)
 				var err error
-				entryPath, err = pluginDownloader.GetPlugin(e)
+				var wasCached bool
+				entryPath, wasCached, err = pluginDownloader.GetPlugin(e)
 				if err != nil {
 					http.Error(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err), http.StatusInternalServerError)
 					return
+				}
+				
+				if wasCached {
+					fmt.Printf("Plugin %s is already downloaded\n", e.Name)
 				}
 
 				// Ensure path is absolute
@@ -696,7 +703,7 @@ func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Only update plugins with URLs and auto-update enabled
 			if entry.URL != "" && entry.AutoUpdate {
-				_, err := pluginDownloader.GetPlugin(entry)
+				_, _, err := pluginDownloader.GetPlugin(entry)
 				if err != nil {
 					errors = append(errors, fmt.Sprintf("%s: %v", entry.Name, err))
 				} else {
@@ -713,4 +720,104 @@ func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// Plugin Download Handler - Downloads GitHub plugins to uploaded_plugins folder
+func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+
+	// Load registry to find the plugin
+	reg, _, err := loadPluginRegistry()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Find the plugin entry
+	var pluginEntry *types.PluginRegistryEntry
+	for _, entry := range reg.Plugins {
+		if entry.Name == req.Name {
+			pluginEntry = &entry
+			break
+		}
+	}
+
+	if pluginEntry == nil {
+		http.Error(w, "plugin not found in registry", http.StatusNotFound)
+		return
+	}
+
+	// Check if it has a download URL
+	if pluginEntry.DownloadURL == "" {
+		http.Error(w, "plugin does not have a download URL", http.StatusBadRequest)
+		return
+	}
+
+	// Create uploaded_plugins directory if it doesn't exist
+	uploadDir := "uploaded_plugins"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create upload directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Download the plugin file
+	resp, err := http.Get(pluginEntry.DownloadURL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to download plugin: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("download failed with status %d", resp.StatusCode), http.StatusInternalServerError)
+		return
+	}
+
+	// Determine the filename from the URL or use plugin name
+	filename := fmt.Sprintf("%s.so", pluginEntry.Name)
+	if pluginEntry.Path != "" {
+		filename = filepath.Base(pluginEntry.Path)
+	}
+	
+	filePath := filepath.Join(uploadDir, filename)
+
+	// Create the file
+	file, err := os.Create(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// Copy the downloaded content to the file
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":  true,
+		"message":  fmt.Sprintf("Plugin %s downloaded successfully", pluginEntry.Name),
+		"filename": filename,
+		"path":     filePath,
+	})
 }

@@ -55,4 +55,3 @@ build_plugin "result-handler" "main.go" "result-handler"
 echo -e "${GREEN}All plugins built successfully!${NC}"
 echo -e "${BLUE}Plugin binaries are in: uploaded_plugins/${NC}"
 ls -la uploaded_plugins/*.so
-

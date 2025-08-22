@@ -31,11 +31,11 @@ func NewDownloader(cacheDir string) *PluginDownloader {
 	}
 }
 
-// GetPlugin downloads a plugin if needed and returns the local path
-func (d *PluginDownloader) GetPlugin(entry types.PluginRegistryEntry) (string, error) {
+// GetPlugin downloads a plugin if needed and returns the local path and whether it was already cached
+func (d *PluginDownloader) GetPlugin(entry types.PluginRegistryEntry) (string, bool, error) {
 	// If it's a local plugin, return the path as-is
 	if entry.URL == "" && entry.Path != "" {
-		return entry.Path, nil
+		return entry.Path, false, nil
 	}
 
 	// If it's a URL plugin, handle downloading/caching
@@ -43,11 +43,11 @@ func (d *PluginDownloader) GetPlugin(entry types.PluginRegistryEntry) (string, e
 		return d.downloadAndCache(entry)
 	}
 
-	return "", fmt.Errorf("plugin entry must have either path or url specified")
+	return "", false, fmt.Errorf("plugin entry must have either path or url specified")
 }
 
 // downloadAndCache downloads a plugin from URL and caches it locally
-func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (string, error) {
+func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (string, bool, error) {
 	// Generate cache filename based on plugin name and version
 	cacheFilename := fmt.Sprintf("%s-%s.so", entry.Name, entry.Version)
 	if entry.Version == "" {
@@ -57,24 +57,24 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 
 	// Check if plugin is already cached and valid
 	if d.isCacheValid(cachePath, entry) {
-		return cachePath, nil
+		return cachePath, true, nil
 	}
 
 	// Download the plugin
 	resp, err := d.HTTPClient.Get(entry.URL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download plugin from %s: %w", entry.URL, err)
+		return "", false, fmt.Errorf("failed to download plugin from %s: %w", entry.URL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download plugin: HTTP %d", resp.StatusCode)
+		return "", false, fmt.Errorf("failed to download plugin: HTTP %d", resp.StatusCode)
 	}
 
 	// Create temporary file
 	tempFile, err := os.CreateTemp(d.CacheDir, "plugin-*.so.tmp")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
+		return "", false, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer tempFile.Close()
 
@@ -85,7 +85,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	_, err = io.Copy(writer, resp.Body)
 	if err != nil {
 		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("failed to download plugin: %w", err)
+		return "", false, fmt.Errorf("failed to download plugin: %w", err)
 	}
 
 	// Verify checksum if provided
@@ -93,7 +93,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 		calculatedChecksum := fmt.Sprintf("%x", hasher.Sum(nil))
 		if calculatedChecksum != entry.Checksum {
 			os.Remove(tempFile.Name())
-			return "", fmt.Errorf("checksum mismatch: expected %s, got %s", entry.Checksum, calculatedChecksum)
+			return "", false, fmt.Errorf("checksum mismatch: expected %s, got %s", entry.Checksum, calculatedChecksum)
 		}
 	}
 
@@ -102,10 +102,10 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	err = os.Rename(tempFile.Name(), cachePath)
 	if err != nil {
 		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("failed to move plugin to cache: %w", err)
+		return "", false, fmt.Errorf("failed to move plugin to cache: %w", err)
 	}
 
-	return cachePath, nil
+	return cachePath, false, nil
 }
 
 // isCacheValid checks if the cached plugin is still valid

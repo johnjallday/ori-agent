@@ -425,7 +425,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 📧 Email: support@dolphin-agent.com
 - 🐛 Issues: [GitHub Issues](https://github.com/johnjallday/dolphin-agent/issues)
 - 📖 Documentation: [Wiki](https://github.com/johnjallday/dolphin-agent/wiki)
-
+coff.ee/johnjallday
 ---
 
 Made with ❤️ by the Dolphin Agent team
