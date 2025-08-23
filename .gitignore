@@ -41,6 +41,7 @@ Thumbs.db
 
 # Runtime/cache directories
 plugin_cache/
+plugin_registry_cache.json
 cache/
 tmp/
 temp/

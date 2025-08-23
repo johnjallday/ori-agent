@@ -47,12 +47,45 @@ var (
 	updateMgr *updatemanager.Manager
 )
 
+// fetchGitHubPluginRegistry fetches the plugin registry from GitHub
+func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
+	var reg types.PluginRegistry
+	
+	url := "https://raw.githubusercontent.com/johnjallday/dolphin-plugin-registry/main/plugin_registry.json"
+	
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	
+	resp, err := client.Get(url)
+	if err != nil {
+		return reg, fmt.Errorf("failed to fetch plugin registry from GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return reg, fmt.Errorf("GitHub returned HTTP %d when fetching plugin registry", resp.StatusCode)
+	}
+	
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return reg, fmt.Errorf("failed to read GitHub response: %w", err)
+	}
+	
+	if err := json.Unmarshal(body, &reg); err != nil {
+		return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
+	}
+	
+	return reg, nil
+}
+
 // loadPluginRegistry reads the registry dynamically with fallbacks.
 // Returns: registry, baseDir (for resolving relative plugin paths), error.
 func loadPluginRegistry() (types.PluginRegistry, string, error) {
 	var reg types.PluginRegistry
+	cachePath := "plugin_registry_cache.json"
 
-	// 1) Env override
+	// 1) Env override (highest priority)
 	if p := os.Getenv("PLUGIN_REGISTRY_PATH"); p != "" {
 		if b, err := os.ReadFile(p); err == nil {
 			if err := json.Unmarshal(b, &reg); err != nil {
@@ -62,7 +95,28 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 		}
 	}
 
-	// 2) Local files
+	// 2) Try to fetch from GitHub (primary source)
+	if githubReg, err := fetchGitHubPluginRegistry(); err == nil {
+		// Success! Cache it for offline use
+		if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
+			os.WriteFile(cachePath, data, 0644) // Ignore error - caching is optional
+		}
+		fmt.Println("plugin registry loaded from GitHub")
+		return githubReg, "", nil
+	} else {
+		fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
+	}
+
+	// 3) Try cached version (offline fallback)
+	if b, err := os.ReadFile(cachePath); err == nil {
+		if err := json.Unmarshal(b, &reg); err == nil {
+			fmt.Println("plugin registry loaded from cache")
+			return reg, cachePath, nil
+		}
+		fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
+	}
+
+	// 4) Local files (legacy fallback)
 	for _, p := range []string{
 		"plugin_registry.json",
 		filepath.Join("internal", "web", "static", "plugin_registry.json"),
@@ -71,12 +125,12 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 			if err := json.Unmarshal(b, &reg); err != nil {
 				return reg, "", fmt.Errorf("parse %s: %w", p, err)
 			}
+			fmt.Printf("plugin registry loaded from local file: %s\n", p)
 			return reg, p, nil
 		}
 	}
-	fmt.Println("plugin registry load complete")
 
-	// 3) Embedded fallback
+	// 5) Embedded fallback (last resort)
 	b, err := web.Static.ReadFile("static/plugin_registry.json")
 	if err != nil {
 		return reg, "", fmt.Errorf("embedded plugin_registry.json not found: %w", err)
@@ -84,6 +138,7 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 	if err := json.Unmarshal(b, &reg); err != nil {
 		return reg, "", fmt.Errorf("parse embedded plugin_registry.json: %w", err)
 	}
+	fmt.Println("plugin registry loaded from embedded file")
 	// baseDir empty -> relative paths are treated as-is
 	return reg, "", nil
 }
@@ -187,13 +242,11 @@ func main() {
 		}
 	}
 
-	// load plugin registry from embedded FS
-	if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
-		if err := json.Unmarshal(b, &pluginReg); err != nil {
-			log.Printf("failed to parse plugin registry: %v", err)
-		}
+	// load plugin registry (now from GitHub with fallbacks)
+	if reg, _, err := loadPluginRegistry(); err == nil {
+		pluginReg = reg
 	} else {
-		log.Printf("failed to read embedded plugin registry: %v", err)
+		log.Printf("failed to load plugin registry: %v", err)
 	}
 
 	// parse template from embedded FS
@@ -287,7 +340,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err), http.StatusInternalServerError)
 					return
 				}
-				
+
 				if wasCached {
 					fmt.Printf("Plugin %s is already downloaded\n", e.Name)
 				}
@@ -355,13 +408,13 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name required", http.StatusBadRequest)
 			return
 		}
-		
+
 		reg, registryPath, err := loadPluginRegistry()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		// Find and remove the plugin from registry
 		var foundIndex = -1
 		var pluginToDelete types.PluginRegistryEntry
@@ -372,15 +425,15 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		
+
 		if foundIndex == -1 {
 			http.Error(w, "plugin not found in registry", http.StatusNotFound)
 			return
 		}
-		
+
 		// Remove plugin from registry
 		reg.Plugins = append(reg.Plugins[:foundIndex], reg.Plugins[foundIndex+1:]...)
-		
+
 		// Save updated registry
 		data, err := json.MarshalIndent(reg, "", "  ")
 		if err != nil {
@@ -391,7 +444,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		// Optionally remove the plugin file if it's in uploaded_plugins directory
 		if pluginToDelete.Path != "" && strings.Contains(pluginToDelete.Path, "uploaded_plugins") {
 			if err := os.Remove(pluginToDelete.Path); err != nil {
@@ -399,7 +452,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Warning: Failed to remove plugin file %s: %v", pluginToDelete.Path, err)
 			}
 		}
-		
+
 		// Also unload the plugin from current agent if it's loaded
 		_, current := st.ListAgents()
 		ag, ok := st.GetAgent(current)
@@ -409,7 +462,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Warning: Failed to unload plugin %s from agent: %v", name, err)
 			}
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 
 	default:
@@ -794,7 +847,7 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	if pluginEntry.Path != "" {
 		filename = filepath.Base(pluginEntry.Path)
 	}
-	
+
 	filePath := filepath.Join(uploadDir, filename)
 
 	// Create the file
