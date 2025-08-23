@@ -79,68 +79,146 @@ func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	return reg, nil
 }
 
-// loadPluginRegistry reads the registry dynamically with fallbacks.
+// loadLocalPluginRegistry loads the user's local plugin registry
+func loadLocalPluginRegistry() (types.PluginRegistry, error) {
+	var reg types.PluginRegistry
+	localRegistryPath := "local_plugin_registry.json"
+	
+	// Try to read local registry file
+	if b, err := os.ReadFile(localRegistryPath); err == nil {
+		if err := json.Unmarshal(b, &reg); err != nil {
+			return reg, fmt.Errorf("failed to parse local plugin registry: %w", err)
+		}
+	}
+	// If file doesn't exist, return empty registry (not an error)
+	return reg, nil
+}
+
+// saveLocalPluginRegistry saves the local plugin registry to file
+func saveLocalPluginRegistry(reg types.PluginRegistry) error {
+	localRegistryPath := "local_plugin_registry.json"
+	
+	data, err := json.MarshalIndent(reg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal local registry: %w", err)
+	}
+	
+	if err := os.WriteFile(localRegistryPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write local registry: %w", err)
+	}
+	
+	return nil
+}
+
+// mergePluginRegistries combines online and local plugin registries
+func mergePluginRegistries(online, local types.PluginRegistry) types.PluginRegistry {
+	merged := types.PluginRegistry{}
+	
+	// Create a map to track plugin names and avoid duplicates
+	pluginMap := make(map[string]types.PluginRegistryEntry)
+	
+	// Add online plugins first
+	for _, plugin := range online.Plugins {
+		pluginMap[plugin.Name] = plugin
+	}
+	
+	// Add local plugins (they override online plugins with same name)
+	for _, plugin := range local.Plugins {
+		pluginMap[plugin.Name] = plugin
+	}
+	
+	// Convert map back to slice
+	for _, plugin := range pluginMap {
+		merged.Plugins = append(merged.Plugins, plugin)
+	}
+	
+	return merged
+}
+
+// loadPluginRegistry reads the registry dynamically with fallbacks, merging online and local registries.
 // Returns: registry, baseDir (for resolving relative plugin paths), error.
 func loadPluginRegistry() (types.PluginRegistry, string, error) {
-	var reg types.PluginRegistry
+	var onlineReg types.PluginRegistry
 	cachePath := "plugin_registry_cache.json"
 
-	// 1) Env override (highest priority)
+	// 1) Env override (highest priority) - if set, use only this and merge with local
 	if p := os.Getenv("PLUGIN_REGISTRY_PATH"); p != "" {
 		if b, err := os.ReadFile(p); err == nil {
-			if err := json.Unmarshal(b, &reg); err != nil {
-				return reg, "", fmt.Errorf("parse %s: %w", p, err)
+			if err := json.Unmarshal(b, &onlineReg); err != nil {
+				return onlineReg, "", fmt.Errorf("parse %s: %w", p, err)
 			}
-			return reg, p, nil
+			// Merge with local registry
+			if localReg, err := loadLocalPluginRegistry(); err == nil {
+				merged := mergePluginRegistries(onlineReg, localReg)
+				return merged, p, nil
+			}
+			return onlineReg, p, nil
 		}
 	}
 
-	// 2) Try to fetch from GitHub (primary source)
+	// 2) Try to fetch from GitHub (primary online source)
 	if githubReg, err := fetchGitHubPluginRegistry(); err == nil {
 		// Success! Cache it for offline use
 		if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
 			os.WriteFile(cachePath, data, 0644) // Ignore error - caching is optional
 		}
+		onlineReg = githubReg
 		fmt.Println("plugin registry loaded from GitHub")
-		return githubReg, "", nil
 	} else {
 		fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
 	}
 
-	// 3) Try cached version (offline fallback)
-	if b, err := os.ReadFile(cachePath); err == nil {
-		if err := json.Unmarshal(b, &reg); err == nil {
-			fmt.Println("plugin registry loaded from cache")
-			return reg, cachePath, nil
-		}
-		fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
-	}
-
-	// 4) Local files (legacy fallback)
-	for _, p := range []string{
-		"plugin_registry.json",
-		filepath.Join("internal", "web", "static", "plugin_registry.json"),
-	} {
-		if b, err := os.ReadFile(p); err == nil {
-			if err := json.Unmarshal(b, &reg); err != nil {
-				return reg, "", fmt.Errorf("parse %s: %w", p, err)
+	// If GitHub failed, try other fallback sources
+	if len(onlineReg.Plugins) == 0 {
+		// 3) Try cached version (offline fallback)
+		if b, err := os.ReadFile(cachePath); err == nil {
+			if err := json.Unmarshal(b, &onlineReg); err == nil {
+				fmt.Println("plugin registry loaded from cache")
+			} else {
+				fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
 			}
-			fmt.Printf("plugin registry loaded from local file: %s\n", p)
-			return reg, p, nil
+		}
+
+		// 4) Local files (legacy fallback)
+		if len(onlineReg.Plugins) == 0 {
+			for _, p := range []string{
+				"plugin_registry.json",
+				filepath.Join("internal", "web", "static", "plugin_registry.json"),
+			} {
+				if b, err := os.ReadFile(p); err == nil {
+					if err := json.Unmarshal(b, &onlineReg); err == nil {
+						fmt.Printf("plugin registry loaded from local file: %s\n", p)
+						break
+					}
+				}
+			}
+		}
+
+		// 5) Embedded fallback (last resort)
+		if len(onlineReg.Plugins) == 0 {
+			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
+				if err := json.Unmarshal(b, &onlineReg); err == nil {
+					fmt.Println("plugin registry loaded from embedded file")
+				}
+			}
 		}
 	}
 
-	// 5) Embedded fallback (last resort)
-	b, err := web.Static.ReadFile("static/plugin_registry.json")
+	// Always try to load and merge local registry
+	localReg, err := loadLocalPluginRegistry()
 	if err != nil {
-		return reg, "", fmt.Errorf("embedded plugin_registry.json not found: %w", err)
+		fmt.Printf("Warning: failed to load local plugin registry: %v\n", err)
+		// Return online registry only if local loading fails
+		return onlineReg, "", nil
 	}
-	if err := json.Unmarshal(b, &reg); err != nil {
-		return reg, "", fmt.Errorf("parse embedded plugin_registry.json: %w", err)
+
+	// Merge online and local registries
+	merged := mergePluginRegistries(onlineReg, localReg)
+	if len(localReg.Plugins) > 0 {
+		fmt.Printf("Merged %d online plugins with %d local plugins\n", len(onlineReg.Plugins), len(localReg.Plugins))
 	}
-	fmt.Println("plugin registry loaded from embedded file")
-	// baseDir empty -> relative paths are treated as-is
-	return reg, "", nil
+	
+	return merged, "", nil
 }
 
 // resolvePluginPath resolves an entry's Path against the registry base dir.
@@ -409,16 +487,17 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		reg, registryPath, err := loadPluginRegistry()
+		// Only delete from local registry (user uploaded plugins)
+		localReg, err := loadLocalPluginRegistry()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Find and remove the plugin from registry
+		// Find and remove the plugin from local registry only
 		var foundIndex = -1
 		var pluginToDelete types.PluginRegistryEntry
-		for i, plugin := range reg.Plugins {
+		for i, plugin := range localReg.Plugins {
 			if plugin.Name == name {
 				foundIndex = i
 				pluginToDelete = plugin
@@ -427,25 +506,20 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if foundIndex == -1 {
-			http.Error(w, "plugin not found in registry", http.StatusNotFound)
+			http.Error(w, "plugin not found in local registry (only user uploaded plugins can be deleted)", http.StatusNotFound)
 			return
 		}
 
-		// Remove plugin from registry
-		reg.Plugins = append(reg.Plugins[:foundIndex], reg.Plugins[foundIndex+1:]...)
+		// Remove plugin from local registry
+		localReg.Plugins = append(localReg.Plugins[:foundIndex], localReg.Plugins[foundIndex+1:]...)
 
-		// Save updated registry
-		data, err := json.MarshalIndent(reg, "", "  ")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+		// Save updated local registry
+		if err := saveLocalPluginRegistry(localReg); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Optionally remove the plugin file if it's in uploaded_plugins directory
+		// Remove the plugin file if it's in uploaded_plugins directory
 		if pluginToDelete.Path != "" && strings.Contains(pluginToDelete.Path, "uploaded_plugins") {
 			if err := os.Remove(pluginToDelete.Path); err != nil {
 				// Log the error but don't fail the request - registry entry is already removed

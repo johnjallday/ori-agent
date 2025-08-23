@@ -133,8 +133,8 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) addToRegistry(name, description, path string) error {
-	// Read current registry
-	registryPath := "plugin_registry.json"
+	// Read current local registry (user uploaded plugins)
+	registryPath := "local_plugin_registry.json"
 	var registry types.PluginRegistry
 	
 	if data, err := os.ReadFile(registryPath); err == nil {
