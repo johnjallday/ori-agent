@@ -50,32 +50,32 @@ var (
 // fetchGitHubPluginRegistry fetches the plugin registry from GitHub
 func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
-	
+
 	url := "https://raw.githubusercontent.com/johnjallday/dolphin-plugin-registry/main/plugin_registry.json"
-	
+
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
-	
+
 	resp, err := client.Get(url)
 	if err != nil {
 		return reg, fmt.Errorf("failed to fetch plugin registry from GitHub: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return reg, fmt.Errorf("GitHub returned HTTP %d when fetching plugin registry", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return reg, fmt.Errorf("failed to read GitHub response: %w", err)
 	}
-	
+
 	if err := json.Unmarshal(body, &reg); err != nil {
 		return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
 	}
-	
+
 	return reg, nil
 }
 
@@ -83,7 +83,7 @@ func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 func loadLocalPluginRegistry() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
 	localRegistryPath := "local_plugin_registry.json"
-	
+
 	// Try to read local registry file
 	if b, err := os.ReadFile(localRegistryPath); err == nil {
 		if err := json.Unmarshal(b, &reg); err != nil {
@@ -97,41 +97,41 @@ func loadLocalPluginRegistry() (types.PluginRegistry, error) {
 // saveLocalPluginRegistry saves the local plugin registry to file
 func saveLocalPluginRegistry(reg types.PluginRegistry) error {
 	localRegistryPath := "local_plugin_registry.json"
-	
+
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal local registry: %w", err)
 	}
-	
+
 	if err := os.WriteFile(localRegistryPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write local registry: %w", err)
 	}
-	
+
 	return nil
 }
 
 // mergePluginRegistries combines online and local plugin registries
 func mergePluginRegistries(online, local types.PluginRegistry) types.PluginRegistry {
 	merged := types.PluginRegistry{}
-	
+
 	// Create a map to track plugin names and avoid duplicates
 	pluginMap := make(map[string]types.PluginRegistryEntry)
-	
+
 	// Add online plugins first
 	for _, plugin := range online.Plugins {
 		pluginMap[plugin.Name] = plugin
 	}
-	
+
 	// Add local plugins (they override online plugins with same name)
 	for _, plugin := range local.Plugins {
 		pluginMap[plugin.Name] = plugin
 	}
-	
+
 	// Convert map back to slice
 	for _, plugin := range pluginMap {
 		merged.Plugins = append(merged.Plugins, plugin)
 	}
-	
+
 	return merged
 }
 
@@ -217,7 +217,7 @@ func loadPluginRegistry() (types.PluginRegistry, string, error) {
 	if len(localReg.Plugins) > 0 {
 		fmt.Printf("Merged %d online plugins with %d local plugins\n", len(onlineReg.Plugins), len(localReg.Plugins))
 	}
-	
+
 	return merged, "", nil
 }
 

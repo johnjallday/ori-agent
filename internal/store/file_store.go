@@ -110,28 +110,52 @@ func (s *fileStore) Save() error {
 // ---------- persistence helpers (no Messages persisted) ----------
 
 func (s *fileStore) saveUnlocked() error {
-	// make a shallow copy without Messages
+	// Ensure base directory exists
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return err
+	}
+	
+	// Create agents directory
+	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		return err
+	}
+	
+	// Save individual agent files
 	type persistAgent struct {
 		Settings types.Settings                `json:"Settings"`
 		Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 	}
-	out := struct {
-		Agents  map[string]persistAgent `json:"agents"`
-		Current string                  `json:"current"`
+	
+	for agentName, agent := range s.agents {
+		agentConfig := persistAgent{
+			Settings: agent.Settings,
+			Plugins:  agent.Plugins,
+		}
+		
+		agentData, err := json.MarshalIndent(agentConfig, "", "  ")
+		if err != nil {
+			return err
+		}
+		
+		agentPath := filepath.Join(agentsDir, agentName+".json")
+		if err := os.WriteFile(agentPath, agentData, 0o644); err != nil {
+			return err
+		}
+	}
+	
+	// Save main index file with just current agent pointer
+	indexConfig := struct {
+		Current string `json:"current"`
 	}{
-		Agents:  make(map[string]persistAgent, len(s.agents)),
 		Current: s.current,
 	}
-	for k, v := range s.agents {
-		out.Agents[k] = persistAgent{Settings: v.Settings, Plugins: v.Plugins}
-	}
-	data, err := json.MarshalIndent(out, "", "  ")
+	
+	data, err := json.MarshalIndent(indexConfig, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return err
-	}
+	
 	return os.WriteFile(s.path, data, 0o644)
 }
 
@@ -140,22 +164,73 @@ func (s *fileStore) load() error {
 	if err != nil {
 		return err
 	}
-	var in struct {
-		Agents  map[string]*types.Agent `json:"agents"`
-		Current string                  `json:"current"`
+	
+	// Try to load as new format (just current agent pointer)
+	var indexConfig struct {
+		Current string `json:"current"`
 	}
-	if err := json.Unmarshal(b, &in); err != nil {
+	if err := json.Unmarshal(b, &indexConfig); err != nil {
 		return err
 	}
+	
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.agents = in.Agents
-	s.current = in.Current
-	// ensure maps
-	for _, ag := range s.agents {
-		if ag.Plugins == nil {
-			ag.Plugins = make(map[string]types.LoadedPlugin)
+	
+	// If agents map is empty, try to load from individual files
+	if s.agents == nil {
+		s.agents = make(map[string]*types.Agent)
+	}
+	
+	s.current = indexConfig.Current
+	
+	// Load individual agent files from agents/ directory
+	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	if _, err := os.Stat(agentsDir); err == nil {
+		// agents/ directory exists, load individual files
+		entries, err := os.ReadDir(agentsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if filepath.Ext(entry.Name()) == ".json" {
+					agentName := entry.Name()[:len(entry.Name())-5] // remove .json
+					agentPath := filepath.Join(agentsDir, entry.Name())
+					
+					agentData, err := os.ReadFile(agentPath)
+					if err != nil {
+						continue
+					}
+					
+					var agent types.Agent
+					if err := json.Unmarshal(agentData, &agent); err != nil {
+						continue
+					}
+					
+					// ensure maps
+					if agent.Plugins == nil {
+						agent.Plugins = make(map[string]types.LoadedPlugin)
+					}
+					
+					s.agents[agentName] = &agent
+				}
+			}
+		}
+	} else {
+		// Fall back to old format (agents in main file)
+		var in struct {
+			Agents  map[string]*types.Agent `json:"agents"`
+			Current string                  `json:"current"`
+		}
+		if err := json.Unmarshal(b, &in); err != nil {
+			return err
+		}
+		s.agents = in.Agents
+		s.current = in.Current
+		// ensure maps
+		for _, ag := range s.agents {
+			if ag.Plugins == nil {
+				ag.Plugins = make(map[string]types.LoadedPlugin)
+			}
 		}
 	}
+	
 	return nil
 }
