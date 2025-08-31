@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
@@ -28,14 +29,18 @@ type SettingsManager struct {
 }
 
 var globalSettings = &SettingsManager{}
+var globalAgentContext *pluginapi.AgentContext
 
 // musicProjectManagerTool implements pluginapi.Tool for music project management.
-type musicProjectManagerTool struct{}
+type musicProjectManagerTool struct {
+	agentContext *pluginapi.AgentContext
+}
 
 // ensure musicProjectManagerTool implements required interfaces at compile time
 var _ pluginapi.Tool = (*musicProjectManagerTool)(nil)
 var _ pluginapi.VersionedTool = (*musicProjectManagerTool)(nil)
 var _ pluginapi.ConfigurableTool = (*musicProjectManagerTool)(nil)
+var _ pluginapi.AgentAwareTool = (*musicProjectManagerTool)(nil)
 
 // Definition returns the OpenAI function definition for music project management operations.
 func (m *musicProjectManagerTool) Definition() openai.FunctionDefinitionParam {
@@ -197,6 +202,8 @@ func (m *musicProjectManagerTool) handleCreateProject(name string, bpm int) (str
 
 // handleSetProjectDir sets the project directory
 func (m *musicProjectManagerTool) handleSetProjectDir(path string) (string, error) {
+	fmt.Printf("DEBUG: handleSetProjectDir called with path: '%s'\n", path)
+	
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return "", fmt.Errorf("failed to create directory %s: %w", path, err)
 	}
@@ -205,13 +212,13 @@ func (m *musicProjectManagerTool) handleSetProjectDir(path string) (string, erro
 	settings.ProjectDir = path
 	globalSettings.settings = settings
 
-	// Update agents.json to persist the setting
-	if err := updateAgentsJSON(path, ""); err != nil {
-		// Don't fail the operation if agents.json update fails, just log it
-		return fmt.Sprintf("Project directory set to: %s\n⚠️  Could not persist to agent config: %v\n\nPlease check that the agents directory is writable and the plugin has access to it.", path, err), nil
+	// Update agent settings to persist the setting
+	if err := m.updateAgentSettings(path, ""); err != nil {
+		// Don't fail the operation if agent settings update fails, just log it
+		return fmt.Sprintf("Project directory set to: %s\n⚠️  Could not persist to agent settings: %v\n\nPlease check that the agents directory is writable and the plugin has access to it.", path, err), nil
 	}
 
-	return fmt.Sprintf("✅ Project directory set to: %s\n✅ Successfully persisted to agent config", path), nil
+	return fmt.Sprintf("✅ Project directory set to: %s\n✅ Successfully persisted to agent settings", path), nil
 }
 
 // handleSetTemplateDir sets the template directory
@@ -227,19 +234,69 @@ func (m *musicProjectManagerTool) handleSetTemplateDir(path string) (string, err
 	}
 	globalSettings.settings = settings
 
-	// Update agents.json to persist the setting
-	if err := updateAgentsJSON("", path); err != nil {
-		// Don't fail the operation if agents.json update fails, just log it
-		return fmt.Sprintf("Template directory set to: %s\n⚠️  Could not persist to agent config: %v\n\nPlease check that the agents directory is writable and the plugin has access to it.", path, err), nil
+	// Update agent settings to persist the setting
+	if err := m.updateAgentSettings("", path); err != nil {
+		// Don't fail the operation if agent settings update fails, just log it
+		return fmt.Sprintf("Template directory set to: %s\n⚠️  Could not persist to agent settings: %v\n\nPlease check that the agents directory is writable and the plugin has access to it.", path, err), nil
 	}
 
-	return fmt.Sprintf("✅ Template directory set to: %s\n✅ Successfully persisted to agent config", path), nil
+	return fmt.Sprintf("✅ Template directory set to: %s\n✅ Successfully persisted to agent settings", path), nil
 }
 
-// handleGetSettings returns current settings
+// handleGetSettings returns current settings from agent_settings.json
 func (m *musicProjectManagerTool) handleGetSettings() (string, error) {
-	settings := globalSettings.getCurrentSettings()
-	data, err := json.MarshalIndent(settings, "", "  ")
+	// Check both instance and global agent context
+	var agentContext *pluginapi.AgentContext
+	if m.agentContext != nil && m.agentContext.SettingsPath != "" {
+		agentContext = m.agentContext
+	} else if globalAgentContext != nil && globalAgentContext.SettingsPath != "" {
+		agentContext = globalAgentContext
+	}
+
+	if agentContext == nil {
+		// Fall back to in-memory settings if no agent context
+		settings := globalSettings.getCurrentSettings()
+		data, err := json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal settings: %w", err)
+		}
+		return string(data), nil
+	}
+
+	settingsFilePath := agentContext.SettingsPath
+
+	// Read settings from the agent_settings.json file
+	var agentSettings map[string]interface{}
+	if settingsData, err := os.ReadFile(settingsFilePath); err == nil {
+		if err := json.Unmarshal(settingsData, &agentSettings); err != nil {
+			return "", fmt.Errorf("failed to parse agent settings at %s: %w", settingsFilePath, err)
+		}
+	} else {
+		return "", fmt.Errorf("failed to read agent settings file at %s: %w", settingsFilePath, err)
+	}
+
+	// Extract music_project_manager settings
+	var musicSettings map[string]interface{}
+	if ms, exists := agentSettings["music_project_manager"].(map[string]interface{}); exists {
+		musicSettings = ms
+	} else {
+		musicSettings = make(map[string]interface{})
+	}
+
+	// Create formatted settings response
+	formattedSettings := map[string]interface{}{
+		"project_dir":  musicSettings["project_dir"],
+		"template_dir": musicSettings["template_dir"],
+		"path":         musicSettings["path"],
+		"initialized":  len(musicSettings) > 0,
+	}
+
+	// Add default_template if template_dir exists
+	if templateDir, ok := musicSettings["template_dir"].(string); ok && templateDir != "" {
+		formattedSettings["default_template"] = filepath.Join(templateDir, "default.RPP")
+	}
+
+	data, err := json.MarshalIndent(formattedSettings, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal settings: %w", err)
 	}
@@ -292,7 +349,7 @@ func (m *musicProjectManagerTool) handleCompleteSetup(projectDir, templateDir st
 
 	// Update agents.json to persist both settings
 	persistMessage := ""
-	if err := updateAgentsJSON(projectDir, templateDir); err != nil {
+	if err := m.updateAgentSettings(projectDir, templateDir); err != nil {
 		persistMessage = fmt.Sprintf(" (Warning: Could not persist to agent config: %v)", err)
 	} else {
 		persistMessage = " and persisted to agent config"
@@ -328,6 +385,12 @@ func (m *musicProjectManagerTool) IsInitialized() bool {
 // Version returns the plugin version.
 func (m *musicProjectManagerTool) Version() string {
 	return "1.0.0"
+}
+
+// SetAgentContext provides the current agent information to the plugin
+func (m *musicProjectManagerTool) SetAgentContext(ctx pluginapi.AgentContext) {
+	m.agentContext = &ctx
+	globalAgentContext = &ctx
 }
 
 // SettingsManager implementation
@@ -384,94 +447,59 @@ func (sm *SettingsManager) getDefaultSettings() *Settings {
 
 // loadDefaultsFromAgentsJSON attempts to load default settings from individual agent files
 func loadDefaultsFromAgentsJSON() *Settings {
-	// First, find the main agents.json to get current agent
-	possibleMainPaths := []string{
-		"../agents.json",
-		"../../agents.json",
-		"agents.json",
-		"/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/agents.json",
+	// Try to find any existing agent file with music_project_manager plugin
+	possibleAgentPaths := []string{
+		"./agents/reaper-project-manager.json",
+		"./agents/default.json",
+		"./agents/test.json",
+		"./agents/reaper.json",
+		"../agents/reaper-project-manager.json",
+		"../agents/default.json",
+		"../../agents/reaper-project-manager.json",
+		"../../agents/default.json",
+		"/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/agents/reaper-project-manager.json",
+		"/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/agents/default.json",
 	}
 
-	var mainAgentsFilePath string
-	for _, path := range possibleMainPaths {
+	for _, path := range possibleAgentPaths {
 		if _, err := os.Stat(path); err == nil {
-			mainAgentsFilePath = path
-			break
-		}
-	}
-
-	if mainAgentsFilePath == "" {
-		return nil
-	}
-
-	// Read main agents.json to get current agent name
-	data, err := os.ReadFile(mainAgentsFilePath)
-	if err != nil {
-		return nil
-	}
-
-	var indexConfig AgentsIndexConfig
-	if err := json.Unmarshal(data, &indexConfig); err != nil {
-		return nil
-	}
-
-	currentAgent := indexConfig.Current
-	if currentAgent == "" {
-		return nil
-	}
-
-	// Try to load the individual agent config file
-	baseDir := filepath.Dir(mainAgentsFilePath)
-	agentsDir := filepath.Join(baseDir, "agents")
-	agentFilePath := filepath.Join(agentsDir, currentAgent+".json")
-
-	var agentConfig IndividualAgentConfig
-	if agentData, err := os.ReadFile(agentFilePath); err == nil {
-		// Individual agent file exists
-		if err := json.Unmarshal(agentData, &agentConfig); err != nil {
-			return nil
-		}
-	} else {
-		// Fall back to reading from main agents.json for backward compatibility
-		var mainConfig AgentsConfig
-		if err := json.Unmarshal(data, &mainConfig); err != nil {
-			return nil
-		}
-
-		if agent, exists := mainConfig.Agents[currentAgent]; exists {
-			agentConfig = IndividualAgentConfig{
-				Settings: agent.Settings,
-				Plugins:  agent.Plugins,
-			}
-		} else {
-			return nil
-		}
-	}
-
-	// Look for music_project_manager plugin in the agent config
-	if plugin, exists := agentConfig.Plugins["music_project_manager"]; exists {
-		if params, ok := plugin.Definition.Parameters["properties"].(map[string]interface{}); ok {
-			settings := &Settings{
-				Initialized: true, // If we found settings, consider initialized
+			// File exists, try to read it
+			agentData, err := os.ReadFile(path)
+			if err != nil {
+				continue
 			}
 
-			// Extract default values from the plugin definition
-			if projectDirParam, exists := params["project_dir"].(map[string]interface{}); exists {
-				if defaultVal, hasDefault := projectDirParam["default"].(string); hasDefault {
-					settings.ProjectDir = defaultVal
+			var agentConfig IndividualAgentConfig
+			if err := json.Unmarshal(agentData, &agentConfig); err != nil {
+				continue
+			}
+
+			// Look for music_project_manager plugin in the agent config
+			if plugin, exists := agentConfig.Plugins["music_project_manager"]; exists {
+				if params, ok := plugin.Definition.Parameters["properties"].(map[string]interface{}); ok {
+					settings := &Settings{
+						Initialized: true, // If we found settings, consider initialized
+					}
+
+					// Extract default values from the plugin definition
+					if projectDirParam, exists := params["project_dir"].(map[string]interface{}); exists {
+						if defaultVal, hasDefault := projectDirParam["default"].(string); hasDefault {
+							settings.ProjectDir = defaultVal
+						}
+					}
+
+					if templateDirParam, exists := params["template_dir"].(map[string]interface{}); exists {
+						if defaultVal, hasDefault := templateDirParam["default"].(string); hasDefault {
+							settings.TemplateDir = defaultVal
+							settings.DefaultTemplate = filepath.Join(defaultVal, "default.RPP")
+						}
+					}
+
+					// If we got valid directories, return this settings object
+					if settings.ProjectDir != "" && settings.TemplateDir != "" {
+						return settings
+					}
 				}
-			}
-
-			if templateDirParam, exists := params["template_dir"].(map[string]interface{}); exists {
-				if defaultVal, hasDefault := templateDirParam["default"].(string); hasDefault {
-					settings.TemplateDir = defaultVal
-					settings.DefaultTemplate = filepath.Join(defaultVal, "default.RPP")
-				}
-			}
-
-			// If we got valid directories, return this settings object
-			if settings.ProjectDir != "" && settings.TemplateDir != "" {
-				return settings
 			}
 		}
 	}
@@ -527,145 +555,104 @@ type AgentsConfig struct {
 	Current string               `json:"current"`
 }
 
-// updateAgentsJSON updates individual agent configuration files with new directory settings
-func updateAgentsJSON(projectDir, templateDir string) error {
-	// First, find and read the main agents.json to get the current agent name
-	possibleMainPaths := []string{
-		"/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/agents.json",
-		"../../../agents.json",
-		"../../agents.json", 
-		"../agents.json",
-		"agents.json",
+// updateAgentSettings updates the agent's settings file with new directory settings
+func (m *musicProjectManagerTool) updateAgentSettings(projectDir, templateDir string) error {
+	// Check both instance and global agent context
+	var agentContext *pluginapi.AgentContext
+	if m.agentContext != nil && m.agentContext.SettingsPath != "" {
+		agentContext = m.agentContext
+		fmt.Printf("DEBUG: Using instance agent context\n")
+	} else if globalAgentContext != nil && globalAgentContext.SettingsPath != "" {
+		agentContext = globalAgentContext
+		fmt.Printf("DEBUG: Using global agent context\n")
 	}
 
-	var mainAgentsFilePath string
-	for _, path := range possibleMainPaths {
-		if _, err := os.Stat(path); err == nil {
-			mainAgentsFilePath = path
-			break
-		}
+	if agentContext == nil {
+		return fmt.Errorf("no agent context available - cannot determine settings file path")
 	}
 
-	if mainAgentsFilePath == "" {
-		return fmt.Errorf("could not find main agents.json file in any of these locations: %v", possibleMainPaths)
-	}
+	settingsFilePath := agentContext.SettingsPath
+	fmt.Printf("DEBUG: Using agent settings path: %s\n", settingsFilePath)
 
-	// Read main agents.json to get current agent name
-	data, err := os.ReadFile(mainAgentsFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to read main agents.json: %w", err)
-	}
-
-	var indexConfig AgentsIndexConfig
-	if err := json.Unmarshal(data, &indexConfig); err != nil {
-		return fmt.Errorf("failed to parse main agents.json: %w", err)
-	}
-
-	currentAgent := indexConfig.Current
-	if currentAgent == "" {
-		return fmt.Errorf("no current agent specified in agents.json")
-	}
-
-	// Find the individual agent config file
-	baseDir := filepath.Dir(mainAgentsFilePath)
-	agentsDir := filepath.Join(baseDir, "agents")
-	agentFilePath := filepath.Join(agentsDir, currentAgent+".json")
-
-	// Create agents directory if it doesn't exist
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create agents directory: %w", err)
-	}
-
-	// Read individual agent config (or create if doesn't exist)
-	var agentConfig IndividualAgentConfig
-	if agentData, err := os.ReadFile(agentFilePath); err == nil {
-		// File exists, parse it
-		if err := json.Unmarshal(agentData, &agentConfig); err != nil {
-			return fmt.Errorf("failed to parse individual agent config: %w", err)
+	// Read existing settings or create default structure
+	var agentSettings map[string]interface{}
+	if settingsData, err := os.ReadFile(settingsFilePath); err == nil {
+		if err := json.Unmarshal(settingsData, &agentSettings); err != nil {
+			return fmt.Errorf("failed to parse agent settings at %s: %w", settingsFilePath, err)
 		}
 	} else {
-		// File doesn't exist, try to migrate from main agents.json
-		var mainConfig AgentsConfig
-		if err := json.Unmarshal(data, &mainConfig); err != nil {
-			return fmt.Errorf("failed to parse main agents.json for migration: %w", err)
-		}
-
-		// Check if the agent exists in main config
-		if agent, exists := mainConfig.Agents[currentAgent]; exists {
-			// Migrate from main config
-			agentConfig = IndividualAgentConfig{
-				Settings: agent.Settings,
-				Plugins:  agent.Plugins,
-			}
-		} else {
-			// Create a minimal config
-			agentConfig = IndividualAgentConfig{
-				Settings: AgentSettings{
-					Model:       "gpt-4.1-nano",
-					Temperature: 1.0,
-				},
-				Plugins: make(map[string]PluginConfig),
-			}
-		}
+		// Settings file doesn't exist, create default structure
+		agentSettings = make(map[string]interface{})
 	}
 
-	// Update the music_project_manager plugin configuration
-	if plugin, exists := agentConfig.Plugins["music_project_manager"]; exists {
-		// Update the default values in the plugin parameters
-		if params, ok := plugin.Definition.Parameters["properties"].(map[string]interface{}); ok {
-			if projectDir != "" {
-				if projectDirParam, exists := params["project_dir"].(map[string]interface{}); exists {
-					projectDirParam["default"] = projectDir
-				} else {
-					// If project_dir parameter doesn't exist, create it
-					params["project_dir"] = map[string]interface{}{
-						"description": "Project directory path (required for complete_setup)",
-						"type":        "string",
-						"default":     projectDir,
-					}
-				}
-
-				// Also update path default to parent of project_dir
-				if pathParam, exists := params["path"].(map[string]interface{}); exists {
-					pathParam["default"] = filepath.Dir(projectDir)
-				} else {
-					// If path parameter doesn't exist, create it
-					params["path"] = map[string]interface{}{
-						"description": "Directory path (required for set_project_dir, set_template_dir)",
-						"type":        "string",
-						"default":     filepath.Dir(projectDir),
-					}
-				}
-			}
-
-			if templateDir != "" {
-				if templateDirParam, exists := params["template_dir"].(map[string]interface{}); exists {
-					templateDirParam["default"] = templateDir
-				} else {
-					// If template_dir parameter doesn't exist, create it
-					params["template_dir"] = map[string]interface{}{
-						"description": "Template directory path (required for complete_setup)",
-						"type":        "string",
-						"default":     templateDir,
-					}
-				}
-			}
-		}
-
-		// Update the plugin in the agent config
-		agentConfig.Plugins["music_project_manager"] = plugin
-	} else {
-		return fmt.Errorf("music_project_manager plugin not found in agent %s", currentAgent)
+	// Ensure music_project_manager section exists
+	if _, exists := agentSettings["music_project_manager"]; !exists {
+		agentSettings["music_project_manager"] = make(map[string]interface{})
 	}
 
-	// Write the updated individual agent config
-	updatedData, err := json.MarshalIndent(agentConfig, "", "  ")
+	musicSettings := agentSettings["music_project_manager"].(map[string]interface{})
+
+	// Update settings
+	if projectDir != "" {
+		oldProjectDir := musicSettings["project_dir"]
+		musicSettings["project_dir"] = projectDir
+		musicSettings["path"] = filepath.Dir(projectDir) // Also update parent directory
+		fmt.Printf("DEBUG: Updated project_dir from '%v' to '%s'\n", oldProjectDir, projectDir)
+	}
+
+	if templateDir != "" {
+		oldTemplateDir := musicSettings["template_dir"]
+		musicSettings["template_dir"] = templateDir
+		fmt.Printf("DEBUG: Updated template_dir from '%v' to '%s'\n", oldTemplateDir, templateDir)
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(settingsFilePath), 0755); err != nil {
+		return fmt.Errorf("failed to create agent directory: %w", err)
+	}
+
+	// Write the updated settings
+	updatedData, err := json.MarshalIndent(agentSettings, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal updated agent config: %w", err)
+		return fmt.Errorf("failed to marshal updated agent settings: %w", err)
 	}
 
-	if err := os.WriteFile(agentFilePath, updatedData, 0644); err != nil {
-		return fmt.Errorf("failed to write to %s: %w", agentFilePath, err)
+	fmt.Printf("DEBUG: About to write %d bytes to: %s\n", len(updatedData), settingsFilePath)
+	previewLen := 200
+	if len(updatedData) < previewLen {
+		previewLen = len(updatedData)
+	}
+	fmt.Printf("DEBUG: First %d chars of data to write: %s\n", previewLen, string(updatedData)[:previewLen])
+
+	if err := os.WriteFile(settingsFilePath, updatedData, 0644); err != nil {
+		return fmt.Errorf("failed to write to %s: %w", settingsFilePath, err)
+	}
+
+	// Verify the write by reading it back
+	if verifyData, err := os.ReadFile(settingsFilePath); err == nil {
+		fmt.Printf("DEBUG: Successfully wrote and verified %d bytes to: %s\n", len(verifyData), settingsFilePath)
+
+		// Check again after a delay to see if it gets overwritten
+		time.Sleep(2 * time.Second)
+		if checkData, err := os.ReadFile(settingsFilePath); err == nil {
+			if len(checkData) != len(verifyData) {
+				fmt.Printf("DEBUG: WARNING - File was overwritten! Original: %d bytes, Now: %d bytes\n", len(verifyData), len(checkData))
+			} else {
+				fmt.Printf("DEBUG: File still intact after 2 seconds\n")
+				// Parse the file and check the actual values
+				var verifySettings map[string]interface{}
+				if json.Unmarshal(checkData, &verifySettings) == nil {
+					if musicSettings, exists := verifySettings["music_project_manager"].(map[string]interface{}); exists {
+						actualProjectDir := musicSettings["project_dir"]
+						actualTemplateDir := musicSettings["template_dir"]
+						fmt.Printf("DEBUG: VERIFICATION - project_dir in file is actually: '%v'\n", actualProjectDir)
+						fmt.Printf("DEBUG: VERIFICATION - template_dir in file is actually: '%v'\n", actualTemplateDir)
+					}
+				}
+			}
+		}
+	} else {
+		fmt.Printf("DEBUG: Write claimed successful but read verification failed: %v\n", err)
 	}
 
 	return nil

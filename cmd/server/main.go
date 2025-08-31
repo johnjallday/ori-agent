@@ -33,9 +33,10 @@ var (
 	client openai.Client
 
 	// runtime state (moved behind Store)
-	st          store.Store
-	pluginReg   types.PluginRegistry
-	defaultConf = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
+	st              store.Store
+	pluginReg       types.PluginRegistry
+	defaultConf     = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
+	agentStorePath  string
 
 	// template
 	tmpl *template.Template
@@ -264,14 +265,14 @@ func main() {
 	// init store (persists agents/plugins/settings; not messages)
 	var err error
 	// Determine agent store path (absolute by default, override via AGENT_STORE_PATH)
-	storePath := "agents.json"
+	agentStorePath = "agents.json"
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
-		storePath = p
-	} else if abs, err2 := filepath.Abs(storePath); err2 == nil {
-		storePath = abs
+		agentStorePath = p
+	} else if abs, err2 := filepath.Abs(agentStorePath); err2 == nil {
+		agentStorePath = abs
 	}
-	log.Printf("Using agent store: %s", storePath)
-	st, err = store.NewFileStore(storePath, defaultConf)
+	log.Printf("Using agent store: %s", agentStorePath)
+	st, err = store.NewFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		log.Fatalf("store init: %v", err)
 	}
@@ -312,6 +313,10 @@ func main() {
 				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
 				continue
 			}
+			
+			// Set agent context for plugins that support it
+			pluginloader.SetAgentContext(tool, agName, agentStorePath)
+			
 			lp.Tool = tool
 			ag.Plugins[key] = lp
 		}
@@ -464,6 +469,9 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 
 		// attach to current agent
 		_, current := st.ListAgents()
+		
+		// Set agent context for plugins that support it
+		pluginloader.SetAgentContext(tool, current, agentStorePath)
 		ag, ok := st.GetAgent(current)
 		if !ok {
 			http.Error(w, "current agent not found", http.StatusInternalServerError)

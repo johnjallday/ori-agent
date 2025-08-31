@@ -39,3 +39,23 @@ type ConfigurableTool interface {
 	Tool
 	SettingsProvider
 }
+
+// AgentContext provides information about the current agent to plugins.
+type AgentContext struct {
+	// Name is the name of the current agent (e.g., "reaper-project-manager", "default")
+	Name string
+	// ConfigPath is the path to the agent's main config file (agents/{name}/config.json)
+	ConfigPath string
+	// SettingsPath is the path to the agent's settings file (agents/{name}/agent_settings.json)
+	SettingsPath string
+	// AgentDir is the path to the agent's directory (agents/{name}/)
+	AgentDir string
+}
+
+// AgentAwareTool extends Tool with agent context information.
+// Plugins can optionally implement this interface to receive current agent info.
+type AgentAwareTool interface {
+	Tool
+	// SetAgentContext provides the current agent information to the plugin
+	SetAgentContext(ctx AgentContext)
+}

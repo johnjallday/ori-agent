@@ -1,0 +1,58 @@
+{
+  "Settings": {
+    "model": "gpt-4.1-nano",
+    "temperature": 1
+  },
+  "Plugins": {
+    "music_project_manager": {
+      "Definition": {
+        "name": "music_project_manager",
+        "description": "Manage music projects: create projects, configure settings, and setup plugin",
+        "parameters": {
+          "properties": {
+            "bpm": {
+              "description": "BPM for the project (optional for create_project)",
+              "maximum": 300,
+              "minimum": 60,
+              "type": "integer"
+            },
+            "name": {
+              "description": "Project name (required for create_project)",
+              "type": "string"
+            },
+            "operation": {
+              "description": "Operation to perform",
+              "enum": [
+                "create_project",
+                "set_project_dir",
+                "set_template_dir",
+                "get_settings",
+                "init_setup",
+                "complete_setup"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "description": "Directory path (required for set_project_dir, set_template_dir)",
+              "type": "string"
+            },
+            "project_dir": {
+              "description": "Project directory path (required for complete_setup)",
+              "type": "string"
+            },
+            "template_dir": {
+              "description": "Template directory path (required for complete_setup)",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "type": "object"
+        }
+      },
+      "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/music_project_manager.so",
+      "Version": "1.0.0"
+    }
+  }
+}

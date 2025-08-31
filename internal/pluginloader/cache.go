@@ -121,3 +121,20 @@ func GetPluginVersion(tool pluginapi.Tool) string {
 	}
 	return ""
 }
+
+// SetAgentContext sets the agent context for plugins that support it.
+func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
+	if agentAwareTool, ok := tool.(pluginapi.AgentAwareTool); ok {
+		agentsDir := filepath.Join(filepath.Dir(agentStorePath), "agents")
+		agentDir := filepath.Join(agentsDir, agentName)
+		configPath := filepath.Join(agentDir, "config.json")
+		settingsPath := filepath.Join(agentDir, "agent_settings.json")
+		
+		agentAwareTool.SetAgentContext(pluginapi.AgentContext{
+			Name:         agentName,
+			ConfigPath:   configPath,
+			SettingsPath: settingsPath,
+			AgentDir:     agentDir,
+		})
+	}
+}

@@ -121,13 +121,19 @@ func (s *fileStore) saveUnlocked() error {
 		return err
 	}
 	
-	// Save individual agent files
+	// Save individual agent files in nested structure
 	type persistAgent struct {
 		Settings types.Settings                `json:"Settings"`
 		Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 	}
 	
 	for agentName, agent := range s.agents {
+		// Create agent-specific directory
+		agentSpecificDir := filepath.Join(agentsDir, agentName)
+		if err := os.MkdirAll(agentSpecificDir, 0o755); err != nil {
+			return err
+		}
+		
 		agentConfig := persistAgent{
 			Settings: agent.Settings,
 			Plugins:  agent.Plugins,
@@ -138,9 +144,23 @@ func (s *fileStore) saveUnlocked() error {
 			return err
 		}
 		
-		agentPath := filepath.Join(agentsDir, agentName+".json")
-		if err := os.WriteFile(agentPath, agentData, 0o644); err != nil {
+		// Save config.json in agent-specific directory
+		configPath := filepath.Join(agentSpecificDir, "config.json")
+		if err := os.WriteFile(configPath, agentData, 0o644); err != nil {
 			return err
+		}
+		
+		// Create empty agent_settings.json if it doesn't exist
+		settingsPath := filepath.Join(agentSpecificDir, "agent_settings.json")
+		if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+			emptySettings := map[string]interface{}{}
+			settingsData, err := json.MarshalIndent(emptySettings, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(settingsPath, settingsData, 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	
@@ -183,14 +203,30 @@ func (s *fileStore) load() error {
 	
 	s.current = indexConfig.Current
 	
-	// Load individual agent files from agents/ directory
+	// Load individual agent files from agents/ directory (nested structure)
 	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
 	if _, err := os.Stat(agentsDir); err == nil {
-		// agents/ directory exists, load individual files
+		// agents/ directory exists, check for nested structure
 		entries, err := os.ReadDir(agentsDir)
 		if err == nil {
 			for _, entry := range entries {
-				if filepath.Ext(entry.Name()) == ".json" {
+				if entry.IsDir() {
+					// New nested structure: agents/{name}/config.json
+					agentName := entry.Name()
+					configPath := filepath.Join(agentsDir, agentName, "config.json")
+					
+					if agentData, err := os.ReadFile(configPath); err == nil {
+						var agent types.Agent
+						if err := json.Unmarshal(agentData, &agent); err == nil {
+							// ensure maps
+							if agent.Plugins == nil {
+								agent.Plugins = make(map[string]types.LoadedPlugin)
+							}
+							s.agents[agentName] = &agent
+						}
+					}
+				} else if filepath.Ext(entry.Name()) == ".json" {
+					// Legacy flat structure: agents/agent.json
 					agentName := entry.Name()[:len(entry.Name())-5] // remove .json
 					agentPath := filepath.Join(agentsDir, entry.Name())
 					
