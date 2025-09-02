@@ -1241,6 +1241,11 @@
         await showAgentsList();
         return;
       }
+      if (q === '/reaper-functions') {
+        input.value = '';
+        await showReaperFunctions();
+        return;
+      }
       addChat('User', q);
       input.value = '';
       try {
@@ -1518,7 +1523,7 @@
         const loadedPluginsRes = await fetch('/api/plugins');
         const loadedPluginsData = await loadedPluginsRes.json();
         
-        // Process loaded plugins data to show available functions
+        // Process loaded plugins data to show available functions for tool calling
         const loadedTools = (loadedPluginsData.plugins || []).map((plugin, index) => {
           const definition = plugin.definition || {};
           const parameters = definition.parameters || {};
@@ -1533,24 +1538,45 @@
             return `${name}${isRequired ? '*' : ''}: ${param.type || 'any'}`;
           }).join(', ');
           
+          // Use the actual function name that the AI calls (definition.name)
+          const functionName = definition.name || 'Unknown';
+          
+          // Extract available operations/modes if they exist
+          let availableOperations = [];
+          if (properties.operation && properties.operation.enum) {
+            availableOperations = properties.operation.enum;
+          } else if (properties.mode && properties.mode.enum) {
+            availableOperations = properties.mode.enum;
+          } else if (properties.action && properties.action.enum) {
+            availableOperations = properties.action.enum;
+          }
+          
+          // Create enhanced description
+          let enhancedDescription = definition.description || plugin.description || 'No description available';
+          if (availableOperations.length > 0) {
+            enhancedDescription += ` | Operations: ${availableOperations.join(', ')}`;
+          }
+          
           return {
             index: index + 1,
-            name: definition.name || plugin.name || 'Unknown',
-            description: definition.description || plugin.description || 'No description available',
+            name: functionName,
+            description: enhancedDescription,
             parameters: paramDetails || 'No parameters',
+            operations: availableOperations,
             version: plugin.version || 'N/A',
             path: plugin.path || 'N/A',
-            status: 'Available'
+            status: 'Callable',
+            pluginSource: plugin.name || 'Unknown'
           };
         });
         
         // Create tools data structure
         const toolsData = {
           type: "available_functions",
-          title: "🔧 Available Functions",
+          title: "🔧 Functions Available for Tool Calling",
           summary: {
             total_functions: loadedTools.length,
-            available_functions: loadedTools.length
+            callable_functions: loadedTools.length
           },
           tools: loadedTools,
           timestamp: new Date().toISOString()
@@ -1603,6 +1629,57 @@
       } catch (error) {
         console.error('Failed to fetch agents list:', error);
         addChat('System', '❌ Failed to load agents list. Please try again.');
+      }
+    }
+    
+    async function showReaperFunctions() {
+      try {
+        // Static list of REAPER functions - no server request needed
+        const reaperFunctionsList = [
+          { id: 1, name: "Add 4 Bar Region", description: "Adds a 4-bar time selection region at the current position", category: "Region" },
+          { id: 2, name: "Auto Color Tracks", description: "Automatically colors tracks based on predefined schemes", category: "Track Management" },
+          { id: 3, name: "Auto Create Markers", description: "Automatically creates markers based on project structure", category: "Marker" },
+          { id: 4, name: "Auto Name Tracks", description: "Automatically names tracks based on content or patterns", category: "Track Management" },
+          { id: 5, name: "Get Status", description: "Retrieves current REAPER project status and information", category: "Info" },
+          { id: 6, name: "Loop Mode", description: "Toggles or sets loop mode for playback", category: "Playback" },
+          { id: 7, name: "Rearrange Tracks", description: "Reorganizes track order based on specified criteria", category: "Track Management" },
+          { id: 8, name: "Remove Empty Tracks", description: "Removes tracks that contain no items or audio", category: "Track Management" },
+          { id: 9, name: "Remove Markers", description: "Removes markers from the project", category: "Marker" },
+          { id: 10, name: "Render Mp3", description: "Renders the project or selection to MP3 format", category: "Render" },
+          { id: 11, name: "Render Stems", description: "Renders individual track stems for mixing", category: "Render" },
+          { id: 12, name: "Render Wav", description: "Renders the project or selection to WAV format", category: "Render" }
+        ];
+        
+        // Group functions by category
+        const categories = {};
+        reaperFunctionsList.forEach(func => {
+          if (!categories[func.category]) {
+            categories[func.category] = [];
+          }
+          categories[func.category].push(func);
+        });
+        
+        // Create REAPER functions data structure
+        const reaperFunctionsData = {
+          type: "reaper_functions",
+          title: "🎵 Available REAPER Functions",
+          summary: {
+            total_functions: reaperFunctionsList.length,
+            total_categories: Object.keys(categories).length,
+            available_functions: reaperFunctionsList.length
+          },
+          functions: reaperFunctionsList,
+          categories: categories,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send structured data to chat
+        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(reaperFunctionsData);
+        addChat('System', structuredOutput);
+        
+      } catch (error) {
+        console.error('Failed to show REAPER functions:', error);
+        addChat('System', '❌ Failed to load REAPER functions. Please try again.');
       }
     }
     
@@ -1686,6 +1763,9 @@
           break;
         case 'agents_list':
           renderAgentsList(container, data);
+          break;
+        case 'reaper_functions':
+          renderReaperFunctions(container, data);
           break;
         default:
           // Unknown structured data type, render as JSON
@@ -2173,7 +2253,7 @@
       // Add content type indicator
       const indicator = document.createElement('div');
       indicator.className = 'content-type-indicator content-type-table';
-      indicator.textContent = 'Available Functions';
+      indicator.textContent = 'Tool Calling Functions';
       indicator.style.background = 'linear-gradient(135deg, #10b981, #34d399)';
       indicator.style.color = 'white';
       container.appendChild(indicator);
@@ -2211,7 +2291,7 @@
       // Summary cards
       const summaryCards = [
         { label: '🔧 Total Functions', value: data.summary.total_functions || data.summary.total_tools, color: '#10b981' },
-        { label: '✅ Available', value: data.summary.available_functions || data.summary.active_tools, color: '#3b82f6' }
+        { label: '📞 Callable Functions', value: data.summary.callable_functions || data.summary.available_functions || data.summary.active_tools, color: '#3b82f6' }
       ];
       
       summaryCards.forEach(card => {
@@ -2258,7 +2338,7 @@
         const headerRow = document.createElement('tr');
         headerRow.style.background = 'var(--bg-secondary)';
         
-        const headers = ['#', 'Function Name', 'Parameters', 'Status', 'Description'];
+        const headers = ['#', 'Function Name (Tool Call)', 'Parameters', 'Available Operations', 'Description'];
         headers.forEach(headerText => {
           const th = document.createElement('th');
           th.textContent = headerText;
@@ -2322,6 +2402,57 @@
           
           row.appendChild(paramsCell);
           
+          // Available Operations
+          const operationsCell = document.createElement('td');
+          operationsCell.style.padding = '0.75rem';
+          operationsCell.style.maxWidth = '180px';
+          
+          if (tool.operations && tool.operations.length > 0) {
+            const operationsContainer = document.createElement('div');
+            operationsContainer.style.display = 'flex';
+            operationsContainer.style.flexWrap = 'wrap';
+            operationsContainer.style.gap = '0.25rem';
+            
+            tool.operations.forEach(operation => {
+              const opBadge = document.createElement('span');
+              opBadge.textContent = operation;
+              opBadge.style.background = 'var(--primary-color)';
+              opBadge.style.color = 'white';
+              opBadge.style.padding = '0.125rem 0.375rem';
+              opBadge.style.borderRadius = 'var(--radius-sm)';
+              opBadge.style.fontSize = '0.625rem';
+              opBadge.style.fontWeight = '600';
+              opBadge.style.cursor = 'pointer';
+              opBadge.title = `Available operation: ${operation}`;
+              
+              // Add click to copy functionality
+              opBadge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(operation).then(() => {
+                  const original = opBadge.textContent;
+                  opBadge.textContent = '✓';
+                  opBadge.style.background = 'var(--success-color)';
+                  setTimeout(() => {
+                    opBadge.textContent = original;
+                    opBadge.style.background = 'var(--primary-color)';
+                  }, 1000);
+                });
+              });
+              
+              operationsContainer.appendChild(opBadge);
+            });
+            
+            operationsCell.appendChild(operationsContainer);
+          } else {
+            const noOpsText = document.createElement('span');
+            noOpsText.textContent = 'N/A';
+            noOpsText.style.color = 'var(--text-muted)';
+            noOpsText.style.fontSize = '0.75rem';
+            operationsCell.appendChild(noOpsText);
+          }
+          
+          row.appendChild(operationsCell);
+          
           // Status
           const statusCell = document.createElement('td');
           statusCell.style.padding = '0.75rem';
@@ -2384,7 +2515,7 @@
         instruction.style.textAlign = 'center';
         instruction.style.marginTop = '0.5rem';
         instruction.style.fontStyle = 'italic';
-        instruction.textContent = '💡 Required parameters are marked with * - these functions can be called by the AI assistant';
+        instruction.textContent = '💡 These are the exact function names the AI can call as tools. Required parameters are marked with *';
         container.appendChild(instruction);
         
       } else {
@@ -2655,6 +2786,241 @@
         noAgents.style.borderRadius = 'var(--radius-md)';
         noAgents.textContent = '🤖 No agents currently available - create your first agent using the sidebar';
         container.appendChild(noAgents);
+      }
+    }
+    
+    function renderReaperFunctions(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-table';
+      indicator.textContent = 'REAPER Functions';
+      indicator.style.background = 'linear-gradient(135deg, #ff6b35, #f7931e)';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create title with timestamp
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create summary cards grid
+      const summaryGrid = document.createElement('div');
+      summaryGrid.style.display = 'grid';
+      summaryGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
+      summaryGrid.style.gap = '1rem';
+      summaryGrid.style.marginBottom = '1.5rem';
+      
+      // Summary cards
+      const summaryCards = [
+        { label: '🎵 Total Functions', value: data.summary.total_functions, color: '#ff6b35' },
+        { label: '📁 Categories', value: data.summary.total_categories, color: '#f7931e' },
+        { label: '✅ Available', value: data.summary.available_functions, color: '#10b981' }
+      ];
+      
+      summaryCards.forEach(card => {
+        const cardEl = document.createElement('div');
+        cardEl.style.background = 'var(--bg-primary)';
+        cardEl.style.border = '1px solid var(--border-color)';
+        cardEl.style.borderRadius = 'var(--radius-md)';
+        cardEl.style.padding = '1rem';
+        cardEl.style.textAlign = 'center';
+        cardEl.style.boxShadow = 'var(--shadow-sm)';
+        
+        const label = document.createElement('div');
+        label.textContent = card.label;
+        label.style.color = 'var(--text-muted)';
+        label.style.fontSize = '0.875rem';
+        label.style.marginBottom = '0.25rem';
+        
+        const value = document.createElement('div');
+        value.textContent = card.value;
+        value.style.color = card.color;
+        value.style.fontSize = '1.5rem';
+        value.style.fontWeight = '700';
+        
+        cardEl.appendChild(label);
+        cardEl.appendChild(value);
+        summaryGrid.appendChild(cardEl);
+      });
+      
+      container.appendChild(summaryGrid);
+      
+      // Create functions organized by category
+      if (data.functions.length > 0) {
+        // Sort categories for consistent display
+        const sortedCategories = Object.keys(data.categories).sort();
+        
+        sortedCategories.forEach(categoryName => {
+          const categoryFunctions = data.categories[categoryName];
+          
+          // Category header
+          const categoryHeader = document.createElement('h3');
+          categoryHeader.textContent = `📂 ${categoryName}`;
+          categoryHeader.style.color = 'var(--text-primary)';
+          categoryHeader.style.marginTop = '1.5rem';
+          categoryHeader.style.marginBottom = '1rem';
+          categoryHeader.style.fontSize = '1.25rem';
+          categoryHeader.style.fontWeight = '600';
+          categoryHeader.style.borderBottom = '2px solid var(--primary-color)';
+          categoryHeader.style.paddingBottom = '0.5rem';
+          container.appendChild(categoryHeader);
+          
+          // Create table for this category
+          const table = document.createElement('table');
+          table.style.width = '100%';
+          table.style.borderCollapse = 'collapse';
+          table.style.background = 'var(--bg-primary)';
+          table.style.border = '1px solid var(--border-color)';
+          table.style.borderRadius = 'var(--radius-md)';
+          table.style.overflow = 'hidden';
+          table.style.boxShadow = 'var(--shadow-sm)';
+          table.style.marginBottom = '1.5rem';
+          
+          // Create header
+          const thead = document.createElement('thead');
+          const headerRow = document.createElement('tr');
+          headerRow.style.background = 'var(--bg-secondary)';
+          
+          const headers = ['#', 'Function Name', 'Description'];
+          headers.forEach(headerText => {
+            const th = document.createElement('th');
+            th.textContent = headerText;
+            th.style.padding = '0.75rem';
+            th.style.textAlign = 'left';
+            th.style.borderBottom = '1px solid var(--border-color)';
+            th.style.color = 'var(--text-primary)';
+            th.style.fontWeight = '600';
+            th.style.fontSize = '0.875rem';
+            headerRow.appendChild(th);
+          });
+          
+          thead.appendChild(headerRow);
+          table.appendChild(thead);
+          
+          // Create body
+          const tbody = document.createElement('tbody');
+          categoryFunctions.forEach((func, index) => {
+            const row = document.createElement('tr');
+            row.style.borderBottom = index < categoryFunctions.length - 1 ? '1px solid var(--border-color)' : 'none';
+            row.style.transition = 'all 0.2s ease';
+            
+            // Add hover effects
+            row.addEventListener('mouseenter', () => {
+              row.style.background = 'var(--bg-tertiary)';
+              row.style.transform = 'translateY(-1px)';
+              row.style.boxShadow = 'var(--shadow-sm)';
+            });
+            row.addEventListener('mouseleave', () => {
+              row.style.background = 'transparent';
+              row.style.transform = '';
+              row.style.boxShadow = '';
+            });
+            
+            // Index
+            const indexCell = document.createElement('td');
+            indexCell.textContent = func.id;
+            indexCell.style.padding = '0.75rem';
+            indexCell.style.fontWeight = '600';
+            indexCell.style.color = 'var(--text-secondary)';
+            indexCell.style.fontSize = '0.875rem';
+            indexCell.style.width = '60px';
+            row.appendChild(indexCell);
+            
+            // Function Name
+            const nameCell = document.createElement('td');
+            nameCell.style.padding = '0.75rem';
+            nameCell.style.minWidth = '200px';
+            
+            const nameEl = document.createElement('strong');
+            nameEl.textContent = func.name;
+            nameEl.style.color = 'var(--primary-color)';
+            nameEl.style.fontFamily = 'monospace';
+            nameEl.style.fontSize = '0.9rem';
+            nameEl.style.cursor = 'pointer';
+            nameEl.title = 'Click to copy function name';
+            
+            // Add copy functionality
+            nameEl.addEventListener('click', (e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(func.name).then(() => {
+                const original = nameEl.textContent;
+                nameEl.textContent = '✓ Copied!';
+                nameEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                  nameEl.textContent = original;
+                  nameEl.style.color = 'var(--primary-color)';
+                }, 1500);
+              }).catch(() => {
+                // Fallback for older browsers
+                nameEl.textContent = '📋 ' + func.name;
+                setTimeout(() => {
+                  nameEl.textContent = func.name;
+                }, 1500);
+              });
+            });
+            
+            nameCell.appendChild(nameEl);
+            row.appendChild(nameCell);
+            
+            // Description
+            const descCell = document.createElement('td');
+            descCell.style.padding = '0.75rem';
+            descCell.textContent = func.description;
+            descCell.style.color = 'var(--text-secondary)';
+            descCell.style.fontSize = '0.875rem';
+            descCell.style.lineHeight = '1.4';
+            row.appendChild(descCell);
+            
+            tbody.appendChild(row);
+          });
+          
+          table.appendChild(tbody);
+          container.appendChild(table);
+        });
+        
+        // Add helpful instruction
+        const instruction = document.createElement('div');
+        instruction.style.marginTop = '1rem';
+        instruction.style.color = 'var(--text-secondary)';
+        instruction.style.fontSize = '0.875rem';
+        instruction.style.fontStyle = 'italic';
+        instruction.style.textAlign = 'center';
+        instruction.style.padding = '1rem';
+        instruction.style.background = 'var(--bg-secondary)';
+        instruction.style.borderRadius = 'var(--radius-md)';
+        instruction.style.border = '1px solid var(--border-color)';
+        instruction.innerHTML = '💡 <strong>Click any function name</strong> to copy it to clipboard. These functions can be referenced when working with REAPER projects.';
+        container.appendChild(instruction);
+        
+      } else {
+        // No functions available (shouldn't happen with static data)
+        const noFunctions = document.createElement('div');
+        noFunctions.style.textAlign = 'center';
+        noFunctions.style.padding = '2rem';
+        noFunctions.style.color = 'var(--text-muted)';
+        noFunctions.style.background = 'var(--bg-secondary)';
+        noFunctions.style.border = '1px solid var(--border-color)';
+        noFunctions.style.borderRadius = 'var(--radius-md)';
+        noFunctions.textContent = '🎵 No REAPER functions currently available';
+        container.appendChild(noFunctions);
       }
     }
     

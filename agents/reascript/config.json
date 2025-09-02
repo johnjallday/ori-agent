@@ -24,6 +24,42 @@
       "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/weather.so",
       "Version": "1.0.0"
     },
+    "math": {
+      "Definition": {
+        "name": "math",
+        "description": "Perform basic math operations: add, subtract, multiply, divide",
+        "parameters": {
+          "properties": {
+            "a": {
+              "description": "First operand",
+              "type": "number"
+            },
+            "b": {
+              "description": "Second operand",
+              "type": "number"
+            },
+            "operation": {
+              "description": "Operation to perform: add, subtract, multiply, divide",
+              "enum": [
+                "add",
+                "subtract",
+                "multiply",
+                "divide"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "a",
+            "b"
+          ],
+          "type": "object"
+        }
+      },
+      "Path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/math.so",
+      "Version": "1.0.0"
+    },
     "reaper_manager": {
       "Definition": {
         "name": "reaper_manager",
