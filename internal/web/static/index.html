@@ -809,6 +809,10 @@
   <script>
     let currentAgent = '';
     let isComposing = false; // IME safety
+    
+    // Prompt history for up/down arrow navigation
+    let promptHistory = [];
+    let historyIndex = -1;
 
     // ---- Dark Mode (Bootstrap + custom) ----
     function applyTheme(isDark) {
@@ -1205,6 +1209,17 @@
       const input = document.getElementById('input');
       const q = input.value.trim();
       if (!q) return;
+      
+      // Add to prompt history (avoid duplicates of the last entry)
+      if (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== q) {
+        promptHistory.push(q);
+        // Keep history limited to last 10 prompts
+        if (promptHistory.length > 10) {
+          promptHistory.shift();
+        }
+      }
+      // Reset history index
+      historyIndex = -1;
       // Slash commands (handled client-side)
       if (q === '/agent') {
         input.value = '';
@@ -1214,6 +1229,16 @@
       if (q === '/plugins') {
         input.value = '';
         await showPluginRegistry();
+        return;
+      }
+      if (q === '/tools') {
+        input.value = '';
+        await showLoadedTools();
+        return;
+      }
+      if (q === '/agents') {
+        input.value = '';
+        await showAgentsList();
         return;
       }
       addChat('User', q);
@@ -1249,6 +1274,47 @@
 
       input.addEventListener('keydown', (e) => {
         const cmdOrCtrl = e.ctrlKey || e.metaKey;
+        
+        // Handle arrow key navigation for prompt history
+        if (e.key === 'ArrowUp' && !isComposing) {
+          e.preventDefault();
+          if (promptHistory.length > 0) {
+            if (historyIndex === -1) {
+              // Start from the most recent prompt
+              historyIndex = promptHistory.length - 1;
+            } else if (historyIndex > 0) {
+              // Go to older prompts
+              historyIndex--;
+            }
+            // Only update input if we have a valid index
+            if (historyIndex >= 0 && historyIndex < promptHistory.length) {
+              input.value = promptHistory[historyIndex];
+              // Move cursor to end
+              setTimeout(() => input.setSelectionRange(input.value.length, input.value.length), 0);
+            }
+          }
+          return;
+        }
+        
+        if (e.key === 'ArrowDown' && !isComposing) {
+          e.preventDefault();
+          if (promptHistory.length > 0 && historyIndex !== -1) {
+            if (historyIndex < promptHistory.length - 1) {
+              // Go to newer prompts
+              historyIndex++;
+              input.value = promptHistory[historyIndex];
+              // Move cursor to end
+              setTimeout(() => input.setSelectionRange(input.value.length, input.value.length), 0);
+            } else {
+              // Clear input and exit history mode
+              historyIndex = -1;
+              input.value = '';
+            }
+          }
+          return;
+        }
+        
+        // Handle Enter key for sending messages
         if ((cmdOrCtrl && e.key === 'Enter') && !isComposing) {
           e.preventDefault();
           document.getElementById('sendBtn').click();
@@ -1446,6 +1512,100 @@
       }
     }
     
+    async function showLoadedTools() {
+      try {
+        // Fetch currently loaded plugins/tools for current agent
+        const loadedPluginsRes = await fetch('/api/plugins');
+        const loadedPluginsData = await loadedPluginsRes.json();
+        
+        // Process loaded plugins data to show available functions
+        const loadedTools = (loadedPluginsData.plugins || []).map((plugin, index) => {
+          const definition = plugin.definition || {};
+          const parameters = definition.parameters || {};
+          const properties = parameters.properties || {};
+          
+          // Extract parameter information
+          const paramNames = Object.keys(properties);
+          const requiredParams = parameters.required || [];
+          const paramDetails = paramNames.map(name => {
+            const param = properties[name];
+            const isRequired = requiredParams.includes(name);
+            return `${name}${isRequired ? '*' : ''}: ${param.type || 'any'}`;
+          }).join(', ');
+          
+          return {
+            index: index + 1,
+            name: definition.name || plugin.name || 'Unknown',
+            description: definition.description || plugin.description || 'No description available',
+            parameters: paramDetails || 'No parameters',
+            version: plugin.version || 'N/A',
+            path: plugin.path || 'N/A',
+            status: 'Available'
+          };
+        });
+        
+        // Create tools data structure
+        const toolsData = {
+          type: "available_functions",
+          title: "🔧 Available Functions",
+          summary: {
+            total_functions: loadedTools.length,
+            available_functions: loadedTools.length
+          },
+          tools: loadedTools,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send structured data to chat
+        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(toolsData);
+        addChat('System', structuredOutput);
+        
+      } catch (error) {
+        console.error('Failed to fetch available functions:', error);
+        addChat('System', '❌ Failed to load available functions. Please try again.');
+      }
+    }
+    
+    async function showAgentsList() {
+      try {
+        // Fetch agents data
+        const agentsRes = await fetch('/api/agents');
+        const agentsData = await agentsRes.json();
+        
+        // Process agents data to create detailed list
+        const agentsList = (agentsData.agents || []).map((agentName, index) => {
+          const isCurrent = agentName === agentsData.current;
+          return {
+            index: index + 1,
+            name: agentName,
+            status: isCurrent ? 'Active' : 'Available',
+            isCurrent: isCurrent
+          };
+        });
+        
+        // Create agents list data structure
+        const agentsListData = {
+          type: "agents_list",
+          title: "🤖 Available Agents",
+          summary: {
+            total_agents: agentsList.length,
+            current_agent: agentsData.current || 'None',
+            available_agents: agentsList.length
+          },
+          agents: agentsList,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Send structured data to chat
+        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(agentsListData);
+        addChat('System', structuredOutput);
+        
+      } catch (error) {
+        console.error('Failed to fetch agents list:', error);
+        addChat('System', '❌ Failed to load agents list. Please try again.');
+      }
+    }
+    
     function isStructuredContent(text) {
       // Check for special structured data prefix
       if (text.startsWith('STRUCTURED_DATA:')) {
@@ -1519,6 +1679,13 @@
           break;
         case 'plugin_registry':
           renderPluginRegistry(container, data);
+          break;
+        case 'loaded_tools':
+        case 'available_functions':
+          renderAvailableFunctions(container, data);
+          break;
+        case 'agents_list':
+          renderAgentsList(container, data);
           break;
         default:
           // Unknown structured data type, render as JSON
@@ -1999,6 +2166,495 @@
         noPlugins.style.borderRadius = 'var(--radius-md)';
         noPlugins.textContent = '📦 No plugins found in registry';
         container.appendChild(noPlugins);
+      }
+    }
+    
+    function renderAvailableFunctions(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-table';
+      indicator.textContent = 'Available Functions';
+      indicator.style.background = 'linear-gradient(135deg, #10b981, #34d399)';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create title with timestamp
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create summary cards grid
+      const summaryGrid = document.createElement('div');
+      summaryGrid.style.display = 'grid';
+      summaryGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
+      summaryGrid.style.gap = '1rem';
+      summaryGrid.style.marginBottom = '1.5rem';
+      
+      // Summary cards
+      const summaryCards = [
+        { label: '🔧 Total Functions', value: data.summary.total_functions || data.summary.total_tools, color: '#10b981' },
+        { label: '✅ Available', value: data.summary.available_functions || data.summary.active_tools, color: '#3b82f6' }
+      ];
+      
+      summaryCards.forEach(card => {
+        const cardEl = document.createElement('div');
+        cardEl.style.background = 'var(--bg-primary)';
+        cardEl.style.border = '1px solid var(--border-color)';
+        cardEl.style.borderRadius = 'var(--radius-md)';
+        cardEl.style.padding = '1rem';
+        cardEl.style.textAlign = 'center';
+        cardEl.style.boxShadow = 'var(--shadow-sm)';
+        
+        const label = document.createElement('div');
+        label.textContent = card.label;
+        label.style.color = 'var(--text-muted)';
+        label.style.fontSize = '0.875rem';
+        label.style.marginBottom = '0.25rem';
+        
+        const value = document.createElement('div');
+        value.textContent = card.value;
+        value.style.color = card.color;
+        value.style.fontSize = '1.5rem';
+        value.style.fontWeight = '700';
+        
+        cardEl.appendChild(label);
+        cardEl.appendChild(value);
+        summaryGrid.appendChild(cardEl);
+      });
+      
+      container.appendChild(summaryGrid);
+      
+      // Create tools table
+      if (data.tools.length > 0) {
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.background = 'var(--bg-primary)';
+        table.style.border = '1px solid var(--border-color)';
+        table.style.borderRadius = 'var(--radius-md)';
+        table.style.overflow = 'hidden';
+        table.style.boxShadow = 'var(--shadow-sm)';
+        
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.style.background = 'var(--bg-secondary)';
+        
+        const headers = ['#', 'Function Name', 'Parameters', 'Status', 'Description'];
+        headers.forEach(headerText => {
+          const th = document.createElement('th');
+          th.textContent = headerText;
+          th.style.padding = '0.75rem';
+          th.style.textAlign = 'left';
+          th.style.borderBottom = '1px solid var(--border-color)';
+          th.style.color = 'var(--text-primary)';
+          th.style.fontWeight = '600';
+          th.style.fontSize = '0.875rem';
+          headerRow.appendChild(th);
+        });
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        
+        // Create body
+        const tbody = document.createElement('tbody');
+        data.tools.forEach((tool, index) => {
+          const row = document.createElement('tr');
+          row.style.borderBottom = index < data.tools.length - 1 ? '1px solid var(--border-color)' : 'none';
+          row.style.transition = 'all 0.2s ease';
+          
+          // Index
+          const indexCell = document.createElement('td');
+          indexCell.textContent = tool.index;
+          indexCell.style.padding = '0.75rem';
+          indexCell.style.fontWeight = '600';
+          indexCell.style.color = 'var(--text-secondary)';
+          row.appendChild(indexCell);
+          
+          // Function Name
+          const nameCell = document.createElement('td');
+          nameCell.style.padding = '0.75rem';
+          
+          const nameEl = document.createElement('strong');
+          nameEl.textContent = tool.name;
+          nameEl.style.color = 'var(--text-primary)';
+          nameEl.style.fontFamily = 'monospace';
+          nameCell.appendChild(nameEl);
+          
+          row.appendChild(nameCell);
+          
+          // Parameters
+          const paramsCell = document.createElement('td');
+          paramsCell.style.padding = '0.75rem';
+          paramsCell.style.maxWidth = '200px';
+          
+          const paramsEl = document.createElement('code');
+          paramsEl.textContent = tool.parameters;
+          paramsEl.style.background = 'var(--bg-tertiary)';
+          paramsEl.style.color = 'var(--primary-color)';
+          paramsEl.style.padding = '0.25rem 0.5rem';
+          paramsEl.style.borderRadius = 'var(--radius-sm)';
+          paramsEl.style.fontSize = '0.75rem';
+          paramsEl.style.display = 'block';
+          paramsEl.style.overflow = 'hidden';
+          paramsEl.style.textOverflow = 'ellipsis';
+          paramsEl.style.whiteSpace = 'nowrap';
+          paramsEl.title = tool.parameters; // Show full text on hover
+          paramsCell.appendChild(paramsEl);
+          
+          row.appendChild(paramsCell);
+          
+          // Status
+          const statusCell = document.createElement('td');
+          statusCell.style.padding = '0.75rem';
+          
+          const statusBadge = document.createElement('span');
+          statusBadge.textContent = tool.status;
+          statusBadge.style.background = 'var(--success-color)';
+          statusBadge.style.color = 'white';
+          statusBadge.style.padding = '0.25rem 0.5rem';
+          statusBadge.style.borderRadius = 'var(--radius-sm)';
+          statusBadge.style.fontSize = '0.75rem';
+          statusBadge.style.fontWeight = '600';
+          statusCell.appendChild(statusBadge);
+          
+          row.appendChild(statusCell);
+          
+          // Description
+          const descCell = document.createElement('td');
+          descCell.textContent = tool.description;
+          descCell.style.padding = '0.75rem';
+          descCell.style.color = 'var(--text-secondary)';
+          descCell.style.maxWidth = '250px';
+          descCell.style.overflow = 'hidden';
+          descCell.style.textOverflow = 'ellipsis';
+          descCell.style.whiteSpace = 'nowrap';
+          row.appendChild(descCell);
+          
+          // Add hover effect
+          row.addEventListener('mouseenter', () => {
+            row.style.backgroundColor = 'var(--bg-tertiary)';
+            row.style.transform = 'translateY(-1px)';
+            row.style.boxShadow = 'var(--shadow-sm)';
+          });
+          
+          row.addEventListener('mouseleave', () => {
+            row.style.backgroundColor = '';
+            row.style.transform = '';
+            row.style.boxShadow = '';
+          });
+          
+          tbody.appendChild(row);
+        });
+        
+        table.appendChild(tbody);
+        container.appendChild(table);
+        
+        // Add metadata
+        const metadata = document.createElement('div');
+        metadata.style.fontSize = '0.875rem';
+        metadata.style.color = 'var(--text-secondary)';
+        metadata.style.marginTop = '1rem';
+        metadata.style.textAlign = 'center';
+        metadata.innerHTML = `📊 <strong>${data.tools.length}</strong> functions available to call`;
+        container.appendChild(metadata);
+        
+        // Add instruction
+        const instruction = document.createElement('div');
+        instruction.style.fontSize = '0.75rem';
+        instruction.style.color = 'var(--text-muted)';
+        instruction.style.textAlign = 'center';
+        instruction.style.marginTop = '0.5rem';
+        instruction.style.fontStyle = 'italic';
+        instruction.textContent = '💡 Required parameters are marked with * - these functions can be called by the AI assistant';
+        container.appendChild(instruction);
+        
+      } else {
+        // No functions available
+        const noFunctions = document.createElement('div');
+        noFunctions.style.textAlign = 'center';
+        noFunctions.style.padding = '2rem';
+        noFunctions.style.color = 'var(--text-muted)';
+        noFunctions.style.background = 'var(--bg-secondary)';
+        noFunctions.style.border = '1px solid var(--border-color)';
+        noFunctions.style.borderRadius = 'var(--radius-md)';
+        noFunctions.textContent = '🔧 No functions currently available - load some plugins first';
+        container.appendChild(noFunctions);
+      }
+    }
+    
+    function renderAgentsList(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-table';
+      indicator.textContent = 'Available Agents';
+      indicator.style.background = 'linear-gradient(135deg, #6366f1, #818cf8)';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create title with timestamp
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create summary cards grid
+      const summaryGrid = document.createElement('div');
+      summaryGrid.style.display = 'grid';
+      summaryGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
+      summaryGrid.style.gap = '1rem';
+      summaryGrid.style.marginBottom = '1.5rem';
+      
+      // Summary cards
+      const summaryCards = [
+        { label: '🤖 Total Agents', value: data.summary.total_agents, color: '#6366f1' },
+        { label: '✅ Active Agent', value: data.summary.current_agent, color: '#10b981' }
+      ];
+      
+      summaryCards.forEach(card => {
+        const cardEl = document.createElement('div');
+        cardEl.style.background = 'var(--bg-primary)';
+        cardEl.style.border = '1px solid var(--border-color)';
+        cardEl.style.borderRadius = 'var(--radius-md)';
+        cardEl.style.padding = '1rem';
+        cardEl.style.textAlign = 'center';
+        cardEl.style.boxShadow = 'var(--shadow-sm)';
+        
+        const label = document.createElement('div');
+        label.textContent = card.label;
+        label.style.color = 'var(--text-muted)';
+        label.style.fontSize = '0.875rem';
+        label.style.marginBottom = '0.25rem';
+        
+        const value = document.createElement('div');
+        value.textContent = card.value;
+        value.style.color = card.color;
+        value.style.fontSize = '1.5rem';
+        value.style.fontWeight = '700';
+        
+        cardEl.appendChild(label);
+        cardEl.appendChild(value);
+        summaryGrid.appendChild(cardEl);
+      });
+      
+      container.appendChild(summaryGrid);
+      
+      // Create agents table
+      if (data.agents.length > 0) {
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.background = 'var(--bg-primary)';
+        table.style.border = '1px solid var(--border-color)';
+        table.style.borderRadius = 'var(--radius-md)';
+        table.style.overflow = 'hidden';
+        table.style.boxShadow = 'var(--shadow-sm)';
+        
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.style.background = 'var(--bg-secondary)';
+        
+        const headers = ['#', 'Agent Name', 'Status', 'Actions'];
+        headers.forEach(headerText => {
+          const th = document.createElement('th');
+          th.textContent = headerText;
+          th.style.padding = '0.75rem';
+          th.style.textAlign = 'left';
+          th.style.borderBottom = '1px solid var(--border-color)';
+          th.style.color = 'var(--text-primary)';
+          th.style.fontWeight = '600';
+          th.style.fontSize = '0.875rem';
+          headerRow.appendChild(th);
+        });
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        
+        // Create body
+        const tbody = document.createElement('tbody');
+        data.agents.forEach((agent, index) => {
+          const row = document.createElement('tr');
+          row.style.borderBottom = index < data.agents.length - 1 ? '1px solid var(--border-color)' : 'none';
+          row.style.transition = 'all 0.2s ease';
+          
+          // Add hover effects
+          row.addEventListener('mouseenter', () => {
+            row.style.background = 'var(--bg-tertiary)';
+            row.style.transform = 'translateY(-1px)';
+            row.style.boxShadow = 'var(--shadow-sm)';
+          });
+          row.addEventListener('mouseleave', () => {
+            row.style.background = 'transparent';
+            row.style.transform = '';
+            row.style.boxShadow = '';
+          });
+          
+          // Index
+          const indexCell = document.createElement('td');
+          indexCell.textContent = agent.index;
+          indexCell.style.padding = '0.75rem';
+          indexCell.style.fontWeight = '600';
+          indexCell.style.color = 'var(--text-secondary)';
+          row.appendChild(indexCell);
+          
+          // Agent Name
+          const nameCell = document.createElement('td');
+          nameCell.style.padding = '0.75rem';
+          
+          const nameEl = document.createElement('strong');
+          nameEl.textContent = agent.name;
+          nameEl.style.color = agent.isCurrent ? 'var(--primary-color)' : 'var(--text-primary)';
+          nameEl.style.fontFamily = 'monospace';
+          
+          if (agent.isCurrent) {
+            const currentBadge = document.createElement('span');
+            currentBadge.textContent = ' (Current)';
+            currentBadge.style.color = 'var(--primary-color)';
+            currentBadge.style.fontSize = '0.75rem';
+            currentBadge.style.fontWeight = '500';
+            nameEl.appendChild(currentBadge);
+          }
+          
+          nameCell.appendChild(nameEl);
+          row.appendChild(nameCell);
+          
+          // Status
+          const statusCell = document.createElement('td');
+          statusCell.style.padding = '0.75rem';
+          
+          const statusBadge = document.createElement('span');
+          statusBadge.textContent = agent.status;
+          statusBadge.style.padding = '0.25rem 0.5rem';
+          statusBadge.style.borderRadius = 'var(--radius-sm)';
+          statusBadge.style.fontSize = '0.75rem';
+          statusBadge.style.fontWeight = '600';
+          
+          if (agent.isCurrent) {
+            statusBadge.style.background = '#10b981';
+            statusBadge.style.color = 'white';
+          } else {
+            statusBadge.style.background = 'var(--bg-tertiary)';
+            statusBadge.style.color = 'var(--text-secondary)';
+          }
+          
+          statusCell.appendChild(statusBadge);
+          row.appendChild(statusCell);
+          
+          // Actions
+          const actionsCell = document.createElement('td');
+          actionsCell.style.padding = '0.75rem';
+          
+          if (!agent.isCurrent) {
+            const switchButton = document.createElement('button');
+            switchButton.textContent = '🔄 Switch';
+            switchButton.style.background = 'var(--primary-color)';
+            switchButton.style.color = 'white';
+            switchButton.style.border = 'none';
+            switchButton.style.padding = '0.375rem 0.75rem';
+            switchButton.style.borderRadius = 'var(--radius-sm)';
+            switchButton.style.cursor = 'pointer';
+            switchButton.style.fontSize = '0.75rem';
+            switchButton.style.fontWeight = '500';
+            switchButton.style.transition = 'all 0.2s ease';
+            
+            switchButton.addEventListener('mouseenter', () => {
+              switchButton.style.background = 'var(--primary-dark)';
+              switchButton.style.transform = 'scale(1.05)';
+            });
+            switchButton.addEventListener('mouseleave', () => {
+              switchButton.style.background = 'var(--primary-color)';
+              switchButton.style.transform = 'scale(1)';
+            });
+            
+            switchButton.addEventListener('click', async () => {
+              try {
+                const response = await fetch(`/api/agents?name=${encodeURIComponent(agent.name)}`, {
+                  method: 'PUT'
+                });
+                if (response.ok) {
+                  // Refresh the agents list
+                  await showAgentsList();
+                } else {
+                  alert('Failed to switch agent');
+                }
+              } catch (error) {
+                alert('Error switching agent');
+              }
+            });
+            
+            actionsCell.appendChild(switchButton);
+          } else {
+            const currentLabel = document.createElement('span');
+            currentLabel.textContent = '✅ Current';
+            currentLabel.style.color = 'var(--success-color)';
+            currentLabel.style.fontSize = '0.75rem';
+            currentLabel.style.fontWeight = '600';
+            actionsCell.appendChild(currentLabel);
+          }
+          
+          row.appendChild(actionsCell);
+          tbody.appendChild(row);
+        });
+        
+        table.appendChild(tbody);
+        container.appendChild(table);
+        
+        // Add helpful instruction
+        const instruction = document.createElement('div');
+        instruction.style.marginTop = '1rem';
+        instruction.style.color = 'var(--text-secondary)';
+        instruction.style.fontSize = '0.875rem';
+        instruction.style.fontStyle = 'italic';
+        instruction.textContent = '💡 Click "Switch" to change to a different agent, or use the sidebar to manage agents';
+        container.appendChild(instruction);
+        
+      } else {
+        // No agents available
+        const noAgents = document.createElement('div');
+        noAgents.style.textAlign = 'center';
+        noAgents.style.padding = '2rem';
+        noAgents.style.color = 'var(--text-muted)';
+        noAgents.style.background = 'var(--bg-secondary)';
+        noAgents.style.border = '1px solid var(--border-color)';
+        noAgents.style.borderRadius = 'var(--radius-md)';
+        noAgents.textContent = '🤖 No agents currently available - create your first agent using the sidebar';
+        container.appendChild(noAgents);
       }
     }
     

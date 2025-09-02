@@ -60,11 +60,14 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "current agent not found", http.StatusInternalServerError)
 		return
 	}
-	plist := make([]map[string]string, 0, len(ag.Plugins))
+	plist := make([]map[string]any, 0, len(ag.Plugins))
 	for name, pl := range ag.Plugins {
-		plist = append(plist, map[string]string{
+		plist = append(plist, map[string]any{
 			"name":        name,
 			"description": pl.Definition.Description.String(),
+			"definition":  pl.Definition,
+			"path":        pl.Path,
+			"version":     pl.Version,
 		})
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})

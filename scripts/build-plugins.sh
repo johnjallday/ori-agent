@@ -51,7 +51,7 @@ build_plugin() {
 build_plugin "weather" "weather.go" "weather"
 build_plugin "math" "math.go" "math"
 build_plugin "result-handler" "main.go" "result-handler"
-build_plugin "music_project_manager" "music_project_manager.go" "music_project_manager"
+#build_plugin "music_project_manager" "music_project_manager.go" "music_project_manager"
 
 echo -e "${GREEN}All plugins built successfully!${NC}"
 echo -e "${BLUE}Plugin binaries are in: uploaded_plugins/${NC}"

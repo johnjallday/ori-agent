@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
@@ -136,24 +136,47 @@ func (m *musicProjectManagerTool) Call(ctx context.Context, args string) (string
 
 // handleCreateProject creates a new music project
 func (m *musicProjectManagerTool) handleCreateProject(name string, bpm int) (string, error) {
-	if !globalSettings.IsInitialized() {
+	// Get current settings from agent_settings.json
+	agentSettings, err := m.getAgentSettings()
+	if err != nil {
+		return "", fmt.Errorf("failed to load agent settings: %w", err)
+	}
+
+	// Check if settings are initialized
+	if len(agentSettings) == 0 {
 		return "Music Project Manager needs to be set up first. Please run music_project_manager with operation 'init_setup' to begin the setup process.", nil
 	}
 
-	settings := globalSettings.getCurrentSettings()
-	if settings.DefaultTemplate == "" {
-		return "", fmt.Errorf("default template not configured")
+	// Get required settings
+	projectDirInterface, hasProjectDir := agentSettings["project_dir"]
+	templateDirInterface, hasTemplateDir := agentSettings["template_dir"]
+	
+	if !hasProjectDir || !hasTemplateDir {
+		return "Music Project Manager needs to be set up first. Please configure project_dir and template_dir using 'set_project_dir' and 'set_template_dir' operations.", nil
 	}
 
+	projectDirBase, ok := projectDirInterface.(string)
+	if !ok || projectDirBase == "" {
+		return "", fmt.Errorf("project directory not configured")
+	}
+
+	templateDir, ok := templateDirInterface.(string)
+	if !ok || templateDir == "" {
+		return "", fmt.Errorf("template directory not configured")
+	}
+
+	// Construct default template path
+	defaultTemplate := filepath.Join(templateDir, "default.RPP")
+
 	// Make the project folder
-	projectDir := filepath.Join(settings.ProjectDir, name)
+	projectDir := filepath.Join(projectDirBase, name)
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create project directory: %w", err)
 	}
 
 	// Copy the .RPP
 	dest := filepath.Join(projectDir, name+".RPP")
-	data, err := os.ReadFile(settings.DefaultTemplate)
+	data, err := os.ReadFile(defaultTemplate)
 	if err != nil {
 		return "", fmt.Errorf("failed to read template file: %w", err)
 	}
@@ -202,8 +225,6 @@ func (m *musicProjectManagerTool) handleCreateProject(name string, bpm int) (str
 
 // handleSetProjectDir sets the project directory
 func (m *musicProjectManagerTool) handleSetProjectDir(path string) (string, error) {
-	fmt.Printf("DEBUG: handleSetProjectDir called with path: '%s'\n", path)
-	
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return "", fmt.Errorf("failed to create directory %s: %w", path, err)
 	}
@@ -303,6 +324,61 @@ func (m *musicProjectManagerTool) handleGetSettings() (string, error) {
 	return string(data), nil
 }
 
+// getSuggestedDirectories returns platform-appropriate suggested directories
+func getSuggestedDirectories() (projectDir, templateDir string) {
+	// Use ~ for cross-platform home directory
+	projectDir = "~/Music/Projects"
+	
+	// Detect platform for REAPER template directory
+	if runtime.GOOS == "darwin" {
+		// macOS - use standard REAPER application support directory
+		templateDir = "~/Library/Application Support/REAPER/ProjectTemplates"
+	} else if runtime.GOOS == "windows" {
+		// Windows - use standard REAPER AppData directory
+		templateDir = "~/AppData/Roaming/REAPER/ProjectTemplates"
+	} else {
+		// Linux/other - use generic location
+		templateDir = "~/Music/Templates"
+	}
+	
+	return projectDir, templateDir
+}
+
+// getAgentSettings reads the music_project_manager settings from agent_settings.json
+func (m *musicProjectManagerTool) getAgentSettings() (map[string]interface{}, error) {
+	// Check both instance and global agent context
+	var agentContext *pluginapi.AgentContext
+	if m.agentContext != nil && m.agentContext.SettingsPath != "" {
+		agentContext = m.agentContext
+	} else if globalAgentContext != nil && globalAgentContext.SettingsPath != "" {
+		agentContext = globalAgentContext
+	}
+
+	if agentContext == nil {
+		return nil, fmt.Errorf("no agent context available - cannot determine settings file path")
+	}
+
+	settingsFilePath := agentContext.SettingsPath
+
+	// Read settings from the agent_settings.json file
+	var agentSettings map[string]interface{}
+	if settingsData, err := os.ReadFile(settingsFilePath); err == nil {
+		if err := json.Unmarshal(settingsData, &agentSettings); err != nil {
+			return nil, fmt.Errorf("failed to parse agent settings at %s: %w", settingsFilePath, err)
+		}
+	} else {
+		return nil, fmt.Errorf("failed to read agent settings file at %s: %w", settingsFilePath, err)
+	}
+
+	// Extract music_project_manager settings
+	if musicSettings, exists := agentSettings["music_project_manager"].(map[string]interface{}); exists {
+		return musicSettings, nil
+	}
+
+	// Return empty map if no music_project_manager settings found
+	return make(map[string]interface{}), nil
+}
+
 // handleInitSetup checks setup status and provides guidance
 func (m *musicProjectManagerTool) handleInitSetup() (string, error) {
 	if globalSettings.IsInitialized() {
@@ -314,8 +390,7 @@ func (m *musicProjectManagerTool) handleInitSetup() (string, error) {
 			"\nUse operation 'get_settings' to view detailed configuration.", nil
 	}
 
-	suggestedProjectDir := "/Users/jj/Music/Projects"
-	suggestedTemplateDir := "/Users/jj/Music/Templates"
+	suggestedProjectDir, suggestedTemplateDir := getSuggestedDirectories()
 
 	return fmt.Sprintf("🎵 Welcome to Music Project Manager! \n\nThis is your first time using the plugin. Please complete the setup by providing:\n\n"+
 		"1. **Project Directory** - Where new music projects will be created\n"+
@@ -561,10 +636,8 @@ func (m *musicProjectManagerTool) updateAgentSettings(projectDir, templateDir st
 	var agentContext *pluginapi.AgentContext
 	if m.agentContext != nil && m.agentContext.SettingsPath != "" {
 		agentContext = m.agentContext
-		fmt.Printf("DEBUG: Using instance agent context\n")
 	} else if globalAgentContext != nil && globalAgentContext.SettingsPath != "" {
 		agentContext = globalAgentContext
-		fmt.Printf("DEBUG: Using global agent context\n")
 	}
 
 	if agentContext == nil {
@@ -572,7 +645,6 @@ func (m *musicProjectManagerTool) updateAgentSettings(projectDir, templateDir st
 	}
 
 	settingsFilePath := agentContext.SettingsPath
-	fmt.Printf("DEBUG: Using agent settings path: %s\n", settingsFilePath)
 
 	// Read existing settings or create default structure
 	var agentSettings map[string]interface{}
@@ -594,16 +666,12 @@ func (m *musicProjectManagerTool) updateAgentSettings(projectDir, templateDir st
 
 	// Update settings
 	if projectDir != "" {
-		oldProjectDir := musicSettings["project_dir"]
 		musicSettings["project_dir"] = projectDir
 		musicSettings["path"] = filepath.Dir(projectDir) // Also update parent directory
-		fmt.Printf("DEBUG: Updated project_dir from '%v' to '%s'\n", oldProjectDir, projectDir)
 	}
 
 	if templateDir != "" {
-		oldTemplateDir := musicSettings["template_dir"]
 		musicSettings["template_dir"] = templateDir
-		fmt.Printf("DEBUG: Updated template_dir from '%v' to '%s'\n", oldTemplateDir, templateDir)
 	}
 
 	// Create directory if it doesn't exist
@@ -617,42 +685,8 @@ func (m *musicProjectManagerTool) updateAgentSettings(projectDir, templateDir st
 		return fmt.Errorf("failed to marshal updated agent settings: %w", err)
 	}
 
-	fmt.Printf("DEBUG: About to write %d bytes to: %s\n", len(updatedData), settingsFilePath)
-	previewLen := 200
-	if len(updatedData) < previewLen {
-		previewLen = len(updatedData)
-	}
-	fmt.Printf("DEBUG: First %d chars of data to write: %s\n", previewLen, string(updatedData)[:previewLen])
-
 	if err := os.WriteFile(settingsFilePath, updatedData, 0644); err != nil {
 		return fmt.Errorf("failed to write to %s: %w", settingsFilePath, err)
-	}
-
-	// Verify the write by reading it back
-	if verifyData, err := os.ReadFile(settingsFilePath); err == nil {
-		fmt.Printf("DEBUG: Successfully wrote and verified %d bytes to: %s\n", len(verifyData), settingsFilePath)
-
-		// Check again after a delay to see if it gets overwritten
-		time.Sleep(2 * time.Second)
-		if checkData, err := os.ReadFile(settingsFilePath); err == nil {
-			if len(checkData) != len(verifyData) {
-				fmt.Printf("DEBUG: WARNING - File was overwritten! Original: %d bytes, Now: %d bytes\n", len(verifyData), len(checkData))
-			} else {
-				fmt.Printf("DEBUG: File still intact after 2 seconds\n")
-				// Parse the file and check the actual values
-				var verifySettings map[string]interface{}
-				if json.Unmarshal(checkData, &verifySettings) == nil {
-					if musicSettings, exists := verifySettings["music_project_manager"].(map[string]interface{}); exists {
-						actualProjectDir := musicSettings["project_dir"]
-						actualTemplateDir := musicSettings["template_dir"]
-						fmt.Printf("DEBUG: VERIFICATION - project_dir in file is actually: '%v'\n", actualProjectDir)
-						fmt.Printf("DEBUG: VERIFICATION - template_dir in file is actually: '%v'\n", actualTemplateDir)
-					}
-				}
-			}
-		}
-	} else {
-		fmt.Printf("DEBUG: Write claimed successful but read verification failed: %v\n", err)
 	}
 
 	return nil

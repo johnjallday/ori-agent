@@ -185,20 +185,49 @@ func (s *fileStore) load() error {
 		return err
 	}
 	
-	// Try to load as new format (just current agent pointer)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// Initialize agents map if nil
+	if s.agents == nil {
+		s.agents = make(map[string]*types.Agent)
+	}
+	
+	// Try to parse the JSON first
+	var rawConfig map[string]interface{}
+	if err := json.Unmarshal(b, &rawConfig); err != nil {
+		return err
+	}
+	
+	// Check if this is the old format with "agents" key
+	if _, hasAgents := rawConfig["agents"]; hasAgents {
+		// Old format: {"agents": {...}, "current": "..."}
+		var in struct {
+			Agents  map[string]*types.Agent `json:"agents"`
+			Current string                  `json:"current"`
+		}
+		if err := json.Unmarshal(b, &in); err != nil {
+			return err
+		}
+		if in.Agents != nil {
+			s.agents = in.Agents
+		}
+		s.current = in.Current
+		// ensure maps
+		for _, ag := range s.agents {
+			if ag.Plugins == nil {
+				ag.Plugins = make(map[string]types.LoadedPlugin)
+			}
+		}
+		return nil
+	}
+	
+	// New format: just {"current": "..."}
 	var indexConfig struct {
 		Current string `json:"current"`
 	}
 	if err := json.Unmarshal(b, &indexConfig); err != nil {
 		return err
-	}
-	
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	
-	// If agents map is empty, try to load from individual files
-	if s.agents == nil {
-		s.agents = make(map[string]*types.Agent)
 	}
 	
 	s.current = indexConfig.Current
@@ -247,23 +276,6 @@ func (s *fileStore) load() error {
 					
 					s.agents[agentName] = &agent
 				}
-			}
-		}
-	} else {
-		// Fall back to old format (agents in main file)
-		var in struct {
-			Agents  map[string]*types.Agent `json:"agents"`
-			Current string                  `json:"current"`
-		}
-		if err := json.Unmarshal(b, &in); err != nil {
-			return err
-		}
-		s.agents = in.Agents
-		s.current = in.Current
-		// ensure maps
-		for _, ag := range s.agents {
-			if ag.Plugins == nil {
-				ag.Plugins = make(map[string]types.LoadedPlugin)
 			}
 		}
 	}

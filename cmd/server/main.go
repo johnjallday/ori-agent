@@ -708,47 +708,62 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
-		tc := choice.ToolCalls[0]
-		name := tc.Function.Name
-		args := tc.Function.Arguments
-
-		pl, ok := ag.Plugins[name]
-		if !ok || pl.Tool == nil {
-			http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
-			return
-		}
-
-		// Execute tool with its own reasonable timeout
-		toolCtx, toolCancel := context.WithTimeout(base, 20*time.Second)
-		defer toolCancel()
-
-		result, err := pl.Tool.Call(toolCtx, args)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
-			return
-		}
-
-		// Append the tool call + result to history
+		// Append the assistant message with tool calls first
 		ag.Messages = append(ag.Messages, choice.ToParam())
-		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
+		
+		// Process ALL tool calls, not just the first one
+		var toolResults []map[string]string
+		for _, tc := range choice.ToolCalls {
+			name := tc.Function.Name
+			args := tc.Function.Arguments
+
+			pl, ok := ag.Plugins[name]
+			if !ok || pl.Tool == nil {
+				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
+				return
+			}
+
+			// Execute tool with its own reasonable timeout
+			toolCtx, toolCancel := context.WithTimeout(base, 20*time.Second)
+			defer toolCancel()
+
+			result, err := pl.Tool.Call(toolCtx, args)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
+				return
+			}
+
+			// Add tool message response for this specific tool call ID
+			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
+			
+			// Store result for final response
+			toolResults = append(toolResults, map[string]string{
+				"function": name,
+				"args":     args,
+				"result":   result,
+			})
+		}
 
 		// Ask model again with tool output, with guidance to focus on the tool result
 		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
-				openai.SystemMessage("The tool was executed successfully. Provide a brief, direct response acknowledging the tool result. Do not provide additional information unless specifically requested."),
+				openai.SystemMessage("The tool was executed successfully. If the tool returned configuration data, settings, or structured information, please display that data clearly to the user. For other operations, provide a brief acknowledgment."),
 			),
 		})
 		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-			// If second turn fails, still return the tool result as a best-effort reply
+			// If second turn fails, still return the tool results as a best-effort reply
+			var combinedResult string
+			for i, tr := range toolResults {
+				if i > 0 {
+					combinedResult += "\n\n"
+				}
+				combinedResult += tr["result"]
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"response": result,
-				"toolCall": map[string]string{
-					"function": name,
-					"args":     args,
-					"result":   result,
-				},
+				"response": combinedResult,
+				"toolCalls": toolResults,
 			})
 			return
 		}
@@ -759,11 +774,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		_ = st.SetAgent(current, ag) // persists settings/plugins only
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response": final.Content,
-			"toolCall": map[string]string{
-				"function": name,
-				"args":     args,
-				"result":   result,
-			},
+			"toolCalls": toolResults,
 		})
 		return
 	}
