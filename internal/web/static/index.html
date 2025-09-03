@@ -276,13 +276,32 @@
     }
     
     /* Plugin registry button styling */
-    #registryList .list-group-item {
+    #registryList .list-group-item,
+    #localRegistryList .list-group-item,
+    #downloadablePluginsList .list-group-item {
       padding: 1rem 1.25rem;
     }
     
-    #registryList .btn-sm {
+    #registryList .btn-sm,
+    #localRegistryList .btn-sm,
+    #downloadablePluginsList .btn-sm {
       min-width: 80px;
       white-space: nowrap;
+    }
+    
+    /* Local plugins section styling */
+    #localRegistryList .list-group-item {
+      border-left: 3px solid var(--success-color);
+    }
+    
+    /* Downloadable plugins section styling */
+    #downloadablePluginsList .list-group-item {
+      border-left: 3px solid var(--primary-color);
+    }
+    
+    /* Plugin section headers */
+    .pills-plugins h6 svg {
+      vertical-align: text-top;
     }
     
     .modal-header {
@@ -598,16 +617,38 @@
           </div>
         </div>
         <div class="tab-pane fade" id="pills-plugins" role="tabpanel">
-          <!-- Registry Section -->
+          <!-- Local Registry Plugins Section -->
           <div class="mb-3">
             <h6 class="fw-bold mb-2">
-              Available Plugins 
-              <span id="registryCount" class="badge bg-secondary"></span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1" style="color: var(--success-color);">
+                <path d="M9 12L11 14L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+              </svg>
+              Local Registry Plugins 
+              <span id="localRegistryCount" class="badge bg-success"></span>
             </h6>
-            <p class="text-muted small mb-2">Load plugins from the registry or external sources</p>
-            <div id="registryList" class="list-group mb-2"></div>
-            <div id="noRegistryMessage" class="text-muted small" style="display: none;">
-              No plugins available in registry.
+            <p class="text-muted small mb-2">Plugins available locally from your registry</p>
+            <div id="localRegistryList" class="list-group mb-2"></div>
+            <div id="noLocalRegistryMessage" class="text-muted small" style="display: none;">
+              No local plugins available in registry.
+            </div>
+          </div>
+          
+          <!-- Downloadable Plugins Section -->
+          <div class="mb-3">
+            <h6 class="fw-bold mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1" style="color: var(--primary-color);">
+                <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="7,10 12,15 17,10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Downloadable Plugins 
+              <span id="downloadableCount" class="badge bg-primary"></span>
+            </h6>
+            <p class="text-muted small mb-2">Plugins available for download from external sources</p>
+            <div id="downloadablePluginsList" class="list-group mb-2"></div>
+            <div id="noDownloadableMessage" class="text-muted small" style="display: none;">
+              No downloadable plugins available.
             </div>
           </div>
           
@@ -991,46 +1032,132 @@
         loadedPluginsMap[plugin.name] = true;
       });
       
-      const container = document.getElementById('registryList');
-      const noRegistryMessage = document.getElementById('noRegistryMessage');
-      const registryCount = document.getElementById('registryCount');
+      // Separate plugins into local and downloadable
+      const localPlugins = [];
+      const downloadablePlugins = [];
+      
+      (data.plugins || []).forEach(p => {
+        if (p.github_repo || p.url || p.download_url) {
+          downloadablePlugins.push(p);
+        } else {
+          localPlugins.push(p);
+        }
+      });
+      
+      // Update local registry plugins
+      updateLocalRegistry(localPlugins, loadedPluginsMap);
+      
+      // Update downloadable plugins
+      updateDownloadablePlugins(downloadablePlugins, loadedPluginsMap);
+    }
+    
+    function updateLocalRegistry(localPlugins, loadedPluginsMap) {
+      const container = document.getElementById('localRegistryList');
+      const noMessage = document.getElementById('noLocalRegistryMessage');
+      const count = document.getElementById('localRegistryCount');
       
       container.innerHTML = '';
       
       // Update count badge
-      if (registryCount) {
-        registryCount.textContent = data.plugins ? data.plugins.length : 0;
+      if (count) {
+        count.textContent = localPlugins.length;
       }
       
       // Show/hide empty message
-      if (!data.plugins || data.plugins.length === 0) {
-        noRegistryMessage.style.display = 'block';
+      if (localPlugins.length === 0) {
+        noMessage.style.display = 'block';
         container.style.display = 'none';
       } else {
-        noRegistryMessage.style.display = 'none';
+        noMessage.style.display = 'none';
         container.style.display = 'block';
         
-        data.plugins.forEach(p => {
+        localPlugins.forEach(p => {
           const item = document.createElement('div');
           item.className = 'list-group-item d-flex justify-content-between align-items-center';
           const info = document.createElement('div');
           
-          // Add plugin type indicator (local vs external/GitHub)
-          let typeIndicator = '';
-          if (p.github_repo) {
-            typeIndicator = '<span class="badge bg-primary me-2">GitHub</span>';
-          } else if (p.url) {
-            typeIndicator = '<span class="badge bg-info me-2">External</span>';
-          } else {
-            typeIndicator = '<span class="badge bg-success me-2">Local</span>';
-          }
-          
-          let pluginInfo = typeIndicator + '<strong>' + p.name + '</strong>: ' + p.description;
+          let pluginInfo = '<span class="badge bg-success me-2">Local</span><strong>' + p.name + '</strong>: ' + p.description;
           
           // Add loaded status indicator
           if (loadedPluginsMap[p.name]) {
             pluginInfo += ' <span class="badge bg-success ms-1">✓ Loaded</span>';
           }
+          
+          // Add version if available
+          if (p.version) {
+            pluginInfo += ' <span class="badge bg-secondary ms-1">v' + p.version + '</span>';
+          }
+          
+          info.innerHTML = pluginInfo;
+          
+          const btnContainer = document.createElement('div');
+          btnContainer.className = 'd-flex gap-2 flex-wrap align-items-center justify-content-end';
+          
+          // Load button for local plugins
+          const loadBtn = document.createElement('button');
+          loadBtn.className = loadedPluginsMap[p.name] ? 'btn btn-sm btn-outline-secondary' : 'btn btn-sm btn-primary';
+          loadBtn.innerHTML = loadedPluginsMap[p.name] ? '✓ Loaded' : 'Load';
+          loadBtn.disabled = loadedPluginsMap[p.name];
+          loadBtn.onclick = async () => {
+            loadBtn.disabled = true;
+            loadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
+            try {
+              await fetch('/api/plugin-registry', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: p.name})
+              });
+              await refreshRegistry();
+              await refreshPlugins();
+            } catch (error) {
+              console.error('Failed to load plugin:', error);
+              loadBtn.disabled = false;
+              loadBtn.innerHTML = 'Load';
+            }
+          };
+          btnContainer.appendChild(loadBtn);
+          
+          item.appendChild(info);
+          item.appendChild(btnContainer);
+          container.appendChild(item);
+        });
+      }
+    }
+    
+    function updateDownloadablePlugins(downloadablePlugins, loadedPluginsMap) {
+      const container = document.getElementById('downloadablePluginsList');
+      const noMessage = document.getElementById('noDownloadableMessage');
+      const count = document.getElementById('downloadableCount');
+      
+      container.innerHTML = '';
+      
+      // Update count badge
+      if (count) {
+        count.textContent = downloadablePlugins.length;
+      }
+      
+      // Show/hide empty message
+      if (downloadablePlugins.length === 0) {
+        noMessage.style.display = 'block';
+        container.style.display = 'none';
+      } else {
+        noMessage.style.display = 'none';
+        container.style.display = 'block';
+        
+        downloadablePlugins.forEach(p => {
+          const item = document.createElement('div');
+          item.className = 'list-group-item d-flex justify-content-between align-items-center';
+          const info = document.createElement('div');
+          
+          // Add plugin type indicator
+          let typeIndicator = '';
+          if (p.github_repo) {
+            typeIndicator = '<span class="badge bg-primary me-2">GitHub</span>';
+          } else if (p.url) {
+            typeIndicator = '<span class="badge bg-info me-2">External</span>';
+          }
+          
+          let pluginInfo = typeIndicator + '<strong>' + p.name + '</strong>: ' + p.description;
           
           // Add version if available
           if (p.version) {
@@ -1047,12 +1174,12 @@
           const btnContainer = document.createElement('div');
           btnContainer.className = 'd-flex gap-2 flex-wrap align-items-center justify-content-end';
           
-          // Download button for GitHub plugins
-          if (p.download_url && p.github_repo) {
+          // Download button
+          if (p.download_url) {
             const downloadBtn = document.createElement('button');
             downloadBtn.className = 'btn btn-sm btn-outline-primary';
             downloadBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1"><path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download';
-            downloadBtn.title = 'Download to uploaded_plugins folder';
+            downloadBtn.title = 'Download plugin to uploaded_plugins folder';
             downloadBtn.onclick = async () => {
               downloadBtn.disabled = true;
               downloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Downloading...';
@@ -1100,51 +1227,40 @@
             btnContainer.appendChild(downloadBtn);
           }
           
+          // Load button for downloadable plugins
           const loadBtn = document.createElement('button');
-          
-          // Check if plugin is already loaded
           if (loadedPluginsMap[p.name]) {
             loadBtn.className = 'btn btn-sm btn-success';
-            loadBtn.textContent = 'Already Loaded';
+            loadBtn.textContent = 'Loaded';
             loadBtn.disabled = true;
-            loadBtn.title = 'This plugin is already loaded in the current agent';
           } else {
             loadBtn.className = 'btn btn-sm btn-outline-success';
             loadBtn.textContent = 'Load';
             loadBtn.onclick = async () => {
-              const res = await fetch('/api/plugin-registry', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name: p.name }),
-              });
-              if (!res.ok) {
-                const text = await res.text();
-                return alert(`Error loading plugin: ${text || res.statusText}`);
+              loadBtn.disabled = true;
+              loadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
+              try {
+                const res = await fetch('/api/plugin-registry', {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({ name: p.name })
+                });
+                if (!res.ok) {
+                  const text = await res.text();
+                  throw new Error(text || res.statusText);
+                }
+                await refreshPlugins();
+                await refreshRegistry();
+              } catch (error) {
+                console.error('Failed to load plugin:', error);
+                alert(`Failed to load plugin: ${error.message}`);
+                loadBtn.disabled = false;
+                loadBtn.textContent = 'Load';
               }
-              await refreshPlugins();
-              await refreshRegistry();
             };
           }
-          
-          const deleteBtn = document.createElement('button');
-          deleteBtn.className = 'btn btn-sm btn-outline-danger';
-          deleteBtn.textContent = 'Delete';
-          deleteBtn.onclick = async () => {
-            if (confirm(`Are you sure you want to delete plugin "${p.name}" from the registry?\n\nThis will:\n- Remove it from the registry\n- Delete the plugin file (if uploaded)\n- Unload it from the current agent\n\nThis action cannot be undone.`)) {
-              const res = await fetch('/api/plugin-registry?name=' + encodeURIComponent(p.name), {
-                method: 'DELETE'
-              });
-              if (!res.ok) {
-                const text = await res.text();
-                return alert(`Error deleting plugin: ${text || res.statusText}`);
-              }
-              await refreshPlugins();
-              await refreshRegistry();
-            }
-          };
-          
           btnContainer.appendChild(loadBtn);
-          btnContainer.appendChild(deleteBtn);
+          
           item.appendChild(info);
           item.appendChild(btnContainer);
           container.appendChild(item);
