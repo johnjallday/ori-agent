@@ -47,8 +47,12 @@ cache/
 tmp/
 temp/
 
-# Plugin binaries
-uploaded_plugins/*.so
+# Agent data and configuration
+agents/
+agents.json
+
+# Plugin binaries and uploads
+uploaded_plugins/
 plugins/*/*.so
 
 # Build artifacts

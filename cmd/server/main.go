@@ -33,10 +33,10 @@ var (
 	client openai.Client
 
 	// runtime state (moved behind Store)
-	st              store.Store
-	pluginReg       types.PluginRegistry
-	defaultConf     = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
-	agentStorePath  string
+	st             store.Store
+	pluginReg      types.PluginRegistry
+	defaultConf    = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
+	agentStorePath string
 
 	// template
 	tmpl *template.Template
@@ -241,6 +241,39 @@ func resolvePluginPath(baseDir, p string) string {
 	return p
 }
 
+// getPluginEmoji returns an appropriate emoji for a plugin based on its name
+func getPluginEmoji(pluginName string) string {
+	name := strings.ToLower(pluginName)
+	
+	// Music/Audio related
+	if strings.Contains(name, "music") || strings.Contains(name, "reaper") || strings.Contains(name, "audio") {
+		return "🎵"
+	}
+	
+	// Development/Code related  
+	if strings.Contains(name, "code") || strings.Contains(name, "dev") || strings.Contains(name, "git") {
+		return "💻"
+	}
+	
+	// File/System related
+	if strings.Contains(name, "file") || strings.Contains(name, "system") || strings.Contains(name, "manager") {
+		return "📁"
+	}
+	
+	// Data/Database related
+	if strings.Contains(name, "data") || strings.Contains(name, "database") || strings.Contains(name, "sql") {
+		return "📊"
+	}
+	
+	// Network/Web related
+	if strings.Contains(name, "web") || strings.Contains(name, "http") || strings.Contains(name, "api") {
+		return "🌐"
+	}
+	
+	// Default plugin emoji
+	return "🔌"
+}
+
 func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
@@ -313,10 +346,10 @@ func main() {
 				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
 				continue
 			}
-			
+
 			// Set agent context for plugins that support it
 			pluginloader.SetAgentContext(tool, agName, agentStorePath)
-			
+
 			lp.Tool = tool
 			ag.Plugins[key] = lp
 		}
@@ -469,7 +502,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 
 		// attach to current agent
 		_, current := st.ListAgents()
-		
+
 		// Set agent context for plugins that support it
 		pluginloader.SetAgentContext(tool, current, agentStorePath)
 		ag, ok := st.GetAgent(current)
@@ -486,6 +519,45 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Generic plugin welcome - try to display settings for any plugin that supports it
+		go func() {
+			// Small delay to ensure plugin is fully loaded
+			time.Sleep(100 * time.Millisecond)
+
+			ctx := context.Background()
+			
+			// Try common settings operations - plugins can implement any of these
+			settingsOperations := []string{
+				`{"operation":"get_settings"}`,
+				`{"operation":"status"}`,
+				`{"operation":"info"}`,
+			}
+			
+			var settingsResult string
+			var settingsErr error
+			
+			// Try each operation until one works
+			for _, operation := range settingsOperations {
+				settingsResult, settingsErr = tool.Call(ctx, operation)
+				if settingsErr == nil {
+					break
+				}
+			}
+			
+			if settingsErr != nil {
+				// If no settings operation works, just log the basic load message
+				log.Printf("🔌 Plugin '%s' loaded successfully!", def.Name)
+				return
+			}
+			
+			// Get a suitable emoji based on plugin name
+			emoji := getPluginEmoji(def.Name)
+			
+			log.Printf("%s Plugin '%s' loaded successfully!", emoji, def.Name)
+			log.Printf("Current settings/status:\n%s", settingsResult)
+		}()
+
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodDelete:
@@ -710,7 +782,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	if len(choice.ToolCalls) > 0 {
 		// Append the assistant message with tool calls first
 		ag.Messages = append(ag.Messages, choice.ToParam())
-		
+
 		// Process ALL tool calls, not just the first one
 		var toolResults []map[string]string
 		for _, tc := range choice.ToolCalls {
@@ -735,7 +807,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Add tool message response for this specific tool call ID
 			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
-			
+
 			// Store result for final response
 			toolResults = append(toolResults, map[string]string{
 				"function": name,
@@ -762,7 +834,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 				combinedResult += tr["result"]
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"response": combinedResult,
+				"response":  combinedResult,
 				"toolCalls": toolResults,
 			})
 			return
@@ -773,7 +845,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Chat (with tool) in %s", time.Since(start))
 		_ = st.SetAgent(current, ag) // persists settings/plugins only
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"response": final.Content,
+			"response":  final.Content,
 			"toolCalls": toolResults,
 		})
 		return

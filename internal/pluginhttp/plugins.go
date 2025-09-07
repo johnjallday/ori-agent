@@ -114,9 +114,12 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	def := tool.Definition()
+	
+	// Extract version information if available
+	version := pluginloader.GetPluginVersion(tool)
 
 	// Add to plugin registry
-	if err := h.addToRegistry(def.Name, def.Description.String(), pluginFile); err != nil {
+	if err := h.addToRegistry(def.Name, def.Description.String(), pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
 		os.Remove(pluginFile)
 		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
@@ -129,17 +132,18 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		"name":        def.Name,
 		"description": def.Description.String(),
 		"path":        pluginFile,
+		"version":     version,
 		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-func (h *Handler) addToRegistry(name, description, path string) error {
+func (h *Handler) addToRegistry(name, description, path, version string) error {
 	// Read current local registry (user uploaded plugins)
 	registryPath := "local_plugin_registry.json"
 	var registry types.PluginRegistry
-	
+
 	if data, err := os.ReadFile(registryPath); err == nil {
 		if err := json.Unmarshal(data, &registry); err != nil {
 			return err
@@ -152,6 +156,7 @@ func (h *Handler) addToRegistry(name, description, path string) error {
 			// Update existing entry
 			registry.Plugins[i].Path = path
 			registry.Plugins[i].Description = description
+			registry.Plugins[i].Version = version
 			return h.saveRegistry(registryPath, registry)
 		}
 	}
@@ -161,9 +166,10 @@ func (h *Handler) addToRegistry(name, description, path string) error {
 		Name:        name,
 		Description: description,
 		Path:        path,
+		Version:     version,
 	}
 	registry.Plugins = append(registry.Plugins, newEntry)
-	
+
 	return h.saveRegistry(registryPath, registry)
 }
 

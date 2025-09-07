@@ -517,6 +517,13 @@
           <span class="status-indicator status-online"></span>
           <span class="fw-medium"></span>
         </span>
+        <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Refresh</span>
+        </button>
         <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1010,7 +1017,7 @@
           btn.textContent = 'Unload';
           btn.onclick = async () => {
             await fetch('/api/plugins?name=' + encodeURIComponent(p.name), { method: 'DELETE' });
-            await refreshPlugins();
+            await refreshApp(true); // Show notification for plugin unloading
           };
           li.appendChild(info);
           li.appendChild(btn);
@@ -1107,8 +1114,10 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: p.name})
               });
-              await refreshRegistry();
-              await refreshPlugins();
+              await refreshApp(true); // Show notification for plugin loading
+              
+              // Generic plugin welcome for any plugin
+              setTimeout(() => showPluginWelcome(p.name), 1500);
             } catch (error) {
               console.error('Failed to load plugin:', error);
               loadBtn.disabled = false;
@@ -1249,8 +1258,10 @@
                   const text = await res.text();
                   throw new Error(text || res.statusText);
                 }
-                await refreshPlugins();
-                await refreshRegistry();
+                await refreshApp(true); // Show notification for plugin loading
+                
+                // Generic plugin welcome for any plugin
+                setTimeout(() => showPluginWelcome(p.name), 1500);
               } catch (error) {
                 console.error('Failed to load plugin:', error);
                 alert(`Failed to load plugin: ${error.message}`);
@@ -1319,6 +1330,464 @@
       }
     };
 
+    // ---- Plugin-Aware Dynamic Frontend System ----
+    
+    async function handlePluginSlashCommand(command, input) {
+      // Check if this is a slash command
+      if (!command.startsWith('/')) {
+        return false;
+      }
+      
+      // Get the command without the slash
+      const cmd = command.substring(1);
+      
+      // First, check if we have loaded plugins that can handle this command
+      try {
+        const pluginsRes = await fetch('/api/plugins');
+        const pluginsData = await pluginsRes.json();
+        
+        const loadedPlugins = pluginsData.plugins || [];
+        
+        // Plugin-specific command mappings
+        const pluginCommands = {
+          'music-project-settings': 'music_project_manager',
+          'music-settings': 'music_project_manager',
+          'reaper-scripts': 'reaper_manager',
+          'reaper-list': 'reaper_manager',
+          // Add more plugin-specific commands here
+        };
+        
+        // Check if this command maps to a loaded plugin
+        const targetPlugin = pluginCommands[cmd];
+        if (targetPlugin) {
+          const isPluginLoaded = loadedPlugins.some(plugin => 
+            plugin.name === targetPlugin || 
+            (plugin.definition && plugin.definition.name === targetPlugin)
+          );
+          
+          if (isPluginLoaded) {
+            input.value = '';
+            await executePluginCommand(targetPlugin, cmd);
+            return true;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking loaded plugins for slash command:', error);
+      }
+      
+      return false; // Command not handled
+    }
+    
+    async function executePluginCommand(pluginName, command) {
+      try {
+        let pluginCall = '';
+        let displayTitle = '';
+        
+        // Generate appropriate plugin calls based on the plugin and command
+        switch (pluginName) {
+          case 'music_project_manager':
+            pluginCall = 'music_project_manager(operation="get_settings")';
+            displayTitle = '🎵 Music Project Manager Settings';
+            break;
+          
+          case 'reaper_manager':
+            pluginCall = 'reaper_manager(operation="list")';
+            displayTitle = '🎵 REAPER Scripts and Functions';
+            break;
+          
+          default:
+            // Generic plugin call - try to get status/info
+            pluginCall = `${pluginName}(operation="status")`;
+            displayTitle = `🔌 ${pluginName} Information`;
+        }
+        
+        // Make the API call
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: pluginCall }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          addChat('System', `❌ Failed to execute ${pluginName}: ${text || res.statusText}`);
+          return;
+        }
+
+        const data = await res.json();
+        
+        // Handle tool call responses
+        if (data.toolCalls && data.toolCalls.length > 0) {
+          const toolCall = data.toolCalls[0];
+          
+          // Try to parse as JSON for structured display
+          try {
+            const result = JSON.parse(toolCall.result);
+            
+            // Create structured display based on the plugin
+            if (pluginName === 'reaper_manager' && result.scripts) {
+              const structuredData = {
+                type: "reaper_functions",
+                title: displayTitle,
+                summary: {
+                  total_functions: result.scripts.length,
+                  scripts_directory: result.scripts_dir || 'Unknown',
+                  reaper_status: result.reaper_running ? 'Running' : 'Not Running'
+                },
+                functions: result.scripts.map((script, index) => ({
+                  id: index + 1,
+                  name: script,
+                  description: `ReaScript: ${script}.lua`,
+                  category: "ReaScript",
+                  path: result.scripts_dir ? `${result.scripts_dir}/${script}.lua` : 'Unknown'
+                })),
+                timestamp: new Date().toISOString()
+              };
+              
+              const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(structuredData);
+              addChat('System', structuredOutput);
+              return;
+            }
+            
+            // Generic structured display for other plugins
+            const structuredData = {
+              type: "plugin_info",
+              title: displayTitle,
+              plugin: pluginName,
+              data: result,
+              timestamp: new Date().toISOString()
+            };
+            
+            const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(structuredData);
+            addChat('System', structuredOutput);
+            return;
+            
+          } catch (parseError) {
+            // Not JSON, display as text
+            addChat('System', `${displayTitle}\n\n${toolCall.result}`);
+            return;
+          }
+        }
+        
+        // Fallback to regular response
+        if (data.response) {
+          addChat('Assistant', data.response);
+        } else {
+          addChat('System', `❌ No response from ${pluginName}. Make sure the plugin is properly loaded.`);
+        }
+        
+      } catch (error) {
+        console.error(`Failed to execute plugin command for ${pluginName}:`, error);
+        addChat('System', `❌ Network error executing ${pluginName}. Please try again.`);
+      }
+    }
+
+    // ---- Generic Plugin Welcome System ----
+    
+    async function showPluginWelcome(pluginName) {
+      try {
+        // Get plugin emoji based on name
+        const emoji = getPluginEmoji(pluginName);
+        
+        // Add welcome message
+        addChat('System', `${emoji} Plugin '${pluginName}' loaded successfully!`);
+        
+        // Try different settings/status operations that plugins might support
+        const settingsOperations = ['get_settings', 'status', 'info'];
+        let settingsData = null;
+        let successfulOperation = null;
+        
+        for (const operation of settingsOperations) {
+          try {
+            const res = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ question: `${pluginName}(operation="${operation}")` }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.toolCalls && data.toolCalls.length > 0) {
+                const toolCall = data.toolCalls[0];
+                if (toolCall.function === pluginName) {
+                  settingsData = data;
+                  successfulOperation = operation;
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            // Continue to next operation
+            continue;
+          }
+        }
+
+        if (!settingsData) {
+          // No settings operation worked, just show basic loaded message
+          addChat('System', `${emoji} Plugin '${pluginName}' is ready to use! Check available functions with \`/tools\` command.`);
+          return;
+        }
+
+        const toolCall = settingsData.toolCalls[0];
+        
+        // Try to parse and display settings in a structured way
+        try {
+          const settings = JSON.parse(toolCall.result);
+          
+          let statusMessage = `📋 Current ${pluginName} Settings/Status:\n\n`;
+          
+          // Handle different plugin response formats
+          if (typeof settings === 'object' && settings !== null) {
+            Object.entries(settings).forEach(([key, value]) => {
+              const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              let displayValue = value;
+              
+              if (typeof value === 'boolean') {
+                displayValue = value ? '✅ Yes' : '❌ No';
+              } else if (value === null || value === undefined) {
+                displayValue = 'Not set';
+              } else if (Array.isArray(value)) {
+                displayValue = value.length > 0 ? value.join(', ') : 'None';
+              }
+              
+              statusMessage += `**${displayKey}**: ${displayValue}\n`;
+            });
+            
+            // Add helpful tip based on plugin type
+            if (pluginName.includes('music') || pluginName.includes('reaper')) {
+              statusMessage += `\n💡 **Tip**: Use \`/${pluginName.replace('_', '-')}-settings\` to view settings anytime.`;
+            } else {
+              statusMessage += `\n💡 **Tip**: Use \`/tools\` to see all available functions for this plugin.`;
+            }
+            
+            // Special handling for uninitialized plugins
+            if (settings.initialized === false || (settings.status && settings.status.includes('Not configured'))) {
+              if (pluginName === 'music_project_manager') {
+                setTimeout(() => {
+                  const initMessage = `${emoji} Welcome to ${pluginName.replace('_', ' ')}! 
+
+This plugin needs to be configured. Please complete the setup to start using it.`;
+                  showMusicProjectSetupUI(initMessage);
+                }, 500);
+              }
+            }
+          } else {
+            // Simple string or other format
+            statusMessage += String(settings);
+          }
+          
+          addChat('System', statusMessage);
+          
+        } catch (parseError) {
+          // Fallback to plain text display
+          addChat('System', `📋 ${pluginName} ${successfulOperation}:\n\n${toolCall.result}`);
+        }
+        
+      } catch (error) {
+        console.error(`Failed to show plugin welcome for ${pluginName}:`, error);
+        const emoji = getPluginEmoji(pluginName);
+        addChat('System', `${emoji} Plugin '${pluginName}' loaded successfully!`);
+      }
+    }
+    
+    // Get appropriate emoji for plugin based on its name
+    function getPluginEmoji(pluginName) {
+      const name = pluginName.toLowerCase();
+      
+      // Music/Audio related
+      if (name.includes('music') || name.includes('reaper') || name.includes('audio')) {
+        return '🎵';
+      }
+      
+      // Development/Code related  
+      if (name.includes('code') || name.includes('dev') || name.includes('git')) {
+        return '💻';
+      }
+      
+      // File/System related
+      if (name.includes('file') || name.includes('system') || name.includes('manager')) {
+        return '📁';
+      }
+      
+      // Data/Database related
+      if (name.includes('data') || name.includes('database') || name.includes('sql')) {
+        return '📊';
+      }
+      
+      // Network/Web related
+      if (name.includes('web') || name.includes('http') || name.includes('api')) {
+        return '🌐';
+      }
+      
+      // Default plugin emoji
+      return '🔌';
+    }
+
+    // ---- Music Project Manager Setup UI ----
+    
+    function showMusicProjectSetupUI(originalMessage) {
+      const chatArea = document.getElementById('chatArea');
+      
+      // Add the original setup message first
+      addChat('Assistant', originalMessage);
+      
+      // Create a special setup UI
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'center';
+      row.style.margin = '1rem 0';
+
+      const setupCard = document.createElement('div');
+      setupCard.className = 'modern-card';
+      setupCard.style.maxWidth = '500px';
+      setupCard.style.width = '100%';
+      setupCard.style.padding = '1.5rem';
+      setupCard.style.background = 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)';
+
+      const setupTitle = document.createElement('h3');
+      setupTitle.textContent = '🎵 Set up Music Project Manager';
+      setupTitle.style.margin = '0 0 1rem 0';
+      setupTitle.style.color = 'var(--text-primary)';
+      setupTitle.style.textAlign = 'center';
+
+      const form = document.createElement('div');
+      form.style.display = 'flex';
+      form.style.flexDirection = 'column';
+      form.style.gap = '1rem';
+
+      // Project Directory Input
+      const projectDirLabel = document.createElement('label');
+      projectDirLabel.textContent = 'Project Directory (where new music projects will be created):';
+      projectDirLabel.style.fontSize = '0.9rem';
+      projectDirLabel.style.fontWeight = '500';
+      projectDirLabel.style.color = 'var(--text-primary)';
+
+      const projectDirInput = document.createElement('input');
+      projectDirInput.type = 'text';
+      projectDirInput.placeholder = '~/Music/Projects';
+      projectDirInput.value = getDefaultProjectDir();
+      projectDirInput.className = 'form-control';
+      projectDirInput.style.borderRadius = 'var(--radius-md)';
+      projectDirInput.style.border = '1px solid var(--border-color)';
+      projectDirInput.style.padding = '0.75rem';
+
+      // Template Directory Input
+      const templateDirLabel = document.createElement('label');
+      templateDirLabel.textContent = 'Template Directory (where your .RPP template files are stored):';
+      templateDirLabel.style.fontSize = '0.9rem';
+      templateDirLabel.style.fontWeight = '500';
+      templateDirLabel.style.color = 'var(--text-primary)';
+
+      const templateDirInput = document.createElement('input');
+      templateDirInput.type = 'text';
+      templateDirInput.placeholder = '~/Library/Application Support/REAPER/ProjectTemplates';
+      templateDirInput.value = getDefaultTemplateDir();
+      templateDirInput.className = 'form-control';
+      templateDirInput.style.borderRadius = 'var(--radius-md)';
+      templateDirInput.style.border = '1px solid var(--border-color)';
+      templateDirInput.style.padding = '0.75rem';
+
+      // Buttons
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.gap = '0.5rem';
+      buttonContainer.style.justifyContent = 'center';
+      buttonContainer.style.marginTop = '1rem';
+
+      const setupButton = document.createElement('button');
+      setupButton.textContent = 'Complete Setup';
+      setupButton.className = 'modern-btn modern-btn-primary';
+      setupButton.onclick = async () => {
+        const projectDir = projectDirInput.value.trim();
+        const templateDir = templateDirInput.value.trim();
+        
+        if (!projectDir || !templateDir) {
+          alert('Please provide both directories');
+          return;
+        }
+        
+        setupButton.disabled = true;
+        setupButton.textContent = 'Setting up...';
+        
+        try {
+          // Send setup request to the music project manager
+          const setupCommand = `music_project_manager(operation="complete_setup", project_dir="${projectDir}", template_dir="${templateDir}")`;
+          
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: setupCommand }),
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            addChat('Assistant', `Setup Error: ${text || res.statusText}`);
+            return;
+          }
+
+          const data = await res.json();
+          if (data.toolCall) addChat(data.toolCall.function, data.toolCall.result);
+          addChat('Assistant', data.response || '(no response)');
+          
+          // Remove the setup UI
+          setupCard.remove();
+          
+        } catch (e) {
+          addChat('Assistant', `Setup Network error: ${e}`);
+          setupButton.disabled = false;
+          setupButton.textContent = 'Complete Setup';
+        }
+      };
+
+      const cancelButton = document.createElement('button');
+      cancelButton.textContent = 'Cancel';
+      cancelButton.className = 'modern-btn';
+      cancelButton.style.background = 'var(--bg-secondary)';
+      cancelButton.style.color = 'var(--text-secondary)';
+      cancelButton.onclick = () => {
+        setupCard.remove();
+      };
+
+      buttonContainer.appendChild(setupButton);
+      buttonContainer.appendChild(cancelButton);
+
+      form.appendChild(projectDirLabel);
+      form.appendChild(projectDirInput);
+      form.appendChild(templateDirLabel);
+      form.appendChild(templateDirInput);
+      form.appendChild(buttonContainer);
+
+      setupCard.appendChild(setupTitle);
+      setupCard.appendChild(form);
+      row.appendChild(setupCard);
+      chatArea.appendChild(row);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+    
+    function getDefaultProjectDir() {
+      // Detect platform and provide appropriate default
+      const userAgent = navigator.userAgent;
+      if (userAgent.includes('Mac')) {
+        return '~/Music/Projects';
+      } else if (userAgent.includes('Win')) {
+        return '~/Music/Projects';
+      } else {
+        return '~/Music/Projects';
+      }
+    }
+    
+    function getDefaultTemplateDir() {
+      // Detect platform and provide appropriate REAPER template directory
+      const userAgent = navigator.userAgent;
+      if (userAgent.includes('Mac')) {
+        return '~/Library/Application Support/REAPER/ProjectTemplates';
+      } else if (userAgent.includes('Win')) {
+        return '~/AppData/Roaming/REAPER/ProjectTemplates';
+      } else {
+        return '~/Music/Templates';
+      }
+    }
+
     // ---- Chat ----
 
     document.getElementById('sendBtn').onclick = async () => {
@@ -1362,6 +1831,11 @@
         await showReaperFunctions();
         return;
       }
+      
+      // Handle plugin-specific slash commands dynamically
+      if (await handlePluginSlashCommand(q, input)) {
+        return;
+      }
       addChat('User', q);
       input.value = '';
       try {
@@ -1379,7 +1853,36 @@
 
         const data = await res.json();
         if (data.toolCall) addChat(data.toolCall.function, data.toolCall.result);
-        addChat('Assistant', data.response || '(no response)');
+        
+        // Check if we need to refresh the app after tool calls
+        if (data.toolCall || data.toolCalls) {
+          const toolCalls = data.toolCalls || [data.toolCall];
+          const shouldRefresh = toolCalls.some(toolCall => {
+            return toolCall && (
+              toolCall.function === 'music_project_manager' ||
+              toolCall.function === 'reaper_manager' ||
+              // Add other plugins that might affect app state
+              toolCall.result && (
+                toolCall.result.includes('loaded') ||
+                toolCall.result.includes('initialized') ||
+                toolCall.result.includes('setup')
+              )
+            );
+          });
+          
+          if (shouldRefresh) {
+            // Refresh app after a short delay to let the chat update
+            setTimeout(() => refreshApp(false), 1000);
+          }
+        }
+        
+        // Check if response contains music project manager setup prompt
+        if (data.response && data.response.includes('Music Project Manager') && data.response.includes('first time using') && data.response.includes('complete_setup')) {
+          // Show directory setup UI instead of plain text response
+          showMusicProjectSetupUI(data.response);
+        } else {
+          addChat('Assistant', data.response || '(no response)');
+        }
       } catch (e) {
         addChat('Assistant', `Network error: ${e}`);
       }
@@ -1750,52 +2253,68 @@
     
     async function showReaperFunctions() {
       try {
-        // Static list of REAPER functions - no server request needed
-        const reaperFunctionsList = [
-          { id: 1, name: "Add 4 Bar Region", description: "Adds a 4-bar time selection region at the current position", category: "Region" },
-          { id: 2, name: "Auto Color Tracks", description: "Automatically colors tracks based on predefined schemes", category: "Track Management" },
-          { id: 3, name: "Auto Create Markers", description: "Automatically creates markers based on project structure", category: "Marker" },
-          { id: 4, name: "Auto Name Tracks", description: "Automatically names tracks based on content or patterns", category: "Track Management" },
-          { id: 5, name: "Get Status", description: "Retrieves current REAPER project status and information", category: "Info" },
-          { id: 6, name: "Loop Mode", description: "Toggles or sets loop mode for playback", category: "Playback" },
-          { id: 7, name: "Rearrange Tracks", description: "Reorganizes track order based on specified criteria", category: "Track Management" },
-          { id: 8, name: "Remove Empty Tracks", description: "Removes tracks that contain no items or audio", category: "Track Management" },
-          { id: 9, name: "Remove Markers", description: "Removes markers from the project", category: "Marker" },
-          { id: 10, name: "Render Mp3", description: "Renders the project or selection to MP3 format", category: "Render" },
-          { id: 11, name: "Render Stems", description: "Renders individual track stems for mixing", category: "Render" },
-          { id: 12, name: "Render Wav", description: "Renders the project or selection to WAV format", category: "Render" }
-        ];
-        
-        // Group functions by category
-        const categories = {};
-        reaperFunctionsList.forEach(func => {
-          if (!categories[func.category]) {
-            categories[func.category] = [];
-          }
-          categories[func.category].push(func);
+        // Dynamically call the reaper_manager plugin to get available functions
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: 'reaper_manager(operation="list")' }),
         });
+
+        if (!res.ok) {
+          const text = await res.text();
+          addChat('System', `❌ Failed to load REAPER functions: ${text || res.statusText}`);
+          return;
+        }
+
+        const data = await res.json();
         
-        // Create REAPER functions data structure
-        const reaperFunctionsData = {
-          type: "reaper_functions",
-          title: "🎵 Available REAPER Functions",
-          summary: {
-            total_functions: reaperFunctionsList.length,
-            total_categories: Object.keys(categories).length,
-            available_functions: reaperFunctionsList.length
-          },
-          functions: reaperFunctionsList,
-          categories: categories,
-          timestamp: new Date().toISOString()
-        };
+        // Check if we got a valid response from reaper_manager
+        if (data.toolCalls && data.toolCalls.length > 0) {
+          const toolCall = data.toolCalls[0];
+          if (toolCall.function === 'reaper_manager') {
+            // Parse the result to create structured data
+            try {
+              const result = JSON.parse(toolCall.result);
+              const reaperFunctionsData = {
+                type: "reaper_functions",
+                title: "🎵 Available REAPER Functions (from reaper_manager)",
+                summary: {
+                  total_functions: result.scripts ? result.scripts.length : 0,
+                  scripts_directory: result.scripts_dir || 'Unknown',
+                  reaper_status: result.reaper_running ? 'Running' : 'Not Running'
+                },
+                functions: result.scripts ? result.scripts.map((script, index) => ({
+                  id: index + 1,
+                  name: script,
+                  description: `ReaScript: ${script}.lua`,
+                  category: "ReaScript",
+                  path: result.scripts_dir ? `${result.scripts_dir}/${script}.lua` : 'Unknown'
+                })) : [],
+                raw_response: result,
+                timestamp: new Date().toISOString()
+              };
+
+              // Send structured data to chat
+              const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(reaperFunctionsData);
+              addChat('System', structuredOutput);
+              return;
+            } catch (parseError) {
+              console.error('Failed to parse reaper_manager response:', parseError);
+              // Fall through to display raw response
+            }
+          }
+        }
         
-        // Send structured data to chat
-        const structuredOutput = "STRUCTURED_DATA:" + JSON.stringify(reaperFunctionsData);
-        addChat('System', structuredOutput);
+        // Fallback: display the raw response
+        if (data.response) {
+          addChat('Assistant', data.response);
+        } else {
+          addChat('System', '❌ No REAPER functions found. Make sure the reaper_manager plugin is loaded and REAPER is configured.');
+        }
         
       } catch (error) {
         console.error('Failed to show REAPER functions:', error);
-        addChat('System', '❌ Failed to load REAPER functions. Please try again.');
+        addChat('System', '❌ Network error loading REAPER functions. Please try again.');
       }
     }
     
@@ -1882,6 +2401,9 @@
           break;
         case 'reaper_functions':
           renderReaperFunctions(container, data);
+          break;
+        case 'plugin_info':
+          renderPluginInfo(container, data);
           break;
         default:
           // Unknown structured data type, render as JSON
@@ -3185,6 +3707,123 @@
       return card;
     }
     
+    function renderPluginInfo(container, data) {
+      // Add content type indicator
+      const indicator = document.createElement('div');
+      indicator.className = 'content-type-indicator content-type-info';
+      indicator.textContent = 'Plugin Information';
+      indicator.style.background = 'linear-gradient(135deg, #8b5cf6, #a78bfa)';
+      indicator.style.color = 'white';
+      container.appendChild(indicator);
+      
+      // Create title
+      const titleRow = document.createElement('div');
+      titleRow.style.display = 'flex';
+      titleRow.style.justifyContent = 'space-between';
+      titleRow.style.alignItems = 'center';
+      titleRow.style.marginBottom = '1.5rem';
+      
+      const title = document.createElement('h2');
+      title.textContent = data.title || `🔌 ${data.plugin} Information`;
+      title.style.color = 'var(--text-primary)';
+      title.style.margin = '0';
+      title.style.fontSize = '1.5rem';
+      title.style.fontWeight = '600';
+      
+      const timestamp = document.createElement('span');
+      timestamp.textContent = new Date(data.timestamp).toLocaleString();
+      timestamp.style.color = 'var(--text-muted)';
+      timestamp.style.fontSize = '0.875rem';
+      
+      titleRow.appendChild(title);
+      titleRow.appendChild(timestamp);
+      container.appendChild(titleRow);
+      
+      // Create plugin info card
+      const infoCard = document.createElement('div');
+      infoCard.style.background = 'var(--bg-primary)';
+      infoCard.style.border = '1px solid var(--border-color)';
+      infoCard.style.borderRadius = 'var(--radius-lg)';
+      infoCard.style.padding = '1.5rem';
+      infoCard.style.boxShadow = 'var(--shadow-sm)';
+      
+      // Plugin name badge
+      const pluginBadge = document.createElement('div');
+      pluginBadge.style.display = 'inline-block';
+      pluginBadge.style.background = 'linear-gradient(135deg, #8b5cf6, #a78bfa)';
+      pluginBadge.style.color = 'white';
+      pluginBadge.style.padding = '0.5rem 1rem';
+      pluginBadge.style.borderRadius = 'var(--radius-md)';
+      pluginBadge.style.fontSize = '0.875rem';
+      pluginBadge.style.fontWeight = '600';
+      pluginBadge.style.marginBottom = '1rem';
+      pluginBadge.textContent = `Plugin: ${data.plugin}`;
+      infoCard.appendChild(pluginBadge);
+      
+      // Render plugin data
+      if (data.data && typeof data.data === 'object') {
+        const dataContainer = document.createElement('div');
+        dataContainer.style.display = 'grid';
+        dataContainer.style.gap = '0.75rem';
+        
+        Object.entries(data.data).forEach(([key, value]) => {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '1rem';
+          row.style.padding = '0.75rem';
+          row.style.background = 'var(--bg-secondary)';
+          row.style.borderRadius = 'var(--radius-md)';
+          row.style.border = '1px solid var(--border-light)';
+          
+          const keyEl = document.createElement('div');
+          keyEl.style.fontWeight = '600';
+          keyEl.style.color = 'var(--text-primary)';
+          keyEl.style.minWidth = '150px';
+          keyEl.style.textTransform = 'capitalize';
+          keyEl.textContent = key.replace(/_/g, ' ');
+          
+          const valueEl = document.createElement('div');
+          valueEl.style.color = 'var(--text-secondary)';
+          valueEl.style.flex = '1';
+          valueEl.style.fontSize = '0.875rem';
+          
+          if (typeof value === 'boolean') {
+            valueEl.innerHTML = value ? 
+              '<span style="color: #10b981; font-weight: 600;">✓ Yes</span>' : 
+              '<span style="color: #ef4444; font-weight: 600;">✗ No</span>';
+          } else if (Array.isArray(value)) {
+            valueEl.textContent = value.length > 0 ? value.join(', ') : 'None';
+          } else if (value === null || value === undefined) {
+            valueEl.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">Not set</span>';
+          } else {
+            valueEl.textContent = String(value);
+          }
+          
+          row.appendChild(keyEl);
+          row.appendChild(valueEl);
+          dataContainer.appendChild(row);
+        });
+        
+        infoCard.appendChild(dataContainer);
+      } else {
+        // Fallback for non-object data
+        const fallbackEl = document.createElement('pre');
+        fallbackEl.style.background = 'var(--bg-secondary)';
+        fallbackEl.style.padding = '1rem';
+        fallbackEl.style.borderRadius = 'var(--radius-md)';
+        fallbackEl.style.border = '1px solid var(--border-light)';
+        fallbackEl.style.fontSize = '0.875rem';
+        fallbackEl.style.color = 'var(--text-primary)';
+        fallbackEl.style.whiteSpace = 'pre-wrap';
+        fallbackEl.style.margin = '0';
+        fallbackEl.textContent = typeof data.data === 'string' ? data.data : JSON.stringify(data.data, null, 2);
+        infoCard.appendChild(fallbackEl);
+      }
+      
+      container.appendChild(infoCard);
+    }
+    
     function renderGenericStructuredData(container, data) {
       // Fallback for unknown structured data types
       const indicator = document.createElement('div');
@@ -3507,6 +4146,154 @@
         console.error('Failed to download update:', error);
         alert(`❌ Download failed: ${error.message}`);
       }
+    }
+
+    // Global app refresh function - called when plugins are loaded/unloaded
+    async function refreshApp(showNotification = false) {
+      if (showNotification) {
+        showAppRefreshNotification();
+      }
+      
+      try {
+        // Refresh all major app sections
+        await Promise.all([
+          refreshAgents(),
+          refreshPlugins(),
+          refreshRegistry(),
+          refreshUpdateInfo()
+        ]);
+        
+        // Refresh settings in case plugin loading changed anything
+        const res = await fetch('/api/settings');
+        const s = await res.json();
+        document.getElementById('modelSelect').value = s.model;
+        document.getElementById('tempInput').value = s.temperature;
+        document.getElementById('apiKeyInput').value = s.api_key || '';
+        
+        if (showNotification) {
+          hideAppRefreshNotification();
+        }
+      } catch (error) {
+        console.error('Error refreshing app:', error);
+        if (showNotification) {
+          hideAppRefreshNotification();
+          showAppRefreshError();
+        }
+      }
+    }
+    
+    function showAppRefreshNotification() {
+      // Create or update notification
+      let notification = document.getElementById('appRefreshNotification');
+      if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'appRefreshNotification';
+        notification.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #10b981, #34d399);
+          color: white;
+          padding: 12px 20px;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          font-size: 14px;
+          font-weight: 500;
+          z-index: 9999;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          transition: all 0.3s ease;
+          transform: translateX(100%);
+        `;
+        
+        const spinner = document.createElement('div');
+        spinner.style.cssText = `
+          width: 16px;
+          height: 16px;
+          border: 2px solid rgba(255,255,255,0.3);
+          border-top: 2px solid white;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        `;
+        
+        const text = document.createElement('span');
+        text.textContent = '🔄 Refreshing app...';
+        
+        notification.appendChild(spinner);
+        notification.appendChild(text);
+        document.body.appendChild(notification);
+        
+        // Add CSS animation
+        if (!document.getElementById('appRefreshStyles')) {
+          const style = document.createElement('style');
+          style.id = 'appRefreshStyles';
+          style.textContent = `
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+      }
+      
+      // Animate in
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+    }
+    
+    function hideAppRefreshNotification() {
+      const notification = document.getElementById('appRefreshNotification');
+      if (notification) {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          notification.remove();
+        }, 300);
+      }
+    }
+    
+    function showAppRefreshError() {
+      let notification = document.getElementById('appRefreshErrorNotification');
+      if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'appRefreshErrorNotification';
+        notification.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #ef4444, #f87171);
+          color: white;
+          padding: 12px 20px;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          font-size: 14px;
+          font-weight: 500;
+          z-index: 9999;
+          transform: translateX(100%);
+          transition: all 0.3s ease;
+          cursor: pointer;
+        `;
+        notification.textContent = '❌ Refresh failed - click to retry';
+        notification.onclick = () => {
+          notification.remove();
+          refreshApp(true);
+        };
+        document.body.appendChild(notification);
+      }
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        if (notification && notification.parentNode) {
+          notification.style.transform = 'translateX(100%)';
+          setTimeout(() => notification.remove(), 300);
+        }
+      }, 5000);
     }
 
     async function init() {
