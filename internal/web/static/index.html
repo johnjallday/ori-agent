@@ -1236,41 +1236,6 @@
             btnContainer.appendChild(downloadBtn);
           }
           
-          // Load button for downloadable plugins
-          const loadBtn = document.createElement('button');
-          if (loadedPluginsMap[p.name]) {
-            loadBtn.className = 'btn btn-sm btn-success';
-            loadBtn.textContent = 'Loaded';
-            loadBtn.disabled = true;
-          } else {
-            loadBtn.className = 'btn btn-sm btn-outline-success';
-            loadBtn.textContent = 'Load';
-            loadBtn.onclick = async () => {
-              loadBtn.disabled = true;
-              loadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
-              try {
-                const res = await fetch('/api/plugin-registry', {
-                  method: 'POST',
-                  headers: {'Content-Type': 'application/json'},
-                  body: JSON.stringify({ name: p.name })
-                });
-                if (!res.ok) {
-                  const text = await res.text();
-                  throw new Error(text || res.statusText);
-                }
-                await refreshApp(true); // Show notification for plugin loading
-                
-                // Generic plugin welcome for any plugin
-                setTimeout(() => showPluginWelcome(p.name), 1500);
-              } catch (error) {
-                console.error('Failed to load plugin:', error);
-                alert(`Failed to load plugin: ${error.message}`);
-                loadBtn.disabled = false;
-                loadBtn.textContent = 'Load';
-              }
-            };
-          }
-          btnContainer.appendChild(loadBtn);
           
           item.appendChild(info);
           item.appendChild(btnContainer);

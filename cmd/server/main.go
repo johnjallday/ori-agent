@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -106,6 +107,96 @@ func saveLocalPluginRegistry(reg types.PluginRegistry) error {
 
 	if err := os.WriteFile(localRegistryPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write local registry: %w", err)
+	}
+
+	return nil
+}
+
+// scanUploadedPlugins scans the uploaded_plugins directory and adds any new plugins to local registry
+func scanUploadedPlugins() error {
+	uploadedDir := "uploaded_plugins"
+	
+	// Check if uploaded_plugins directory exists
+	if _, err := os.Stat(uploadedDir); os.IsNotExist(err) {
+		return nil // No uploaded plugins directory, nothing to scan
+	}
+
+	// Load current local registry
+	localReg, err := loadLocalPluginRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	// Create map of existing plugins for quick lookup
+	existingPlugins := make(map[string]bool)
+	for _, plugin := range localReg.Plugins {
+		existingPlugins[plugin.Path] = true
+	}
+
+	// Read uploaded_plugins directory
+	entries, err := os.ReadDir(uploadedDir)
+	if err != nil {
+		return fmt.Errorf("failed to read uploaded_plugins directory: %w", err)
+	}
+
+	var newPluginsAdded bool
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+		// Only process .so files
+		if !strings.HasSuffix(strings.ToLower(filename), ".so") {
+			continue
+		}
+
+		pluginPath := filepath.Join(uploadedDir, filename)
+		
+		// Skip if plugin is already in registry
+		if existingPlugins[pluginPath] {
+			continue
+		}
+
+		// Try to extract plugin name from filename (remove .so extension)
+		pluginName := strings.TrimSuffix(filename, ".so")
+		
+		// Try to load the plugin to get better information
+		var description, version string
+		if tool, loadErr := pluginloader.LoadWithCache(pluginPath); loadErr == nil {
+			def := tool.Definition()
+			description = def.Description.String()
+			version = pluginloader.GetPluginVersion(tool)
+		}
+		
+		// Fallback values if loading failed
+		if description == "" {
+			description = fmt.Sprintf("Plugin: %s", pluginName)
+		}
+		if version == "" {
+			version = "unknown"
+		}
+
+		// Add to registry
+		newPlugin := types.PluginRegistryEntry{
+			Name:        pluginName,
+			Description: description,
+			Path:        pluginPath,
+			Version:     version,
+		}
+		
+		localReg.Plugins = append(localReg.Plugins, newPlugin)
+		newPluginsAdded = true
+		
+		fmt.Printf("Auto-registered plugin: %s (%s) from %s\n", pluginName, version, pluginPath)
+	}
+
+	// Save updated registry if changes were made
+	if newPluginsAdded {
+		if err := saveLocalPluginRegistry(localReg); err != nil {
+			return fmt.Errorf("failed to save updated local registry: %w", err)
+		}
+		fmt.Printf("Updated local plugin registry with new plugins from uploaded_plugins/\n")
 	}
 
 	return nil
@@ -319,6 +410,11 @@ func main() {
 	}
 	log.Printf("Using plugin cache: %s", pluginCacheDir)
 	pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
+
+	// scan uploaded_plugins directory and auto-register any new plugins
+	if err := scanUploadedPlugins(); err != nil {
+		log.Printf("Warning: failed to scan uploaded_plugins directory: %v", err)
+	}
 
 	// init update manager
 	currentVersion := version.GetVersion()
@@ -943,7 +1039,12 @@ func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 // Plugin Download Handler - Downloads GitHub plugins to uploaded_plugins folder
 func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "method not allowed",
+		})
 		return
 	}
 
@@ -951,19 +1052,34 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": err.Error(),
+		})
 		return
 	}
 
 	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "name required",
+		})
 		return
 	}
 
 	// Load registry to find the plugin
 	reg, _, err := loadPluginRegistry()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": err.Error(),
+		})
 		return
 	}
 
@@ -977,40 +1093,72 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pluginEntry == nil {
-		http.Error(w, "plugin not found in registry", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "plugin not found in registry",
+		})
 		return
 	}
 
 	// Check if it has a download URL
 	if pluginEntry.DownloadURL == "" {
-		http.Error(w, "plugin does not have a download URL", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "plugin does not have a download URL",
+		})
 		return
 	}
 
 	// Create uploaded_plugins directory if it doesn't exist
 	uploadDir := "uploaded_plugins"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		http.Error(w, fmt.Sprintf("failed to create upload directory: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": fmt.Sprintf("failed to create upload directory: %v", err),
+		})
 		return
 	}
 
 	// Download the plugin file
 	resp, err := http.Get(pluginEntry.DownloadURL)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to download plugin: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": fmt.Sprintf("failed to download plugin: %v", err),
+		})
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		http.Error(w, fmt.Sprintf("download failed with status %d", resp.StatusCode), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": fmt.Sprintf("download failed with status %d", resp.StatusCode),
+		})
 		return
 	}
 
-	// Determine the filename from the URL or use plugin name
+	// Determine the filename from the download URL
 	filename := fmt.Sprintf("%s.so", pluginEntry.Name)
-	if pluginEntry.Path != "" {
-		filename = filepath.Base(pluginEntry.Path)
+	if pluginEntry.DownloadURL != "" {
+		// Extract filename from download URL
+		parsedURL, err := url.Parse(pluginEntry.DownloadURL)
+		if err == nil {
+			urlFilename := filepath.Base(parsedURL.Path)
+			if urlFilename != "." && urlFilename != "/" {
+				filename = urlFilename
+			}
+		}
 	}
 
 	filePath := filepath.Join(uploadDir, filename)
@@ -1018,7 +1166,12 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Create the file
 	file, err := os.Create(filePath)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to create file: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": fmt.Sprintf("failed to create file: %v", err),
+		})
 		return
 	}
 	defer file.Close()
@@ -1026,8 +1179,18 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Copy the downloaded content to the file
 	_, err = io.Copy(file, resp.Body)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": fmt.Sprintf("failed to save file: %v", err),
+		})
 		return
+	}
+
+	// Scan uploaded plugins to auto-register the newly downloaded plugin
+	if err := scanUploadedPlugins(); err != nil {
+		log.Printf("Warning: failed to scan uploaded_plugins after download: %v", err)
 	}
 
 	// Return success response
