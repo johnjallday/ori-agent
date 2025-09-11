@@ -470,6 +470,11 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", serveIndex)
+	
+	// Static file server for CSS, JS, icons, and other assets
+	mux.HandleFunc("/styles.css", serveStaticFile)
+	mux.HandleFunc("/js/", serveStaticFile)
+	mux.HandleFunc("/icons/", serveStaticFile)
 
 	// Handlers: agents moved to separate package
 	mux.Handle("/api/agents", agenthttp.New(st))
@@ -507,6 +512,40 @@ func main() {
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	_ = tmpl.Execute(w, nil)
+}
+
+// serveStaticFile serves static files from the embedded filesystem
+func serveStaticFile(w http.ResponseWriter, r *http.Request) {
+	// Remove leading slash and prepend "static/"
+	path := "static" + r.URL.Path
+	
+	// Read file from embedded filesystem
+	content, err := web.Static.ReadFile(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	
+	// Set appropriate content type based on file extension
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		w.Header().Set("Content-Type", "text/css")
+	case strings.HasSuffix(path, ".js"):
+		w.Header().Set("Content-Type", "application/javascript")
+	case strings.HasSuffix(path, ".svg"):
+		w.Header().Set("Content-Type", "image/svg+xml")
+	case strings.HasSuffix(path, ".html"):
+		w.Header().Set("Content-Type", "text/html")
+	case strings.HasSuffix(path, ".json"):
+		w.Header().Set("Content-Type", "application/json")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	
+	// Add cache headers for static assets
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	
+	w.Write(content)
 }
 
 // Registry
