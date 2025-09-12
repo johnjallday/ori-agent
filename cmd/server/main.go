@@ -475,6 +475,7 @@ func main() {
 	mux.HandleFunc("/styles.css", serveStaticFile)
 	mux.HandleFunc("/js/", serveStaticFile)
 	mux.HandleFunc("/icons/", serveStaticFile)
+	mux.HandleFunc("/chat-area.html", serveStaticFile)
 
 	// Handlers: agents moved to separate package
 	mux.Handle("/api/agents", agenthttp.New(st))
