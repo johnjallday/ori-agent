@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -39,8 +38,8 @@ var (
 	defaultConf    = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
 	agentStorePath string
 
-	// template
-	tmpl *template.Template
+	// template renderer
+	templateRenderer *web.TemplateRenderer
 
 	// plugin downloader for external plugins
 	pluginDownloader *plugindownloader.PluginDownloader
@@ -461,11 +460,10 @@ func main() {
 		log.Printf("failed to load plugin registry: %v", err)
 	}
 
-	// parse template from embedded FS
-	if b, err := web.Static.ReadFile("static/index.html"); err == nil {
-		tmpl = template.Must(template.New("index").Parse(string(b)))
-	} else {
-		log.Fatalf("failed to read embedded static/index.html: %v", err)
+	// initialize template renderer
+	templateRenderer = web.NewTemplateRenderer()
+	if err := templateRenderer.LoadTemplates(); err != nil {
+		log.Fatalf("failed to load templates: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -512,7 +510,31 @@ func main() {
 // ---------- Handlers below still use the Store (no package-level agents/currentAgent) ----------
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
-	_ = tmpl.Execute(w, nil)
+	// Get current agent info for template data
+	data := web.GetDefaultData()
+	
+	// Try to get current agent from store
+	if agents, _ := st.ListAgents(); len(agents) > 0 {
+		// Get the first agent as current
+		currentAgentName := agents[0]
+		if agent, found := st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+	
+	// Render the index template
+	html, err := templateRenderer.RenderTemplate("index", data)
+	if err != nil {
+		log.Printf("Failed to render template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }
 
 // serveStaticFile serves static files from the embedded filesystem

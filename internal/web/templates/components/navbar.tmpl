@@ -1,0 +1,31 @@
+<!-- Top Navbar -->
+<nav class="navbar modern-card glassmorphism" style="border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);">
+  <div class="container-fluid">
+    <button class="modern-btn modern-btn-secondary me-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
+      <span data-icon="menu" data-icon-size="16"></span>
+    </button>
+    <a class="navbar-brand fw-bold text-decoration-none" href="#" style="color: var(--text-primary); font-size: 1.25rem;">
+      <span data-icon="plugin" data-icon-size="24" data-icon-class="me-2" style="color: var(--primary-color);"></span>
+      {{.Title}}
+    </a>
+    <div class="d-flex align-items-center gap-3">
+      <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="cursor:pointer; padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Click to view agent details">
+        <span class="status-indicator status-online"></span>
+        <span class="fw-medium">{{.CurrentAgent}}</span>
+      </span>
+      <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Refresh</span>
+      </button>
+      <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Dark</span>
+      </button>
+    </div>
+  </div>
+</nav>

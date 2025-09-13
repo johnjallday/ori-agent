@@ -1,0 +1,123 @@
+<!-- Sidebar -->
+<div class="sidebar">
+  <!-- Agents Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1L13.5 2.5L16.17 5.17L11.83 9.51C11.25 9.19 10.61 9 10 9C8.61 9 7.22 9.39 6 10.17L3 7.17L1.59 8.59L4.17 11.17C3.39 12.39 3 13.78 3 15.17C3 16.56 3.39 17.94 4.17 19.17L1.59 21.75L3 23.16L6 20.16C7.22 20.94 8.61 21.33 10 21.33C10.61 21.33 11.25 21.13 11.83 20.82L16.17 16.48L13.5 19.15L15 20.65L21 14.65V12.65L17.83 15.82L12.41 10.41C12.61 10.25 12.8 10.08 13 9.83L17.83 5L21 8.17V9Z"/>
+          </svg>
+          Agents
+        </h6>
+        <button id="addAgentBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div id="agentsList" class="agents-list">
+        <!-- Agents will be loaded dynamically -->
+      </div>
+      
+      <button id="loadMoreAgentsBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
+        Load More
+      </button>
+    </div>
+  </div>
+
+  <!-- Plugins Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+          </svg>
+          Plugins
+        </h6>
+        <button id="browsePluginsBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+        </button>
+      </div>
+      
+      <div id="pluginsList" class="plugins-list">
+        <!-- Plugins will be loaded dynamically -->
+      </div>
+      
+      <button id="pluginStoreBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
+        Plugin Store
+      </button>
+    </div>
+  </div>
+
+  <!-- Settings Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+          </svg>
+          Settings
+        </h6>
+      </div>
+      
+      <div id="settingsList" class="settings-list">
+        <div class="setting-item">
+          <div class="d-flex align-items-center justify-content-between">
+            <span style="color: var(--text-primary);">Auto-save conversations</span>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" checked>
+            </div>
+          </div>
+        </div>
+        
+        <div class="setting-item">
+          <div class="d-flex align-items-center justify-content-between">
+            <span style="color: var(--text-primary);">Show typing indicators</span>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" checked>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <button id="advancedSettingsBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
+        Advanced Settings
+      </button>
+    </div>
+  </div>
+
+  <!-- System Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M13,9H18.5L13,3.5V9M6,2H14L20,8V20A2,2 0 0,1 18,22H6C4.89,22 4,21.1 4,20V4C4,2.89 4.89,2 6,2M15,18V16H6V18H15M18,14V12H6V14H18Z"/>
+          </svg>
+          System
+        </h6>
+      </div>
+      
+      <div id="systemInfo" class="system-info">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="text-muted small">Version</span>
+          <span class="text-primary small fw-medium">{{.Version}}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="text-muted small">Status</span>
+          <span class="badge badge-success">Online</span>
+        </div>
+      </div>
+      
+      <button id="systemDiagnosticsBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
+        Diagnostics
+      </button>
+    </div>
+  </div>
+</div>

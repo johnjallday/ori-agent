@@ -76,7 +76,11 @@ func (s *fileStore) SwitchAgent(name string) error {
 func (s *fileStore) DeleteAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	
+	// Remove agent from memory
 	delete(s.agents, name)
+	
+	// Update current agent if it was deleted
 	if s.current == name {
 		s.current = ""
 		for k := range s.agents {
@@ -84,6 +88,16 @@ func (s *fileStore) DeleteAgent(name string) error {
 			break
 		}
 	}
+	
+	// Delete the agent folder from filesystem
+	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	agentFolder := filepath.Join(agentsDir, name)
+	if err := os.RemoveAll(agentFolder); err != nil && !os.IsNotExist(err) {
+		// Log error but don't fail the operation since agent is already removed from memory
+		// In a production app, you might want to handle this differently
+		_ = err
+	}
+	
 	return s.saveUnlocked()
 }
 
