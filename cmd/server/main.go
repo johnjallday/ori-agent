@@ -947,8 +947,18 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 			name := tc.Function.Name
 			args := tc.Function.Arguments
 
-			pl, ok := ag.Plugins[name]
-			if !ok || pl.Tool == nil {
+			// Find plugin by function definition name
+			var pl types.LoadedPlugin
+			var found bool
+			for _, plugin := range ag.Plugins {
+				if plugin.Definition.Name == name {
+					pl = plugin
+					found = true
+					break
+				}
+			}
+			
+			if !found || pl.Tool == nil {
 				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
 				return
 			}

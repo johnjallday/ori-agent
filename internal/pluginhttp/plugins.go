@@ -43,7 +43,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.list(w, r)
 
 	case http.MethodPost:
-		h.uploadAndRegister(w, r)
+		// Parse multipart form to check if it contains actual file uploads
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			// If parsing multipart fails, try regular form parsing for registry loading
+			h.loadFromRegistry(w, r)
+			return
+		}
+		
+		// Check if this request contains actual file uploads
+		if _, _, err := r.FormFile("plugin"); err == nil {
+			// Has file upload - use upload handler
+			h.uploadAndRegister(w, r)
+		} else {
+			// No file upload, just form data - use registry loader
+			h.loadFromRegistry(w, r)
+		}
 
 	case http.MethodDelete:
 		h.unload(w, r)
@@ -74,9 +88,12 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	// Form should already be parsed in ServeHTTP, but ensure it's parsed
+	if r.MultipartForm == nil {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	file, header, err := r.FormFile("plugin")
 	if err != nil {
@@ -179,6 +196,72 @@ func (h *Handler) saveRegistry(path string, registry types.PluginRegistry) error
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
+	// Try to parse multipart form first, then regular form
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	
+	name := r.FormValue("name")
+	path := r.FormValue("path")
+	
+	if name == "" || path == "" {
+		http.Error(w, "name and path required", http.StatusBadRequest)
+		return
+	}
+	
+	// Load plugin from the specified path
+	tool, err := h.Loader.Load(path)
+	if err != nil {
+		http.Error(w, "Failed to load plugin: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	def := tool.Definition()
+	version := pluginloader.GetPluginVersion(tool)
+	
+	// Get current agent
+	_, current := h.State.ListAgents()
+	ag, ok := h.State.GetAgent(current)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+	
+	// Add plugin to current agent
+	if ag.Plugins == nil {
+		ag.Plugins = make(map[string]types.LoadedPlugin)
+	}
+	
+	ag.Plugins[name] = types.LoadedPlugin{
+		Tool:       tool,
+		Definition: def,
+		Path:       path,
+		Version:    version,
+	}
+	
+	// Save updated agent
+	if err := h.State.SetAgent(current, ag); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	// Return success response
+	response := map[string]any{
+		"success":     true,
+		"name":        name,
+		"description": def.Description.String(),
+		"path":        path,
+		"version":     version,
+		"message":     "Plugin loaded successfully from registry",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {

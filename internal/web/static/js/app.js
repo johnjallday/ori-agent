@@ -741,16 +741,20 @@ async function togglePlugin(pluginName, pluginPath, enable) {
   const method = enable ? 'POST' : 'DELETE';
   const url = enable ? '/api/plugins' : `/api/plugins?name=${encodeURIComponent(pluginName)}`;
   
-  const body = enable ? JSON.stringify({
-    name: pluginName,
-    path: pluginPath
-  }) : undefined;
+  let body;
+  let headers = {};
+  
+  if (enable) {
+    // Use FormData instead of JSON for multipart/form-data
+    body = new FormData();
+    body.append('name', pluginName);
+    body.append('path', pluginPath);
+    // Don't set Content-Type header - let browser set it with boundary
+  }
   
   const response = await fetch(url, {
     method: method,
-    headers: enable ? {
-      'Content-Type': 'application/json'
-    } : {},
+    headers: headers,
     body: body
   });
   
