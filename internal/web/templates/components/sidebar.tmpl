@@ -116,6 +116,17 @@
           <span class="text-muted small">Status</span>
           <span class="badge badge-success">Online</span>
         </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="text-muted small">API Key</span>
+          <span class="text-primary small fw-medium" id="apiKeyStatus">
+            <span id="apiKeyMasked">sk-proj-***...***</span>
+            <button id="editApiKeyBtn" class="btn btn-link p-0 ms-1" style="font-size: 12px; color: var(--accent-color);">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3,17.25V21H6.75L17.81,9.94L14.06,6.19L3,17.25M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.13,5.12L18.88,8.87M20.71,7.04Z"/>
+              </svg>
+            </button>
+          </span>
+        </div>
       </div>
       
       <button id="systemDiagnosticsBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
@@ -126,4 +137,51 @@
   
   <!-- Resize Handle -->
   <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
+</div>
+
+<!-- API Key Modal -->
+<div class="modal fade" id="apiKeyModal" tabindex="-1" aria-labelledby="apiKeyModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h5 class="modal-title" id="apiKeyModalLabel" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M7,14A2,2 0 0,1 5,12A2,2 0 0,1 7,10A2,2 0 0,1 9,12A2,2 0 0,1 7,14M12.65,10C11.83,7.67 9.61,6 7,6A6,6 0 0,0 1,12A6,6 0 0,0 7,18C9.61,18 11.83,16.33 12.65,14H17V18H21V14H23V10H12.65Z"/>
+          </svg>
+          Edit API Key
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+      </div>
+      <div class="modal-body">
+        <form id="apiKeyForm">
+          <div class="mb-3">
+            <label for="apiKeyInput" class="form-label" style="color: var(--text-primary);">OpenAI API Key</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="apiKeyInput" placeholder="sk-proj-..." 
+                     style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+              <button type="button" class="btn btn-outline-secondary" id="toggleApiKeyVisibility" 
+                      style="border-color: var(--border-color); color: var(--text-secondary);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" id="eyeIcon">
+                  <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="form-text" style="color: var(--text-secondary);">
+              Your API key is stored securely and never shared. It starts with "sk-proj-" or "sk-".
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" 
+                style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-primary" id="saveApiKeyBtn"
+                style="background: var(--accent-color); border-color: var(--accent-color);">
+          Save API Key
+        </button>
+      </div>
+    </div>
+  </div>
 </div>

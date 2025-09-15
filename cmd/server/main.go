@@ -37,6 +37,7 @@ var (
 	pluginReg      types.PluginRegistry
 	defaultConf    = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
 	agentStorePath string
+	appSettings    AppSettings
 
 	// template renderer
 	templateRenderer *web.TemplateRenderer
@@ -47,6 +48,44 @@ var (
 	// update manager for software updates
 	updateMgr *updatemanager.Manager
 )
+
+// AppSettings holds application-wide settings
+type AppSettings struct {
+	CurrentAgent string `json:"current_agent"`
+	OpenAIAPIKey string `json:"openai_api_key"`
+}
+
+// loadAppSettings loads application settings from settings.json
+func loadAppSettings() (AppSettings, error) {
+	var settings AppSettings
+	settingsPath := "settings.json"
+	
+	// Try to read settings file
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		// If file doesn't exist, return default settings
+		if os.IsNotExist(err) {
+			return AppSettings{
+				CurrentAgent: "default",
+				OpenAIAPIKey: "",
+			}, nil
+		}
+		return settings, err
+	}
+	
+	err = json.Unmarshal(data, &settings)
+	return settings, err
+}
+
+// saveAppSettings saves application settings to settings.json
+func saveAppSettings(settings AppSettings) error {
+	settingsPath := "settings.json"
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, data, 0644)
+}
 
 // fetchGitHubPluginRegistry fetches the plugin registry from GitHub
 func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
@@ -114,7 +153,7 @@ func saveLocalPluginRegistry(reg types.PluginRegistry) error {
 // scanUploadedPlugins scans the uploaded_plugins directory and adds any new plugins to local registry
 func scanUploadedPlugins() error {
 	uploadedDir := "uploaded_plugins"
-	
+
 	// Check if uploaded_plugins directory exists
 	if _, err := os.Stat(uploadedDir); os.IsNotExist(err) {
 		return nil // No uploaded plugins directory, nothing to scan
@@ -151,7 +190,7 @@ func scanUploadedPlugins() error {
 		}
 
 		pluginPath := filepath.Join(uploadedDir, filename)
-		
+
 		// Skip if plugin is already in registry
 		if existingPlugins[pluginPath] {
 			continue
@@ -159,7 +198,7 @@ func scanUploadedPlugins() error {
 
 		// Try to extract plugin name from filename (remove .so extension)
 		pluginName := strings.TrimSuffix(filename, ".so")
-		
+
 		// Try to load the plugin to get better information
 		var description, version string
 		if tool, loadErr := pluginloader.LoadWithCache(pluginPath); loadErr == nil {
@@ -167,7 +206,7 @@ func scanUploadedPlugins() error {
 			description = def.Description.String()
 			version = pluginloader.GetPluginVersion(tool)
 		}
-		
+
 		// Fallback values if loading failed
 		if description == "" {
 			description = fmt.Sprintf("Plugin: %s", pluginName)
@@ -183,10 +222,10 @@ func scanUploadedPlugins() error {
 			Path:        pluginPath,
 			Version:     version,
 		}
-		
+
 		localReg.Plugins = append(localReg.Plugins, newPlugin)
 		newPluginsAdded = true
-		
+
 		fmt.Printf("Auto-registered plugin: %s (%s) from %s\n", pluginName, version, pluginPath)
 	}
 
@@ -334,40 +373,51 @@ func resolvePluginPath(baseDir, p string) string {
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
 func getPluginEmoji(pluginName string) string {
 	name := strings.ToLower(pluginName)
-	
+
 	// Music/Audio related
 	if strings.Contains(name, "music") || strings.Contains(name, "reaper") || strings.Contains(name, "audio") {
 		return "🎵"
 	}
-	
-	// Development/Code related  
+
+	// Development/Code related
 	if strings.Contains(name, "code") || strings.Contains(name, "dev") || strings.Contains(name, "git") {
 		return "💻"
 	}
-	
+
 	// File/System related
 	if strings.Contains(name, "file") || strings.Contains(name, "system") || strings.Contains(name, "manager") {
 		return "📁"
 	}
-	
+
 	// Data/Database related
 	if strings.Contains(name, "data") || strings.Contains(name, "database") || strings.Contains(name, "sql") {
 		return "📊"
 	}
-	
+
 	// Network/Web related
 	if strings.Contains(name, "web") || strings.Contains(name, "http") || strings.Contains(name, "api") {
 		return "🌐"
 	}
-	
+
 	// Default plugin emoji
 	return "🔌"
 }
 
 func main() {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	// Load application settings first
+	var err error
+	appSettings, err = loadAppSettings()
+	if err != nil {
+		log.Fatalf("Failed to load app settings: %v", err)
+	}
+
+	// Use OpenAI API key from settings, fallback to environment variable
+	apiKey := appSettings.OpenAIAPIKey
 	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY environment variable is required")
+		apiKey = os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			log.Fatal("OPENAI_API_KEY must be set either in settings.json or as environment variable")
+		}
 	}
 
 	// NEW: http client with sane timeouts for OpenAI calls
@@ -386,9 +436,9 @@ func main() {
 	//client = openai.NewClient(option.WithAPIKey(apiKey))
 
 	// init store (persists agents/plugins/settings; not messages)
-	var err error
-	// Determine agent store path (absolute by default, override via AGENT_STORE_PATH)
-	agentStorePath = "agents.json"
+	// Determine agent store path based on current agent from settings
+	currentAgentPath := fmt.Sprintf("agents/%s/config.json", appSettings.CurrentAgent)
+	agentStorePath = currentAgentPath
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
 		agentStorePath = p
 	} else if abs, err2 := filepath.Abs(agentStorePath); err2 == nil {
@@ -468,7 +518,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", serveIndex)
-	
+
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", serveStaticFile)
 	mux.HandleFunc("/js/", serveStaticFile)
@@ -484,6 +534,7 @@ func main() {
 	mux.HandleFunc("/api/plugins/download", pluginDownloadHandler)
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/settings", settingsHandler)
+	mux.HandleFunc("/api/api-key", apiKeyHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
 
 	// Update management endpoints
@@ -512,11 +563,14 @@ func main() {
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	// Get current agent info for template data
 	data := web.GetDefaultData()
-	
+
 	// Try to get current agent from store
-	if agents, _ := st.ListAgents(); len(agents) > 0 {
-		// Get the first agent as current
-		currentAgentName := agents[0]
+	if agents, current := st.ListAgents(); len(agents) > 0 {
+		// Get the current agent as specified by the store
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0] // fallback to first agent
+		}
 		if agent, found := st.GetAgent(currentAgentName); found && agent != nil {
 			data.CurrentAgent = currentAgentName
 			if agent.Settings.Model != "" {
@@ -524,7 +578,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	
+
 	// Render the index template
 	html, err := templateRenderer.RenderTemplate("index", data)
 	if err != nil {
@@ -532,7 +586,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
@@ -541,14 +595,14 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 func serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	// Remove leading slash and prepend "static/"
 	path := "static" + r.URL.Path
-	
+
 	// Read file from embedded filesystem
 	content, err := web.Static.ReadFile(path)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	
+
 	// Set appropriate content type based on file extension
 	switch {
 	case strings.HasSuffix(path, ".css"):
@@ -564,10 +618,10 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	
+
 	// Add cache headers for static assets
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	
+
 	w.Write(content)
 }
 
@@ -684,17 +738,17 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
 
 			ctx := context.Background()
-			
+
 			// Try common settings operations - plugins can implement any of these
 			settingsOperations := []string{
 				`{"operation":"get_settings"}`,
 				`{"operation":"status"}`,
 				`{"operation":"info"}`,
 			}
-			
+
 			var settingsResult string
 			var settingsErr error
-			
+
 			// Try each operation until one works
 			for _, operation := range settingsOperations {
 				settingsResult, settingsErr = tool.Call(ctx, operation)
@@ -702,16 +756,16 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			
+
 			if settingsErr != nil {
 				// If no settings operation works, just log the basic load message
 				log.Printf("🔌 Plugin '%s' loaded successfully!", def.Name)
 				return
 			}
-			
+
 			// Get a suitable emoji based on plugin name
 			emoji := getPluginEmoji(def.Name)
-			
+
 			log.Printf("%s Plugin '%s' loaded successfully!", emoji, def.Name)
 			log.Printf("Current settings/status:\n%s", settingsResult)
 		}()
@@ -824,6 +878,80 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Return masked API key for display
+		response := struct {
+			APIKey string `json:"api_key"`
+			Masked string `json:"masked"`
+		}{
+			APIKey: appSettings.OpenAIAPIKey,
+			Masked: maskAPIKey(appSettings.OpenAIAPIKey),
+		}
+		_ = json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost:
+		var req struct {
+			APIKey string `json:"api_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		
+		// Trim whitespace from API key
+		req.APIKey = strings.TrimSpace(req.APIKey)
+		
+		// Validate API key format
+		if req.APIKey != "" && !strings.HasPrefix(req.APIKey, "sk-") {
+			http.Error(w, "Invalid API key format", http.StatusBadRequest)
+			return
+		}
+		
+		// Update appSettings and save to file
+		appSettings.OpenAIAPIKey = req.APIKey
+		if err := saveAppSettings(appSettings); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		// Update global client with new API key (only if not empty)
+		if req.APIKey != "" {
+			client = openai.NewClient(option.WithAPIKey(req.APIKey))
+		}
+		// Note: When API key is empty, we keep the existing client
+		// This means if there was a previous key, it will still work
+		// If you want to clear the client entirely, you could create a client
+		// with no key or a dummy key, but that might break functionality
+		
+		w.WriteHeader(http.StatusOK)
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// maskAPIKey returns a masked version of the API key for display
+func maskAPIKey(apiKey string) string {
+	// Check if we have an API key from settings
+	if apiKey != "" {
+		if len(apiKey) < 8 {
+			return "***"
+		}
+		return apiKey[:8] + "***..." + apiKey[len(apiKey)-4:]
+	}
+	
+	// Check if there's an environment variable set
+	envKey := os.Getenv("OPENAI_API_KEY")
+	if envKey != "" {
+		return "Environment variable set"
+	}
+	
+	// No API key found anywhere
+	return "API key required"
+}
+
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
 func getClientForAgent(ag *types.Agent) openai.Client {
 	if ag.Settings.APIKey != "" {
@@ -869,8 +997,11 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(base, 45*time.Second)
 	defer cancel()
 
-	// Load agent
-	_, current := st.ListAgents()
+	// Load agent - for single agent stores, use the current agent name stored in the config
+	names, current := st.ListAgents()
+	if current == "" && len(names) > 0 {
+		current = names[0] // fallback to first available agent
+	}
 	ag, ok := st.GetAgent(current)
 	if !ok {
 		http.Error(w, "current agent not found", http.StatusInternalServerError)
@@ -963,7 +1094,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			
+
 			if !found || pl.Tool == nil {
 				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
 				return
