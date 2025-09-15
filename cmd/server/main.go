@@ -792,7 +792,13 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "current agent not found", http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(ag.Settings)
+		// Wrap settings in the expected format for frontend compatibility
+		response := struct {
+			Settings types.Settings `json:"Settings"`
+		}{
+			Settings: ag.Settings,
+		}
+		_ = json.NewEncoder(w).Encode(response)
 
 	case http.MethodPost:
 		var s types.Settings

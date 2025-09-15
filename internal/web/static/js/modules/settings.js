@@ -49,17 +49,23 @@ async function loadSettings() {
       
       // Update model dropdown
       const modelSelect = document.getElementById('gptModelSelect');
-      if (modelSelect && settings.Settings && settings.Settings.model) {
-        modelSelect.value = settings.Settings.model;
+      // Handle both nested (settings.Settings.model) and flat (settings.model) formats
+      const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
+      if (modelSelect && modelValue) {
+        modelSelect.value = modelValue;
       }
       
       // Update temperature slider
       const temperatureSlider = document.getElementById('temperatureSlider');
       const temperatureValue = document.getElementById('temperatureValue');
-      if (temperatureSlider && settings.Settings && typeof settings.Settings.temperature !== 'undefined') {
-        temperatureSlider.value = settings.Settings.temperature;
+      // Handle both nested (settings.Settings.temperature) and flat (settings.temperature) formats
+      const temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined') 
+        ? settings.Settings.temperature 
+        : settings.temperature;
+      if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
+        temperatureSlider.value = temperatureValueData;
         if (temperatureValue) {
-          temperatureValue.textContent = settings.Settings.temperature.toFixed(1);
+          temperatureValue.textContent = temperatureValueData.toFixed(1);
         }
       }
     } else {
