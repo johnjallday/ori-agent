@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 
 	"github.com/openai/openai-go/v2"
-	"github.com/openai/openai-go/v2/option"
 
 	agenthttp "github.com/johnjallday/dolphin-agent/internal/agenthttp"
 	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
@@ -27,12 +26,13 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
 	"github.com/johnjallday/dolphin-agent/internal/version"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
+	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/config"
 	"github.com/johnjallday/dolphin-agent/internal/registry"
 )
 
 var (
-	client openai.Client
+	clientFactory *client.Factory
 	registryManager *registry.Manager
 
 	// runtime state (moved behind Store)
@@ -189,20 +189,8 @@ func main() {
 		log.Fatal("OPENAI_API_KEY must be set either in settings.json or as environment variable")
 	}
 
-	// NEW: http client with sane timeouts for OpenAI calls
-	httpClient := &http.Client{
-		Timeout: 60 * time.Second, // hard cap per request
-		Transport: &http.Transport{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-	client = openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithHTTPClient(httpClient), // <- important
-	)
-	//client = openai.NewClient(option.WithAPIKey(apiKey))
+	// Initialize OpenAI client factory
+	clientFactory = client.NewFactory(apiKey)
 
 	// init store (persists agents/plugins/settings; not messages)
 	// Determine agent store path based on current agent from settings
@@ -684,7 +672,7 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 		
 		// Update global client with new API key (only if not empty)
 		if req.APIKey != "" {
-			client = openai.NewClient(option.WithAPIKey(req.APIKey))
+			clientFactory.UpdateDefaultClient(req.APIKey)
 		}
 		
 		w.WriteHeader(http.StatusOK)
@@ -697,23 +685,7 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
 func getClientForAgent(ag *types.Agent) openai.Client {
-	if ag.Settings.APIKey != "" {
-		// Create client with agent-specific API key
-		httpClient := &http.Client{
-			Timeout: 60 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-			},
-		}
-		return openai.NewClient(
-			option.WithAPIKey(ag.Settings.APIKey),
-			option.WithHTTPClient(httpClient),
-		)
-	}
-	// Use global client (with env API key)
-	return client
+	return clientFactory.GetForAgent(ag)
 }
 
 // Chat (same logic as yours; now pulls state from Store; messages stay in-memory)
@@ -792,8 +764,11 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	resp, err := agentClient.Chat.Completions.New(ctx, params)
 	if err != nil {
-		// surface timeout/cancel clearly to the client
-		http.Error(w, fmt.Sprintf("chat completion error: %v", err), http.StatusBadGateway)
+		// Return error as a chat message instead of HTTP error
+		errorResponse := map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: %v", err),
+		}
+		json.NewEncoder(w).Encode(errorResponse)
 		return
 	}
 	if resp == nil || len(resp.Choices) == 0 {

@@ -134,11 +134,46 @@ function setupSettings() {
   const modelSelect = document.getElementById('gptModelSelect');
   const temperatureSlider = document.getElementById('temperatureSlider');
   const temperatureValue = document.getElementById('temperatureValue');
+  const temperatureInput = document.getElementById('temperatureInput');
   const updateBtn = document.getElementById('updateSettingsBtn');
   
   if (temperatureSlider && temperatureValue) {
     temperatureSlider.addEventListener('input', function(e) {
       temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+    });
+  }
+  
+  // Temperature click-to-edit functionality
+  if (temperatureValue && temperatureInput && temperatureSlider) {
+    // Click on value to edit
+    temperatureValue.addEventListener('click', function() {
+      temperatureInput.value = parseFloat(temperatureValue.textContent);
+      temperatureValue.style.display = 'none';
+      temperatureInput.style.display = 'inline-block';
+      temperatureInput.focus();
+      temperatureInput.select();
+    });
+    
+    // Handle input changes
+    function updateTemperatureFromInput() {
+      const value = parseFloat(temperatureInput.value);
+      if (!isNaN(value) && value >= 0 && value <= 2) {
+        temperatureSlider.value = value;
+        temperatureValue.textContent = value.toFixed(1);
+      }
+      temperatureInput.style.display = 'none';
+      temperatureValue.style.display = 'inline-block';
+    }
+    
+    // Save on Enter or blur
+    temperatureInput.addEventListener('blur', updateTemperatureFromInput);
+    temperatureInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        updateTemperatureFromInput();
+      } else if (e.key === 'Escape') {
+        temperatureInput.style.display = 'none';
+        temperatureValue.style.display = 'inline-block';
+      }
     });
   }
   
