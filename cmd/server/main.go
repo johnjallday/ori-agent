@@ -27,17 +27,20 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
 	"github.com/johnjallday/dolphin-agent/internal/version"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
+	"github.com/johnjallday/dolphin-agent/internal/config"
+	"github.com/johnjallday/dolphin-agent/internal/registry"
 )
 
 var (
 	client openai.Client
+	registryManager *registry.Manager
 
 	// runtime state (moved behind Store)
 	st             store.Store
 	pluginReg      types.PluginRegistry
 	defaultConf    = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
 	agentStorePath string
-	appSettings    AppSettings
+	configManager  *config.Manager
 
 	// template renderer
 	templateRenderer *web.TemplateRenderer
@@ -49,307 +52,7 @@ var (
 	updateMgr *updatemanager.Manager
 )
 
-// AppSettings holds application-wide settings
-type AppSettings struct {
-	CurrentAgent string `json:"current_agent"`
-	OpenAIAPIKey string `json:"openai_api_key"`
-}
 
-// loadAppSettings loads application settings from settings.json
-func loadAppSettings() (AppSettings, error) {
-	var settings AppSettings
-	settingsPath := "settings.json"
-	
-	// Try to read settings file
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		// If file doesn't exist, return default settings
-		if os.IsNotExist(err) {
-			return AppSettings{
-				CurrentAgent: "default",
-				OpenAIAPIKey: "",
-			}, nil
-		}
-		return settings, err
-	}
-	
-	err = json.Unmarshal(data, &settings)
-	return settings, err
-}
-
-// saveAppSettings saves application settings to settings.json
-func saveAppSettings(settings AppSettings) error {
-	settingsPath := "settings.json"
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(settingsPath, data, 0644)
-}
-
-// fetchGitHubPluginRegistry fetches the plugin registry from GitHub
-func fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
-	var reg types.PluginRegistry
-
-	url := "https://raw.githubusercontent.com/johnjallday/dolphin-plugin-registry/main/plugin_registry.json"
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	resp, err := client.Get(url)
-	if err != nil {
-		return reg, fmt.Errorf("failed to fetch plugin registry from GitHub: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return reg, fmt.Errorf("GitHub returned HTTP %d when fetching plugin registry", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return reg, fmt.Errorf("failed to read GitHub response: %w", err)
-	}
-
-	if err := json.Unmarshal(body, &reg); err != nil {
-		return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
-	}
-
-	return reg, nil
-}
-
-// loadLocalPluginRegistry loads the user's local plugin registry
-func loadLocalPluginRegistry() (types.PluginRegistry, error) {
-	var reg types.PluginRegistry
-	localRegistryPath := "local_plugin_registry.json"
-
-	// Try to read local registry file
-	if b, err := os.ReadFile(localRegistryPath); err == nil {
-		if err := json.Unmarshal(b, &reg); err != nil {
-			return reg, fmt.Errorf("failed to parse local plugin registry: %w", err)
-		}
-	}
-	// If file doesn't exist, return empty registry (not an error)
-	return reg, nil
-}
-
-// saveLocalPluginRegistry saves the local plugin registry to file
-func saveLocalPluginRegistry(reg types.PluginRegistry) error {
-	localRegistryPath := "local_plugin_registry.json"
-
-	data, err := json.MarshalIndent(reg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal local registry: %w", err)
-	}
-
-	if err := os.WriteFile(localRegistryPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write local registry: %w", err)
-	}
-
-	return nil
-}
-
-// scanUploadedPlugins scans the uploaded_plugins directory and adds any new plugins to local registry
-func scanUploadedPlugins() error {
-	uploadedDir := "uploaded_plugins"
-
-	// Check if uploaded_plugins directory exists
-	if _, err := os.Stat(uploadedDir); os.IsNotExist(err) {
-		return nil // No uploaded plugins directory, nothing to scan
-	}
-
-	// Load current local registry
-	localReg, err := loadLocalPluginRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to load local registry: %w", err)
-	}
-
-	// Create map of existing plugins for quick lookup
-	existingPlugins := make(map[string]bool)
-	for _, plugin := range localReg.Plugins {
-		existingPlugins[plugin.Path] = true
-	}
-
-	// Read uploaded_plugins directory
-	entries, err := os.ReadDir(uploadedDir)
-	if err != nil {
-		return fmt.Errorf("failed to read uploaded_plugins directory: %w", err)
-	}
-
-	var newPluginsAdded bool
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		filename := entry.Name()
-		// Only process .so files
-		if !strings.HasSuffix(strings.ToLower(filename), ".so") {
-			continue
-		}
-
-		pluginPath := filepath.Join(uploadedDir, filename)
-
-		// Skip if plugin is already in registry
-		if existingPlugins[pluginPath] {
-			continue
-		}
-
-		// Try to extract plugin name from filename (remove .so extension)
-		pluginName := strings.TrimSuffix(filename, ".so")
-
-		// Try to load the plugin to get better information
-		var description, version string
-		if tool, loadErr := pluginloader.LoadWithCache(pluginPath); loadErr == nil {
-			def := tool.Definition()
-			description = def.Description.String()
-			version = pluginloader.GetPluginVersion(tool)
-		}
-
-		// Fallback values if loading failed
-		if description == "" {
-			description = fmt.Sprintf("Plugin: %s", pluginName)
-		}
-		if version == "" {
-			version = "unknown"
-		}
-
-		// Add to registry
-		newPlugin := types.PluginRegistryEntry{
-			Name:        pluginName,
-			Description: description,
-			Path:        pluginPath,
-			Version:     version,
-		}
-
-		localReg.Plugins = append(localReg.Plugins, newPlugin)
-		newPluginsAdded = true
-
-		fmt.Printf("Auto-registered plugin: %s (%s) from %s\n", pluginName, version, pluginPath)
-	}
-
-	// Save updated registry if changes were made
-	if newPluginsAdded {
-		if err := saveLocalPluginRegistry(localReg); err != nil {
-			return fmt.Errorf("failed to save updated local registry: %w", err)
-		}
-		fmt.Printf("Updated local plugin registry with new plugins from uploaded_plugins/\n")
-	}
-
-	return nil
-}
-
-// mergePluginRegistries combines online and local plugin registries
-func mergePluginRegistries(online, local types.PluginRegistry) types.PluginRegistry {
-	merged := types.PluginRegistry{}
-
-	// Create a map to track plugin names and avoid duplicates
-	pluginMap := make(map[string]types.PluginRegistryEntry)
-
-	// Add online plugins first
-	for _, plugin := range online.Plugins {
-		pluginMap[plugin.Name] = plugin
-	}
-
-	// Add local plugins (they override online plugins with same name)
-	for _, plugin := range local.Plugins {
-		pluginMap[plugin.Name] = plugin
-	}
-
-	// Convert map back to slice
-	for _, plugin := range pluginMap {
-		merged.Plugins = append(merged.Plugins, plugin)
-	}
-
-	return merged
-}
-
-// loadPluginRegistry reads the registry dynamically with fallbacks, merging online and local registries.
-// Returns: registry, baseDir (for resolving relative plugin paths), error.
-func loadPluginRegistry() (types.PluginRegistry, string, error) {
-	var onlineReg types.PluginRegistry
-	cachePath := "plugin_registry_cache.json"
-
-	// 1) Env override (highest priority) - if set, use only this and merge with local
-	if p := os.Getenv("PLUGIN_REGISTRY_PATH"); p != "" {
-		if b, err := os.ReadFile(p); err == nil {
-			if err := json.Unmarshal(b, &onlineReg); err != nil {
-				return onlineReg, "", fmt.Errorf("parse %s: %w", p, err)
-			}
-			// Merge with local registry
-			if localReg, err := loadLocalPluginRegistry(); err == nil {
-				merged := mergePluginRegistries(onlineReg, localReg)
-				return merged, p, nil
-			}
-			return onlineReg, p, nil
-		}
-	}
-
-	// 2) Try to fetch from GitHub (primary online source)
-	if githubReg, err := fetchGitHubPluginRegistry(); err == nil {
-		// Success! Cache it for offline use
-		if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
-			os.WriteFile(cachePath, data, 0644) // Ignore error - caching is optional
-		}
-		onlineReg = githubReg
-		fmt.Println("plugin registry loaded from GitHub")
-	} else {
-		fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
-	}
-
-	// If GitHub failed, try other fallback sources
-	if len(onlineReg.Plugins) == 0 {
-		// 3) Try cached version (offline fallback)
-		if b, err := os.ReadFile(cachePath); err == nil {
-			if err := json.Unmarshal(b, &onlineReg); err == nil {
-				fmt.Println("plugin registry loaded from cache")
-			} else {
-				fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
-			}
-		}
-
-		// 4) Local files (legacy fallback)
-		if len(onlineReg.Plugins) == 0 {
-			for _, p := range []string{
-				"plugin_registry.json",
-				filepath.Join("internal", "web", "static", "plugin_registry.json"),
-			} {
-				if b, err := os.ReadFile(p); err == nil {
-					if err := json.Unmarshal(b, &onlineReg); err == nil {
-						fmt.Printf("plugin registry loaded from local file: %s\n", p)
-						break
-					}
-				}
-			}
-		}
-
-		// 5) Embedded fallback (last resort)
-		if len(onlineReg.Plugins) == 0 {
-			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
-				if err := json.Unmarshal(b, &onlineReg); err == nil {
-					fmt.Println("plugin registry loaded from embedded file")
-				}
-			}
-		}
-	}
-
-	// Always try to load and merge local registry
-	localReg, err := loadLocalPluginRegistry()
-	if err != nil {
-		fmt.Printf("Warning: failed to load local plugin registry: %v\n", err)
-		// Return online registry only if local loading fails
-		return onlineReg, "", nil
-	}
-
-	// Merge online and local registries
-	merged := mergePluginRegistries(onlineReg, localReg)
-	if len(localReg.Plugins) > 0 {
-		fmt.Printf("Merged %d online plugins with %d local plugins\n", len(onlineReg.Plugins), len(localReg.Plugins))
-	}
-
-	return merged, "", nil
-}
 
 // resolvePluginPath resolves an entry's Path against the registry base dir.
 // If the plugin path is absolute, returns it directly. Otherwise, it first tries
@@ -403,21 +106,87 @@ func getPluginEmoji(pluginName string) string {
 	return "🔌"
 }
 
+// handleAgentStatusCommand handles the /agent command to show agent status dashboard
+func handleAgentStatusCommand(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Get current agent information
+	names, current := st.ListAgents()
+	if current == "" && len(names) > 0 {
+		current = names[0] // fallback to first available agent
+	}
+	
+	ag, ok := st.GetAgent(current)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+	
+	// Get API key status
+	apiKey := configManager.GetAPIKey()
+	apiKeyStatus := "Not Set"
+	if apiKey != "" {
+		apiKeyStatus = "Environment variable set"
+		if configKey := configManager.Get().OpenAIAPIKey; configKey != "" {
+			apiKeyStatus = "Settings file: " + configManager.MaskAPIKey()
+		}
+	}
+	
+	// Build status dashboard
+	statusResponse := fmt.Sprintf(`## 🤖 Agent Status Dashboard
+
+**Current Agent:** %s
+
+**Model Configuration:**
+- Model: %s
+- Temperature: %.1f
+
+**API Configuration:**
+- API Key: %s
+
+**Plugin Status:**
+- Total Plugins: %d`,
+		current,
+		ag.Settings.Model,
+		ag.Settings.Temperature,
+		apiKeyStatus,
+		len(ag.Plugins))
+	
+	// Add plugin details
+	if len(ag.Plugins) > 0 {
+		statusResponse += "\n- Active Plugins:\n"
+		for name, plugin := range ag.Plugins {
+			statusResponse += fmt.Sprintf("  - %s %s (v%s)\n", getPluginEmoji(name), name, plugin.Version)
+		}
+	} else {
+		statusResponse += "\n- No plugins loaded"
+	}
+	
+	// Add system information
+	statusResponse += "\n\n**System Status:**\n- Server: Running ✅\n- Registry: Loaded ✅"
+	
+	// Return as a response that mimics a chat message
+	response := map[string]any{
+		"response": statusResponse,
+	}
+	
+	json.NewEncoder(w).Encode(response)
+}
+
 func main() {
-	// Load application settings first
-	var err error
-	appSettings, err = loadAppSettings()
-	if err != nil {
-		log.Fatalf("Failed to load app settings: %v", err)
+	// Initialize configuration manager
+	configManager = config.NewManager("settings.json")
+	if err := configManager.Load(); err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Use OpenAI API key from settings, fallback to environment variable
-	apiKey := appSettings.OpenAIAPIKey
+	// Initialize registry manager
+	registryManager = registry.NewManager()
+
+	// Get API key from configuration (checks settings then env var)
+	apiKey := configManager.GetAPIKey()
 	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
-		if apiKey == "" {
-			log.Fatal("OPENAI_API_KEY must be set either in settings.json or as environment variable")
-		}
+		log.Fatal("OPENAI_API_KEY must be set either in settings.json or as environment variable")
 	}
 
 	// NEW: http client with sane timeouts for OpenAI calls
@@ -437,7 +206,7 @@ func main() {
 
 	// init store (persists agents/plugins/settings; not messages)
 	// Determine agent store path based on current agent from settings
-	currentAgentPath := fmt.Sprintf("agents/%s/config.json", appSettings.CurrentAgent)
+	currentAgentPath := fmt.Sprintf("agents/%s/config.json", configManager.GetCurrentAgent())
 	agentStorePath = currentAgentPath
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
 		agentStorePath = p
@@ -445,6 +214,7 @@ func main() {
 		agentStorePath = abs
 	}
 	log.Printf("Using agent store: %s", agentStorePath)
+	var err error
 	st, err = store.NewFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		log.Fatalf("store init: %v", err)
@@ -461,7 +231,7 @@ func main() {
 	pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
 
 	// scan uploaded_plugins directory and auto-register any new plugins
-	if err := scanUploadedPlugins(); err != nil {
+	if err := registryManager.ScanUploadedPlugins(); err != nil {
 		log.Printf("Warning: failed to scan uploaded_plugins directory: %v", err)
 	}
 
@@ -504,7 +274,7 @@ func main() {
 	}
 
 	// load plugin registry (now from GitHub with fallbacks)
-	if reg, _, err := loadPluginRegistry(); err == nil {
+	if reg, _, err := registryManager.Load(); err == nil {
 		pluginReg = reg
 	} else {
 		log.Printf("failed to load plugin registry: %v", err)
@@ -629,7 +399,7 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request) {
 func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		reg, _, err := loadPluginRegistry()
+		reg, _, err := registryManager.Load()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -649,7 +419,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		reg, _, err := loadPluginRegistry()
+		reg, _, err := registryManager.Load()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -780,7 +550,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Only delete from local registry (user uploaded plugins)
-		localReg, err := loadLocalPluginRegistry()
+		localReg, err := registryManager.LoadLocal()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -806,7 +576,7 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		localReg.Plugins = append(localReg.Plugins[:foundIndex], localReg.Plugins[foundIndex+1:]...)
 
 		// Save updated local registry
-		if err := saveLocalPluginRegistry(localReg); err != nil {
+		if err := registryManager.SaveLocal(localReg); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -886,8 +656,8 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 			APIKey string `json:"api_key"`
 			Masked string `json:"masked"`
 		}{
-			APIKey: appSettings.OpenAIAPIKey,
-			Masked: maskAPIKey(appSettings.OpenAIAPIKey),
+			APIKey: configManager.Get().OpenAIAPIKey,
+			Masked: configManager.MaskAPIKey(),
 		}
 		_ = json.NewEncoder(w).Encode(response)
 
@@ -900,18 +670,14 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		// Trim whitespace from API key
-		req.APIKey = strings.TrimSpace(req.APIKey)
-		
-		// Validate API key format
-		if req.APIKey != "" && !strings.HasPrefix(req.APIKey, "sk-") {
-			http.Error(w, "Invalid API key format", http.StatusBadRequest)
+		// Set API key in config manager (includes validation)
+		if err := configManager.SetAPIKey(req.APIKey); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		
-		// Update appSettings and save to file
-		appSettings.OpenAIAPIKey = req.APIKey
-		if err := saveAppSettings(appSettings); err != nil {
+		// Save configuration
+		if err := configManager.Save(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -920,10 +686,6 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if req.APIKey != "" {
 			client = openai.NewClient(option.WithAPIKey(req.APIKey))
 		}
-		// Note: When API key is empty, we keep the existing client
-		// This means if there was a previous key, it will still work
-		// If you want to clear the client entirely, you could create a client
-		// with no key or a dummy key, but that might break functionality
 		
 		w.WriteHeader(http.StatusOK)
 
@@ -932,25 +694,6 @@ func apiKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// maskAPIKey returns a masked version of the API key for display
-func maskAPIKey(apiKey string) string {
-	// Check if we have an API key from settings
-	if apiKey != "" {
-		if len(apiKey) < 8 {
-			return "***"
-		}
-		return apiKey[:8] + "***..." + apiKey[len(apiKey)-4:]
-	}
-	
-	// Check if there's an environment variable set
-	envKey := os.Getenv("OPENAI_API_KEY")
-	if envKey != "" {
-		return "Environment variable set"
-	}
-	
-	// No API key found anywhere
-	return "API key required"
-}
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
 func getClientForAgent(ag *types.Agent) openai.Client {
@@ -988,6 +731,12 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
 		http.Error(w, "empty question", http.StatusBadRequest)
+		return
+	}
+	
+	// Handle special commands
+	if q == "/agent" {
+		handleAgentStatusCommand(w, r)
 		return
 	}
 
@@ -1173,7 +922,7 @@ func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// Check for available updates
-		reg, _, err := loadPluginRegistry()
+		reg, _, err := registryManager.Load()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1200,7 +949,7 @@ func pluginUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		reg, _, err := loadPluginRegistry()
+		reg, _, err := registryManager.Load()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1281,7 +1030,7 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load registry to find the plugin
-	reg, _, err := loadPluginRegistry()
+	reg, _, err := registryManager.Load()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1398,7 +1147,7 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scan uploaded plugins to auto-register the newly downloaded plugin
-	if err := scanUploadedPlugins(); err != nil {
+	if err := registryManager.ScanUploadedPlugins(); err != nil {
 		log.Printf("Warning: failed to scan uploaded_plugins after download: %v", err)
 	}
 
