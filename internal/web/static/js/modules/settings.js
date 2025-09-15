@@ -1,0 +1,183 @@
+// Settings Management Module
+// Handles all settings-related functionality including loading, saving, and UI management
+
+// Settings Management Functions
+
+// Show notification function
+function showNotification(message, type = 'info') {
+  // Create notification element
+  const notification = document.createElement('div');
+  notification.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} position-fixed`;
+  notification.style.cssText = `
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+    max-width: 300px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border: none;
+  `;
+  notification.innerHTML = `
+    <div class="d-flex align-items-center">
+      <span>${message}</span>
+      <button type="button" class="btn-close ms-2" aria-label="Close"></button>
+    </div>
+  `;
+  
+  // Add to body
+  document.body.appendChild(notification);
+  
+  // Add close functionality
+  const closeBtn = notification.querySelector('.btn-close');
+  closeBtn.addEventListener('click', () => {
+    notification.remove();
+  });
+  
+  // Auto-remove after 3 seconds
+  setTimeout(() => {
+    if (document.body.contains(notification)) {
+      notification.remove();
+    }
+  }, 3000);
+}
+
+// Load current settings
+async function loadSettings() {
+  try {
+    const response = await fetch('/api/settings');
+    if (response.ok) {
+      const settings = await response.json();
+      
+      // Update model dropdown
+      const modelSelect = document.getElementById('gptModelSelect');
+      if (modelSelect && settings.Settings && settings.Settings.model) {
+        modelSelect.value = settings.Settings.model;
+      }
+      
+      // Update temperature slider
+      const temperatureSlider = document.getElementById('temperatureSlider');
+      const temperatureValue = document.getElementById('temperatureValue');
+      if (temperatureSlider && settings.Settings && typeof settings.Settings.temperature !== 'undefined') {
+        temperatureSlider.value = settings.Settings.temperature;
+        if (temperatureValue) {
+          temperatureValue.textContent = settings.Settings.temperature.toFixed(1);
+        }
+      }
+    } else {
+      console.error('Failed to load settings:', response.status);
+    }
+  } catch (error) {
+    console.error('Error loading settings:', error);
+    // Fallback to defaults
+    const modelSelect = document.getElementById('gptModelSelect');
+    const temperatureSlider = document.getElementById('temperatureSlider');
+    const temperatureValue = document.getElementById('temperatureValue');
+    
+    if (modelSelect) modelSelect.value = 'gpt-4o';
+    if (temperatureSlider) temperatureSlider.value = 0;
+    if (temperatureValue) temperatureValue.textContent = '0.0';
+  }
+}
+
+// Save settings
+async function saveSettings() {
+  try {
+    const modelSelect = document.getElementById('gptModelSelect');
+    const temperatureSlider = document.getElementById('temperatureSlider');
+    
+    if (!modelSelect || !temperatureSlider) {
+      console.error('Settings elements not found');
+      return;
+    }
+    
+    const response = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        model: modelSelect.value,
+        temperature: parseFloat(temperatureSlider.value)
+      })
+    });
+    
+    if (response.ok) {
+      console.log('Settings updated:', {
+        model: modelSelect.value,
+        temperature: parseFloat(temperatureSlider.value)
+      });
+      
+      // Show success notification
+      showNotification('Settings updated successfully!', 'success');
+    } else {
+      console.error('Failed to save settings:', response.status);
+      showNotification('Failed to save settings', 'error');
+    }
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    showNotification('Error saving settings', 'error');
+  }
+}
+
+// Settings Management
+function toggleSetting(settingName, enabled) {
+  console.log('Toggling setting:', settingName, 'enabled:', enabled);
+  // Save setting to localStorage or send to server
+  localStorage.setItem(settingName, String(enabled));
+}
+
+// Setup settings event listeners
+function setupSettings() {
+  const modelSelect = document.getElementById('gptModelSelect');
+  const temperatureSlider = document.getElementById('temperatureSlider');
+  const temperatureValue = document.getElementById('temperatureValue');
+  const updateBtn = document.getElementById('updateSettingsBtn');
+  
+  if (temperatureSlider && temperatureValue) {
+    temperatureSlider.addEventListener('input', function(e) {
+      temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+    });
+  }
+  
+  if (updateBtn) {
+    updateBtn.addEventListener('click', function() {
+      saveSettings();
+      console.log('Settings saved to config.json');
+    });
+  }
+  
+  // Settings buttons
+  const advancedSettingsBtn = document.getElementById('advancedSettingsBtn');
+  if (advancedSettingsBtn) {
+    advancedSettingsBtn.addEventListener('click', () => {
+      console.log('Advanced settings clicked');
+      // Show advanced settings modal
+    });
+  }
+
+  // System buttons
+  const systemDiagnosticsBtn = document.getElementById('systemDiagnosticsBtn');
+  if (systemDiagnosticsBtn) {
+    systemDiagnosticsBtn.addEventListener('click', () => {
+      console.log('System diagnostics clicked');
+      // Show system diagnostics panel
+    });
+  }
+
+  // Settings toggle switches
+  document.querySelectorAll('.setting-item .form-check-input').forEach(toggle => {
+    toggle.addEventListener('change', (e) => {
+      const settingName = e.target.closest('.setting-item').querySelector('span').textContent;
+      toggleSetting(settingName, e.target.checked);
+    });
+  });
+  
+  // Load current settings
+  loadSettings();
+  
+  console.log('Settings management setup complete');
+}
+
+// Initialize settings management when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupSettings);
+} else {
+  setupSettings();
+}

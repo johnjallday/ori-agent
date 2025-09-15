@@ -546,7 +546,7 @@
     }
 
     .sidebar {
-      width: 300px;
+      width: var(--sidebar-width, 300px);
       background: var(--bg-primary);
       border-right: 1px solid var(--border-color);
       padding: 1rem;
@@ -556,13 +556,48 @@
       top: 76px;
       bottom: 0;
       z-index: 1020;
+      min-width: 250px;
+      max-width: 600px;
+      transition: width 0.1s ease;
     }
 
     .main-content {
       flex: 1;
-      margin-left: 300px;
+      margin-left: var(--sidebar-width, 300px);
       padding: 1rem;
-      max-width: calc(100vw - 300px);
+      max-width: calc(100vw - var(--sidebar-width, 300px));
+      transition: margin-left 0.1s ease, max-width 0.1s ease;
+    }
+
+    /* Resize handle */
+    .sidebar-resize-handle {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 4px;
+      height: 100%;
+      cursor: col-resize;
+      background: transparent;
+      transition: background-color 0.2s ease;
+      z-index: 1021;
+    }
+
+    .sidebar-resize-handle:hover {
+      background: var(--primary-color);
+    }
+
+    .sidebar-resize-handle:active {
+      background: var(--primary-dark);
+    }
+
+    /* Resize active state */
+    .sidebar-resizing {
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .sidebar-resizing .sidebar-resize-handle {
+      background: var(--primary-color);
     }
 
     .sidebar-section {
@@ -579,11 +614,112 @@
       border: 1px solid var(--border-color);
       cursor: pointer;
       transition: all 0.2s ease;
+      overflow: hidden;
     }
 
     .agent-item:hover,
     .plugin-item:hover {
       background: var(--bg-tertiary);
+    }
+
+    /* Plugin item responsive layout */
+    .plugin-item .d-flex {
+      align-items: flex-start !important;
+      gap: 0.5rem;
+    }
+
+    .plugin-item .d-flex > div:first-child {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: break-word;
+    }
+
+    .plugin-item .d-flex > div:last-child {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.25rem;
+    }
+
+    /* Compact layout for narrow sidebar */
+    .sidebar-compact .plugin-item .d-flex > div:last-child {
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .sidebar-compact .plugin-item .plugin-remove-btn {
+      margin-right: 0 !important;
+      margin-bottom: 0.25rem;
+      padding: 0.25rem;
+      min-width: 24px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sidebar-compact .plugin-item .plugin-remove-btn svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .sidebar-compact .plugin-item .form-switch {
+      margin: 0;
+      transform: scale(0.9);
+    }
+
+    /* Very compact layout for very narrow sidebar */
+    .sidebar-very-compact .plugin-item {
+      padding: 0.5rem;
+    }
+
+    .sidebar-very-compact .plugin-item .d-flex {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.5rem;
+    }
+
+    .sidebar-very-compact .plugin-item .d-flex > div:last-child {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .sidebar-very-compact .plugin-item .plugin-remove-btn {
+      margin-right: 0.5rem !important;
+      margin-bottom: 0;
+    }
+
+    /* Plugin controls responsive behavior */
+    .plugin-item .plugin-remove-btn {
+      flex-shrink: 0;
+      min-width: auto;
+      padding: 0.25rem 0.5rem;
+    }
+
+    .plugin-item .form-switch {
+      flex-shrink: 0;
+      margin: 0;
+    }
+
+    .plugin-item .form-switch .form-check-input {
+      margin: 0;
+    }
+
+    /* Text truncation for plugin names and descriptions */
+    .plugin-item .fw-medium {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .plugin-item .text-muted.small {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     /* Status indicators */

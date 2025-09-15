@@ -12,6 +12,11 @@ import (
 //go:embed static/*
 var Static embed.FS
 
+// Embed the templates directory
+//
+//go:embed templates/*
+var Templates embed.FS
+
 // ComponentRenderer handles template-based component rendering
 type ComponentRenderer struct {
 	templates map[string]*template.Template

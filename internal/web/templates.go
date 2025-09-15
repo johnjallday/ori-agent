@@ -29,38 +29,43 @@ func NewTemplateRenderer() *TemplateRenderer {
 	}
 }
 
-// LoadTemplates loads all templates from the templates directory
+// LoadTemplates loads all templates from the embedded filesystem
 func (tr *TemplateRenderer) LoadTemplates() error {
-	templateDir := "internal/web/templates"
+	log.Printf("Loading templates from embedded filesystem")
 
-	// Load base layout templates
-	layoutPattern := filepath.Join(templateDir, "layout", "*.tmpl")
-	componentPattern := filepath.Join(templateDir, "components", "*.tmpl")
-	pagePattern := filepath.Join(templateDir, "pages", "*.tmpl")
+	// Create a new template with custom functions if needed
+	tmpl := template.New("base")
 
-	log.Printf("Loading templates from patterns: %s, %s, %s", layoutPattern, componentPattern, pagePattern)
-
-	// Parse all templates together so they can reference each other
-	tmpl, err := template.ParseGlob(layoutPattern)
-	if err != nil {
-		log.Printf("Error loading layout templates: %v", err)
-		return err
+	// Load all template files from embedded filesystem
+	templatePaths := []string{
+		"templates/layout/base.tmpl",
+		"templates/layout/head.tmpl", 
+		"templates/components/sidebar.tmpl",
+		"templates/components/chat-area.tmpl",
+		"templates/components/modals.tmpl",
+		"templates/components/navbar.tmpl",
+		"templates/pages/index.tmpl",
 	}
 
-	tmpl, err = tmpl.ParseGlob(componentPattern)
-	if err != nil {
-		log.Printf("Error loading component templates: %v", err)
-		return err
-	}
-
-	tmpl, err = tmpl.ParseGlob(pagePattern)
-	if err != nil {
-		log.Printf("Error loading page templates: %v", err)
-		return err
+	for _, path := range templatePaths {
+		content, err := Templates.ReadFile(path)
+		if err != nil {
+			log.Printf("Warning: Could not read template %s: %v", path, err)
+			continue
+		}
+		
+		// Extract the template name from the path
+		name := filepath.Base(path)
+		_, err = tmpl.New(name).Parse(string(content))
+		if err != nil {
+			log.Printf("Error parsing template %s: %v", name, err)
+			return err
+		}
+		log.Printf("Loaded template: %s", name)
 	}
 
 	tr.templates["index"] = tmpl
-	log.Printf("Successfully loaded templates")
+	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
 }
@@ -103,4 +108,3 @@ func GetDefaultData() TemplateData {
 		Version:      "0.0.1",
 	}
 }
-
