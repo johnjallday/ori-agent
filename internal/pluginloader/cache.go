@@ -1,7 +1,10 @@
 package pluginloader
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"plugin"
 	"strings"
@@ -125,11 +128,13 @@ func GetPluginVersion(tool pluginapi.Tool) string {
 // SetAgentContext sets the agent context for plugins that support it.
 func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 	if agentAwareTool, ok := tool.(pluginapi.AgentAwareTool); ok {
-		agentsDir := filepath.Join(filepath.Dir(agentStorePath), "agents")
-		agentDir := filepath.Join(agentsDir, agentName)
+		// The agentStorePath is already something like "agents/default/config.json"
+		// So we just need to get the agent directory from it
+		agentDir := filepath.Dir(agentStorePath)
 		configPath := filepath.Join(agentDir, "config.json")
 		settingsPath := filepath.Join(agentDir, "agent_settings.json")
-		
+
+
 		agentAwareTool.SetAgentContext(pluginapi.AgentContext{
 			Name:         agentName,
 			ConfigPath:   configPath,
@@ -137,4 +142,51 @@ func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 			AgentDir:     agentDir,
 		})
 	}
+}
+
+// ExtractPluginSettingsSchema checks if a plugin has get_settings operation and extracts the settings schema.
+// If found, writes the schema to the specified agent settings file.
+func ExtractPluginSettingsSchema(tool pluginapi.Tool, agentName string) error {
+	// Get plugin definition
+	def := tool.Definition()
+
+	// Check if plugin supports get_settings operation
+	if params, ok := def.Parameters["properties"].(map[string]any); ok {
+		if operation, ok := params["operation"].(map[string]any); ok {
+			if enum, ok := operation["enum"].([]string); ok {
+				supportsGetSettings := false
+				for _, op := range enum {
+					if op == "get_settings" {
+						supportsGetSettings = true
+						break
+					}
+				}
+
+				if supportsGetSettings {
+					// Call get_settings to get the schema
+					result, err := tool.Call(context.Background(), `{"operation": "get_settings"}`)
+					if err != nil {
+						return fmt.Errorf("failed to call get_settings: %w", err)
+					}
+
+					// Create agent directory if it doesn't exist
+					agentDir := filepath.Join("agents", agentName)
+					if err := os.MkdirAll(agentDir, 0755); err != nil {
+						return fmt.Errorf("failed to create agent directory: %w", err)
+					}
+
+					// Write the settings schema to {plugin_name}_settings.json
+					settingsFileName := fmt.Sprintf("%s_settings.json", def.Name)
+					settingsPath := filepath.Join(agentDir, settingsFileName)
+					if err := os.WriteFile(settingsPath, []byte(result), 0644); err != nil {
+						return fmt.Errorf("failed to write plugin settings: %w", err)
+					}
+
+					fmt.Printf("Extracted settings schema for plugin %s to %s\n", def.Name, settingsPath)
+				}
+			}
+		}
+	}
+
+	return nil
 }

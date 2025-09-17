@@ -2,10 +2,12 @@ package pluginhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 
@@ -37,6 +39,12 @@ func New(state store.Store, loader ToolLoader) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle special save-settings endpoint
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/save-settings") {
+		h.saveSettings(w, r)
+		return
+	}
+
 	switch r.Method {
 
 	case http.MethodGet:
@@ -49,7 +57,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.loadFromRegistry(w, r)
 			return
 		}
-		
+
 		// Check if this request contains actual file uploads
 		if _, _, err := r.FormFile("plugin"); err == nil {
 			// Has file upload - use upload handler
@@ -282,4 +290,66 @@ func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
+	// Parse JSON body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		PluginName string            `json:"plugin_name"`
+		Settings   map[string]string `json:"settings"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.PluginName == "" {
+		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		return
+	}
+
+	// Get current agent
+	_, current := h.State.ListAgents()
+
+	// Create agent directory if it doesn't exist
+	agentDir := filepath.Join("agents", current)
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create agent directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save settings to plugin-specific file
+	settingsFileName := fmt.Sprintf("%s_settings.json", req.PluginName)
+	settingsPath := filepath.Join(agentDir, settingsFileName)
+
+	// Convert user settings to JSON
+	settingsData, err := json.MarshalIndent(req.Settings, "", "  ")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(settingsPath, settingsData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write settings file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("Saved plugin settings for %s to %s\n", req.PluginName, settingsPath)
+
+	// Return success response
+	response := map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Settings saved for plugin %s", req.PluginName),
+		"path":    settingsPath,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

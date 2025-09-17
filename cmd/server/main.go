@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
 	"github.com/johnjallday/dolphin-agent/internal/version"
 	web "github.com/johnjallday/dolphin-agent/internal/web"
+	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/config"
 	"github.com/johnjallday/dolphin-agent/internal/registry"
@@ -193,9 +194,8 @@ func main() {
 	clientFactory = client.NewFactory(apiKey)
 
 	// init store (persists agents/plugins/settings; not messages)
-	// Determine agent store path based on current agent from settings
-	currentAgentPath := fmt.Sprintf("agents/%s/config.json", configManager.GetCurrentAgent())
-	agentStorePath = currentAgentPath
+	// Use the index file path for the store, not the individual agent config
+	agentStorePath = "agents/config.json"
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
 		agentStorePath = p
 	} else if abs, err2 := filepath.Abs(agentStorePath); err2 == nil {
@@ -251,7 +251,17 @@ func main() {
 			}
 
 			// Set agent context for plugins that support it
-			pluginloader.SetAgentContext(tool, agName, agentStorePath)
+			// Construct the correct agent store path for this specific agent
+			agentSpecificStorePath := fmt.Sprintf("agents/%s/config.json", agName)
+			if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
+				agentSpecificStorePath = abs
+			}
+			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath)
+
+			// Extract plugin settings schema for this agent if plugin supports get_settings
+			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
+				log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
+			}
 
 			lp.Tool = tool
 			ag.Plugins[key] = lp
@@ -290,7 +300,10 @@ func main() {
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler)
 	mux.HandleFunc("/api/plugin-updates", pluginUpdatesHandler)
 	mux.HandleFunc("/api/plugins/download", pluginDownloadHandler)
+	mux.HandleFunc("/api/plugins/save-settings", pluginSaveSettingsHandler)
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
+	mux.HandleFunc("/api/plugins/", pluginInitHandler) // Handle /api/plugins/{name}/config and /api/plugins/{name}/initialize
+	mux.HandleFunc("/api/plugins/execute", pluginExecuteHandler)
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/api-key", apiKeyHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
@@ -474,7 +487,14 @@ func pluginRegistryHandler(w http.ResponseWriter, r *http.Request) {
 		_, current := st.ListAgents()
 
 		// Set agent context for plugins that support it
-		pluginloader.SetAgentContext(tool, current, agentStorePath)
+		// Construct the agent-specific path since agentStorePath is now the index file
+		agentSpecificPath := filepath.Join(filepath.Dir(agentStorePath), current, "config.json")
+		pluginloader.SetAgentContext(tool, current, agentSpecificPath)
+
+		// Extract plugin settings schema for this agent if plugin supports get_settings
+		if err := pluginloader.ExtractPluginSettingsSchema(tool, current); err != nil {
+			log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", def.Name, current, err)
+		}
 		ag, ok := st.GetAgent(current)
 		if !ok {
 			http.Error(w, "current agent not found", http.StatusInternalServerError)
@@ -726,6 +746,18 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	ag, ok := st.GetAgent(current)
 	if !ok {
 		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Check for uninitialized plugins before proceeding with chat
+	uninitializedPlugins := checkUninitializedPlugins(ag)
+	if len(uninitializedPlugins) > 0 {
+		initPrompt := generateInitializationPrompt(uninitializedPlugins)
+		json.NewEncoder(w).Encode(map[string]any{
+			"response":                initPrompt,
+			"requires_initialization": true,
+			"uninitialized_plugins":   uninitializedPlugins,
+		})
 		return
 	}
 
@@ -1134,4 +1166,404 @@ func pluginDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"filename": filename,
 		"path":     filePath,
 	})
+}
+
+// Plugin Initialization Handler - handles plugin config discovery and initialization
+func pluginInitHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse URL path to extract plugin name and action
+	// Expected paths: /api/plugins/{name}/config or /api/plugins/{name}/initialize
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/plugins/"), "/")
+	if len(pathParts) < 2 {
+		http.Error(w, "invalid path format", http.StatusBadRequest)
+		return
+	}
+	
+	pluginName := pathParts[0]
+	action := pathParts[1]
+	
+	if pluginName == "" {
+		http.Error(w, "plugin name required", http.StatusBadRequest)
+		return
+	}
+	
+	// Get current agent and its plugins
+	_, current := st.ListAgents()
+	ag, ok := st.GetAgent(current)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+	
+	// Find the plugin
+	plugin, exists := ag.Plugins[pluginName]
+	if !exists {
+		http.Error(w, "plugin not found", http.StatusNotFound)
+		return
+	}
+	
+	switch action {
+	case "config":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handlePluginConfigDiscovery(w, plugin.Tool)
+		
+	case "initialize":
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handlePluginInitialization(w, r, plugin.Tool, pluginName, current)
+		
+	default:
+		http.Error(w, "invalid action", http.StatusBadRequest)
+	}
+}
+
+// Plugin Execute Handler - directly executes plugin function calls
+func pluginExecuteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		PluginName string                 `json:"plugin_name"`
+		Parameters map[string]interface{} `json:"parameters"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.PluginName == "" {
+		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		return
+	}
+
+	// Get current agent and its plugins
+	_, current := st.ListAgents()
+	ag, ok := st.GetAgent(current)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Find the plugin
+	plugin, exists := ag.Plugins[req.PluginName]
+	if !exists {
+		http.Error(w, "plugin not found", http.StatusNotFound)
+		return
+	}
+
+	// Convert parameters to JSON string
+	argsJSON, err := json.Marshal(req.Parameters)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to marshal parameters: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Execute the plugin function
+	result, err := plugin.Tool.Call(r.Context(), string(argsJSON))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("plugin execution error: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the result
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"result":  result,
+	})
+}
+
+func handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.Tool) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if plugin implements SettingsProvider (for legacy plugins)
+	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
+		isInitialized := settingsProvider.IsInitialized()
+
+		// Get current settings if the plugin supports it
+		var currentSettings map[string]interface{}
+		if settingsJSON, err := settingsProvider.GetSettings(); err == nil {
+			json.Unmarshal([]byte(settingsJSON), &currentSettings)
+		}
+
+		response := map[string]any{
+			"supports_initialization": true,
+			"is_initialized":          isInitialized,
+			"is_legacy_plugin":        true,
+			"current_settings":        currentSettings,
+		}
+
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if plugin implements InitializationProvider (for modern plugins)
+	initProvider, ok := tool.(pluginapi.InitializationProvider)
+	if !ok {
+		// Plugin doesn't support any kind of initialization
+		json.NewEncoder(w).Encode(map[string]any{
+			"supports_initialization": false,
+			"message": "Plugin does not support automatic initialization",
+		})
+		return
+	}
+
+	// Get required configuration variables
+	configVars := initProvider.GetRequiredConfig()
+
+	// Check if plugin is already initialized (if it supports SettingsProvider)
+	isInitialized := false
+	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
+		isInitialized = settingsProvider.IsInitialized()
+	}
+
+	response := map[string]any{
+		"supports_initialization": true,
+		"is_initialized":         isInitialized,
+		"required_config":        configVars,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func handlePluginInitialization(w http.ResponseWriter, r *http.Request, tool pluginapi.Tool, pluginName, agentName string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse configuration from request body first
+	var configData map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "Invalid JSON in request body: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if plugin implements SettingsProvider (legacy plugins)
+	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
+		// For legacy plugins, update settings directly using SetSettings
+		settingsJSON, err := json.Marshal(configData)
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"message": "Failed to encode settings: " + err.Error(),
+			})
+			return
+		}
+
+		if err := settingsProvider.SetSettings(string(settingsJSON)); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"message": "Failed to update settings: " + err.Error(),
+			})
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"message": "Plugin settings updated successfully",
+		})
+		return
+	}
+
+	// Check if plugin implements InitializationProvider (modern plugins)
+	initProvider, ok := tool.(pluginapi.InitializationProvider)
+	if !ok {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "Plugin does not support automatic initialization",
+		})
+		return
+	}
+	
+	// Validate configuration
+	if err := initProvider.ValidateConfig(configData); err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "Configuration validation failed: " + err.Error(),
+		})
+		return
+	}
+	
+	// Initialize plugin with configuration
+	if err := initProvider.InitializeWithConfig(configData); err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "Plugin initialization failed: " + err.Error(),
+		})
+		return
+	}
+	
+	// Provide agent context if plugin supports it
+	if agentAware, ok := tool.(pluginapi.AgentAwareTool); ok {
+		agentDir := fmt.Sprintf("agents/%s", agentName)
+		agentContext := pluginapi.AgentContext{
+			Name:         agentName,
+			ConfigPath:   fmt.Sprintf("%s/config.json", agentDir),
+			SettingsPath: fmt.Sprintf("%s/agent_settings.json", agentDir),
+			AgentDir:     agentDir,
+		}
+		agentAware.SetAgentContext(agentContext)
+	}
+	
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": "Plugin initialized successfully",
+	})
+}
+
+// checkUninitializedPlugins checks which plugins need initialization
+func checkUninitializedPlugins(agent *types.Agent) []map[string]any {
+	var uninitializedPlugins []map[string]any
+	
+	for name, plugin := range agent.Plugins {
+		// Check if plugin supports initialization
+		initProvider, supportsInit := plugin.Tool.(pluginapi.InitializationProvider)
+		if !supportsInit {
+			// Check if plugin supports SettingsProvider (legacy check)
+			if settingsProvider, ok := plugin.Tool.(pluginapi.SettingsProvider); ok {
+				isInitialized := settingsProvider.IsInitialized()
+				
+				if !isInitialized {
+					// For plugins that support SettingsProvider but not InitializationProvider,
+					// we still want to show them as needing initialization
+					uninitializedPlugins = append(uninitializedPlugins, map[string]any{
+						"name":            name,
+						"description":     plugin.Definition.Description.String(),
+						"required_config": []pluginapi.ConfigVariable{}, // Empty config vars since we can't detect them
+						"legacy_plugin":   true,
+					})
+				}
+			}
+			continue
+		}
+		
+		// Check if plugin is already initialized
+		isInitialized := false
+		if settingsProvider, ok := plugin.Tool.(pluginapi.SettingsProvider); ok {
+			isInitialized = settingsProvider.IsInitialized()
+		}
+		
+		if !isInitialized {
+			// Get required config for this plugin
+			configVars := initProvider.GetRequiredConfig()
+			uninitializedPlugins = append(uninitializedPlugins, map[string]any{
+				"name":            name,
+				"description":     plugin.Definition.Description.String(),
+				"required_config": configVars,
+			})
+		}
+	}
+	return uninitializedPlugins
+}
+
+// generateInitializationPrompt creates a user-friendly prompt for plugin initialization
+func generateInitializationPrompt(uninitializedPlugins []map[string]any) string {
+	if len(uninitializedPlugins) == 0 {
+		return ""
+	}
+	
+	var prompt strings.Builder
+	
+	if len(uninitializedPlugins) == 1 {
+		plugin := uninitializedPlugins[0]
+		prompt.WriteString(fmt.Sprintf("🔧 **Plugin Setup Required**\n\n"))
+		prompt.WriteString(fmt.Sprintf("The **%s** plugin needs to be configured before you can use it.\n\n", plugin["name"]))
+		prompt.WriteString(fmt.Sprintf("**Description:** %s\n\n", plugin["description"]))
+		
+		if configVars, ok := plugin["required_config"].([]pluginapi.ConfigVariable); ok && len(configVars) > 0 {
+			prompt.WriteString("**Required configuration:**\n")
+			for _, configVar := range configVars {
+				prompt.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", configVar.Name, configVar.Type, configVar.Description))
+			}
+		}
+		
+		prompt.WriteString("\n**Please click the 'Configure Plugin' button to set up this plugin.**")
+	} else {
+		prompt.WriteString(fmt.Sprintf("🔧 **Plugin Setup Required**\n\n"))
+		prompt.WriteString(fmt.Sprintf("You have %d plugins that need to be configured before you can use them:\n\n", len(uninitializedPlugins)))
+		
+		for i, plugin := range uninitializedPlugins {
+			prompt.WriteString(fmt.Sprintf("%d. **%s** - %s\n", i+1, plugin["name"], plugin["description"]))
+		}
+		
+		prompt.WriteString("\n**Please configure these plugins to unlock their full functionality.**")
+	}
+	
+	return prompt.String()
+}
+
+// Plugin Settings Save Handler
+func pluginSaveSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse JSON body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		PluginName string            `json:"plugin_name"`
+		Settings   map[string]string `json:"settings"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.PluginName == "" {
+		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		return
+	}
+
+	// Get current agent
+	_, current := st.ListAgents()
+
+	// Create agent directory if it doesn't exist
+	agentDir := filepath.Join("agents", current)
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create agent directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save settings to plugin-specific file
+	settingsFileName := fmt.Sprintf("%s_settings.json", req.PluginName)
+	settingsPath := filepath.Join(agentDir, settingsFileName)
+
+	// Convert user settings to JSON
+	settingsData, err := json.MarshalIndent(req.Settings, "", "  ")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(settingsPath, settingsData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write settings file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("Saved plugin settings for %s to %s\n", req.PluginName, settingsPath)
+
+	// Return success response
+	response := map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Settings saved for plugin %s", req.PluginName),
+		"path":    settingsPath,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

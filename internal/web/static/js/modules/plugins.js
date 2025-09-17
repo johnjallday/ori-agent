@@ -6,6 +6,56 @@ let uploadListenersSetup = false;
 
 // Plugin Management Functions
 
+// Check which plugins need initialization
+async function checkPluginInitializationStatus(activePluginNames) {
+  const initStatus = new Map();
+
+  try {
+    // Make a test chat request to get uninitialized plugins info
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: '_check_init_status_' })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.requires_initialization && data.uninitialized_plugins) {
+        for (const plugin of data.uninitialized_plugins) {
+          if (activePluginNames.has(plugin.name)) {
+            initStatus.set(plugin.name, {
+              needsInit: true,
+              configVars: plugin.required_config || [],
+              isLegacy: plugin.legacy_plugin || false
+            });
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to check plugin initialization status:', error);
+
+    // Fallback: try individual config endpoints
+    for (const pluginName of activePluginNames) {
+      try {
+        const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/config`);
+        if (response.ok) {
+          const configData = await response.json();
+          initStatus.set(pluginName, {
+            needsInit: !configData.is_initialized,
+            configVars: configData.required_config || [],
+            isLegacy: false
+          });
+        }
+      } catch (error) {
+        console.warn(`Failed to check initialization status for ${pluginName}:`, error);
+      }
+    }
+  }
+
+  return initStatus;
+}
+
 // Load available plugins
 async function loadPlugins() {
   try {
@@ -15,21 +65,24 @@ async function loadPlugins() {
       throw new Error('Failed to fetch plugin registry');
     }
     const registry = await registryResponse.json();
-    
+
     // Fetch currently loaded plugins for this agent
     const activeResponse = await fetch('/api/plugins');
     if (!activeResponse.ok) {
       throw new Error('Failed to fetch active plugins');
     }
     const activePlugins = await activeResponse.json();
-    
+
     // Create a set of active plugin names for quick lookup
     const activePluginNames = new Set(activePlugins.plugins.map(p => p.name));
-    
+
     // Filter to only show local plugins in sidebar (those without github_repo)
     const localPlugins = registry.plugins.filter(plugin => !plugin.github_repo);
-    
-    displayPlugins(localPlugins, activePluginNames);
+
+    // Fetch plugin initialization status for active plugins
+    const pluginInitStatus = await checkPluginInitializationStatus(activePluginNames);
+
+    displayPlugins(localPlugins, activePluginNames, pluginInitStatus);
   } catch (error) {
     console.error('Error loading plugins:', error);
     const pluginsList = document.getElementById('pluginsList');
@@ -40,20 +93,22 @@ async function loadPlugins() {
 }
 
 // Display plugins in the sidebar
-function displayPlugins(plugins, activePluginNames) {
+function displayPlugins(plugins, activePluginNames, pluginInitStatus = new Map()) {
   const pluginsList = document.getElementById('pluginsList');
   if (!pluginsList) return;
-  
+
   if (plugins.length === 0) {
     pluginsList.innerHTML = '<div class="text-muted small">No plugins available</div>';
     return;
   }
-  
+
   pluginsList.innerHTML = plugins.map(plugin => {
     const isActive = activePluginNames.has(plugin.name);
     const pluginPath = plugin.path || '';
     const isUploaded = pluginPath.includes('uploaded_plugins') && !plugin.github_repo;
-    
+    const initStatus = pluginInitStatus.get(plugin.name);
+    const needsConfig = isActive && initStatus && initStatus.needsInit;
+
     return `
       <div class="plugin-item">
         <div class="d-flex align-items-center justify-content-between">
@@ -61,14 +116,24 @@ function displayPlugins(plugins, activePluginNames) {
             <div class="fw-medium d-flex align-items-center" style="color: var(--text-primary);">
               ${plugin.name}
               ${isUploaded ? '<span class="badge badge-success ms-2" style="font-size: 0.7em;">Local</span>' : ''}
+              ${needsConfig ? '<span class="badge badge-warning ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
             </div>
             <div class="text-muted small">${plugin.description || 'No description available'}</div>
             ${plugin.version ? `<div class="text-muted" style="font-size: 0.7em;">v${plugin.version}</div>` : ''}
           </div>
           <div class="d-flex align-items-center">
+            ${needsConfig ? `
+              <button class="btn btn-sm btn-outline-warning me-2 plugin-config-btn"
+                      data-plugin-name="${plugin.name}"
+                      title="Configure plugin">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                </svg>
+              </button>
+            ` : ''}
             ${isUploaded ? `
-              <button class="btn btn-sm btn-outline-danger me-2 plugin-remove-btn" 
-                      data-plugin-name="${plugin.name}" 
+              <button class="btn btn-sm btn-outline-danger me-2 plugin-remove-btn"
+                      data-plugin-name="${plugin.name}"
                       data-plugin-path="${plugin.path}"
                       title="Remove plugin">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -77,8 +142,8 @@ function displayPlugins(plugins, activePluginNames) {
               </button>
             ` : ''}
             <div class="form-check form-switch">
-              <input class="form-check-input plugin-toggle" type="checkbox" 
-                     data-plugin-name="${plugin.name}" 
+              <input class="form-check-input plugin-toggle" type="checkbox"
+                     data-plugin-name="${plugin.name}"
                      data-plugin-path="${plugin.path}"
                      ${isActive ? 'checked' : ''}>
             </div>
@@ -87,7 +152,7 @@ function displayPlugins(plugins, activePluginNames) {
       </div>
     `;
   }).join('');
-  
+
   // Add event listeners to plugin toggles
   setupPluginToggles();
 }
@@ -101,40 +166,41 @@ function setupPluginToggles() {
       const pluginName = e.target.dataset.pluginName;
       const pluginPath = e.target.dataset.pluginPath;
       const isEnabled = e.target.checked;
-      
+
       console.log(`Toggle event: ${pluginName}, isEnabled: ${isEnabled}`);
-      
+
       try {
         await togglePlugin(pluginName, pluginPath, isEnabled);
       } catch (error) {
         console.error('Failed to toggle plugin:', error);
         // Revert the toggle state
         e.target.checked = !isEnabled;
-        
-        // If we were trying to disable and it failed, still refresh to ensure clean state
-        if (!isEnabled) {
-          console.log('Plugin disable failed but refreshing anyway to ensure clean state');
-          window.location.reload();
-          return;
-        }
-        
         alert(`Failed to ${isEnabled ? 'enable' : 'disable'} plugin: ${error.message}`);
       }
     });
   });
-  
+
+  // Setup plugin configuration buttons
+  const configButtons = document.querySelectorAll('.plugin-config-btn');
+  configButtons.forEach(button => {
+    button.addEventListener('click', async (e) => {
+      const pluginName = e.target.closest('button').dataset.pluginName;
+      await showPluginConfigModal(pluginName);
+    });
+  });
+
   // Setup plugin remove buttons
   const removeButtons = document.querySelectorAll('.plugin-remove-btn');
   removeButtons.forEach(button => {
     button.addEventListener('click', async (e) => {
       const pluginName = e.target.closest('button').dataset.pluginName;
       const pluginPath = e.target.closest('button').dataset.pluginPath;
-      
+
       // Confirm removal
       if (!confirm(`Are you sure you want to remove the plugin "${pluginName}"? This action cannot be undone.`)) {
         return;
       }
-      
+
       try {
         await removePlugin(pluginName, pluginPath);
         // Refresh plugins list
@@ -150,11 +216,23 @@ function setupPluginToggles() {
 // Toggle plugin on/off
 async function togglePlugin(pluginName, pluginPath, enable) {
   console.log(`togglePlugin called: ${pluginName}, enable: ${enable}`);
-  
+
   if (enable) {
+    // Check if plugin has filepath settings that need user input
+    const hasFilepathSettings = await checkPluginFilepathSettings(pluginName, pluginPath);
+    if (hasFilepathSettings) {
+      const userSettings = await showFilepathSettingsModal(pluginName, hasFilepathSettings);
+      if (!userSettings) {
+        // User cancelled
+        return;
+      }
+      // Continue with enable process using user settings
+      return await enablePluginWithSettings(pluginName, pluginPath, userSettings);
+    }
+
     // For enabling, check if the file needs to be renamed back from .disabled
     const disabledPath = pluginPath + '.disabled';
-    
+
     // Try to enable the plugin first
     const enableResponse = await fetch('/api/plugins', {
       method: 'POST',
@@ -206,66 +284,20 @@ async function togglePlugin(pluginName, pluginPath, enable) {
     console.log(`Plugin ${pluginName} enabled successfully`);
     
   } else {
-    // For disabling, first unload from cache
+    // For disabling, unload from cache
     const unloadResponse = await fetch(`/api/plugins?name=${encodeURIComponent(pluginName)}`, {
       method: 'DELETE'
     });
-    
+
     if (!unloadResponse.ok) {
-      console.warn('Failed to unload plugin from cache, but continuing with disable');
+      const errorText = await unloadResponse.text();
+      throw new Error(`Failed to unload plugin: ${errorText}`);
     }
-    
-    // Show immediate notification that requires server restart
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10000;
-      background: var(--warning-color, #ff6b35); color: white; padding: 20px 30px;
-      border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-      font-weight: 500; max-width: 400px; text-align: center;
-      border: 3px solid #ff8c5a;
-    `;
-    notification.innerHTML = `
-      <div style="font-size: 18px; margin-bottom: 10px;">⚠️ Plugin Disable Required</div>
-      <div style="margin-bottom: 15px;">
-        To fully disable "${pluginName}", the server must be restarted.<br>
-        The plugin will remain active until then.
-      </div>
-      <button id="restartServerBtn" style="
-        background: white; color: #ff6b35; border: none; padding: 8px 16px;
-        border-radius: 6px; font-weight: bold; cursor: pointer; margin-right: 10px;
-      ">Restart Server</button>
-      <button id="cancelDisableBtn" style="
-        background: transparent; color: white; border: 1px solid white;
-        padding: 8px 16px; border-radius: 6px; cursor: pointer;
-      ">Cancel</button>
-    `;
-    document.body.appendChild(notification);
-    
-    // Handle restart button
-    document.getElementById('restartServerBtn').onclick = () => {
-      // Show restarting message
-      notification.innerHTML = `
-        <div style="font-size: 16px;">🔄 Restarting server...</div>
-        <div style="margin-top: 10px; font-size: 14px;">Page will reload automatically</div>
-      `;
-      
-      // Simulate server restart by reloading after a delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 2000);
-    };
-    
-    // Handle cancel button
-    document.getElementById('cancelDisableBtn').onclick = () => {
-      notification.remove();
-      // Revert the toggle state since we're canceling
-      const toggle = document.querySelector(`[data-plugin-name="${pluginName}"]`);
-      if (toggle) {
-        toggle.checked = true; // Keep it enabled
-      }
-    };
-    
-    console.log(`Plugin ${pluginName} disable initiated - user must restart server`);
+
+    console.log(`Plugin ${pluginName} disabled successfully`);
+
+    // Refresh the plugins list to show the updated state
+    await loadPlugins();
   }
 }
 
@@ -620,6 +652,554 @@ function showUploadResult(type, message) {
   resultDiv.classList.remove('d-none');
 }
 
+// Show plugin configuration modal
+async function showPluginConfigModal(pluginName) {
+  try {
+    // Fetch plugin configuration info
+    const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/config`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch plugin configuration');
+    }
+
+    const configData = await response.json();
+
+    // Check if this is a legacy plugin with current settings
+    if (configData.is_legacy_plugin && configData.current_settings) {
+      showLegacyPluginConfigModal(pluginName, configData.current_settings);
+      return;
+    }
+
+    // Handle modern plugins with required_config
+    const configVars = configData.required_config || [];
+    if (configVars.length === 0) {
+      // No configuration needed, but still allow manual setup for legacy plugins
+      showLegacyPluginSetupModal(pluginName);
+      return;
+    }
+
+    // Create modal HTML
+    const modalHtml = `
+      <div class="modal fade" id="pluginConfigModal" tabindex="-1" aria-labelledby="pluginConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+              <h5 class="modal-title" id="pluginConfigModalLabel" style="color: var(--text-primary);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                </svg>
+                Configure ${pluginName}
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+            </div>
+            <div class="modal-body">
+              <form id="pluginConfigForm">
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                  This plugin requires configuration before it can be used. Please provide the following information:
+                </p>
+                ${configVars.map(configVar => `
+                  <div class="mb-3">
+                    <label for="config_${configVar.name}" class="form-label" style="color: var(--text-primary);">
+                      ${configVar.name}
+                      ${configVar.required ? '<span style="color: var(--danger-color);">*</span>' : ''}
+                    </label>
+                    ${configVar.type === 'password' ? `
+                      <input type="password" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
+                             placeholder="${configVar.description}"
+                             ${configVar.required ? 'required' : ''}
+                             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                    ` : configVar.type === 'number' ? `
+                      <input type="number" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
+                             placeholder="${configVar.description}"
+                             ${configVar.required ? 'required' : ''}
+                             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                    ` : configVar.type === 'boolean' ? `
+                      <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="config_${configVar.name}" name="${configVar.name}">
+                        <label class="form-check-label" for="config_${configVar.name}" style="color: var(--text-secondary);">
+                          ${configVar.description}
+                        </label>
+                      </div>
+                    ` : `
+                      <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
+                             placeholder="${configVar.description}"
+                             ${configVar.required ? 'required' : ''}
+                             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                    `}
+                    <div class="form-text" style="color: var(--text-secondary);">
+                      ${configVar.description}
+                    </div>
+                  </div>
+                `).join('')}
+              </form>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                      style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-primary" id="savePluginConfigBtn"
+                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('pluginConfigModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Setup save button event listener
+    document.getElementById('savePluginConfigBtn').addEventListener('click', async () => {
+      await savePluginConfig(pluginName, configVars);
+    });
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('pluginConfigModal'));
+    modal.show();
+
+  } catch (error) {
+    console.error('Error showing plugin config modal:', error);
+    alert(`Failed to show plugin configuration: ${error.message}`);
+  }
+}
+
+// Save plugin configuration
+async function savePluginConfig(pluginName, configVars) {
+  try {
+    const form = document.getElementById('pluginConfigForm');
+    const formData = new FormData(form);
+    const configData = {};
+
+    // Convert form data to config object
+    for (const configVar of configVars) {
+      const value = formData.get(configVar.name);
+      if (configVar.type === 'boolean') {
+        configData[configVar.name] = document.getElementById(`config_${configVar.name}`).checked;
+      } else if (configVar.type === 'number') {
+        configData[configVar.name] = value ? Number(value) : null;
+      } else {
+        configData[configVar.name] = value;
+      }
+    }
+
+    // Send configuration to server
+    const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/initialize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(configData)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save plugin configuration');
+    }
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('pluginConfigModal'));
+    modal.hide();
+
+    // Show success message
+    alert(`Plugin "${pluginName}" has been configured successfully!`);
+
+    // Refresh plugins list to update status
+    await loadPlugins();
+
+  } catch (error) {
+    console.error('Error saving plugin config:', error);
+    alert(`Failed to save plugin configuration: ${error.message}`);
+  }
+}
+
+// Show legacy plugin configuration modal with actual settings fields
+async function showLegacyPluginConfigModal(pluginName, currentSettings) {
+  try {
+    // Dynamically generate field information from current settings
+    const settingsFields = [];
+
+    for (const [key, value] of Object.entries(currentSettings)) {
+      // Skip the 'initialized' field as it's handled automatically
+      if (key === 'initialized') continue;
+
+      // Convert snake_case to human readable labels
+      const label = key.split('_').map(word =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+      ).join(' ');
+
+      // Determine field type based on value type
+      let fieldType = 'text';
+      let fieldValue = value;
+
+      if (typeof value === 'boolean') {
+        fieldType = 'checkbox';
+      } else if (typeof value === 'number') {
+        fieldType = 'number';
+      } else {
+        fieldValue = String(value || '');
+      }
+
+      // Generate description based on field name
+      let description = `Configure the ${label.toLowerCase()}`;
+      if (key.includes('dir') || key.includes('directory')) {
+        description = `Path to the ${label.toLowerCase().replace(' dir', ' directory')}`;
+      } else if (key.includes('template')) {
+        description = `Path to the ${label.toLowerCase()}`;
+      } else if (key.includes('script')) {
+        description = `Path to the ${label.toLowerCase()}`;
+      }
+
+      settingsFields.push({
+        name: key,
+        label: label,
+        type: fieldType,
+        value: fieldValue,
+        description: description
+      });
+    }
+
+    // Create modal HTML for legacy plugin configuration
+    const modalHtml = `
+      <div class="modal fade" id="pluginConfigModal" tabindex="-1" aria-labelledby="pluginConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+              <h5 class="modal-title" id="pluginConfigModalLabel" style="color: var(--text-primary);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                </svg>
+                Configure ${pluginName}
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+            </div>
+            <div class="modal-body">
+              <form id="pluginConfigForm">
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                  Configure the plugin settings below. These settings will be saved to your agent configuration.
+                </p>
+                ${settingsFields.map(field => `
+                  <div class="mb-3">
+                    <label for="setting_${field.name}" class="form-label" style="color: var(--text-primary);">
+                      ${field.label}
+                    </label>
+                    ${field.type === 'checkbox' ? `
+                      <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="setting_${field.name}" name="${field.name}"
+                               ${field.value ? 'checked' : ''}
+                               style="background: var(--bg-tertiary); border: 1px solid var(--border-color);">
+                        <label class="form-check-label" for="setting_${field.name}" style="color: var(--text-secondary);">
+                          ${field.description}
+                        </label>
+                      </div>
+                    ` : `
+                      <input type="${field.type}" class="form-control" id="setting_${field.name}" name="${field.name}"
+                             value="${field.value}"
+                             placeholder="${field.description}"
+                             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <div class="form-text" style="color: var(--text-secondary);">
+                        ${field.description}
+                      </div>
+                    `}
+                  </div>
+                `).join('')}
+              </form>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                      style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-primary" id="saveLegacyConfigBtn"
+                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('pluginConfigModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Setup save button event listener
+    document.getElementById('saveLegacyConfigBtn').addEventListener('click', async () => {
+      await saveLegacyPluginConfig(pluginName, settingsFields);
+    });
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('pluginConfigModal'));
+    modal.show();
+
+  } catch (error) {
+    console.error('Error showing legacy plugin config modal:', error);
+    alert(`Failed to show plugin configuration: ${error.message}`);
+  }
+}
+
+// Prepare parameters for complete_setup operation based on plugin type
+function prepareCompleteSetupParams(pluginName, configData) {
+  console.log('Preparing params for plugin:', pluginName, 'with data:', configData);
+  const params = ['operation="complete_setup"'];
+
+  if (pluginName === 'music_project_manager') {
+    // music_project_manager expects project_dir and template_dir
+    if (configData.project_dir) {
+      params.push(`project_dir="${configData.project_dir}"`);
+    }
+    if (configData.template_dir) {
+      params.push(`template_dir="${configData.template_dir}"`);
+    }
+    // Add default template if provided
+    if (configData.default_template) {
+      params.push(`default_template="${configData.default_template}"`);
+    }
+  } else if (pluginName === 'reascript_launcher') {
+    // reascript_launcher expects scripts_dir
+    if (configData.scripts_dir) {
+      params.push(`scripts_dir="${configData.scripts_dir}"`);
+    }
+  } else {
+    // For other plugins, add all non-initialized fields as parameters
+    for (const [key, value] of Object.entries(configData)) {
+      if (key !== 'initialized' && value) {
+        params.push(`${key.toLowerCase()}="${value}"`);
+      }
+    }
+  }
+
+  console.log('Generated params:', params.join(', '));
+  return params.join(', ');
+}
+
+function prepareCompleteSetupParamsObject(pluginName, configData) {
+  console.log('Preparing params object for plugin:', pluginName, 'with data:', configData);
+  const params = { operation: "complete_setup" };
+
+  if (pluginName === 'music_project_manager') {
+    // music_project_manager expects project_dir and template_dir
+    if (configData.project_dir) {
+      params.project_dir = configData.project_dir;
+    }
+    if (configData.template_dir) {
+      params.template_dir = configData.template_dir;
+    }
+    // Add default template if provided
+    if (configData.default_template) {
+      params.default_template = configData.default_template;
+    }
+  } else if (pluginName === 'reascript_launcher') {
+    // reascript_launcher expects scripts_dir
+    if (configData.scripts_dir) {
+      params.scripts_dir = configData.scripts_dir;
+    }
+  } else {
+    // For other plugins, add all non-initialized fields as parameters
+    for (const [key, value] of Object.entries(configData)) {
+      if (key !== 'initialized' && value) {
+        params[key.toLowerCase()] = value;
+      }
+    }
+  }
+
+  console.log('Generated params object:', params);
+  return params;
+}
+
+// Save legacy plugin configuration
+async function saveLegacyPluginConfig(pluginName, settingsFields) {
+  try {
+    const form = document.getElementById('pluginConfigForm');
+    const formData = new FormData(form);
+    const configData = {};
+
+    // Convert form data to config object
+    for (const field of settingsFields) {
+      if (field.type === 'checkbox') {
+        configData[field.name] = document.getElementById(`setting_${field.name}`).checked;
+      } else if (field.type === 'number') {
+        const value = formData.get(field.name);
+        configData[field.name] = value ? Number(value) : 0;
+      } else {
+        configData[field.name] = formData.get(field.name) || '';
+      }
+    }
+
+    // Mark as initialized
+    configData.initialized = true;
+
+    // Call complete_setup operation via plugin execution
+    const parameters = prepareCompleteSetupParamsObject(pluginName, configData);
+
+    console.log('Plugin configuration parameters:', parameters);
+    console.log('Config data:', configData);
+    console.log('Form field names and values:');
+    for (const key in configData) {
+      console.log(`  ${key}: ${configData[key]}`);
+    }
+
+    const response = await fetch('/api/plugins/execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        plugin_name: pluginName,
+        parameters: parameters
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save plugin configuration');
+    }
+
+    // Parse response to check for errors from plugin execution
+    const result = await response.json();
+    if (result.error) {
+      throw new Error(result.error);
+    }
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('pluginConfigModal'));
+    modal.hide();
+
+    // Show success message
+    alert(`Plugin "${pluginName}" has been configured successfully!`);
+
+    // Refresh plugins list to update status
+    await loadPlugins();
+
+  } catch (error) {
+    console.error('Error saving legacy plugin config:', error);
+    alert(`Failed to save plugin configuration: ${error.message}`);
+  }
+}
+
+// Show legacy plugin setup modal for plugins that require manual configuration
+async function showLegacyPluginSetupModal(pluginName) {
+  try {
+    // Create modal HTML for legacy plugins
+    const modalHtml = `
+      <div class="modal fade" id="pluginConfigModal" tabindex="-1" aria-labelledby="pluginConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+              <h5 class="modal-title" id="pluginConfigModalLabel" style="color: var(--text-primary);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2.18 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                </svg>
+                Configure ${pluginName}
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+            </div>
+            <div class="modal-body">
+              <div style="color: var(--text-secondary); margin-bottom: 20px;">
+                <p>This plugin requires manual setup through chat interaction.</p>
+                <p>Click "Start Setup" below, then follow the prompts in the chat to configure the plugin.</p>
+                <div class="alert alert-info" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  <strong>Setup Instructions:</strong><br>
+                  1. Click "Start Setup" to begin<br>
+                  2. The plugin will guide you through configuration in the chat<br>
+                  3. Follow the prompts to set required directories and settings
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                      style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-primary" id="startLegacySetupBtn"
+                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                Start Setup
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('pluginConfigModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Setup start setup button event listener
+    document.getElementById('startLegacySetupBtn').addEventListener('click', async () => {
+      await startLegacyPluginSetup(pluginName);
+    });
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('pluginConfigModal'));
+    modal.show();
+
+  } catch (error) {
+    console.error('Error showing legacy plugin setup modal:', error);
+    alert(`Failed to show plugin setup: ${error.message}`);
+  }
+}
+
+// Start legacy plugin setup by sending a setup command via chat
+async function startLegacyPluginSetup(pluginName) {
+  try {
+    // Close the modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('pluginConfigModal'));
+    modal.hide();
+
+    // Send a setup command to the chat
+    const setupMessage = `${pluginName} init_setup`;
+
+    // Add the setup message to chat and send it
+    if (typeof sendMessage === 'function') {
+      await sendMessage(setupMessage);
+    } else {
+      // Fallback: manually trigger the setup via API
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: setupMessage })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Add both user message and response to chat
+        if (typeof addMessageToChat === 'function') {
+          addMessageToChat(setupMessage, true);
+          addMessageToChat(data.response, false);
+        }
+      }
+    }
+
+    // Refresh plugins list after setup
+    setTimeout(() => {
+      loadPlugins();
+    }, 1000);
+
+  } catch (error) {
+    console.error('Error starting legacy plugin setup:', error);
+    alert(`Failed to start plugin setup: ${error.message}`);
+  }
+}
+
 // Setup plugin management event listeners
 function setupPluginManagement() {
   // Plugin management buttons
@@ -640,6 +1220,245 @@ function setupPluginManagement() {
   }
 
   console.log('Plugin management setup complete');
+}
+
+// Check if plugin has filepath settings that require user input
+async function checkPluginFilepathSettings(pluginName, pluginPath) {
+  try {
+    // Temporarily enable plugin to call get_settings
+    const tempEnableResponse = await fetch('/api/plugins', {
+      method: 'POST',
+      body: (() => {
+        const formData = new FormData();
+        formData.append('name', pluginName);
+        formData.append('path', pluginPath);
+        return formData;
+      })()
+    });
+
+    if (!tempEnableResponse.ok) {
+      return null; // Can't check, proceed normally
+    }
+
+    // Call get_settings to see what fields are needed
+    const settingsResponse = await fetch('/api/plugins/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plugin_name: pluginName,
+        parameters: { operation: 'get_settings' }
+      })
+    });
+
+    if (settingsResponse.ok) {
+      const result = await settingsResponse.json();
+      if (result.result) {
+        const settings = JSON.parse(result.result);
+        const filepathFields = {};
+
+        // Find fields with 'filepath' type
+        for (const [fieldName, fieldType] of Object.entries(settings)) {
+          if (fieldType === 'filepath') {
+            filepathFields[fieldName] = fieldType;
+          }
+        }
+
+        // Disable the plugin again since this was just for checking
+        await fetch(`/api/plugins?name=${encodeURIComponent(pluginName)}`, {
+          method: 'DELETE'
+        });
+
+        return Object.keys(filepathFields).length > 0 ? filepathFields : null;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error checking plugin filepath settings:', error);
+    return null;
+  }
+}
+
+// Show modal for filepath settings input
+async function showFilepathSettingsModal(pluginName, filepathFields) {
+  return new Promise((resolve) => {
+    // Create modal HTML
+    const modalHtml = `
+      <div class="modal fade" id="filepathSettingsModal" tabindex="-1" aria-labelledby="filepathSettingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+              <h5 class="modal-title" id="filepathSettingsModalLabel" style="color: var(--text-primary);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                </svg>
+                Configure ${pluginName} - File Paths
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+            </div>
+            <div class="modal-body">
+              <form id="filepathSettingsForm">
+                <p style="color: var(--text-secondary); margin-bottom: 20px;">
+                  Please select the file paths for this plugin configuration:
+                </p>
+                ${Object.keys(filepathFields).map(fieldName => {
+                  const displayName = fieldName.split('_').map(word =>
+                    word.charAt(0).toUpperCase() + word.slice(1)
+                  ).join(' ');
+
+                  return `
+                    <div class="mb-3">
+                      <label for="filepath_${fieldName}" class="form-label" style="color: var(--text-primary);">
+                        ${displayName}
+                      </label>
+                      <div class="input-group">
+                        <input type="text" class="form-control" id="filepath_${fieldName}" name="${fieldName}"
+                               placeholder="${fieldName.includes('dir') ? '/Users/username/Documents/Folder' : '/Users/username/Documents/file.txt'}"
+                               style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <button type="button" class="btn btn-outline-secondary file-browse-btn" data-field="${fieldName}">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+                          </svg>
+                          Help
+                        </button>
+                      </div>
+                      <div class="form-text" style="color: var(--text-secondary);">
+                        ${fieldName.includes('dir') ? 'Enter the full path to the directory (folder)' : 'Enter the full path to the file'}. Paths with spaces are supported.
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </form>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
+                      style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-primary" id="saveFilepathSettingsBtn"
+                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                Configure Plugin
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('filepathSettingsModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Setup file browse buttons
+    document.querySelectorAll('.file-browse-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const fieldName = e.target.closest('button').dataset.field;
+        const inputField = document.getElementById(`filepath_${fieldName}`);
+        const isDirectory = fieldName.includes('dir');
+
+        // For web browsers, we can't actually browse the full filesystem
+        // So we'll provide a better input experience with validation
+        alert(`Please enter the full path for ${displayName.toLowerCase()}.\n\nExamples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt\n\nNote: You need to type the complete path as web browsers cannot browse your filesystem.`);
+
+        // Focus the input field for easier typing
+        inputField.focus();
+      });
+    });
+
+    // Setup save button
+    document.getElementById('saveFilepathSettingsBtn').addEventListener('click', () => {
+      const form = document.getElementById('filepathSettingsForm');
+      const formData = new FormData(form);
+      const settings = {};
+
+      for (const [key, value] of formData.entries()) {
+        settings[key] = value;
+      }
+
+      // Validate that all fields are filled and contain valid paths
+      const emptyFields = Object.keys(filepathFields).filter(field => !settings[field] || settings[field].trim() === '');
+      if (emptyFields.length > 0) {
+        alert(`Please fill in all required fields: ${emptyFields.join(', ')}`);
+        return;
+      }
+
+      // Basic path validation - just check if it looks like a path
+      const invalidFields = [];
+      for (const [field, value] of Object.entries(settings)) {
+        const trimmedValue = value.trim();
+        // Very basic validation - just check if it starts with / or contains some path-like structure
+        if (!trimmedValue.match(/^[\/~]|^[A-Za-z]:[\/\\]/) && !trimmedValue.includes('/')) {
+          invalidFields.push(field);
+        }
+      }
+
+      if (invalidFields.length > 0) {
+        alert(`Please enter valid file paths for: ${invalidFields.join(', ')}\n\nPaths should start with / (Unix/Mac) or C:\\ (Windows) or be relative paths with forward slashes.`);
+        return;
+      }
+
+      // Close modal and resolve with settings
+      const modal = bootstrap.Modal.getInstance(document.getElementById('filepathSettingsModal'));
+      modal.hide();
+      resolve(settings);
+    });
+
+    // Setup cancel button
+    document.querySelector('[data-bs-dismiss="modal"]').addEventListener('click', () => {
+      resolve(null);
+    });
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('filepathSettingsModal'));
+    modal.show();
+  });
+}
+
+// Enable plugin with user-provided settings
+async function enablePluginWithSettings(pluginName, pluginPath, userSettings) {
+  try {
+    // Enable the plugin first
+    const enableResponse = await fetch('/api/plugins', {
+      method: 'POST',
+      body: (() => {
+        const formData = new FormData();
+        formData.append('name', pluginName);
+        formData.append('path', pluginPath);
+        return formData;
+      })()
+    });
+
+    if (!enableResponse.ok) {
+      const errorText = await enableResponse.text();
+      throw new Error(errorText || 'Failed to enable plugin');
+    }
+
+    // Now save the user settings
+    const settingsResponse = await fetch('/api/plugins/save-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plugin_name: pluginName,
+        settings: userSettings
+      })
+    });
+
+    if (!settingsResponse.ok) {
+      const errorText = await settingsResponse.text();
+      throw new Error(`Failed to save plugin settings: ${errorText}`);
+    }
+
+    console.log(`Plugin ${pluginName} enabled successfully with user settings`);
+
+  } catch (error) {
+    console.error('Error enabling plugin with settings:', error);
+    throw error;
+  }
 }
 
 // Initialize plugin management when DOM is ready

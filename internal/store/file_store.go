@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/johnjallday/dolphin-agent/internal/types"
@@ -90,7 +91,24 @@ func (s *fileStore) DeleteAgent(name string) error {
 	}
 	
 	// Delete the agent folder from filesystem
-	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	baseDir := filepath.Dir(s.path)
+	var agentsDir string
+	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
+		// Path already contains agents directory structure
+		// Find the agents directory and get its parent + "agents"
+		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
+		if agentsDirIndex == -1 {
+			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
+		}
+		if agentsDirIndex != -1 {
+			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
+		} else {
+			agentsDir = filepath.Join(baseDir, "agents")
+		}
+	} else {
+		// Path is something like config.json, need to create agents subdir
+		agentsDir = filepath.Join(baseDir, "agents")
+	}
 	agentFolder := filepath.Join(agentsDir, name)
 	if err := os.RemoveAll(agentFolder); err != nil && !os.IsNotExist(err) {
 		// Log error but don't fail the operation since agent is already removed from memory
@@ -129,8 +147,25 @@ func (s *fileStore) saveUnlocked() error {
 		return err
 	}
 	
-	// Create agents directory
-	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	// Create agents directory - handle case where path already includes agents/
+	baseDir := filepath.Dir(s.path)
+	var agentsDir string
+	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
+		// Path already contains agents directory structure
+		// Find the agents directory and get its parent + "agents"
+		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
+		if agentsDirIndex == -1 {
+			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
+		}
+		if agentsDirIndex != -1 {
+			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
+		} else {
+			agentsDir = filepath.Join(baseDir, "agents")
+		}
+	} else {
+		// Path is something like config.json, need to create agents subdir
+		agentsDir = filepath.Join(baseDir, "agents")
+	}
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
@@ -247,7 +282,24 @@ func (s *fileStore) load() error {
 	s.current = indexConfig.Current
 	
 	// Load individual agent files from agents/ directory (nested structure)
-	agentsDir := filepath.Join(filepath.Dir(s.path), "agents")
+	baseDir := filepath.Dir(s.path)
+	var agentsDir string
+	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
+		// Path already contains agents directory structure
+		// Find the agents directory and get its parent + "agents"
+		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
+		if agentsDirIndex == -1 {
+			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
+		}
+		if agentsDirIndex != -1 {
+			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
+		} else {
+			agentsDir = filepath.Join(baseDir, "agents")
+		}
+	} else {
+		// Path is something like config.json, need to create agents subdir
+		agentsDir = filepath.Join(baseDir, "agents")
+	}
 	if _, err := os.Stat(agentsDir); err == nil {
 		// agents/ directory exists, check for nested structure
 		entries, err := os.ReadDir(agentsDir)
