@@ -657,7 +657,7 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
                           </svg>
-                          Help
+                          Browse
                         </button>
                       </div>
                       <div class="form-text" style="color: var(--text-secondary);">
@@ -699,17 +699,109 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
         const inputField = document.getElementById(`filepath_${fieldName}`);
         const isDirectory = fieldName.includes('dir');
 
-        // For web browsers, we can't actually browse the full filesystem
-        // So we'll provide a better input experience with validation
-        const defaultValue = defaultSettings[fieldName];
-        const exampleText = defaultValue
-          ? `Suggested default: ${defaultValue}\n\nOr enter your own path:`
-          : `Examples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`;
+        try {
+          let selectedPath = '';
 
-        alert(`Please enter the full path for ${displayName.toLowerCase()}.\n\n${exampleText}\n\nNote: You need to type the complete path as web browsers cannot browse your filesystem.`);
+          if (isDirectory) {
+            // Use directory picker if available
+            if ('showDirectoryPicker' in window) {
+              const dirHandle = await window.showDirectoryPicker();
+              selectedPath = dirHandle.name; // This only gives folder name, not full path
 
-        // Focus the input field for easier typing
-        inputField.focus();
+              // Since we can't get the full path from the File System Access API,
+              // we'll prompt the user to enter the full path manually
+              selectedPath = prompt(
+                `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
+                inputField.value || inputField.placeholder
+              );
+            } else {
+              // Fallback: create a file input for directory selection
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.webkitdirectory = true;
+              input.multiple = false;
+
+              input.onchange = (event) => {
+                const files = event.target.files;
+                if (files.length > 0) {
+                  // Get the directory path from the first file
+                  const firstFile = files[0];
+                  const fullPath = firstFile.webkitRelativePath;
+                  const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+
+                  // Since we still can't get the absolute path, ask user to provide it
+                  selectedPath = prompt(
+                    `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
+                    inputField.value || inputField.placeholder
+                  );
+
+                  if (selectedPath) {
+                    inputField.value = selectedPath;
+                  }
+                }
+              };
+
+              input.click();
+              return; // Exit early since the callback will handle setting the value
+            }
+          } else {
+            // Use file picker for files
+            if ('showOpenFilePicker' in window) {
+              const [fileHandle] = await window.showOpenFilePicker();
+              selectedPath = fileHandle.name; // This only gives filename, not full path
+
+              // Since we can't get the full path from the File System Access API,
+              // we'll prompt the user to enter the full path manually
+              selectedPath = prompt(
+                `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
+                inputField.value || inputField.placeholder
+              );
+            } else {
+              // Fallback: create a file input for file selection
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.multiple = false;
+
+              input.onchange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                  // Since we can't get the absolute path, ask user to provide it
+                  selectedPath = prompt(
+                    `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
+                    inputField.value || inputField.placeholder
+                  );
+
+                  if (selectedPath) {
+                    inputField.value = selectedPath;
+                  }
+                }
+              };
+
+              input.click();
+              return; // Exit early since the callback will handle setting the value
+            }
+          }
+
+          if (selectedPath && selectedPath.trim() !== '') {
+            inputField.value = selectedPath.trim();
+          }
+
+        } catch (error) {
+          console.error('Error browsing for path:', error);
+
+          // Fallback to manual input
+          const defaultValue = defaultSettings[fieldName];
+          const displayName = fieldName.split('_').map(word =>
+            word.charAt(0).toUpperCase() + word.slice(1)
+          ).join(' ');
+
+          const exampleText = defaultValue
+            ? `Suggested default: ${defaultValue}\n\nOr enter your own path:`
+            : `Examples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`;
+
+          alert(`Browser doesn't support file picking. Please enter the full path for ${displayName.toLowerCase()}.\n\n${exampleText}`);
+          inputField.focus();
+        }
       });
     });
 
