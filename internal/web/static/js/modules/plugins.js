@@ -9,16 +9,12 @@ async function checkPluginInitializationStatus(activePluginNames) {
   const initStatus = new Map();
 
   try {
-    // Make a test chat request to get uninitialized plugins info
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: '_check_init_status_' })
-    });
+    // Check plugin initialization status via filesystem API
+    const response = await fetch('/api/plugins/init-status');
 
     if (response.ok) {
       const data = await response.json();
-      if (data.requires_initialization && data.uninitialized_plugins) {
+      if (data.success && data.requires_initialization && data.uninitialized_plugins) {
         for (const plugin of data.uninitialized_plugins) {
           if (activePluginNames.has(plugin.name)) {
             initStatus.set(plugin.name, {
@@ -815,40 +811,6 @@ async function showLegacyPluginConfigModal(pluginName, currentSettings) {
   }
 }
 
-// Prepare parameters for complete_setup operation based on plugin type
-function prepareCompleteSetupParams(pluginName, configData) {
-  console.log('Preparing params for plugin:', pluginName, 'with data:', configData);
-  const params = ['operation="complete_setup"'];
-
-  if (pluginName === 'music_project_manager') {
-    // music_project_manager expects project_dir and template_dir
-    if (configData.project_dir) {
-      params.push(`project_dir="${configData.project_dir}"`);
-    }
-    if (configData.template_dir) {
-      params.push(`template_dir="${configData.template_dir}"`);
-    }
-    // Add default template if provided
-    if (configData.default_template) {
-      params.push(`default_template="${configData.default_template}"`);
-    }
-  } else if (pluginName === 'reascript_launcher') {
-    // reascript_launcher expects scripts_dir
-    if (configData.scripts_dir) {
-      params.push(`scripts_dir="${configData.scripts_dir}"`);
-    }
-  } else {
-    // For other plugins, add all non-initialized fields as parameters
-    for (const [key, value] of Object.entries(configData)) {
-      if (key !== 'initialized' && value) {
-        params.push(`${key.toLowerCase()}="${value}"`);
-      }
-    }
-  }
-
-  console.log('Generated params:', params.join(', '));
-  return params.join(', ');
-}
 
 function prepareCompleteSetupParamsObject(pluginName, configData) {
   console.log('Preparing params object for plugin:', pluginName, 'with data:', configData);

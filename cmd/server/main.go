@@ -341,6 +341,7 @@ func main() {
 	mux.Handle("/api/plugins", pluginhttp.New(st, pluginhttp.NativeLoader{}))
 	mux.HandleFunc("/api/plugins/", pluginInitHandler) // Handle /api/plugins/{name}/config and /api/plugins/{name}/initialize
 	mux.HandleFunc("/api/plugins/execute", pluginExecuteHandler)
+	mux.HandleFunc("/api/plugins/init-status", pluginInitStatusHandler)
 	mux.HandleFunc("/api/settings", settingsHandler)
 	mux.HandleFunc("/api/api-key", apiKeyHandler)
 	mux.HandleFunc("/api/chat", chatHandler)
@@ -769,7 +770,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Chat question received")
+	log.Printf("Chat question received: %q", q)
 	// Context with timeout per request (prevents indefinite hang)
 	base := r.Context()
 	ctx, cancel := context.WithTimeout(base, 45*time.Second)
@@ -956,7 +957,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ag.Messages = append(ag.Messages, choice.ToParam())
 
-	log.Printf("Chat response in %s", time.Since(start))
+	log.Printf("Chat response in %s: %q", time.Since(start), text)
 	_ = st.SetAgent(current, ag) // persists settings/plugins only
 	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
@@ -1648,5 +1649,62 @@ func pluginSaveSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// Plugin Initialization Status Handler - checks filesystem for settings files
+func pluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get current agent
+	_, current := st.ListAgents()
+	if current == "" {
+		names, _ := st.ListAgents()
+		if len(names) > 0 {
+			current = names[0]
+		} else {
+			current = "default"
+		}
+	}
+
+	// Get active plugins for current agent
+	ag, ok := st.GetAgent(current)
+	if !ok {
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "current agent not found",
+		})
+		return
+	}
+
+	// Check each active plugin for settings file
+	var uninitializedPlugins []map[string]any
+
+	for pluginName := range ag.Plugins {
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
+
+		// Check if settings file exists
+		if _, err := os.Stat(settingsFilePath); os.IsNotExist(err) {
+			// Settings file doesn't exist, plugin needs initialization
+			uninitializedPlugins = append(uninitializedPlugins, map[string]any{
+				"name":            pluginName,
+				"description":     fmt.Sprintf("Plugin %s needs configuration", pluginName),
+				"required_config": []map[string]any{}, // Empty for now, could be expanded later
+				"legacy_plugin":   true,
+			})
+		}
+	}
+
+	response := map[string]any{
+		"success":               true,
+		"requires_initialization": len(uninitializedPlugins) > 0,
+		"uninitialized_plugins":   uninitializedPlugins,
+	}
+
 	json.NewEncoder(w).Encode(response)
 }
