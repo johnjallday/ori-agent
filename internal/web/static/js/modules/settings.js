@@ -54,14 +54,26 @@ async function loadSettings() {
       if (modelSelect && modelValue) {
         modelSelect.value = modelValue;
       }
-      
+
       // Update temperature slider
       const temperatureSlider = document.getElementById('temperatureSlider');
       const temperatureValue = document.getElementById('temperatureValue');
       // Handle both nested (settings.Settings.temperature) and flat (settings.temperature) formats
-      const temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined') 
-        ? settings.Settings.temperature 
+      let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
+        ? settings.Settings.temperature
         : settings.temperature;
+
+      // Force temperature to 1.0 for GPT-5 models
+      const gpt5Notice = document.getElementById('gpt5TempNotice');
+      if (modelValue && modelValue.includes('gpt-5')) {
+        temperatureValueData = 1.0;
+        if (temperatureSlider) temperatureSlider.disabled = true;
+        if (gpt5Notice) gpt5Notice.style.display = 'block';
+      } else {
+        if (temperatureSlider) temperatureSlider.disabled = false;
+        if (gpt5Notice) gpt5Notice.style.display = 'none';
+      }
+
       if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
         temperatureSlider.value = temperatureValueData;
         if (temperatureValue) {
@@ -136,10 +148,37 @@ function setupSettings() {
   const temperatureValue = document.getElementById('temperatureValue');
   const temperatureInput = document.getElementById('temperatureInput');
   const updateBtn = document.getElementById('updateSettingsBtn');
+
+  // Add model change listener to handle GPT-5 temperature restriction
+  if (modelSelect && temperatureSlider && temperatureValue) {
+    modelSelect.addEventListener('change', function() {
+      const gpt5Notice = document.getElementById('gpt5TempNotice');
+      if (this.value.includes('gpt-5')) {
+        temperatureSlider.value = 1.0;
+        temperatureValue.textContent = '1.0';
+        temperatureSlider.disabled = true;
+        if (gpt5Notice) gpt5Notice.style.display = 'block';
+      } else {
+        temperatureSlider.disabled = false;
+        if (gpt5Notice) gpt5Notice.style.display = 'none';
+      }
+    });
+  }
   
   if (temperatureSlider && temperatureValue) {
     temperatureSlider.addEventListener('input', function(e) {
-      temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+      const modelSelect = document.getElementById('gptModelSelect');
+      const selectedModel = modelSelect ? modelSelect.value : '';
+
+      // Force temperature to 1.0 for GPT-5 models
+      if (selectedModel.includes('gpt-5')) {
+        e.target.value = 1.0;
+        temperatureValue.textContent = '1.0';
+        e.target.disabled = true;
+      } else {
+        e.target.disabled = false;
+        temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
+      }
     });
   }
   
@@ -147,6 +186,14 @@ function setupSettings() {
   if (temperatureValue && temperatureInput && temperatureSlider) {
     // Click on value to edit
     temperatureValue.addEventListener('click', function() {
+      const modelSelect = document.getElementById('gptModelSelect');
+      const selectedModel = modelSelect ? modelSelect.value : '';
+
+      // Disable edit for GPT-5 models
+      if (selectedModel.includes('gpt-5')) {
+        return;
+      }
+
       temperatureInput.value = parseFloat(temperatureValue.textContent);
       temperatureValue.style.display = 'none';
       temperatureInput.style.display = 'inline-block';

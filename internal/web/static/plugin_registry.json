@@ -17,6 +17,11 @@
       "version": "1.0.0",
       "checksum": "sha256_hash_here",
       "auto_update": true
+    },
+    {
+      "name": "music_project_manager",
+      "description": "Manage music projects: scan for .RPP files, create new projects, and manage project templates",
+      "path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/music_project_manager.so"
     }
   ]
 }

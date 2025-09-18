@@ -775,6 +775,48 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
   });
 }
 
+// Enable plugin with user-provided settings
+async function enablePluginWithSettings(pluginName, pluginPath, userSettings) {
+  try {
+    // Enable the plugin first
+    const enableResponse = await fetch('/api/plugins', {
+      method: 'POST',
+      body: (() => {
+        const formData = new FormData();
+        formData.append('name', pluginName);
+        formData.append('path', pluginPath);
+        return formData;
+      })()
+    });
+
+    if (!enableResponse.ok) {
+      const errorText = await enableResponse.text();
+      throw new Error(errorText || 'Failed to enable plugin');
+    }
+
+    // Now save the user settings
+    const settingsResponse = await fetch('/api/plugins/save-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        plugin_name: pluginName,
+        settings: userSettings
+      })
+    });
+
+    if (!settingsResponse.ok) {
+      const errorText = await settingsResponse.text();
+      throw new Error(`Failed to save plugin settings: ${errorText}`);
+    }
+
+    console.log(`Plugin ${pluginName} enabled successfully with user settings`);
+
+  } catch (error) {
+    console.error('Error enabling plugin with settings:', error);
+    throw error;
+  }
+}
+
 // Make functions globally available
 window.showPluginConfigModal = showPluginConfigModal;
 window.savePluginConfig = savePluginConfig;
@@ -785,3 +827,4 @@ window.showLegacyPluginSetupModal = showLegacyPluginSetupModal;
 window.startLegacyPluginSetup = startLegacyPluginSetup;
 window.checkPluginFilepathSettings = checkPluginFilepathSettings;
 window.showFilepathSettingsModal = showFilepathSettingsModal;
+window.enablePluginWithSettings = enablePluginWithSettings;

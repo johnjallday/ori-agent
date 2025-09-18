@@ -5,7 +5,7 @@ SERVER_BIN    ?= $(BINDIR)/dolphin-agent
 STATIC_DIR    ?= internal/web/static      # adjust if your embedded static dir is elsewhere
 REGISTRY_FILE ?= $(STATIC_DIR)/plugin_registry.json
 
-PLUGIN_DIRS   := plugins/math plugins/weather
+PLUGIN_DIRS   := plugins/math plugins/weather plugins/music_project_manager
 PLUGINS       := $(PLUGIN_DIRS:%=%/$(notdir %).so)
 
 # ---- Default ----
