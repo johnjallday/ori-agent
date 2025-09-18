@@ -1268,7 +1268,7 @@ func pluginInitHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handlePluginConfigDiscovery(w, plugin.Tool)
+		handlePluginConfigDiscovery(w, plugin.Tool, pluginName, current)
 		
 	case "initialize":
 		if r.Method != http.MethodPost {
@@ -1348,7 +1348,22 @@ func pluginExecuteHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.Tool) {
+func handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.Tool, pluginName, agentName string) {
+	// Check if we should return the raw JSON settings file
+	// Look for the plugin settings file in the agent directory
+	_, current := st.ListAgents()
+	if current == "" {
+		current = agentName
+	}
+
+	settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
+	if fileData, err := os.ReadFile(settingsFilePath); err == nil {
+		// File exists, return it directly as JSON
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(fileData)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	// Check if plugin implements SettingsProvider (for legacy plugins)
