@@ -195,7 +195,7 @@ func main() {
 
 	// init store (persists agents/plugins/settings; not messages)
 	// Use the index file path for the store, not the individual agent config
-	agentStorePath = "agents/config.json"
+	agentStorePath = "agents.json"
 	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
 		agentStorePath = p
 	} else if abs, err2 := filepath.Abs(agentStorePath); err2 == nil {
