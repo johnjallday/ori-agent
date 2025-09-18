@@ -823,6 +823,21 @@ async function savePluginConfig(pluginName, configVars) {
 // Show legacy plugin configuration modal with actual settings fields
 async function showLegacyPluginConfigModal(pluginName, currentSettings) {
   try {
+    // Try to fetch default settings for this plugin
+    let defaultSettings = {};
+    try {
+      const defaultResponse = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/default-settings`);
+      if (defaultResponse.ok) {
+        const defaultData = await defaultResponse.json();
+        if (defaultData.success && defaultData.default_settings) {
+          defaultSettings = defaultData.default_settings;
+          console.log('Fetched default settings for', pluginName, ':', defaultSettings);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to fetch default settings for', pluginName, ':', error);
+    }
+
     // Dynamically generate field information from current settings
     const settingsFields = [];
 
@@ -847,14 +862,24 @@ async function showLegacyPluginConfigModal(pluginName, currentSettings) {
         fieldValue = String(value || '');
       }
 
-      // Generate description based on field name
+      // Generate description and placeholder based on field name and default settings
       let description = `Configure the ${label.toLowerCase()}`;
+      let placeholder = description;
+
       if (key.includes('dir') || key.includes('directory')) {
         description = `Path to the ${label.toLowerCase().replace(' dir', ' directory')}`;
+        placeholder = description;
       } else if (key.includes('template')) {
         description = `Path to the ${label.toLowerCase()}`;
+        placeholder = description;
       } else if (key.includes('script')) {
         description = `Path to the ${label.toLowerCase()}`;
+        placeholder = description;
+      }
+
+      // Use default setting value as placeholder if available
+      if (defaultSettings[key]) {
+        placeholder = defaultSettings[key];
       }
 
       settingsFields.push({
@@ -862,7 +887,8 @@ async function showLegacyPluginConfigModal(pluginName, currentSettings) {
         label: label,
         type: fieldType,
         value: fieldValue,
-        description: description
+        description: description,
+        placeholder: placeholder
       });
     }
 
@@ -902,7 +928,7 @@ async function showLegacyPluginConfigModal(pluginName, currentSettings) {
                     ` : `
                       <input type="${field.type}" class="form-control" id="setting_${field.name}" name="${field.name}"
                              value="${field.value}"
-                             placeholder="${field.description}"
+                             placeholder="${field.placeholder}"
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                       <div class="form-text" style="color: var(--text-secondary);">
                         ${field.description}
@@ -1281,6 +1307,20 @@ async function checkPluginFilepathSettings(pluginName, pluginPath) {
 
 // Show modal for filepath settings input
 async function showFilepathSettingsModal(pluginName, filepathFields) {
+  // Try to fetch default settings for this plugin
+  let defaultSettings = {};
+  try {
+    const defaultResponse = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/default-settings`);
+    if (defaultResponse.ok) {
+      const defaultData = await defaultResponse.json();
+      if (defaultData.success && defaultData.default_settings) {
+        defaultSettings = defaultData.default_settings;
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to fetch default settings for plugin:', pluginName, error);
+  }
+
   return new Promise((resolve) => {
     // Create modal HTML
     const modalHtml = `
@@ -1313,7 +1353,7 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                       </label>
                       <div class="input-group">
                         <input type="text" class="form-control" id="filepath_${fieldName}" name="${fieldName}"
-                               placeholder="${fieldName.includes('dir') ? '/Users/username/Documents/Folder' : '/Users/username/Documents/file.txt'}"
+                               placeholder="${defaultSettings[fieldName] || (fieldName.includes('dir') ? '/Users/username/Documents/Folder' : '/Users/username/Documents/file.txt')}"
                                style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                         <button type="button" class="btn btn-outline-secondary file-browse-btn" data-field="${fieldName}">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1363,7 +1403,12 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
 
         // For web browsers, we can't actually browse the full filesystem
         // So we'll provide a better input experience with validation
-        alert(`Please enter the full path for ${displayName.toLowerCase()}.\n\nExamples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt\n\nNote: You need to type the complete path as web browsers cannot browse your filesystem.`);
+        const defaultValue = defaultSettings[fieldName];
+        const exampleText = defaultValue
+          ? `Suggested default: ${defaultValue}\n\nOr enter your own path:`
+          : `Examples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`;
+
+        alert(`Please enter the full path for ${displayName.toLowerCase()}.\n\n${exampleText}\n\nNote: You need to type the complete path as web browsers cannot browse your filesystem.`);
 
         // Focus the input field for easier typing
         inputField.focus();

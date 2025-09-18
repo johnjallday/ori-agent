@@ -174,6 +174,43 @@ func handleAgentStatusCommand(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// handlePluginDefaultSettings handles requests for plugin default settings
+func handlePluginDefaultSettings(w http.ResponseWriter, tool pluginapi.Tool, pluginName string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if the tool supports GetDefaultSettings
+	if defaultSettingsTool, ok := tool.(interface{ GetDefaultSettings() (string, error) }); ok {
+		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
+		if err != nil {
+			log.Printf("Error getting default settings for plugin %s: %v", pluginName, err)
+			http.Error(w, "Failed to get default settings", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse the JSON settings to ensure it's valid
+		var settings map[string]interface{}
+		if err := json.Unmarshal([]byte(defaultSettings), &settings); err != nil {
+			log.Printf("Error parsing default settings JSON for plugin %s: %v", pluginName, err)
+			http.Error(w, "Invalid default settings format", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the default settings
+		response := map[string]interface{}{
+			"success": true,
+			"default_settings": settings,
+		}
+		json.NewEncoder(w).Encode(response)
+	} else {
+		// Plugin doesn't support default settings
+		response := map[string]interface{}{
+			"success": false,
+			"message": "Plugin does not support default settings",
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
 func main() {
 	// Initialize configuration manager
 	configManager = config.NewManager("settings.json")
@@ -1196,11 +1233,35 @@ func pluginInitHandler(w http.ResponseWriter, r *http.Request) {
 	
 	// Find the plugin
 	plugin, exists := ag.Plugins[pluginName]
+
+	// For default-settings, also check local registry if plugin not loaded in agent
+	if !exists && action == "default-settings" {
+		// Try to load plugin from local registry temporarily
+		localReg, err := registryManager.LoadLocal()
+		if err == nil {
+			for _, regPlugin := range localReg.Plugins {
+				if regPlugin.Name == pluginName {
+					// Load the plugin temporarily just to get default settings
+					tool, err := pluginloader.LoadWithCache(regPlugin.Path)
+					if err == nil {
+						if r.Method != http.MethodGet {
+							w.WriteHeader(http.StatusMethodNotAllowed)
+							return
+						}
+						handlePluginDefaultSettings(w, tool, pluginName)
+						return
+					}
+					break
+				}
+			}
+		}
+	}
+
 	if !exists {
 		http.Error(w, "plugin not found", http.StatusNotFound)
 		return
 	}
-	
+
 	switch action {
 	case "config":
 		if r.Method != http.MethodGet {
@@ -1215,7 +1276,14 @@ func pluginInitHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handlePluginInitialization(w, r, plugin.Tool, pluginName, current)
-		
+
+	case "default-settings":
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handlePluginDefaultSettings(w, plugin.Tool, pluginName)
+
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)
 	}
