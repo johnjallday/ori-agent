@@ -39,6 +39,10 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		}
 	}
 	_ = fs.saveUnlocked()
+
+	// Write agents.json for plugins on startup
+	_ = fs.writeAgentsJSON()
+
 	return fs, nil
 }
 
@@ -71,7 +75,14 @@ func (s *fileStore) SwitchAgent(name string) error {
 		return errors.New("agent not found")
 	}
 	s.current = name
-	return s.saveUnlocked()
+
+	// Save main store
+	if err := s.saveUnlocked(); err != nil {
+		return err
+	}
+
+	// Also write agents.json in current working directory for plugins
+	return s.writeAgentsJSON()
 }
 
 func (s *fileStore) DeleteAgent(name string) error {
@@ -137,6 +148,22 @@ func (s *fileStore) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.saveUnlocked()
+}
+
+// writeAgentsJSON writes agents.json in the current working directory for plugins
+func (s *fileStore) writeAgentsJSON() error {
+	agentsConfig := struct {
+		Current string `json:"current"`
+	}{
+		Current: s.current,
+	}
+
+	data, err := json.MarshalIndent(agentsConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile("agents.json", data, 0o644)
 }
 
 // ---------- persistence helpers (no Messages persisted) ----------
