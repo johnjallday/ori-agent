@@ -136,29 +136,12 @@ func (h *Handler) checkUninitializedPlugins(agent *types.Agent) []map[string]any
 		// Check if plugin supports initialization
 		initProvider, supportsInit := plugin.Tool.(pluginapi.InitializationProvider)
 		if !supportsInit {
-			// Check if plugin supports SettingsProvider (legacy check)
-			if settingsProvider, ok := plugin.Tool.(pluginapi.SettingsProvider); ok {
-				isInitialized := settingsProvider.IsInitialized()
-
-				if !isInitialized {
-					// For plugins that support SettingsProvider but not InitializationProvider,
-					// we still want to show them as needing initialization
-					uninitializedPlugins = append(uninitializedPlugins, map[string]any{
-						"name":            name,
-						"description":     plugin.Definition.Description.String(),
-						"required_config": []pluginapi.ConfigVariable{}, // Empty config vars since we can't detect them
-						"legacy_plugin":   true,
-					})
-				}
-			}
+			// Simplified: Skip plugins that don't support InitializationProvider
 			continue
 		}
 
-		// Check if plugin is already initialized
+		// Simplified: assume plugins with InitializationProvider need initialization
 		isInitialized := false
-		if settingsProvider, ok := plugin.Tool.(pluginapi.SettingsProvider); ok {
-			isInitialized = settingsProvider.IsInitialized()
-		}
 
 		if !isInitialized {
 			// Get required config for this plugin

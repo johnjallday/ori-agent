@@ -4,50 +4,29 @@
 // Plugin upload state management
 let uploadListenersSetup = false;
 
-// Check which plugins need initialization
-async function checkPluginInitializationStatus(activePluginNames) {
-  const initStatus = new Map();
+// Check plugin configuration status - simplified approach
+async function checkPluginConfigurationStatus(activePluginNames) {
+  const configStatus = new Map();
 
-  try {
-    // Check plugin initialization status via filesystem API
-    const response = await fetch('/api/plugins/init-status');
+  // Define which plugins we know have configuration based on their operations
+  const knownConfigPlugins = new Set([
+    'music_project_manager', // has get_settings operation
+    'reascript_launcher',    // has settings for scripts_dir
+    // Add more plugins here as they're identified to have configuration
+  ]);
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.requires_initialization && data.uninitialized_plugins) {
-        for (const plugin of data.uninitialized_plugins) {
-          if (activePluginNames.has(plugin.name)) {
-            initStatus.set(plugin.name, {
-              needsInit: true,
-              configVars: plugin.required_config || [],
-              isLegacy: plugin.legacy_plugin || false
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Failed to check plugin initialization status:', error);
+  for (const pluginName of activePluginNames) {
+    const hasConfig = knownConfigPlugins.has(pluginName);
 
-    // Fallback: try individual config endpoints
-    for (const pluginName of activePluginNames) {
-      try {
-        const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/config`);
-        if (response.ok) {
-          const configData = await response.json();
-          initStatus.set(pluginName, {
-            needsInit: !configData.is_initialized,
-            configVars: configData.required_config || [],
-            isLegacy: false
-          });
-        }
-      } catch (error) {
-        console.warn(`Failed to check initialization status for ${pluginName}:`, error);
-      }
-    }
+    configStatus.set(pluginName, {
+      needsInit: false,        // For simplicity, assume plugins are initialized
+      hasConfig: hasConfig,    // Only show config for known configurable plugins
+      configVars: [],
+      isLegacy: false
+    });
   }
 
-  return initStatus;
+  return configStatus;
 }
 
 // Load available plugins
@@ -73,10 +52,18 @@ async function loadPlugins() {
     // Filter to only show local plugins in sidebar (those without github_repo)
     const localPlugins = registry.plugins.filter(plugin => !plugin.github_repo);
 
-    // Fetch plugin initialization status for active plugins
-    const pluginInitStatus = await checkPluginInitializationStatus(activePluginNames);
+    // Fetch plugin configuration status for active plugins
+    console.log('About to call checkPluginConfigurationStatus with:', activePluginNames);
+    let pluginConfigStatus;
+    try {
+      pluginConfigStatus = await checkPluginConfigurationStatus(activePluginNames);
+      console.log('checkPluginConfigurationStatus returned:', pluginConfigStatus);
+    } catch (error) {
+      console.error('Error in checkPluginConfigurationStatus:', error);
+      pluginConfigStatus = new Map(); // fallback to empty map
+    }
 
-    displayPlugins(localPlugins, activePluginNames, pluginInitStatus);
+    displayPlugins(localPlugins, activePluginNames, pluginConfigStatus);
   } catch (error) {
     console.error('Error loading plugins:', error);
     const pluginsList = document.getElementById('pluginsList');
@@ -87,7 +74,7 @@ async function loadPlugins() {
 }
 
 // Display plugins in the sidebar
-function displayPlugins(plugins, activePluginNames, pluginInitStatus = new Map()) {
+function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map()) {
   const pluginsList = document.getElementById('pluginsList');
   if (!pluginsList) return;
 
@@ -100,8 +87,20 @@ function displayPlugins(plugins, activePluginNames, pluginInitStatus = new Map()
     const isActive = activePluginNames.has(plugin.name);
     const pluginPath = plugin.path || '';
     const isUploaded = pluginPath.includes('uploaded_plugins') && !plugin.github_repo;
-    const initStatus = pluginInitStatus.get(plugin.name);
-    const needsConfig = isActive && initStatus && initStatus.needsInit;
+    const configStatus = pluginConfigStatus.get(plugin.name);
+    const needsConfig = isActive && configStatus && configStatus.needsInit;
+    const hasConfig = isActive && configStatus && configStatus.hasConfig;
+
+    // Debug logging for config button visibility
+    if (isActive) {
+      console.log(`Plugin: ${plugin.name}`);
+      console.log(`  - isActive: ${isActive}`);
+      console.log(`  - configStatus:`, configStatus);
+      console.log(`  - needsConfig: ${needsConfig}`);
+      console.log(`  - hasConfig: ${hasConfig}`);
+      console.log(`  - Will show config button: ${hasConfig}`);
+    }
+
 
     return `
       <div class="plugin-item">
@@ -116,10 +115,11 @@ function displayPlugins(plugins, activePluginNames, pluginInitStatus = new Map()
             ${plugin.version ? `<div class="text-muted" style="font-size: 0.7em;">v${plugin.version}</div>` : ''}
           </div>
           <div class="d-flex align-items-center">
-            ${needsConfig ? `
-              <button class="btn btn-sm btn-outline-warning me-2 plugin-config-btn"
+            ${hasConfig ? `
+              <button class="btn btn-sm ${needsConfig ? 'btn-outline-warning' : 'btn-outline-secondary'} me-2 plugin-config-btn"
                       data-plugin-name="${plugin.name}"
-                      title="Configure plugin">
+                      data-plugin-path="${plugin.path}"
+                      title="${needsConfig ? 'Configure plugin (setup required)' : 'Configure plugin'}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
                 </svg>
@@ -178,8 +178,18 @@ function setupPluginToggles() {
   const configButtons = document.querySelectorAll('.plugin-config-btn');
   configButtons.forEach(button => {
     button.addEventListener('click', async (e) => {
-      const pluginName = e.target.closest('button').dataset.pluginName;
-      await showPluginConfigModal(pluginName);
+      const button = e.target.closest('button');
+      const pluginName = button.dataset.pluginName;
+      const pluginPath = button.dataset.pluginPath;
+
+      // Check if plugin has filepath settings and show the appropriate modal
+      const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
+      if (filepathFields) {
+        await showFilepathSettingsModal(pluginName, filepathFields);
+      } else {
+        // Fallback to regular config modal if no filepath settings
+        await showPluginConfigModal(pluginName);
+      }
     });
   });
 

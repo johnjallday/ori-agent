@@ -21,24 +21,6 @@ type VersionedTool interface {
 	Version() string
 }
 
-// SettingsProvider is an interface for tools that manage custom settings.
-// Plugins can optionally implement this interface to provide settings management.
-type SettingsProvider interface {
-	// GetSettings returns the current settings as a JSON string
-	GetSettings() (string, error)
-	// SetSettings updates settings from a JSON string
-	SetSettings(settings string) error
-	// GetDefaultSettings returns default settings as a JSON string
-	GetDefaultSettings() (string, error)
-	// IsInitialized returns true if the plugin has been properly configured
-	IsInitialized() bool
-}
-
-// ConfigurableTool combines Tool with SettingsProvider for tools that need configuration.
-type ConfigurableTool interface {
-	Tool
-	SettingsProvider
-}
 
 // AgentContext provides information about the current agent to plugins.
 type AgentContext struct {
@@ -111,6 +93,5 @@ type InitializationProvider interface {
 // InitializableTool combines Tool with InitializationProvider for full initialization support.
 type InitializableTool interface {
 	Tool
-	SettingsProvider
 	InitializationProvider
 }

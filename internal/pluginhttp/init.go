@@ -161,26 +161,7 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if plugin implements SettingsProvider (for legacy plugins)
-	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
-		isInitialized := settingsProvider.IsInitialized()
-
-		// Get current settings if the plugin supports it
-		var currentSettings map[string]interface{}
-		if settingsJSON, err := settingsProvider.GetSettings(); err == nil {
-			json.Unmarshal([]byte(settingsJSON), &currentSettings)
-		}
-
-		response := map[string]any{
-			"supports_initialization": true,
-			"is_initialized":          isInitialized,
-			"is_legacy_plugin":        true,
-			"current_settings":        currentSettings,
-		}
-
-		json.NewEncoder(w).Encode(response)
-		return
-	}
+	// Simplified: Skip legacy SettingsProvider check
 
 	// Check if plugin implements InitializationProvider (for modern plugins)
 	initProvider, ok := tool.(pluginapi.InitializationProvider)
@@ -196,11 +177,8 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	// Get required configuration variables
 	configVars := initProvider.GetRequiredConfig()
 
-	// Check if plugin is already initialized (if it supports SettingsProvider)
+	// Simplified: assume plugins are not initialized for InitializationProvider
 	isInitialized := false
-	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
-		isInitialized = settingsProvider.IsInitialized()
-	}
 
 	response := map[string]any{
 		"supports_initialization": true,
@@ -224,32 +202,7 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Check if plugin implements SettingsProvider (legacy plugins)
-	if settingsProvider, ok := tool.(pluginapi.SettingsProvider); ok {
-		// For legacy plugins, update settings directly using SetSettings
-		settingsJSON, err := json.Marshal(configData)
-		if err != nil {
-			json.NewEncoder(w).Encode(map[string]any{
-				"success": false,
-				"message": "Failed to encode settings: " + err.Error(),
-			})
-			return
-		}
-
-		if err := settingsProvider.SetSettings(string(settingsJSON)); err != nil {
-			json.NewEncoder(w).Encode(map[string]any{
-				"success": false,
-				"message": "Failed to update settings: " + err.Error(),
-			})
-			return
-		}
-
-		json.NewEncoder(w).Encode(map[string]any{
-			"success": true,
-			"message": "Plugin settings updated successfully",
-		})
-		return
-	}
+	// Simplified: Skip legacy SettingsProvider check
 
 	// Check if plugin implements InitializationProvider (modern plugins)
 	initProvider, ok := tool.(pluginapi.InitializationProvider)
