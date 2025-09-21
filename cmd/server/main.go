@@ -284,8 +284,10 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	// Add cache headers for static assets
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// Disable cache for development to ensure updates are picked up
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 
 	w.Write(content)
 }

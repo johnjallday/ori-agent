@@ -175,20 +175,38 @@ function setupPluginToggles() {
   });
 
   // Setup plugin configuration buttons
+  console.log('UPDATED: Setting up plugin config buttons with new logic');
   const configButtons = document.querySelectorAll('.plugin-config-btn');
+  console.log(`Found ${configButtons.length} config buttons to set up`);
   configButtons.forEach(button => {
     button.addEventListener('click', async (e) => {
       const button = e.target.closest('button');
       const pluginName = button.dataset.pluginName;
       const pluginPath = button.dataset.pluginPath;
 
-      // Check if plugin has filepath settings and show the appropriate modal
-      const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
-      if (filepathFields) {
+      // For known configurable plugins, show filepath settings modal directly
+      console.log(`NEW HANDLER: Config button clicked for plugin: ${pluginName}`);
+      if (pluginName === 'reascript_launcher') {
+        console.log('Detected reascript_launcher, showing filepath modal directly');
+        // reascript_launcher has scripts_dir setting - show filepath modal with known field
+        const filepathFields = { 'scripts_dir': 'filepath' };
         await showFilepathSettingsModal(pluginName, filepathFields);
+      } else if (pluginName === 'music_project_manager') {
+        // Check if plugin has filepath settings and show the appropriate modal
+        const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
+        if (filepathFields) {
+          await showFilepathSettingsModal(pluginName, filepathFields);
+        } else {
+          await showPluginConfigModal(pluginName);
+        }
       } else {
-        // Fallback to regular config modal if no filepath settings
-        await showPluginConfigModal(pluginName);
+        // For other plugins, use the original logic
+        const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
+        if (filepathFields) {
+          await showFilepathSettingsModal(pluginName, filepathFields);
+        } else {
+          await showPluginConfigModal(pluginName);
+        }
       }
     });
   });
