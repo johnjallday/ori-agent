@@ -172,41 +172,6 @@ async function savePluginConfig(pluginName, configVars) {
 }
 
 
-function prepareCompleteSetupParamsObject(pluginName, configData) {
-  console.log('Preparing params object for plugin:', pluginName, 'with data:', configData);
-  const params = { operation: "complete_setup" };
-
-  if (pluginName === 'music_project_manager') {
-    // music_project_manager expects project_dir and template_dir
-    if (configData.project_dir) {
-      params.project_dir = configData.project_dir;
-    }
-    if (configData.template_dir) {
-      params.template_dir = configData.template_dir;
-    }
-    // Add default template if provided
-    if (configData.default_template) {
-      params.default_template = configData.default_template;
-    }
-  } else if (pluginName === 'reascript_launcher') {
-    // reascript_launcher expects scripts_dir
-    if (configData.scripts_dir) {
-      params.scripts_dir = configData.scripts_dir;
-    }
-  } else {
-    // For other plugins, add all non-initialized fields as parameters
-    for (const [key, value] of Object.entries(configData)) {
-      if (key !== 'initialized' && value) {
-        params[key.toLowerCase()] = value;
-      }
-    }
-  }
-
-  console.log('Generated params object:', params);
-  return params;
-}
-
-
 // Check if plugin has filepath settings that require user input
 async function checkPluginFilepathSettings(pluginName, pluginPath) {
   try {
@@ -573,7 +538,6 @@ async function enablePluginWithSettings(pluginName, pluginPath, userSettings) {
 // Make functions globally available
 window.showPluginConfigModal = showPluginConfigModal;
 window.savePluginConfig = savePluginConfig;
-window.prepareCompleteSetupParamsObject = prepareCompleteSetupParamsObject;
 window.checkPluginFilepathSettings = checkPluginFilepathSettings;
 window.showFilepathSettingsModal = showFilepathSettingsModal;
 window.enablePluginWithSettings = enablePluginWithSettings;
