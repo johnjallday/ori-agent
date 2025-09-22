@@ -88,14 +88,26 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	// Find the plugin
 	plugin, exists := ag.Plugins[pluginName]
 
-	// For default-settings, also check local registry if plugin not loaded in agent
-	if !exists && action == "default-settings" {
+	// For default-settings and config, also check local registry if plugin not loaded in agent
+	// OR if plugin exists but tool is nil (failed to load)
+	if (!exists || (exists && plugin.Tool == nil)) && (action == "default-settings" || action == "config") {
 		// Try to load plugin from local registry temporarily
 		localReg, err := h.registryManager.LoadLocal()
 		if err == nil {
 			for _, regPlugin := range localReg.Plugins {
 				if regPlugin.Name == pluginName {
-					// Load the plugin temporarily just to get default settings
+					// For config action, we can proceed even if loading fails (to show existing settings)
+					if action == "config" {
+						if r.Method != http.MethodGet {
+							w.WriteHeader(http.StatusMethodNotAllowed)
+							return
+						}
+						// Pass nil tool - handlePluginConfigDiscovery will handle it gracefully
+						h.handlePluginConfigDiscovery(w, nil, pluginName, current)
+						return
+					}
+
+					// For default-settings, we need to load the plugin
 					tool, err := NativeLoader{}.Load(regPlugin.Path)
 					if err == nil {
 						if r.Method != http.MethodGet {
@@ -144,46 +156,51 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.Tool, pluginName, agentName string) {
-	// Check if we should return the raw JSON settings file
-	// Look for the plugin settings file in the agent directory
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get current agent
 	_, current := h.store.ListAgents()
 	if current == "" {
 		current = agentName
 	}
 
+	// Always check for existing settings file first, regardless of plugin load status
 	settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
-	if fileData, err := os.ReadFile(settingsFilePath); err == nil {
-		// File exists, return it directly as JSON
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(fileData)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-
-	// Simplified: Skip legacy SettingsProvider check
-
-	// Check if plugin implements InitializationProvider (for modern plugins)
-	initProvider, ok := tool.(pluginapi.InitializationProvider)
-	if !ok {
-		// Plugin doesn't support any kind of initialization
-		json.NewEncoder(w).Encode(map[string]any{
-			"supports_initialization": false,
-			"message":                 "Plugin does not support automatic initialization",
-		})
-		return
-	}
-
-	// Get required configuration variables
-	configVars := initProvider.GetRequiredConfig()
-
-	// Simplified: assume plugins are not initialized for InitializationProvider
+	var currentValues map[string]interface{}
 	isInitialized := false
 
+	if fileData, err := os.ReadFile(settingsFilePath); err == nil {
+		// File exists, parse current values
+		if err := json.Unmarshal(fileData, &currentValues); err == nil {
+			isInitialized = true
+		}
+	}
+
+	// If tool is provided, check if it supports initialization
+	if tool != nil {
+		if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+			// Get required configuration variables
+			configVars := initProvider.GetRequiredConfig()
+
+			response := map[string]any{
+				"supports_initialization": true,
+				"is_initialized":          isInitialized,
+				"required_config":         configVars,
+				"current_values":          currentValues,
+			}
+
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	}
+
+	// Plugin doesn't support initialization or tool is nil, but still show settings if they exist
 	response := map[string]any{
-		"supports_initialization": true,
+		"supports_initialization": isInitialized, // If settings exist, we can at least show them
 		"is_initialized":          isInitialized,
-		"required_config":         configVars,
+		"required_config":         []interface{}{}, // Empty config for unsupported plugins
+		"current_values":          currentValues,
+		"message":                 "Plugin configuration found in settings file",
 	}
 
 	json.NewEncoder(w).Encode(response)

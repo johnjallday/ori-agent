@@ -20,8 +20,22 @@ async function showPluginConfigModal(pluginName) {
 
     // Handle modern plugins with required_config
     const configVars = configData.required_config || [];
-    if (configVars.length === 0) {
-      // No configuration needed
+    const currentValues = configData.current_values || {};
+
+    // If no required_config but we have current_values, create form fields from existing values
+    let finalConfigVars = configVars;
+    if (configVars.length === 0 && Object.keys(currentValues).length > 0) {
+      // Create config vars from existing values
+      finalConfigVars = Object.keys(currentValues).map(key => ({
+        name: key,
+        type: 'text', // Default to text type
+        description: `Configuration for ${key}`,
+        required: false
+      }));
+    }
+
+    if (finalConfigVars.length === 0) {
+      // No configuration needed and no existing values
       alert(`${pluginName} plugin is ready to use - no configuration required.`);
       return;
     }
@@ -36,16 +50,20 @@ async function showPluginConfigModal(pluginName) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
                   <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
                 </svg>
-                Configure ${pluginName}
+                ${configData.is_initialized ? 'Edit' : 'Configure'} ${pluginName}
               </h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
             </div>
             <div class="modal-body">
               <form id="pluginConfigForm">
                 <p style="color: var(--text-secondary); margin-bottom: 20px;">
-                  This plugin requires configuration before it can be used. Please provide the following information:
+                  ${configData.is_initialized ?
+                    'Edit the configuration settings for this plugin:' :
+                    'This plugin requires configuration before it can be used. Please provide the following information:'}
                 </p>
-                ${configVars.map(configVar => `
+                ${finalConfigVars.map(configVar => {
+                  const currentValue = currentValues[configVar.name] || '';
+                  return `
                   <div class="mb-3">
                     <label for="config_${configVar.name}" class="form-label" style="color: var(--text-primary);">
                       ${configVar.name}
@@ -54,23 +72,41 @@ async function showPluginConfigModal(pluginName) {
                     ${configVar.type === 'password' ? `
                       <input type="password" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
                              placeholder="${configVar.description}"
+                             value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                     ` : configVar.type === 'number' ? `
                       <input type="number" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
                              placeholder="${configVar.description}"
+                             value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                     ` : configVar.type === 'boolean' ? `
                       <div class="form-check">
-                        <input type="checkbox" class="form-check-input" id="config_${configVar.name}" name="${configVar.name}">
+                        <input type="checkbox" class="form-check-input" id="config_${configVar.name}" name="${configVar.name}"
+                               ${currentValue ? 'checked' : ''}>
                         <label class="form-check-label" for="config_${configVar.name}" style="color: var(--text-secondary);">
                           ${configVar.description}
                         </label>
                       </div>
+                    ` : (configVar.name.includes('dir') || configVar.name.includes('path') || configVar.name.includes('template') || configVar.name.includes('file')) ? `
+                      <div class="input-group">
+                        <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
+                               placeholder="${configVar.description}"
+                               value="${currentValue}"
+                               ${configVar.required ? 'required' : ''}
+                               style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <button type="button" class="btn btn-outline-secondary browse-btn" data-field="${configVar.name}">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+                          </svg>
+                          Browse
+                        </button>
+                      </div>
                     ` : `
                       <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
                              placeholder="${configVar.description}"
+                             value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                     `}
@@ -78,7 +114,7 @@ async function showPluginConfigModal(pluginName) {
                       ${configVar.description}
                     </div>
                   </div>
-                `).join('')}
+                `;}).join('')}
               </form>
             </div>
             <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
@@ -88,7 +124,7 @@ async function showPluginConfigModal(pluginName) {
               </button>
               <button type="button" class="btn btn-primary" id="savePluginConfigBtn"
                       style="background: var(--accent-color); border-color: var(--accent-color);">
-                Save Configuration
+                ${configData.is_initialized ? 'Update Configuration' : 'Save Configuration'}
               </button>
             </div>
           </div>
@@ -105,9 +141,170 @@ async function showPluginConfigModal(pluginName) {
     // Add modal to page
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+    // Setup browse button event listeners
+    document.querySelectorAll('.browse-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const fieldName = e.target.closest('button').dataset.field;
+        const inputField = document.getElementById(`config_${fieldName}`);
+        const isDirectory = fieldName.includes('dir');
+        const isFile = fieldName.includes('template') || fieldName.includes('file');
+
+        try {
+          let selectedPath = '';
+
+          if (isDirectory) {
+            // Use directory picker if available
+            if ('showDirectoryPicker' in window) {
+              const dirHandle = await window.showDirectoryPicker();
+              selectedPath = prompt(
+                `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
+                inputField.value || inputField.placeholder
+              );
+            } else {
+              // Fallback: create a file input for directory selection
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.webkitdirectory = true;
+              input.multiple = false;
+
+              input.onchange = (event) => {
+                const files = event.target.files;
+                if (files.length > 0) {
+                  const firstFile = files[0];
+                  selectedPath = prompt(
+                    `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
+                    inputField.value || inputField.placeholder
+                  );
+
+                  if (selectedPath) {
+                    inputField.value = selectedPath;
+                  }
+                }
+              };
+
+              input.click();
+              return;
+            }
+          } else if (isFile) {
+            // Use file picker for files
+            if ('showOpenFilePicker' in window) {
+              const [fileHandle] = await window.showOpenFilePicker();
+              selectedPath = prompt(
+                `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
+                inputField.value || inputField.placeholder
+              );
+            } else {
+              // Fallback: create a file input for file selection
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.multiple = false;
+
+              input.onchange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                  selectedPath = prompt(
+                    `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
+                    inputField.value || inputField.placeholder
+                  );
+
+                  if (selectedPath) {
+                    inputField.value = selectedPath;
+                  }
+                }
+              };
+
+              input.click();
+              return;
+            }
+          } else {
+            // For path fields, ask user what they want to select
+            const choice = confirm(`Do you want to select a directory/folder?\n\nClick "OK" for directory, "Cancel" for file.`);
+
+            if (choice) {
+              // Directory selection
+              if ('showDirectoryPicker' in window) {
+                const dirHandle = await window.showDirectoryPicker();
+                selectedPath = prompt(
+                  `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
+                  inputField.value || inputField.placeholder
+                );
+              } else {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.webkitdirectory = true;
+                input.multiple = false;
+
+                input.onchange = (event) => {
+                  const files = event.target.files;
+                  if (files.length > 0) {
+                    const firstFile = files[0];
+                    selectedPath = prompt(
+                      `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
+                      inputField.value || inputField.placeholder
+                    );
+
+                    if (selectedPath) {
+                      inputField.value = selectedPath;
+                    }
+                  }
+                };
+
+                input.click();
+                return;
+              }
+            } else {
+              // File selection
+              if ('showOpenFilePicker' in window) {
+                const [fileHandle] = await window.showOpenFilePicker();
+                selectedPath = prompt(
+                  `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
+                  inputField.value || inputField.placeholder
+                );
+              } else {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.multiple = false;
+
+                input.onchange = (event) => {
+                  const file = event.target.files[0];
+                  if (file) {
+                    selectedPath = prompt(
+                      `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
+                      inputField.value || inputField.placeholder
+                    );
+
+                    if (selectedPath) {
+                      inputField.value = selectedPath;
+                    }
+                  }
+                };
+
+                input.click();
+                return;
+              }
+            }
+          }
+
+          if (selectedPath && selectedPath.trim() !== '') {
+            inputField.value = selectedPath.trim();
+          }
+
+        } catch (error) {
+          console.error('Error browsing for path:', error);
+
+          const displayName = fieldName.split('_').map(word =>
+            word.charAt(0).toUpperCase() + word.slice(1)
+          ).join(' ');
+
+          alert(`Browser doesn't support file picking. Please enter the full path for ${displayName.toLowerCase()} manually.\n\nExamples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`);
+          inputField.focus();
+        }
+      });
+    });
+
     // Setup save button event listener
     document.getElementById('savePluginConfigBtn').addEventListener('click', async () => {
-      await savePluginConfig(pluginName, configVars);
+      await savePluginConfig(pluginName, finalConfigVars);
     });
 
     // Show modal

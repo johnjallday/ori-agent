@@ -184,21 +184,16 @@ function setupPluginToggles() {
       const pluginName = button.dataset.pluginName;
       const pluginPath = button.dataset.pluginPath;
 
-      // For known configurable plugins, show filepath settings modal directly
+      // For known configurable plugins, show configuration modal
       console.log(`NEW HANDLER: Config button clicked for plugin: ${pluginName}`);
       if (pluginName === 'reascript_launcher') {
-        console.log('Detected reascript_launcher, showing filepath modal directly');
-        // reascript_launcher has scripts_dir setting - show filepath modal with known field
-        const filepathFields = { 'scripts_dir': 'filepath' };
-        await showFilepathSettingsModal(pluginName, filepathFields);
+        console.log('Detected reascript_launcher, showing regular config modal');
+        // Use the regular config modal which will show current settings
+        await showPluginConfigModal(pluginName);
       } else if (pluginName === 'music_project_manager') {
-        // Check if plugin has filepath settings and show the appropriate modal
-        const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
-        if (filepathFields) {
-          await showFilepathSettingsModal(pluginName, filepathFields);
-        } else {
-          await showPluginConfigModal(pluginName);
-        }
+        console.log('Detected music_project_manager, showing regular config modal');
+        // Use the regular config modal which will show current settings
+        await showPluginConfigModal(pluginName);
       } else {
         // For other plugins, use the original logic
         const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
