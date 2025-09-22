@@ -114,6 +114,10 @@ func main() {
 		if !ok {
 			continue
 		}
+
+		// Track failed plugins to remove from config
+		var failedPlugins []string
+
 		for key, lp := range ag.Plugins {
 			// If tool is already set, just add it to cache
 			if lp.Tool != nil {
@@ -127,6 +131,8 @@ func main() {
 			tool, err := pluginloader.LoadWithCache(lp.Path)
 			if err != nil {
 				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
+				log.Printf("removing failed plugin %s from agent %s config", key, agName)
+				failedPlugins = append(failedPlugins, key)
 				continue
 			}
 
@@ -146,6 +152,12 @@ func main() {
 			lp.Tool = tool
 			ag.Plugins[key] = lp
 		}
+
+		// Remove failed plugins from agent config
+		for _, pluginKey := range failedPlugins {
+			delete(ag.Plugins, pluginKey)
+		}
+
 		if err := st.SetAgent(agName, ag); err != nil {
 			log.Printf("failed to restore plugins for agent %s: %v", agName, err)
 		}
