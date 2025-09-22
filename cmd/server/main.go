@@ -32,7 +32,7 @@ var (
 	// runtime state (moved behind Store)
 	st             store.Store
 	pluginReg      types.PluginRegistry
-	defaultConf    = types.Settings{Model: "gpt-5-nano", Temperature: 0}
+	defaultConf    = types.Settings{Model: "gpt-5-nano", Temperature: 1}
 	agentStorePath string
 	configManager  *config.Manager
 
@@ -47,9 +47,9 @@ var (
 
 	// HTTP handlers
 	settingsHandler       *settingshttp.Handler
-	chatHandler          *chathttp.Handler
+	chatHandler           *chathttp.Handler
 	pluginRegistryHandler *pluginhttp.RegistryHandler
-	pluginInitHandler    *pluginhttp.InitHandler
+	pluginInitHandler     *pluginhttp.InitHandler
 )
 
 func main() {
@@ -301,3 +301,4 @@ func serveStaticFile(w http.ResponseWriter, r *http.Request) {
 
 	w.Write(content)
 }
+

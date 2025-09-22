@@ -128,6 +128,108 @@ func (h *Handler) handleAgentStatusCommand(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleToolsListCommand handles the /tools command to list available functions
+func (h *Handler) handleToolsListCommand(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get current agent information
+	names, current := h.store.ListAgents()
+	if current == "" && len(names) > 0 {
+		current = names[0] // fallback to first available agent
+	}
+
+	ag, ok := h.store.GetAgent(current)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Build tools list response
+	var toolsResponse strings.Builder
+	toolsResponse.WriteString("## 🔧 Available Tools\n\n")
+
+	if len(ag.Plugins) == 0 {
+		toolsResponse.WriteString("No tools are currently loaded.")
+	} else {
+		for name, plugin := range ag.Plugins {
+			emoji := getPluginEmoji(name)
+			toolsResponse.WriteString(fmt.Sprintf("### %s %s\n\n", emoji, plugin.Definition.Name))
+
+			description := plugin.Definition.Description.String()
+			if description != "" {
+				toolsResponse.WriteString(fmt.Sprintf("**Description:** %s\n\n", description))
+			}
+
+			// Extract and display parameters information
+			if plugin.Definition.Parameters != nil {
+				if props, ok := plugin.Definition.Parameters["properties"].(map[string]any); ok {
+					toolsResponse.WriteString("**Parameters:**\n")
+
+					// Handle required fields
+					var required []string
+					if reqField, exists := plugin.Definition.Parameters["required"]; exists {
+						if reqSlice, ok := reqField.([]string); ok {
+							required = reqSlice
+						}
+					}
+
+					for paramName, paramInfo := range props {
+						if paramInfoMap, ok := paramInfo.(map[string]any); ok {
+							isRequired := false
+							for _, req := range required {
+								if req == paramName {
+									isRequired = true
+									break
+								}
+							}
+
+							reqText := ""
+							if isRequired {
+								reqText = " (required)"
+							}
+
+							// Get parameter description
+							description := ""
+							if desc, exists := paramInfoMap["description"]; exists {
+								if descStr, ok := desc.(string); ok {
+									description = descStr
+								}
+							}
+
+							// Get enum values if they exist
+							enumText := ""
+							if enumField, exists := paramInfoMap["enum"]; exists {
+								if enumSlice, ok := enumField.([]any); ok {
+									var enumStrings []string
+									for _, enumVal := range enumSlice {
+										if enumStr, ok := enumVal.(string); ok {
+											enumStrings = append(enumStrings, enumStr)
+										}
+									}
+									if len(enumStrings) > 0 {
+										enumText = fmt.Sprintf(" (options: %s)", strings.Join(enumStrings, ", "))
+									}
+								}
+							}
+
+							toolsResponse.WriteString(fmt.Sprintf("- **%s**%s: %s%s\n", paramName, reqText, description, enumText))
+						}
+					}
+				}
+			}
+
+			toolsResponse.WriteString("\n")
+		}
+	}
+
+	// Return as a response that mimics a chat message
+	response := map[string]any{
+		"response": toolsResponse.String(),
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
 // checkUninitializedPlugins checks which plugins need initialization
 func (h *Handler) checkUninitializedPlugins(agent *types.Agent) []map[string]any {
 	var uninitializedPlugins []map[string]any
@@ -212,6 +314,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Handle special commands
 	if q == "/agent" {
 		h.handleAgentStatusCommand(w, r)
+		return
+	}
+	if q == "/tools" {
+		h.handleToolsListCommand(w, r)
 		return
 	}
 
@@ -365,7 +471,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			Model:       ag.Settings.Model,
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
-				openai.SystemMessage("The tool was executed successfully. If the tool returned configuration data, settings, or structured information, please display that data clearly to the user. For other operations, provide a brief acknowledgment."),
+				openai.SystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."),
 			),
 		})
 		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
