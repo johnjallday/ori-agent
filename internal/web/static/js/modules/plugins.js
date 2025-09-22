@@ -244,7 +244,11 @@ async function togglePlugin(pluginName, pluginPath, enable) {
         return;
       }
       // Continue with enable process using user settings
-      return await enablePluginWithSettings(pluginName, pluginPath, userSettings);
+      await enablePluginWithSettings(pluginName, pluginPath, userSettings);
+
+      // Refresh the plugins list to show the updated state
+      await loadPlugins();
+      return;
     }
 
     // For enabling, check if the file needs to be renamed back from .disabled
@@ -297,9 +301,12 @@ async function togglePlugin(pluginName, pluginPath, enable) {
         throw new Error(errorText || 'Failed to enable plugin');
       }
     }
-    
+
     console.log(`Plugin ${pluginName} enabled successfully`);
-    
+
+    // Refresh the plugins list to show the updated state
+    await loadPlugins();
+
   } else {
     // For disabling, unload from cache
     const unloadResponse = await fetch(`/api/plugins?name=${encodeURIComponent(pluginName)}`, {
