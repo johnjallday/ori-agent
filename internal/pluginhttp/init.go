@@ -29,7 +29,7 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 	w.Header().Set("Content-Type", "application/json")
 
 	// Check if the tool supports GetDefaultSettings
-	if defaultSettingsTool, ok := tool.(interface{ GetDefaultSettings() (string, error) }); ok {
+	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
 			http.Error(w, "Failed to get default settings", http.StatusInternalServerError)

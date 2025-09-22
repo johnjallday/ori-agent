@@ -21,6 +21,13 @@ type VersionedTool interface {
 	Version() string
 }
 
+// DefaultSettingsProvider allows plugins to provide default configuration values.
+// This is useful for plugins that need default file paths or configuration.
+type DefaultSettingsProvider interface {
+	// GetDefaultSettings returns default settings as a JSON string
+	GetDefaultSettings() (string, error)
+}
+
 
 // AgentContext provides information about the current agent to plugins.
 type AgentContext struct {
