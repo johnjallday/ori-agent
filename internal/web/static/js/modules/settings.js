@@ -90,7 +90,7 @@ async function loadSettings() {
     const temperatureSlider = document.getElementById('temperatureSlider');
     const temperatureValue = document.getElementById('temperatureValue');
     
-    if (modelSelect) modelSelect.value = 'gpt-4o';
+    if (modelSelect) modelSelect.value = 'gpt-5-nano';
     if (temperatureSlider) temperatureSlider.value = 0;
     if (temperatureValue) temperatureValue.textContent = '0.0';
   }

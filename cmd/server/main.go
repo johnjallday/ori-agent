@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v2"
-
 	agenthttp "github.com/johnjallday/dolphin-agent/internal/agenthttp"
 	"github.com/johnjallday/dolphin-agent/internal/chathttp"
 	"github.com/johnjallday/dolphin-agent/internal/client"
@@ -34,7 +32,7 @@ var (
 	// runtime state (moved behind Store)
 	st             store.Store
 	pluginReg      types.PluginRegistry
-	defaultConf    = types.Settings{Model: openai.ChatModelGPT4_1Nano, Temperature: 0}
+	defaultConf    = types.Settings{Model: "gpt-5-nano", Temperature: 0}
 	agentStorePath string
 	configManager  *config.Manager
 

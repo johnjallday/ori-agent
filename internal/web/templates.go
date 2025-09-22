@@ -39,7 +39,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	// Load all template files from embedded filesystem
 	templatePaths := []string{
 		"templates/layout/base.tmpl",
-		"templates/layout/head.tmpl", 
+		"templates/layout/head.tmpl",
 		"templates/components/sidebar.tmpl",
 		"templates/components/chat-area.tmpl",
 		"templates/components/modals.tmpl",
@@ -53,7 +53,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 			log.Printf("Warning: Could not read template %s: %v", path, err)
 			continue
 		}
-		
+
 		// Extract the template name from the path
 		name := filepath.Base(path)
 		_, err = tmpl.New(name).Parse(string(content))
@@ -104,7 +104,8 @@ func GetDefaultData() TemplateData {
 		Title:        "Dolphin Agent Chatbot",
 		Theme:        "light",
 		CurrentAgent: "Default Agent",
-		Model:        "gpt-4",
+		Model:        "gpt-5-nano",
 		Version:      "0.0.1",
 	}
 }
+
