@@ -126,6 +126,21 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 - View responses with timestamps and tool usage
 - Click the agent badge in the navbar for quick status info
 
+#### Special Commands
+- **`/agent`** - Display comprehensive agent status dashboard
+  - Shows current agent name and configuration
+  - Lists model settings (model type, temperature)
+  - Displays API key status
+  - Shows all loaded plugins with versions and emojis
+  - Provides system status information
+
+- **`/tools`** - List all available tools and functions
+  - Shows all loaded plugins with descriptions
+  - Displays function parameters (required vs optional)
+  - Lists available options for enum parameters
+  - Includes helpful emojis for easy identification
+  - Works entirely offline without API calls
+
 ## 🔌 Plugin Development
 
 ### Creating a Plugin
