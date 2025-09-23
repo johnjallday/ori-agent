@@ -68,7 +68,7 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
    export OPENAI_API_KEY="your-openai-api-key"
    ```
 
-   Or create a `settings.json` file:
+   Or Simply enter your api key on the bottom of the sidebar
    ```json
    {
      "openai_api_key": "your-openai-api-key"
@@ -120,12 +120,6 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 4. Update API key if needed
 5. Click "Save Settings"
 
-### Chatting with Agents
-- Type messages in the chat input
-- Use **Enter** to send (or **Shift+Enter** for new lines)
-- View responses with timestamps and tool usage
-- Click the agent badge in the navbar for quick status info
-
 #### Special Commands
 - **`/agent`** - Display comprehensive agent status dashboard
   - Shows current agent name and configuration
@@ -143,170 +137,34 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 
 ## 🔌 Plugin Development
 
-### Creating a Plugin
+For detailed information on creating custom plugins, see the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md).
 
-Plugins are Go packages compiled as shared libraries (`.so` files) that implement the `pluginapi.Tool` interface.
+**Quick Overview:**
+- Plugins are Go shared libraries (`.so` files) that implement the `pluginapi.Tool` interface
+- Support for initialization, configuration, and agent-specific contexts
+- Example plugins included: Math, Weather, and Result Handler
 
-#### 1. Basic Structure
+**Getting Started:**
+1. Implement the `pluginapi.Tool` interface
+2. Build with `go build -buildmode=plugin`
+3. Upload via the UI or API
+4. Configure through the web interface
 
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "github.com/johnjallday/dolphin-agent/pluginapi"
-    "github.com/openai/openai-go/v2"
-)
-
-type MyTool struct{}
-
-// Ensure interface compliance
-var _ pluginapi.Tool = MyTool{}
-
-func (t MyTool) Definition() openai.FunctionDefinitionParam {
-    return openai.FunctionDefinitionParam{
-        Name:        "my_function",
-        Description: openai.String("Description of what this tool does"),
-        Parameters: openai.FunctionParameters{
-            "type": "object",
-            "properties": map[string]any{
-                "param1": map[string]any{
-                    "type":        "string",
-                    "description": "Parameter description",
-                },
-            },
-            "required": []string{"param1"},
-        },
-    }
-}
-
-func (t MyTool) Call(ctx context.Context, args string) (string, error) {
-    var params struct {
-        Param1 string `json:"param1"`
-    }
-    if err := json.Unmarshal([]byte(args), &params); err != nil {
-        return "", err
-    }
-
-    // Your tool logic here
-    result := "Processed: " + params.Param1
-    return result, nil
-}
-
-// Export the tool
-var Tool MyTool
-```
-
-#### 2. Advanced Plugin Features
-
-##### Plugin Initialization
-```go
-type MyTool struct {
-    initialized bool
-    config      map[string]string
-}
-
-// Implement InitializationProvider for configuration
-func (t *MyTool) GetRequiredConfig() []pluginapi.ConfigVariable {
-    return []pluginapi.ConfigVariable{
-        {
-            Name:        "api_key",
-            Type:        "string",
-            Description: "Your API key",
-            Required:    true,
-        },
-    }
-}
-
-func (t *MyTool) ValidateConfig(config map[string]interface{}) error {
-    if _, ok := config["api_key"]; !ok {
-        return errors.New("api_key is required")
-    }
-    return nil
-}
-
-func (t *MyTool) InitializeWithConfig(config map[string]interface{}) error {
-    t.config = make(map[string]string)
-    for k, v := range config {
-        t.config[k] = fmt.Sprintf("%v", v)
-    }
-    t.initialized = true
-    return nil
-}
-```
-
-##### Agent Context Awareness
-```go
-// Implement AgentAwareTool for agent-specific behavior
-func (t *MyTool) SetAgentContext(ctx pluginapi.AgentContext) {
-    log.Printf("Plugin loaded for agent: %s", ctx.Name)
-    // Access agent-specific configuration path: ctx.ConfigPath
-}
-```
-
-#### 3. Build the Plugin
-
-```bash
-go build -buildmode=plugin -o my_plugin.so my_plugin.go
-```
-
-#### 4. Upload via UI
-
-Use the file upload in the Plugins tab or the API:
-
-```bash
-curl -X POST -F "plugin=@my_plugin.so" http://localhost:8080/api/plugins
-```
-
-### Example Plugins
-
-The project includes several example plugins:
-
-- **Math Plugin** (`plugins/math/`): Basic arithmetic operations
-- **Weather Plugin** (`plugins/weather/`): Weather information (mock implementation)
-- **Result Handler Plugin** (`plugins/result-handler/`): File and URL handling
+See the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md) for complete examples, advanced features, and best practices.
 
 ## 🌐 API Reference
 
-### Agents
-- `GET /api/agents` - List all agents and current agent
-- `POST /api/agents` - Create new agent (JSON: `{"name": "agent_name"}`)
-- `PUT /api/agents?name=<name>` - Switch to agent
-- `DELETE /api/agents?name=<name>` - Delete agent
+For detailed API documentation including request/response formats, authentication, and examples, see the [API Reference Guide](API_REFERENCE.md).
 
-### Plugins
-- `GET /api/plugins` - List loaded plugins for current agent
-- `POST /api/plugins` - Upload and load plugin (multipart/form-data)
-- `DELETE /api/plugins?name=<name>` - Unload plugin
-- `POST /api/plugins/save-settings` - Save plugin settings
-- `GET /api/plugins/{name}/config` - Get plugin configuration
-- `POST /api/plugins/{name}/initialize` - Initialize plugin with config
-- `POST /api/plugins/execute` - Execute plugin function directly
-- `GET /api/plugins/init-status` - Check plugin initialization status
+**Available Endpoints:**
+- **Agents**: Create, list, switch, and delete agents
+- **Plugins**: Upload, configure, and manage plugins
+- **Plugin Registry**: Browse and install plugins from registry
+- **Settings**: Manage agent configuration and API keys
+- **Chat**: Send messages and interact with agents
+- **Updates**: Check for and install software updates
 
-### Plugin Registry
-- `GET /api/plugin-registry` - List available plugins
-- `POST /api/plugin-registry` - Load plugin from registry (JSON: `{"name": "plugin_name"}`)
-- `DELETE /api/plugin-registry?name=<name>` - Delete plugin from local registry
-- `GET /api/plugin-updates` - Check for plugin updates
-- `POST /api/plugin-updates` - Update plugins
-- `POST /api/plugins/download` - Download plugin from registry
-
-### Settings
-- `GET /api/settings` - Get current agent settings
-- `POST /api/settings` - Update agent settings
-- `GET /api/api-key` - Get masked API key info
-- `POST /api/api-key` - Update API key
-
-### Chat
-- `POST /api/chat` - Send message to current agent (JSON: `{"question": "message"}`)
-
-### Updates
-- `GET /api/updates/check` - Check for software updates
-- `GET /api/updates/releases` - List available releases
-- `POST /api/updates/download` - Download update
-- `GET /api/updates/version` - Get current version
+See the [API Reference Guide](API_REFERENCE.md) for complete endpoint documentation with examples.
 
 ## 🏗️ Technology Stack
 

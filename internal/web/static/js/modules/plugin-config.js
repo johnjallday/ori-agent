@@ -123,7 +123,7 @@ async function showPluginConfigModal(pluginName) {
                 Cancel
               </button>
               <button type="button" class="btn btn-primary" id="savePluginConfigBtn"
-                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                      style="background: var(--primary-color); border-color: var(--primary-color); color: white;">
                 ${configData.is_initialized ? 'Update Configuration' : 'Save Configuration'}
               </button>
             </div>
@@ -497,7 +497,7 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                 Cancel
               </button>
               <button type="button" class="btn btn-primary" id="saveFilepathSettingsBtn"
-                      style="background: var(--accent-color); border-color: var(--accent-color);">
+                      style="background: var(--primary-color); border-color: var(--primary-color); color: white;">
                 Configure Plugin
               </button>
             </div>
