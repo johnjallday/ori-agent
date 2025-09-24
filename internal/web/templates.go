@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"github.com/johnjallday/dolphin-agent/internal/version"
 	"html/template"
 	"log"
 	"path/filepath"
@@ -86,7 +87,6 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 		templateName = name + ".tmpl"
 	}
 
-	log.Printf("Executing template: %s with data: %+v", templateName, data)
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
 	if err != nil {
 		log.Printf("Error executing template: %v", err)
@@ -105,7 +105,7 @@ func GetDefaultData() TemplateData {
 		Theme:        "light",
 		CurrentAgent: "Default Agent",
 		Model:        "gpt-5-nano",
-		Version:      "0.0.1",
+		Version:      version.GetVersion(),
+		//Version: "test",
 	}
 }
-
