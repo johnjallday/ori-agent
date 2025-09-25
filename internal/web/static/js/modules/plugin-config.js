@@ -153,56 +153,16 @@ async function showPluginConfigModal(pluginName) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // For directories, use the Directory Picker API (no upload warning)
+            // Use cross-browser directory selection
+            const browserName = getBrowserName();
+
             if ('showDirectoryPicker' in window) {
+              // Chrome/Edge - use File System Access API
               try {
                 const dirHandle = await window.showDirectoryPicker({
-                  mode: 'read' // Explicitly specify read-only mode
+                  mode: 'read'
                 });
-
-                const dirName = dirHandle.name;
-
-                // Use the ACTUAL selected directory name, not field-based assumptions
-                const username = 'jj';
-
-                // Always base the path on the actual selected directory name
-                if (navigator.platform.includes('Mac')) {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `/Users/${username}/Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `/Users/${username}/Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `/Users/${username}/Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `/Users/${username}/Pictures`;
-                  } else if (dirName.toLowerCase() === 'projects') {
-                    selectedPath = `/Users/${username}/Music/Projects`;
-                  } else if (dirName.toLowerCase().includes('template')) {
-                    selectedPath = `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
-                  } else {
-                    // For any other directory, use the actual selected directory name
-                    selectedPath = `/Users/${username}/${dirName}`;
-                  }
-                } else {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `C:\\Users\\${username}\\Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `C:\\Users\\${username}\\Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `C:\\Users\\${username}\\Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `C:\\Users\\${username}\\Pictures`;
-                  } else if (dirName.toLowerCase() === 'projects') {
-                    selectedPath = `C:\\Users\\${username}\\Music\\Projects`;
-                  } else if (dirName.toLowerCase().includes('template')) {
-                    selectedPath = `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates`;
-                  } else {
-                    // For any other directory, use the actual selected directory name
-                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
-                  }
-                }
-
-                console.log(`Auto-constructed path: ${selectedPath} (from directory: ${dirName})`);
+                selectedPath = constructPathFromDirHandle(dirHandle);
               } catch (error) {
                 if (error.name === 'AbortError') {
                   return; // User cancelled
@@ -210,12 +170,18 @@ async function showPluginConfigModal(pluginName) {
                 throw error;
               }
             } else {
-              // Fallback for browsers without Directory Picker API
-              throw new Error('Directory picker not supported');
+              // Firefox/Safari/Others - use fallback
+              try {
+                selectedPath = await selectDirectoryFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
+              } catch (error) {
+                throw error;
+              }
             }
           } else if (isFile) {
-            // For files, use the File Picker API with read-only mode
+            // Use cross-browser file selection
             if ('showOpenFilePicker' in window) {
+              // Chrome/Edge - use File System Access API
               try {
                 const [fileHandle] = await window.showOpenFilePicker({
                   types: [{
@@ -225,22 +191,7 @@ async function showPluginConfigModal(pluginName) {
                   excludeAcceptAllOption: false,
                   multiple: false
                 });
-
-                const fileName = fileHandle.name;
-                const username = 'jj'; // Use your username
-
-                // Automatically construct the full path based on file type and context
-                if (fieldName.toLowerCase().includes('template')) {
-                  selectedPath = navigator.platform.includes('Mac') ?
-                    `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
-                    `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates\\${fileName}`;
-                } else {
-                  selectedPath = navigator.platform.includes('Mac') ?
-                    `/Users/${username}/Documents/${fileName}` :
-                    `C:\\Users\\${username}\\Documents\\${fileName}`;
-                }
-
-                console.log(`Auto-constructed path: ${selectedPath} (from file: ${fileName})`);
+                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
               } catch (error) {
                 if (error.name === 'AbortError') {
                   return; // User cancelled
@@ -248,63 +199,38 @@ async function showPluginConfigModal(pluginName) {
                 throw error;
               }
             } else {
-              throw new Error('File picker not supported');
+              // Firefox/Safari/Others - use fallback
+              try {
+                selectedPath = await selectFileFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
+              } catch (error) {
+                throw error;
+              }
             }
           } else {
             // For generic path fields, ask what they want to select
             const choice = confirm(`What do you want to select?\n\nClick "OK" for directory/folder\nClick "Cancel" for file`);
 
             if (choice) {
-              // Directory selection
+              // Directory selection - use cross-browser helper
               if ('showDirectoryPicker' in window) {
                 const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-                const dirName = dirHandle.name;
-                const username = 'jj'; // Use your username
-
-                // Auto-construct path based on directory name
-                if (navigator.platform.includes('Mac')) {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `/Users/${username}/Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `/Users/${username}/Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `/Users/${username}/Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `/Users/${username}/Pictures`;
-                  } else {
-                    selectedPath = `/Users/${username}/${dirName}`;
-                  }
-                } else {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `C:\\Users\\${username}\\Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `C:\\Users\\${username}\\Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `C:\\Users\\${username}\\Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `C:\\Users\\${username}\\Pictures`;
-                  } else {
-                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
-                  }
-                }
+                selectedPath = constructPathFromDirHandle(dirHandle);
               } else {
-                throw new Error('Directory picker not supported');
+                selectedPath = await selectDirectoryFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
               }
             } else {
-              // File selection
+              // File selection - use cross-browser helper
               if ('showOpenFilePicker' in window) {
                 const [fileHandle] = await window.showOpenFilePicker({
                   excludeAcceptAllOption: false,
                   multiple: false
                 });
-                const fileName = fileHandle.name;
-                const username = 'jj'; // Use your username
-
-                selectedPath = navigator.platform.includes('Mac') ?
-                  `/Users/${username}/Documents/${fileName}` :
-                  `C:\\Users\\${username}\\Documents\\${fileName}`;
+                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
               } else {
-                throw new Error('File picker not supported');
+                selectedPath = await selectFileFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
               }
             }
           }
@@ -573,55 +499,15 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // For directories, use Directory Picker API
+            // Use cross-browser directory selection
             if ('showDirectoryPicker' in window) {
+              // Chrome/Edge - use File System Access API
               try {
                 const dirHandle = await window.showDirectoryPicker({
                   mode: 'read'
                 });
-
-                const dirName = dirHandle.name;
-                const username = 'jj'; // Use your username
-
-                // Use the ACTUAL selected directory name, not field-based assumptions
-                // Always base the path on the actual selected directory name
-                if (navigator.platform.includes('Mac')) {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `/Users/${username}/Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `/Users/${username}/Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `/Users/${username}/Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `/Users/${username}/Pictures`;
-                  } else if (dirName.toLowerCase() === 'projects') {
-                    selectedPath = `/Users/${username}/Music/Projects`;
-                  } else if (dirName.toLowerCase().includes('template')) {
-                    selectedPath = `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
-                  } else {
-                    // For any other directory, use the actual selected directory name
-                    selectedPath = `/Users/${username}/${dirName}`;
-                  }
-                } else {
-                  if (dirName.toLowerCase().includes('document')) {
-                    selectedPath = `C:\\Users\\${username}\\Documents`;
-                  } else if (dirName.toLowerCase().includes('music')) {
-                    selectedPath = `C:\\Users\\${username}\\Music`;
-                  } else if (dirName.toLowerCase().includes('desktop')) {
-                    selectedPath = `C:\\Users\\${username}\\Desktop`;
-                  } else if (dirName.toLowerCase().includes('picture')) {
-                    selectedPath = `C:\\Users\\${username}\\Pictures`;
-                  } else if (dirName.toLowerCase() === 'projects') {
-                    selectedPath = `C:\\Users\\${username}\\Music\\Projects`;
-                  } else if (dirName.toLowerCase().includes('template')) {
-                    selectedPath = `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates`;
-                  } else {
-                    // For any other directory, use the actual selected directory name
-                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
-                  }
-                }
-
-                console.log(`Legacy modal - Auto-constructed path: ${selectedPath} (from directory: ${dirName})`);
+                selectedPath = constructPathFromDirHandle(dirHandle);
+                console.log(`Legacy modal - Auto-constructed path: ${selectedPath}`);
               } catch (error) {
                 if (error.name === 'AbortError') {
                   return; // User cancelled
@@ -629,11 +515,19 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                 throw error;
               }
             } else {
-              throw new Error('Directory picker not supported');
+              // Firefox/Safari/Others - use fallback
+              try {
+                selectedPath = await selectDirectoryFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
+                console.log(`Legacy modal - Fallback path: ${selectedPath}`);
+              } catch (error) {
+                throw error;
+              }
             }
           } else {
-            // For files, use File Picker API
+            // Use cross-browser file selection
             if ('showOpenFilePicker' in window) {
+              // Chrome/Edge - use File System Access API
               try {
                 const [fileHandle] = await window.showOpenFilePicker({
                   types: [{
@@ -643,23 +537,8 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                   excludeAcceptAllOption: false,
                   multiple: false
                 });
-
-                const fileName = fileHandle.name;
-                const username = 'jj'; // Use your username
-
-                // Automatically construct the full path based on file type and context
-                if (fieldName.toLowerCase().includes('template')) {
-                  selectedPath = navigator.platform.includes('Mac') ?
-                    `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
-                    `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates\\${fileName}`;
-                } else {
-                  selectedPath = navigator.platform.includes('Mac') ?
-                    `/Users/${username}/Documents/${fileName}` :
-                    `C:\\Users\\${username}\\Documents\\${fileName}`;
-                }
-
-                console.log(`Legacy modal - Auto-constructed path: ${selectedPath} (from file: ${fileName})`);
-
+                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
+                console.log(`Legacy modal - Auto-constructed path: ${selectedPath}`);
               } catch (error) {
                 if (error.name === 'AbortError') {
                   return; // User cancelled
@@ -667,7 +546,14 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
                 throw error;
               }
             } else {
-              throw new Error('File picker not supported');
+              // Firefox/Safari/Others - use fallback
+              try {
+                selectedPath = await selectFileFallback(fieldName);
+                if (!selectedPath) return; // User cancelled
+                console.log(`Legacy modal - Fallback path: ${selectedPath}`);
+              } catch (error) {
+                throw error;
+              }
             }
           }
 
@@ -815,9 +701,208 @@ async function enablePluginWithSettings(pluginName, pluginPath, userSettings) {
   }
 }
 
+// Cross-browser helper functions
+function constructPathFromDirHandle(dirHandle) {
+  const dirName = dirHandle.name;
+  const username = 'jj';
+
+  if (navigator.platform.includes('Mac')) {
+    if (dirName.toLowerCase().includes('document')) {
+      return `/Users/${username}/Documents`;
+    } else if (dirName.toLowerCase().includes('music')) {
+      return `/Users/${username}/Music`;
+    } else if (dirName.toLowerCase().includes('desktop')) {
+      return `/Users/${username}/Desktop`;
+    } else if (dirName.toLowerCase().includes('picture')) {
+      return `/Users/${username}/Pictures`;
+    } else if (dirName.toLowerCase() === 'projects') {
+      return `/Users/${username}/Music/Projects`;
+    } else if (dirName.toLowerCase().includes('template')) {
+      return `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
+    } else {
+      return `/Users/${username}/${dirName}`;
+    }
+  } else {
+    if (dirName.toLowerCase().includes('document')) {
+      return `C:\\\\Users\\\\${username}\\\\Documents`;
+    } else if (dirName.toLowerCase().includes('music')) {
+      return `C:\\\\Users\\\\${username}\\\\Music`;
+    } else if (dirName.toLowerCase().includes('desktop')) {
+      return `C:\\\\Users\\\\${username}\\\\Desktop`;
+    } else if (dirName.toLowerCase().includes('picture')) {
+      return `C:\\\\Users\\\\${username}\\\\Pictures`;
+    } else if (dirName.toLowerCase() === 'projects') {
+      return `C:\\\\Users\\\\${username}\\\\Music\\\\Projects`;
+    } else if (dirName.toLowerCase().includes('template')) {
+      return `C:\\\\Users\\\\${username}\\\\AppData\\\\Roaming\\\\REAPER\\\\ProjectTemplates`;
+    } else {
+      return `C:\\\\Users\\\\${username}\\\\${dirName}`;
+    }
+  }
+}
+
+function constructPathFromFileHandle(fileHandle, fieldName) {
+  const fileName = fileHandle.name;
+  const username = 'jj';
+
+  if (fieldName.toLowerCase().includes('template')) {
+    return navigator.platform.includes('Mac') ?
+      `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
+      `C:\\\\Users\\\\${username}\\\\AppData\\\\Roaming\\\\REAPER\\\\ProjectTemplates\\\\${fileName}`;
+  } else {
+    return navigator.platform.includes('Mac') ?
+      `/Users/${username}/Documents/${fileName}` :
+      `C:\\\\Users\\\\${username}\\\\Documents\\\\${fileName}`;
+  }
+}
+
+// Fallback for Firefox, Safari, and other browsers
+async function selectDirectoryFallback(fieldName) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+    input.multiple = false;
+    input.style.display = 'none';
+
+    input.onchange = (event) => {
+      const files = event.target.files;
+      if (files.length > 0) {
+        const firstFile = files[0];
+        const relativePath = firstFile.webkitRelativePath;
+        const dirName = relativePath.split('/')[0];
+
+        const username = 'jj';
+        let constructedPath;
+
+        // Construct path based on detected directory name
+        if (navigator.platform.includes('Mac')) {
+          if (dirName.toLowerCase().includes('document')) {
+            constructedPath = `/Users/${username}/Documents`;
+          } else if (dirName.toLowerCase().includes('music')) {
+            constructedPath = `/Users/${username}/Music`;
+          } else if (dirName.toLowerCase().includes('desktop')) {
+            constructedPath = `/Users/${username}/Desktop`;
+          } else if (dirName.toLowerCase().includes('picture')) {
+            constructedPath = `/Users/${username}/Pictures`;
+          } else if (dirName.toLowerCase() === 'projects') {
+            constructedPath = `/Users/${username}/Music/Projects`;
+          } else if (dirName.toLowerCase().includes('template')) {
+            constructedPath = `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
+          } else {
+            constructedPath = `/Users/${username}/${dirName}`;
+          }
+        } else {
+          if (dirName.toLowerCase().includes('document')) {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\Documents`;
+          } else if (dirName.toLowerCase().includes('music')) {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\Music`;
+          } else if (dirName.toLowerCase().includes('desktop')) {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\Desktop`;
+          } else if (dirName.toLowerCase().includes('picture')) {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\Pictures`;
+          } else if (dirName.toLowerCase() === 'projects') {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\Music\\\\Projects`;
+          } else if (dirName.toLowerCase().includes('template')) {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\AppData\\\\Roaming\\\\REAPER\\\\ProjectTemplates`;
+          } else {
+            constructedPath = `C:\\\\Users\\\\${username}\\\\${dirName}`;
+          }
+        }
+
+        console.log(`Fallback directory selection: ${dirName} → ${constructedPath}`);
+        resolve(constructedPath);
+      } else {
+        resolve(null); // No files selected
+      }
+
+      // Clean up
+      document.body.removeChild(input);
+    };
+
+    input.oncancel = () => {
+      resolve(null);
+      document.body.removeChild(input);
+    };
+
+    // Add to DOM temporarily and trigger click
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+async function selectFileFallback(fieldName) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = false;
+    input.style.display = 'none';
+
+    // Set accept filter based on field type
+    if (fieldName.toLowerCase().includes('template')) {
+      input.accept = '.rpp,.RPP';
+    }
+
+    input.onchange = (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const fileName = file.name;
+        const username = 'jj';
+        let constructedPath;
+
+        if (fieldName.toLowerCase().includes('template')) {
+          constructedPath = navigator.platform.includes('Mac') ?
+            `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
+            `C:\\\\Users\\\\${username}\\\\AppData\\\\Roaming\\\\REAPER\\\\ProjectTemplates\\\\${fileName}`;
+        } else {
+          constructedPath = navigator.platform.includes('Mac') ?
+            `/Users/${username}/Documents/${fileName}` :
+            `C:\\\\Users\\\\${username}\\\\Documents\\\\${fileName}`;
+        }
+
+        console.log(`Fallback file selection: ${fileName} → ${constructedPath}`);
+        resolve(constructedPath);
+      } else {
+        resolve(null);
+      }
+
+      // Clean up
+      document.body.removeChild(input);
+    };
+
+    input.oncancel = () => {
+      resolve(null);
+      document.body.removeChild(input);
+    };
+
+    // Add to DOM temporarily and trigger click
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+// Browser detection helper
+function getBrowserName() {
+  const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+  const isEdge = /Edg/.test(navigator.userAgent);
+  const isFirefox = /Firefox/.test(navigator.userAgent);
+  const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+
+  if (isChrome) return 'Chrome';
+  if (isEdge) return 'Edge';
+  if (isFirefox) return 'Firefox';
+  if (isSafari) return 'Safari';
+  return 'Unknown';
+}
+
 // Make functions globally available
 window.showPluginConfigModal = showPluginConfigModal;
 window.savePluginConfig = savePluginConfig;
 window.checkPluginFilepathSettings = checkPluginFilepathSettings;
 window.showFilepathSettingsModal = showFilepathSettingsModal;
 window.enablePluginWithSettings = enablePluginWithSettings;
+window.constructPathFromDirHandle = constructPathFromDirHandle;
+window.constructPathFromFileHandle = constructPathFromFileHandle;
+window.selectDirectoryFallback = selectDirectoryFallback;
+window.selectFileFallback = selectFileFallback;
+window.getBrowserName = getBrowserName;
