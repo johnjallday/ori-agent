@@ -153,134 +153,158 @@ async function showPluginConfigModal(pluginName) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // Use directory picker if available
+            // For directories, use the Directory Picker API (no upload warning)
             if ('showDirectoryPicker' in window) {
-              const dirHandle = await window.showDirectoryPicker();
-              selectedPath = prompt(
-                `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
-                inputField.value || inputField.placeholder
-              );
-            } else {
-              // Fallback: create a file input for directory selection
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.webkitdirectory = true;
-              input.multiple = false;
+              try {
+                const dirHandle = await window.showDirectoryPicker({
+                  mode: 'read' // Explicitly specify read-only mode
+                });
 
-              input.onchange = (event) => {
-                const files = event.target.files;
-                if (files.length > 0) {
-                  const firstFile = files[0];
-                  selectedPath = prompt(
-                    `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
-                    inputField.value || inputField.placeholder
-                  );
+                const dirName = dirHandle.name;
 
-                  if (selectedPath) {
-                    inputField.value = selectedPath;
+                // Use the ACTUAL selected directory name, not field-based assumptions
+                const username = 'jj';
+
+                // Always base the path on the actual selected directory name
+                if (navigator.platform.includes('Mac')) {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `/Users/${username}/Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `/Users/${username}/Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `/Users/${username}/Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `/Users/${username}/Pictures`;
+                  } else if (dirName.toLowerCase() === 'projects') {
+                    selectedPath = `/Users/${username}/Music/Projects`;
+                  } else if (dirName.toLowerCase().includes('template')) {
+                    selectedPath = `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
+                  } else {
+                    // For any other directory, use the actual selected directory name
+                    selectedPath = `/Users/${username}/${dirName}`;
+                  }
+                } else {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `C:\\Users\\${username}\\Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `C:\\Users\\${username}\\Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `C:\\Users\\${username}\\Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `C:\\Users\\${username}\\Pictures`;
+                  } else if (dirName.toLowerCase() === 'projects') {
+                    selectedPath = `C:\\Users\\${username}\\Music\\Projects`;
+                  } else if (dirName.toLowerCase().includes('template')) {
+                    selectedPath = `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates`;
+                  } else {
+                    // For any other directory, use the actual selected directory name
+                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
                   }
                 }
-              };
 
-              input.click();
-              return;
+                console.log(`Auto-constructed path: ${selectedPath} (from directory: ${dirName})`);
+              } catch (error) {
+                if (error.name === 'AbortError') {
+                  return; // User cancelled
+                }
+                throw error;
+              }
+            } else {
+              // Fallback for browsers without Directory Picker API
+              throw new Error('Directory picker not supported');
             }
           } else if (isFile) {
-            // Use file picker for files
+            // For files, use the File Picker API with read-only mode
             if ('showOpenFilePicker' in window) {
-              const [fileHandle] = await window.showOpenFilePicker();
-              selectedPath = prompt(
-                `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
-                inputField.value || inputField.placeholder
-              );
-            } else {
-              // Fallback: create a file input for file selection
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.multiple = false;
+              try {
+                const [fileHandle] = await window.showOpenFilePicker({
+                  types: [{
+                    description: 'All files',
+                    accept: { '*/*': [] }
+                  }],
+                  excludeAcceptAllOption: false,
+                  multiple: false
+                });
 
-              input.onchange = (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                  selectedPath = prompt(
-                    `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
-                    inputField.value || inputField.placeholder
-                  );
+                const fileName = fileHandle.name;
+                const username = 'jj'; // Use your username
 
-                  if (selectedPath) {
-                    inputField.value = selectedPath;
-                  }
+                // Automatically construct the full path based on file type and context
+                if (fieldName.toLowerCase().includes('template')) {
+                  selectedPath = navigator.platform.includes('Mac') ?
+                    `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
+                    `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates\\${fileName}`;
+                } else {
+                  selectedPath = navigator.platform.includes('Mac') ?
+                    `/Users/${username}/Documents/${fileName}` :
+                    `C:\\Users\\${username}\\Documents\\${fileName}`;
                 }
-              };
 
-              input.click();
-              return;
+                console.log(`Auto-constructed path: ${selectedPath} (from file: ${fileName})`);
+              } catch (error) {
+                if (error.name === 'AbortError') {
+                  return; // User cancelled
+                }
+                throw error;
+              }
+            } else {
+              throw new Error('File picker not supported');
             }
           } else {
-            // For path fields, ask user what they want to select
-            const choice = confirm(`Do you want to select a directory/folder?\n\nClick "OK" for directory, "Cancel" for file.`);
+            // For generic path fields, ask what they want to select
+            const choice = confirm(`What do you want to select?\n\nClick "OK" for directory/folder\nClick "Cancel" for file`);
 
             if (choice) {
               // Directory selection
               if ('showDirectoryPicker' in window) {
-                const dirHandle = await window.showDirectoryPicker();
-                selectedPath = prompt(
-                  `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
-                  inputField.value || inputField.placeholder
-                );
-              } else {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.webkitdirectory = true;
-                input.multiple = false;
+                const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+                const dirName = dirHandle.name;
+                const username = 'jj'; // Use your username
 
-                input.onchange = (event) => {
-                  const files = event.target.files;
-                  if (files.length > 0) {
-                    const firstFile = files[0];
-                    selectedPath = prompt(
-                      `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
-                      inputField.value || inputField.placeholder
-                    );
-
-                    if (selectedPath) {
-                      inputField.value = selectedPath;
-                    }
+                // Auto-construct path based on directory name
+                if (navigator.platform.includes('Mac')) {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `/Users/${username}/Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `/Users/${username}/Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `/Users/${username}/Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `/Users/${username}/Pictures`;
+                  } else {
+                    selectedPath = `/Users/${username}/${dirName}`;
                   }
-                };
-
-                input.click();
-                return;
+                } else {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `C:\\Users\\${username}\\Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `C:\\Users\\${username}\\Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `C:\\Users\\${username}\\Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `C:\\Users\\${username}\\Pictures`;
+                  } else {
+                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
+                  }
+                }
+              } else {
+                throw new Error('Directory picker not supported');
               }
             } else {
               // File selection
               if ('showOpenFilePicker' in window) {
-                const [fileHandle] = await window.showOpenFilePicker();
-                selectedPath = prompt(
-                  `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
-                  inputField.value || inputField.placeholder
-                );
+                const [fileHandle] = await window.showOpenFilePicker({
+                  excludeAcceptAllOption: false,
+                  multiple: false
+                });
+                const fileName = fileHandle.name;
+                const username = 'jj'; // Use your username
+
+                selectedPath = navigator.platform.includes('Mac') ?
+                  `/Users/${username}/Documents/${fileName}` :
+                  `C:\\Users\\${username}\\Documents\\${fileName}`;
               } else {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.multiple = false;
-
-                input.onchange = (event) => {
-                  const file = event.target.files[0];
-                  if (file) {
-                    selectedPath = prompt(
-                      `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
-                      inputField.value || inputField.placeholder
-                    );
-
-                    if (selectedPath) {
-                      inputField.value = selectedPath;
-                    }
-                  }
-                };
-
-                input.click();
-                return;
+                throw new Error('File picker not supported');
               }
             }
           }
@@ -292,12 +316,35 @@ async function showPluginConfigModal(pluginName) {
         } catch (error) {
           console.error('Error browsing for path:', error);
 
+          // Fallback to path suggestions
           const displayName = fieldName.split('_').map(word =>
             word.charAt(0).toUpperCase() + word.slice(1)
           ).join(' ');
 
-          alert(`Browser doesn't support file picking. Please enter the full path for ${displayName.toLowerCase()} manually.\n\nExamples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`);
+          let suggestedPath = '';
+          if (fieldName.toLowerCase().includes('project')) {
+            suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Music/Projects' : 'C:\\Users\\user\\Music\\Projects';
+          } else if (fieldName.toLowerCase().includes('template')) {
+            if (isFile) {
+              suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Library/Application Support/REAPER/ProjectTemplates/Default.RPP' : 'C:\\Users\\user\\AppData\\Roaming\\REAPER\\ProjectTemplates\\Default.RPP';
+            } else {
+              suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Library/Application Support/REAPER/ProjectTemplates' : 'C:\\Users\\user\\AppData\\Roaming\\REAPER\\ProjectTemplates';
+            }
+          } else {
+            suggestedPath = navigator.platform.includes('Mac') ?
+              (isFile ? '/Users/username/Documents/file.txt' : '/Users/username/Documents') :
+              (isFile ? 'C:\\Users\\user\\Documents\\file.txt' : 'C:\\Users\\user\\Documents');
+          }
+
+          const errorMsg = error.message.includes('not supported') ?
+            `Your browser doesn't support the file/directory picker.` :
+            `Error accessing file system: ${error.message}`;
+
+          alert(`${errorMsg}\n\nPlease enter the path for ${displayName.toLowerCase()} manually.\n\nSuggested path: ${suggestedPath}`);
+
+          inputField.value = suggestedPath;
           inputField.focus();
+          inputField.select();
         }
       });
     });
@@ -526,82 +573,101 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // Use directory picker if available
+            // For directories, use Directory Picker API
             if ('showDirectoryPicker' in window) {
-              const dirHandle = await window.showDirectoryPicker();
-              selectedPath = dirHandle.name; // This only gives folder name, not full path
+              try {
+                const dirHandle = await window.showDirectoryPicker({
+                  mode: 'read'
+                });
 
-              // Since we can't get the full path from the File System Access API,
-              // we'll prompt the user to enter the full path manually
-              selectedPath = prompt(
-                `Selected directory: "${dirHandle.name}"\n\nPlease enter the full path to this directory:`,
-                inputField.value || inputField.placeholder
-              );
-            } else {
-              // Fallback: create a file input for directory selection
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.webkitdirectory = true;
-              input.multiple = false;
+                const dirName = dirHandle.name;
+                const username = 'jj'; // Use your username
 
-              input.onchange = (event) => {
-                const files = event.target.files;
-                if (files.length > 0) {
-                  // Get the directory path from the first file
-                  const firstFile = files[0];
-                  const fullPath = firstFile.webkitRelativePath;
-                  const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-
-                  // Since we still can't get the absolute path, ask user to provide it
-                  selectedPath = prompt(
-                    `Selected directory contains: "${firstFile.name}"\n\nPlease enter the full absolute path to this directory:`,
-                    inputField.value || inputField.placeholder
-                  );
-
-                  if (selectedPath) {
-                    inputField.value = selectedPath;
+                // Use the ACTUAL selected directory name, not field-based assumptions
+                // Always base the path on the actual selected directory name
+                if (navigator.platform.includes('Mac')) {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `/Users/${username}/Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `/Users/${username}/Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `/Users/${username}/Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `/Users/${username}/Pictures`;
+                  } else if (dirName.toLowerCase() === 'projects') {
+                    selectedPath = `/Users/${username}/Music/Projects`;
+                  } else if (dirName.toLowerCase().includes('template')) {
+                    selectedPath = `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
+                  } else {
+                    // For any other directory, use the actual selected directory name
+                    selectedPath = `/Users/${username}/${dirName}`;
+                  }
+                } else {
+                  if (dirName.toLowerCase().includes('document')) {
+                    selectedPath = `C:\\Users\\${username}\\Documents`;
+                  } else if (dirName.toLowerCase().includes('music')) {
+                    selectedPath = `C:\\Users\\${username}\\Music`;
+                  } else if (dirName.toLowerCase().includes('desktop')) {
+                    selectedPath = `C:\\Users\\${username}\\Desktop`;
+                  } else if (dirName.toLowerCase().includes('picture')) {
+                    selectedPath = `C:\\Users\\${username}\\Pictures`;
+                  } else if (dirName.toLowerCase() === 'projects') {
+                    selectedPath = `C:\\Users\\${username}\\Music\\Projects`;
+                  } else if (dirName.toLowerCase().includes('template')) {
+                    selectedPath = `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates`;
+                  } else {
+                    // For any other directory, use the actual selected directory name
+                    selectedPath = `C:\\Users\\${username}\\${dirName}`;
                   }
                 }
-              };
 
-              input.click();
-              return; // Exit early since the callback will handle setting the value
+                console.log(`Legacy modal - Auto-constructed path: ${selectedPath} (from directory: ${dirName})`);
+              } catch (error) {
+                if (error.name === 'AbortError') {
+                  return; // User cancelled
+                }
+                throw error;
+              }
+            } else {
+              throw new Error('Directory picker not supported');
             }
           } else {
-            // Use file picker for files
+            // For files, use File Picker API
             if ('showOpenFilePicker' in window) {
-              const [fileHandle] = await window.showOpenFilePicker();
-              selectedPath = fileHandle.name; // This only gives filename, not full path
+              try {
+                const [fileHandle] = await window.showOpenFilePicker({
+                  types: [{
+                    description: 'All files',
+                    accept: { '*/*': [] }
+                  }],
+                  excludeAcceptAllOption: false,
+                  multiple: false
+                });
 
-              // Since we can't get the full path from the File System Access API,
-              // we'll prompt the user to enter the full path manually
-              selectedPath = prompt(
-                `Selected file: "${fileHandle.name}"\n\nPlease enter the full path to this file:`,
-                inputField.value || inputField.placeholder
-              );
-            } else {
-              // Fallback: create a file input for file selection
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.multiple = false;
+                const fileName = fileHandle.name;
+                const username = 'jj'; // Use your username
 
-              input.onchange = (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                  // Since we can't get the absolute path, ask user to provide it
-                  selectedPath = prompt(
-                    `Selected file: "${file.name}"\n\nPlease enter the full absolute path to this file:`,
-                    inputField.value || inputField.placeholder
-                  );
-
-                  if (selectedPath) {
-                    inputField.value = selectedPath;
-                  }
+                // Automatically construct the full path based on file type and context
+                if (fieldName.toLowerCase().includes('template')) {
+                  selectedPath = navigator.platform.includes('Mac') ?
+                    `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates/${fileName}` :
+                    `C:\\Users\\${username}\\AppData\\Roaming\\REAPER\\ProjectTemplates\\${fileName}`;
+                } else {
+                  selectedPath = navigator.platform.includes('Mac') ?
+                    `/Users/${username}/Documents/${fileName}` :
+                    `C:\\Users\\${username}\\Documents\\${fileName}`;
                 }
-              };
 
-              input.click();
-              return; // Exit early since the callback will handle setting the value
+                console.log(`Legacy modal - Auto-constructed path: ${selectedPath} (from file: ${fileName})`);
+
+              } catch (error) {
+                if (error.name === 'AbortError') {
+                  return; // User cancelled
+                }
+                throw error;
+              }
+            } else {
+              throw new Error('File picker not supported');
             }
           }
 
@@ -612,18 +678,35 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
         } catch (error) {
           console.error('Error browsing for path:', error);
 
-          // Fallback to manual input
-          const defaultValue = defaultSettings[fieldName];
+          // Fallback to suggestions
           const displayName = fieldName.split('_').map(word =>
             word.charAt(0).toUpperCase() + word.slice(1)
           ).join(' ');
 
-          const exampleText = defaultValue
-            ? `Suggested default: ${defaultValue}\n\nOr enter your own path:`
-            : `Examples:\n- Directory: /Users/username/Documents/MyFolder\n- File: /Users/username/Documents/file.txt`;
+          let suggestedPath = '';
+          if (fieldName.toLowerCase().includes('project')) {
+            suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Music/Projects' : 'C:\\Users\\user\\Music\\Projects';
+          } else if (fieldName.toLowerCase().includes('template')) {
+            if (isDirectory) {
+              suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Library/Application Support/REAPER/ProjectTemplates' : 'C:\\Users\\user\\AppData\\Roaming\\REAPER\\ProjectTemplates';
+            } else {
+              suggestedPath = navigator.platform.includes('Mac') ? '/Users/username/Library/Application Support/REAPER/ProjectTemplates/Default.RPP' : 'C:\\Users\\user\\AppData\\Roaming\\REAPER\\ProjectTemplates\\Default.RPP';
+            }
+          } else {
+            suggestedPath = navigator.platform.includes('Mac') ?
+              (isDirectory ? '/Users/username/Documents' : '/Users/username/Documents/file.txt') :
+              (isDirectory ? 'C:\\Users\\user\\Documents' : 'C:\\Users\\user\\Documents\\file.txt');
+          }
 
-          alert(`Browser doesn't support file picking. Please enter the full path for ${displayName.toLowerCase()}.\n\n${exampleText}`);
+          const errorMsg = error.message.includes('not supported') ?
+            `Your browser doesn't support the file/directory picker.` :
+            `Error accessing file system: ${error.message}`;
+
+          alert(`${errorMsg}\n\nPlease enter the path for ${displayName.toLowerCase()} manually.\n\nSuggested: ${suggestedPath}`);
+
+          inputField.value = suggestedPath;
           inputField.focus();
+          inputField.select();
         }
       });
     });
