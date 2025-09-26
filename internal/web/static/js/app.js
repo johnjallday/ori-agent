@@ -37,6 +37,25 @@ function setupDarkMode() {
   }
 }
 
+// ---- Agent Display Functionality ----
+
+// Refresh agent display in navbar
+async function refreshAgentDisplay() {
+  try {
+    const response = await fetch('/api/agents');
+    if (response.ok) {
+      const data = await response.json();
+      const currentAgentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
+
+      if (currentAgentElement && data.current) {
+        currentAgentElement.textContent = data.current;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to refresh agent display:', error);
+  }
+}
+
 // ---- Chat Functionality ----
 
 // Add message to chat area
@@ -169,6 +188,26 @@ async function sendMessage(message) {
     
     if (data.response) {
       addMessageToChat(data.response, false);
+
+      // Check if this was a successful /switch command and refresh agent display and sidebar
+      console.log('Checking for switch command:', {
+        message: trimmedMessage,
+        startsWithSwitch: trimmedMessage.startsWith('/switch'),
+        hasCheckmark: data.response.includes('✅'),
+        hasSwitched: data.response.includes('Switched to agent'),
+        response: data.response
+      });
+
+      if (trimmedMessage.startsWith('/switch') && data.response.includes('✅') && data.response.includes('Switched to agent')) {
+        console.log('Successful agent switch detected, refreshing agent display and sidebar');
+        setTimeout(() => {
+          refreshAgentDisplay();
+          // Refresh sidebar agents list if the function exists
+          if (typeof loadAgents === 'function') {
+            loadAgents();
+          }
+        }, 100); // Small delay to ensure backend has updated
+      }
     } else {
       console.error('No response field found. Available fields:', Object.keys(data));
       addMessageToChat('Sorry, I received an unexpected response format.', false, true);

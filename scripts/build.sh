@@ -3,7 +3,7 @@
 # Build script for dolphin-agent project
 # Builds the main server binary and all plugins
 
-set -e  # Exit on any error
+set -e # Exit on any error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -27,7 +27,7 @@ GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 # Read version from VERSION file
 VERSION="unknown"
 if [ -f "$VERSION_FILE" ]; then
-    VERSION=$(cat "$VERSION_FILE" | tr -d '\n\r')
+  VERSION=$(cat "$VERSION_FILE" | tr -d '\n\r')
 fi
 
 echo -e "${BLUE}🔨 Building dolphin-agent${NC}"
@@ -51,41 +51,31 @@ echo -e "${YELLOW}Building for $TARGET_OS/$TARGET_ARCH...${NC}"
 # Build the main server binary
 echo -e "${YELLOW}Building server binary...${NC}"
 if [ "$TARGET_OS" = "windows" ]; then
-    BINARY_NAME="${BINARY_NAME}.exe"
+  BINARY_NAME="${BINARY_NAME}.exe"
 fi
 
 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build \
-    -ldflags "$LDFLAGS" \
-    -o "$OUTPUT_DIR/$BINARY_NAME" \
-    "./cmd/server"
+  -ldflags "$LDFLAGS" \
+  -o "$OUTPUT_DIR/$BINARY_NAME" \
+  "./cmd/server"
 
 if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ Server binary built successfully: $OUTPUT_DIR/$BINARY_NAME${NC}"
+  echo -e "${GREEN}✓ Server binary built successfully: $OUTPUT_DIR/$BINARY_NAME${NC}"
 else
-    echo -e "${RED}✗ Failed to build server binary${NC}"
-    exit 1
+  echo -e "${RED}✗ Failed to build server binary${NC}"
+  exit 1
 fi
 
 # Build plugins if requested
 BUILD_PLUGINS=${BUILD_PLUGINS:-true}
 if [ "$BUILD_PLUGINS" = "true" ]; then
-    echo -e "${YELLOW}Building plugins...${NC}"
-    if [ -f "scripts/build-plugins.sh" ]; then
-        ./scripts/build-plugins.sh
-    else
-        echo -e "${YELLOW}Plugin build script not found, skipping plugins${NC}"
-    fi
-    
-    # Build external plugins if requested
-    BUILD_EXTERNAL_PLUGINS=${BUILD_EXTERNAL_PLUGINS:-true}
-    if [ "$BUILD_EXTERNAL_PLUGINS" = "true" ]; then
-        echo -e "${YELLOW}Building external plugins...${NC}"
-        if [ -f "scripts/build-external-plugins.sh" ]; then
-            ./scripts/build-external-plugins.sh
-        else
-            echo -e "${YELLOW}External plugin build script not found, skipping external plugins${NC}"
-        fi
-    fi
+  echo -e "${YELLOW}Building plugins...${NC}"
+  if [ -f "scripts/build-plugins.sh" ]; then
+    ./scripts/build-plugins.sh
+  else
+    echo -e "${YELLOW}Plugin build script not found, skipping plugins${NC}"
+  fi
+
 fi
 
 # Display build results
@@ -95,11 +85,12 @@ echo -e "${BLUE}Output files:${NC}"
 ls -la "$OUTPUT_DIR/$BINARY_NAME"
 
 if [ -d "uploaded_plugins" ] && [ "$(ls -A uploaded_plugins 2>/dev/null)" ]; then
-    echo -e "${BLUE}Plugin files:${NC}"
-    ls -la uploaded_plugins/*.so 2>/dev/null || true
+  echo -e "${BLUE}Plugin files:${NC}"
+  ls -la uploaded_plugins/*.so 2>/dev/null || true
 fi
 
 echo ""
 echo -e "${CYAN}To run the server:${NC}"
 echo -e "${CYAN}  ./$OUTPUT_DIR/$BINARY_NAME${NC}"
 echo ""
+

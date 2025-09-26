@@ -160,6 +160,16 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleToolsList(w, r)
 		return
 	}
+	if strings.HasPrefix(q, "/switch") {
+		// Parse the agent name from the command
+		parts := strings.Fields(q)
+		var agentName string
+		if len(parts) > 1 {
+			agentName = parts[1]
+		}
+		h.commandHandler.HandleSwitch(w, r, agentName)
+		return
+	}
 
 	log.Printf("Chat question received: %q", q)
 	// Context with timeout per request (prevents indefinite hang)

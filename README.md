@@ -10,14 +10,6 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 
 ## ✨ Features
 
-### 🎨 Modern Web Interface
-- **Glassmorphism Design**: Beautiful, contemporary UI with backdrop blur effects
-- **Dark/Light Mode**: Seamless theme switching with excellent contrast
-- **Responsive Layout**: Works perfectly on desktop and mobile devices
-- **Real-time Updates**: Live status indicators and dynamic content
-- **Interactive Chat**: Modern message bubbles with timestamps and avatars
-- **Structured Content**: Intelligent markdown rendering with interactive tables
-
 ### 🔌 Extensible Plugin System
 - **Hot-loadable Plugins**: Add functionality without restarting the server
 - **Plugin Registry**: Local and external plugin support with auto-updates
@@ -166,61 +158,6 @@ For detailed API documentation including request/response formats, authenticatio
 
 See the [API Reference Guide](API_REFERENCE.md) for complete endpoint documentation with examples.
 
-## 🏗️ Technology Stack
-
-### Backend Technologies
-
-#### Core Language & Runtime
-- **Go 1.24+** - Primary programming language
-  - High-performance concurrent server
-  - Native plugin system support
-  - Excellent standard library
-  - Cross-platform compilation
-
-#### Web Framework & HTTP
-- **Native `net/http`** - Go standard library HTTP server
-  - Modular handler architecture
-  - RESTful API design
-  - JSON-based communication
-  - CORS support for web interface
-
-#### AI & Machine Learning
-- **OpenAI Go SDK v2** - Official OpenAI client
-  - GPT-4o, GPT-4o-mini, GPT-4-turbo support
-  - Function calling for tool integration
-  - Temperature and parameter control
-
-#### Plugin System
-- **Go Plugin Package** - Native dynamic loading
-  - Shared library (`.so`) compilation
-  - Hot-reloadable plugins
-  - Interface-based architecture
-  - Plugin caching and version management
-
-#### Data Storage
-- **JSON Files** - Configuration and state
-  - `agents.json` - Agent configurations
-  - `plugin_registry.json` - Plugin metadata
-  - `settings.json` - Global configuration
-  - File-based persistence for simplicity
-
-### Frontend Technologies
-
-#### Core Web Technologies
-- **HTML5** - Modern semantic markup
-- **CSS3** - Advanced styling with custom properties
-- **Vanilla JavaScript ES6+** - No framework dependencies
-  - Async/await for API calls
-  - Modern DOM manipulation
-  - Event-driven architecture
-
-#### UI Framework & Design
-- **Bootstrap 5.3** - Responsive framework
-- **Custom CSS** - Modern design system
-  - CSS Custom Properties (variables)
-  - Glassmorphism effects
-  - Dark/light theme support
-  - Smooth animations and transitions
 
 ### Project Structure
 ```
@@ -307,20 +244,7 @@ dolphin-agent/
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
-### Development Guidelines
-
-- Follow Go best practices and conventions
-- Add tests for new functionality
-- Update documentation for API changes
-- Ensure plugins follow the interface specification
-- Use the modern UI design patterns
-- Maintain the modular handler architecture
 
 ### Building and Testing
 
