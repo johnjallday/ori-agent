@@ -6,18 +6,21 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/dolphin-agent/internal/pluginhttp"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 )
 
 // CommandHandler handles special chat commands
 type CommandHandler struct {
-	store store.Store
+	store         store.Store
+	enumExtractor *pluginhttp.EnumExtractor
 }
 
 // NewCommandHandler creates a new command handler
 func NewCommandHandler(store store.Store) *CommandHandler {
 	return &CommandHandler{
-		store: store,
+		store:         store,
+		enumExtractor: pluginhttp.NewEnumExtractor(),
 	}
 }
 
@@ -114,62 +117,98 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 				toolsResponse.WriteString(fmt.Sprintf("**Description:** %s\n\n", description))
 			}
 
-			// Extract and display parameters information
-			if plugin.Definition.Parameters != nil {
-				if props, ok := plugin.Definition.Parameters["properties"].(map[string]any); ok {
-					toolsResponse.WriteString("**Parameters:**\n")
+			// Extract all enum values for this plugin and show them prominently with parameters
+			allEnums, err := ch.enumExtractor.GetAllEnumsFromParameter(plugin.Definition)
+			if err == nil && len(allEnums) > 0 {
+				toolsResponse.WriteString("**🎯 Available Options:**\n")
 
-					// Handle required fields
-					var required []string
-					if reqField, exists := plugin.Definition.Parameters["required"]; exists {
-						if reqSlice, ok := reqField.([]string); ok {
-							required = reqSlice
+				// Get parameter info for inline display
+				var parameterInfo map[string]map[string]any
+				var required []string
+				if plugin.Definition.Parameters != nil {
+					if props, ok := plugin.Definition.Parameters["properties"].(map[string]any); ok {
+						parameterInfo = make(map[string]map[string]any)
+						for paramName, paramData := range props {
+							if paramMap, ok := paramData.(map[string]any); ok {
+								parameterInfo[paramName] = paramMap
+							}
 						}
-					}
 
-					for paramName, paramInfo := range props {
-						if paramInfoMap, ok := paramInfo.(map[string]any); ok {
-							isRequired := false
-							for _, req := range required {
-								if req == paramName {
-									isRequired = true
-									break
-								}
+						// Get required fields
+						if reqField, exists := plugin.Definition.Parameters["required"]; exists {
+							if reqSlice, ok := reqField.([]string); ok {
+								required = reqSlice
 							}
-
-							reqText := ""
-							if isRequired {
-								reqText = " (required)"
-							}
-
-							// Get parameter description
-							description := ""
-							if desc, exists := paramInfoMap["description"]; exists {
-								if descStr, ok := desc.(string); ok {
-									description = descStr
-								}
-							}
-
-							// Get enum values if they exist
-							enumText := ""
-							if enumField, exists := paramInfoMap["enum"]; exists {
-								if enumSlice, ok := enumField.([]any); ok {
-									var enumStrings []string
-									for _, enumVal := range enumSlice {
-										if enumStr, ok := enumVal.(string); ok {
-											enumStrings = append(enumStrings, enumStr)
-										}
-									}
-									if len(enumStrings) > 0 {
-										enumText = fmt.Sprintf(" (options: %s)", strings.Join(enumStrings, ", "))
-									}
-								}
-							}
-
-							toolsResponse.WriteString(fmt.Sprintf("- **%s**%s: %s%s\n", paramName, reqText, description, enumText))
 						}
 					}
 				}
+
+				for enumProperty, enumValues := range allEnums {
+					toolsResponse.WriteString(fmt.Sprintf("- **%s**:\n", enumProperty))
+					for _, enumValue := range enumValues {
+						// Get parameters for this operation based on operation type
+						var operationParams []string
+
+						// Define operation-specific parameter mappings
+						operationParamMap := map[string][]string{
+							"create_project":  {"name", "bpm"},
+							"open_project":    {"path"},
+							"filter_project": {"name"},
+							"get_settings":   {},
+							"scan":           {},
+							"list_projects":  {},
+						}
+
+						// Get relevant parameters for this specific operation
+						if relevantParams, exists := operationParamMap[enumValue]; exists {
+							for _, paramName := range relevantParams {
+								if _, paramExists := parameterInfo[paramName]; paramExists {
+									isRequired := false
+									for _, req := range required {
+										if req == paramName {
+											isRequired = true
+											break
+										}
+									}
+
+									displayName := paramName
+									if isRequired {
+										displayName += "*"
+									}
+									operationParams = append(operationParams, displayName)
+								}
+							}
+						} else {
+							// Fallback: show all non-operation parameters for unknown operations
+							for paramName := range parameterInfo {
+								if paramName == enumProperty {
+									continue // Skip the operation parameter itself
+								}
+
+								isRequired := false
+								for _, req := range required {
+									if req == paramName {
+										isRequired = true
+										break
+									}
+								}
+
+								displayName := paramName
+								if isRequired {
+									displayName += "*"
+								}
+								operationParams = append(operationParams, displayName)
+							}
+						}
+
+						if len(operationParams) > 0 {
+							toolsResponse.WriteString(fmt.Sprintf("  - `%s` (%s)\n", enumValue, strings.Join(operationParams, ", ")))
+						} else {
+							toolsResponse.WriteString(fmt.Sprintf("  - `%s`\n", enumValue))
+						}
+					}
+				}
+				toolsResponse.WriteString("\n")
 			}
 
 			toolsResponse.WriteString("\n")

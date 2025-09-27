@@ -33,6 +33,7 @@ type Handler struct {
 	State         store.Store
 	Loader        ToolLoader
 	LocalRegistry *LocalRegistry
+	EnumExtractor *EnumExtractor
 }
 
 func New(state store.Store, loader ToolLoader) *Handler {
@@ -40,6 +41,7 @@ func New(state store.Store, loader ToolLoader) *Handler {
 		State:         state,
 		Loader:        loader,
 		LocalRegistry: NewLocalRegistry(),
+		EnumExtractor: NewEnumExtractor(),
 	}
 }
 
@@ -254,6 +256,38 @@ func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// GetPluginEnums extracts enum values from a specific plugin's function definition
+func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error) {
+	_, current := h.State.ListAgents()
+	ag, ok := h.State.GetAgent(current)
+	if !ok {
+		return nil, fmt.Errorf("current agent not found")
+	}
+
+	plugin, exists := ag.Plugins[pluginName]
+	if !exists {
+		return nil, fmt.Errorf("plugin %s not found", pluginName)
+	}
+
+	return h.EnumExtractor.GetAllEnumsFromParameter(plugin.Definition)
+}
+
+// ValidatePluginEnumValue validates an enum value for a specific plugin and property
+func (h *Handler) ValidatePluginEnumValue(pluginName, propertyName, value string) (bool, error) {
+	_, current := h.State.ListAgents()
+	ag, ok := h.State.GetAgent(current)
+	if !ok {
+		return false, fmt.Errorf("current agent not found")
+	}
+
+	plugin, exists := ag.Plugins[pluginName]
+	if !exists {
+		return false, fmt.Errorf("plugin %s not found", pluginName)
+	}
+
+	return h.EnumExtractor.ValidateEnumValue(plugin.Definition, propertyName, value)
 }
 
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
