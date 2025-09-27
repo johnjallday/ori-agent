@@ -30,12 +30,17 @@ func (NativeLoader) Load(path string) (pluginapi.Tool, error) {
 
 // Handler serves /api/plugins (GET list, POST upload+load, DELETE unload).
 type Handler struct {
-	State  store.Store
-	Loader ToolLoader
+	State         store.Store
+	Loader        ToolLoader
+	LocalRegistry *LocalRegistry
 }
 
 func New(state store.Store, loader ToolLoader) *Handler {
-	return &Handler{State: state, Loader: loader}
+	return &Handler{
+		State:         state,
+		Loader:        loader,
+		LocalRegistry: NewLocalRegistry(),
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +149,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	version := pluginloader.GetPluginVersion(tool)
 
 	// Add to plugin registry
-	if err := h.addToRegistry(def.Name, def.Description.String(), pluginFile, version); err != nil {
+	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description.String(), pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
 		os.Remove(pluginFile)
 		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
@@ -164,47 +169,6 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (h *Handler) addToRegistry(name, description, path, version string) error {
-	// Read current local registry (user uploaded plugins)
-	registryPath := "local_plugin_registry.json"
-	var registry types.PluginRegistry
-
-	if data, err := os.ReadFile(registryPath); err == nil {
-		if err := json.Unmarshal(data, &registry); err != nil {
-			return err
-		}
-	}
-
-	// Check if plugin already exists in registry
-	for i, plugin := range registry.Plugins {
-		if plugin.Name == name {
-			// Update existing entry
-			registry.Plugins[i].Path = path
-			registry.Plugins[i].Description = description
-			registry.Plugins[i].Version = version
-			return h.saveRegistry(registryPath, registry)
-		}
-	}
-
-	// Add new entry
-	newEntry := types.PluginRegistryEntry{
-		Name:        name,
-		Description: description,
-		Path:        path,
-		Version:     version,
-	}
-	registry.Plugins = append(registry.Plugins, newEntry)
-
-	return h.saveRegistry(registryPath, registry)
-}
-
-func (h *Handler) saveRegistry(path string, registry types.PluginRegistry) error {
-	data, err := json.MarshalIndent(registry, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
 
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	// Try to parse multipart form first, then regular form
