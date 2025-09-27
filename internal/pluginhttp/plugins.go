@@ -52,6 +52,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle special upload-config endpoint
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/upload-config") {
+		h.uploadConfig(w, r)
+		return
+	}
+
 	switch r.Method {
 
 	case http.MethodGet:
@@ -346,6 +352,75 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("Settings saved for plugin %s", req.PluginName),
 		"path":    settingsPath,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
+	// Parse JSON body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		PluginName string                 `json:"plugin_name"`
+		Config     map[string]interface{} `json:"config"`
+		Filename   string                 `json:"filename"`
+		FieldName  string                 `json:"field_name"`
+	}
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.PluginName == "" {
+		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Filename == "" {
+		http.Error(w, "filename required", http.StatusBadRequest)
+		return
+	}
+
+	// Get current agent
+	_, current := h.State.ListAgents()
+
+	// Create agent directory if it doesn't exist
+	agentDir := filepath.Join("agents", current)
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create agent directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save uploaded config to file
+	configPath := filepath.Join(agentDir, req.Filename)
+
+	// Convert config to JSON
+	configData, err := json.MarshalIndent(req.Config, "", "  ")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("Uploaded config file %s for plugin %s to %s\n", req.Filename, req.PluginName, configPath)
+
+	// Return success response
+	response := map[string]any{
+		"success":    true,
+		"message":    fmt.Sprintf("Config file %s uploaded successfully for plugin %s", req.Filename, req.PluginName),
+		"saved_path": configPath,
+		"filename":   req.Filename,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

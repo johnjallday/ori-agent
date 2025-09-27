@@ -96,12 +96,6 @@ async function showPluginConfigModal(pluginName) {
                                value="${currentValue}"
                                ${configVar.required ? 'required' : ''}
                                style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                        <button type="button" class="btn btn-outline-secondary browse-btn" data-field="${configVar.name}">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-                          </svg>
-                          Browse
-                        </button>
                       </div>
                     ` : `
                       <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
@@ -141,6 +135,7 @@ async function showPluginConfigModal(pluginName) {
     // Add modal to page
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+
     // Setup browse button event listeners
     document.querySelectorAll('.browse-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -153,84 +148,70 @@ async function showPluginConfigModal(pluginName) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // Use cross-browser directory selection
-            const browserName = getBrowserName();
-
-            if ('showDirectoryPicker' in window) {
-              // Chrome/Edge - use File System Access API
-              try {
-                const dirHandle = await window.showDirectoryPicker({
-                  mode: 'read'
-                });
-                selectedPath = constructPathFromDirHandle(dirHandle);
-              } catch (error) {
-                if (error.name === 'AbortError') {
-                  return; // User cancelled
-                }
-                throw error;
+            // Try visual directory picker first, fallback to manual entry
+            try {
+              if ('showDirectoryPicker' in window) {
+                const dirHandle = await window.showDirectoryPicker();
+                // Browser won't give us the full path, so ask user to provide it
+                selectedPath = await promptWithVisualPicker(fieldName, true, dirHandle.name);
+              } else {
+                selectedPath = await promptForDirectoryPath(fieldName, true);
               }
-            } else {
-              // Firefox/Safari/Others - use fallback
-              try {
-                selectedPath = await selectDirectoryFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
-              } catch (error) {
-                throw error;
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                selectedPath = await promptForDirectoryPath(fieldName, true);
               }
+              return;
             }
           } else if (isFile) {
-            // Use cross-browser file selection
-            if ('showOpenFilePicker' in window) {
-              // Chrome/Edge - use File System Access API
-              try {
-                const [fileHandle] = await window.showOpenFilePicker({
-                  types: [{
-                    description: 'All files',
-                    accept: { '*/*': [] }
-                  }],
-                  excludeAcceptAllOption: false,
-                  multiple: false
-                });
-                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
-              } catch (error) {
-                if (error.name === 'AbortError') {
-                  return; // User cancelled
-                }
-                throw error;
+            // Try visual file picker first, fallback to manual entry
+            try {
+              if ('showOpenFilePicker' in window) {
+                const [fileHandle] = await window.showOpenFilePicker();
+                // Browser won't give us the full path, so ask user to provide it
+                selectedPath = await promptWithVisualPicker(fieldName, false, fileHandle.name);
+              } else {
+                selectedPath = await promptForDirectoryPath(fieldName, false);
               }
-            } else {
-              // Firefox/Safari/Others - use fallback
-              try {
-                selectedPath = await selectFileFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
-              } catch (error) {
-                throw error;
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                selectedPath = await promptForDirectoryPath(fieldName, false);
               }
+              return;
             }
           } else {
             // For generic path fields, ask what they want to select
             const choice = confirm(`What do you want to select?\n\nClick "OK" for directory/folder\nClick "Cancel" for file`);
 
             if (choice) {
-              // Directory selection - use cross-browser helper
-              if ('showDirectoryPicker' in window) {
-                const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-                selectedPath = constructPathFromDirHandle(dirHandle);
-              } else {
-                selectedPath = await selectDirectoryFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
+              // Directory
+              try {
+                if ('showDirectoryPicker' in window) {
+                  const dirHandle = await window.showDirectoryPicker();
+                  selectedPath = await promptWithVisualPicker(fieldName, true, dirHandle.name);
+                } else {
+                  selectedPath = await promptForDirectoryPath(fieldName, true);
+                }
+              } catch (err) {
+                if (err.name !== 'AbortError') {
+                  selectedPath = await promptForDirectoryPath(fieldName, true);
+                }
+                return;
               }
             } else {
-              // File selection - use cross-browser helper
-              if ('showOpenFilePicker' in window) {
-                const [fileHandle] = await window.showOpenFilePicker({
-                  excludeAcceptAllOption: false,
-                  multiple: false
-                });
-                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
-              } else {
-                selectedPath = await selectFileFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
+              // File
+              try {
+                if ('showOpenFilePicker' in window) {
+                  const [fileHandle] = await window.showOpenFilePicker();
+                  selectedPath = await promptWithVisualPicker(fieldName, false, fileHandle.name);
+                } else {
+                  selectedPath = await promptForDirectoryPath(fieldName, false);
+                }
+              } catch (err) {
+                if (err.name !== 'AbortError') {
+                  selectedPath = await promptForDirectoryPath(fieldName, false);
+                }
+                return;
               }
             }
           }
@@ -309,13 +290,16 @@ async function savePluginConfig(pluginName, configVars) {
       }
     }
 
-    // Send configuration to server
-    const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/initialize`, {
+    // Send configuration to server using the save-settings endpoint
+    const response = await fetch('/api/plugins/save-settings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(configData)
+      body: JSON.stringify({
+        plugin_name: pluginName,
+        settings: configData
+      })
     });
 
     if (!response.ok) {
@@ -499,61 +483,40 @@ async function showFilepathSettingsModal(pluginName, filepathFields) {
           let selectedPath = '';
 
           if (isDirectory) {
-            // Use cross-browser directory selection
-            if ('showDirectoryPicker' in window) {
-              // Chrome/Edge - use File System Access API
-              try {
-                const dirHandle = await window.showDirectoryPicker({
-                  mode: 'read'
-                });
-                selectedPath = constructPathFromDirHandle(dirHandle);
-                console.log(`Legacy modal - Auto-constructed path: ${selectedPath}`);
-              } catch (error) {
-                if (error.name === 'AbortError') {
-                  return; // User cancelled
-                }
-                throw error;
+            // Try visual directory picker first, fallback to manual entry
+            try {
+              if ('showDirectoryPicker' in window) {
+                const dirHandle = await window.showDirectoryPicker();
+                selectedPath = await promptWithVisualPicker(fieldName, true, dirHandle.name);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
+              } else {
+                selectedPath = await promptForDirectoryPath(fieldName, true);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
               }
-            } else {
-              // Firefox/Safari/Others - use fallback
-              try {
-                selectedPath = await selectDirectoryFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
-                console.log(`Legacy modal - Fallback path: ${selectedPath}`);
-              } catch (error) {
-                throw error;
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                selectedPath = await promptForDirectoryPath(fieldName, true);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
               }
+              return;
             }
           } else {
-            // Use cross-browser file selection
-            if ('showOpenFilePicker' in window) {
-              // Chrome/Edge - use File System Access API
-              try {
-                const [fileHandle] = await window.showOpenFilePicker({
-                  types: [{
-                    description: 'All files',
-                    accept: { '*/*': [] }
-                  }],
-                  excludeAcceptAllOption: false,
-                  multiple: false
-                });
-                selectedPath = constructPathFromFileHandle(fileHandle, fieldName);
-                console.log(`Legacy modal - Auto-constructed path: ${selectedPath}`);
-              } catch (error) {
-                if (error.name === 'AbortError') {
-                  return; // User cancelled
-                }
-                throw error;
+            // Try visual file picker first, fallback to manual entry
+            try {
+              if ('showOpenFilePicker' in window) {
+                const [fileHandle] = await window.showOpenFilePicker();
+                selectedPath = await promptWithVisualPicker(fieldName, false, fileHandle.name);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
+              } else {
+                selectedPath = await promptForDirectoryPath(fieldName, false);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
               }
-            } else {
-              // Firefox/Safari/Others - use fallback
-              try {
-                selectedPath = await selectFileFallback(fieldName);
-                if (!selectedPath) return; // User cancelled
-                console.log(`Legacy modal - Fallback path: ${selectedPath}`);
-              } catch (error) {
-                throw error;
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                selectedPath = await promptForDirectoryPath(fieldName, false);
+                console.log(`Legacy modal - User provided path: ${selectedPath}`);
               }
+              return;
             }
           }
 
@@ -702,42 +665,27 @@ async function enablePluginWithSettings(pluginName, pluginPath, userSettings) {
 }
 
 // Cross-browser helper functions
-function constructPathFromDirHandle(dirHandle) {
-  const dirName = dirHandle.name;
-  const username = 'jj';
+async function constructPathFromDirHandle(dirHandle) {
+  try {
+    // Try to get the full path if available (newer browsers)
+    if (dirHandle.getDirectoryHandle) {
+      // Try to resolve the full path by traversing up to get context
+      let pathParts = [dirHandle.name];
+      let current = dirHandle;
 
-  if (navigator.platform.includes('Mac')) {
-    if (dirName.toLowerCase().includes('document')) {
-      return `/Users/${username}/Documents`;
-    } else if (dirName.toLowerCase().includes('music')) {
-      return `/Users/${username}/Music`;
-    } else if (dirName.toLowerCase().includes('desktop')) {
-      return `/Users/${username}/Desktop`;
-    } else if (dirName.toLowerCase().includes('picture')) {
-      return `/Users/${username}/Pictures`;
-    } else if (dirName.toLowerCase() === 'projects') {
-      return `/Users/${username}/Music/Projects`;
-    } else if (dirName.toLowerCase().includes('template')) {
-      return `/Users/${username}/Library/Application Support/REAPER/ProjectTemplates`;
-    } else {
-      return `/Users/${username}/${dirName}`;
+      // This is a simplified approach - in practice, getting full paths
+      // from directory handles is limited for security reasons
+      // We'll use the directory name as the final component
+      return `/Users/jj/${dirHandle.name}`;
     }
-  } else {
-    if (dirName.toLowerCase().includes('document')) {
-      return `C:\\\\Users\\\\${username}\\\\Documents`;
-    } else if (dirName.toLowerCase().includes('music')) {
-      return `C:\\\\Users\\\\${username}\\\\Music`;
-    } else if (dirName.toLowerCase().includes('desktop')) {
-      return `C:\\\\Users\\\\${username}\\\\Desktop`;
-    } else if (dirName.toLowerCase().includes('picture')) {
-      return `C:\\\\Users\\\\${username}\\\\Pictures`;
-    } else if (dirName.toLowerCase() === 'projects') {
-      return `C:\\\\Users\\\\${username}\\\\Music\\\\Projects`;
-    } else if (dirName.toLowerCase().includes('template')) {
-      return `C:\\\\Users\\\\${username}\\\\AppData\\\\Roaming\\\\REAPER\\\\ProjectTemplates`;
-    } else {
-      return `C:\\\\Users\\\\${username}\\\\${dirName}`;
-    }
+
+    // Fallback: just use the directory name
+    return `/Users/jj/${dirHandle.name}`;
+
+  } catch (error) {
+    console.error('Error constructing path from directory handle:', error);
+    // Ultimate fallback
+    return `/Users/jj/${dirHandle.name}`;
   }
 }
 
@@ -879,6 +827,157 @@ async function selectFileFallback(fieldName) {
     document.body.appendChild(input);
     input.click();
   });
+}
+
+// Prompt user for directory/file path
+async function promptWithVisualPicker(fieldName, isDirectory, selectedName) {
+  const displayName = fieldName.split('_').map(word =>
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
+
+  const pathType = isDirectory ? 'directory' : 'file';
+  let suggestedPath = '';
+
+  // Provide better defaults based on field name
+  if (fieldName.toLowerCase().includes('project')) {
+    suggestedPath = `/Users/jj/Music/Projects${isDirectory ? `/${selectedName}` : `/${selectedName}`}`;
+  } else if (fieldName.toLowerCase().includes('template')) {
+    if (isDirectory) {
+      suggestedPath = `/Users/jj/Library/Application Support/REAPER/ProjectTemplates/${selectedName}`;
+    } else {
+      suggestedPath = `/Users/jj/Library/Application Support/REAPER/ProjectTemplates/${selectedName}`;
+    }
+  } else {
+    suggestedPath = isDirectory ? `/Users/jj/Documents/${selectedName}` : `/Users/jj/Documents/${selectedName}`;
+  }
+
+  const message = `You selected "${selectedName}" from the ${pathType} picker.\n\n` +
+    `Please enter the full path to this ${pathType}:\n\n` +
+    `Note: Browsers don't reveal actual paths for security, so you need to provide the full path.`;
+
+  const userPath = prompt(message, suggestedPath);
+
+  if (userPath && userPath.trim() !== '') {
+    return userPath.trim();
+  }
+
+  return null;
+}
+
+async function promptForDirectoryPath(fieldName, isDirectory) {
+  const displayName = fieldName.split('_').map(word =>
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
+
+  const pathType = isDirectory ? 'directory' : 'file';
+  let suggestedPath = '';
+
+  // Provide better defaults based on field name
+  if (fieldName.toLowerCase().includes('project')) {
+    suggestedPath = '/Users/jj/Music/Projects';
+  } else if (fieldName.toLowerCase().includes('template')) {
+    if (isDirectory) {
+      suggestedPath = '/Users/jj/Library/Application Support/REAPER/ProjectTemplates';
+    } else {
+      suggestedPath = '/Users/jj/Library/Application Support/REAPER/ProjectTemplates/Default.RPP';
+    }
+  } else {
+    suggestedPath = isDirectory ? '/Users/jj/Documents' : '/Users/jj/Documents/file.txt';
+  }
+
+  const message = `Please enter the full path to the ${pathType} for "${displayName}":\n\n` +
+    `Example: ${suggestedPath}\n\n` +
+    `Note: Due to browser security restrictions, you need to type the full path manually.`;
+
+  const userPath = prompt(message, suggestedPath);
+
+  if (userPath && userPath.trim() !== '') {
+    return userPath.trim();
+  }
+
+  return null; // User cancelled or entered empty path
+}
+
+// Handle file upload for config files
+async function handleFileUpload(fieldName, inputField) {
+  try {
+    // Create file input element
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,.txt,.config,.yaml,.yml';
+    fileInput.style.display = 'none';
+
+    // Handle file selection
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      try {
+        // Read file content
+        const content = await file.text();
+
+        // Try to parse as JSON to validate
+        let configData;
+        try {
+          configData = JSON.parse(content);
+        } catch (parseError) {
+          // If not JSON, treat as plain text
+          configData = { [fieldName]: content };
+        }
+
+        // Extract plugin name from modal
+        const modal = document.getElementById('pluginConfigModal');
+        const modalTitle = modal.querySelector('.modal-title').textContent;
+        const pluginName = modalTitle.replace('Configure ', '').replace(' Plugin', '').trim();
+
+        // Upload config file
+        const response = await fetch('/api/plugins/upload-config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            plugin_name: pluginName,
+            config: configData,
+            filename: file.name,
+            field_name: fieldName
+          })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+
+          // Update input field with the saved path
+          inputField.value = result.saved_path || file.name;
+
+          // Show success message
+          alert(`✅ Successfully uploaded ${file.name}!\n\nFile saved to: ${result.saved_path}`);
+
+          console.log('File uploaded successfully:', result);
+        } else {
+          const error = await response.text();
+          throw new Error(`Upload failed: ${error}`);
+        }
+
+      } catch (error) {
+        console.error('File upload error:', error);
+        alert(`❌ Upload failed: ${error.message}`);
+      }
+    });
+
+    // Trigger file picker
+    document.body.appendChild(fileInput);
+    fileInput.click();
+
+    // Clean up
+    setTimeout(() => {
+      document.body.removeChild(fileInput);
+    }, 1000);
+
+  } catch (error) {
+    console.error('File upload setup error:', error);
+    alert(`❌ Error setting up file upload: ${error.message}`);
+  }
 }
 
 // Browser detection helper
