@@ -1,0 +1,32 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "dolphin-desktop-wails",
+  "outputfilename": "dolphin-desktop-wails",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev": "",
+  "frontend:dev:build": "",
+  "frontend:dev:install": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "Dolphin Agent",
+    "email": "dolphin@example.com"
+  },
+  "info": {
+    "companyName": "Dolphin Agent",
+    "productName": "Dolphin Desktop",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2024, Dolphin Agent",
+    "comments": "Modern desktop interface for Dolphin Agent with glassmorphism design"
+  },
+  "nsisType": "multiple",
+  "obfuscated": false,
+  "garbleargs": "",
+  "upx": false,
+  "upxflags": "",
+  "windres": false,
+  "preBuildHooks": {},
+  "postBuildHooks": {},
+  "version": "2"
+}

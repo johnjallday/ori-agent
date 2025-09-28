@@ -222,9 +222,25 @@ func main() {
 	addr := ":8080"
 	log.Printf("Listening on http://localhost%s", addr)
 
+	// CORS middleware to allow requests from Wails desktop app
+	corsHandler := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           corsHandler(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      120 * time.Second, // allow for model latency + tool calls
