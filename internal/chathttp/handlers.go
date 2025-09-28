@@ -152,6 +152,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle special commands
+	if q == "/help" {
+		h.commandHandler.HandleHelp(w, r)
+		return
+	}
 	if q == "/agent" {
 		h.commandHandler.HandleAgentStatus(w, r)
 		return

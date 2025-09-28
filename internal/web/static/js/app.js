@@ -334,18 +334,68 @@ function setupChat() {
 // - js/modules/settings.js - Settings management
 // - js/modules/sidebar.js - Main sidebar controller
 
+// ---- Sidebar Toggle Functionality ----
+function setupSidebarToggle() {
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebar = document.getElementById('sidebar');
 
+  if (sidebarToggle && sidebar) {
+    sidebarToggle.addEventListener('click', function() {
+      // Toggle sidebar visibility
+      sidebar.classList.toggle('d-none');
+
+      // Toggle sidebar position for mobile overlay
+      if (sidebar.classList.contains('d-none')) {
+        sidebar.classList.remove('sidebar-mobile-show');
+      } else {
+        sidebar.classList.add('sidebar-mobile-show');
+      }
+    });
+
+    // Close sidebar when clicking outside on mobile
+    document.addEventListener('click', function(event) {
+      const isClickInSidebar = sidebar.contains(event.target);
+      const isClickOnToggle = sidebarToggle.contains(event.target);
+
+      // Only close if sidebar is visible and click is outside
+      if (!isClickInSidebar && !isClickOnToggle &&
+          !sidebar.classList.contains('d-none') &&
+          window.innerWidth < 992) { // lg breakpoint
+        sidebar.classList.add('d-none');
+        sidebar.classList.remove('sidebar-mobile-show');
+      }
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', function() {
+      if (window.innerWidth >= 992) { // lg breakpoint
+        // Show sidebar on large screens
+        sidebar.classList.remove('d-none');
+        sidebar.classList.remove('sidebar-mobile-show');
+        sidebar.classList.add('d-lg-block');
+      } else {
+        // Hide sidebar on small screens by default
+        sidebar.classList.add('d-none');
+        sidebar.classList.remove('d-lg-block');
+        sidebar.classList.remove('sidebar-mobile-show');
+      }
+    });
+  }
+}
 
 // Initialize application
 function initializeApp() {
   // Set up dark mode functionality
   setupDarkMode();
-  
+
   // Set up chat functionality
   setupChat();
-  
+
+  // Set up sidebar toggle functionality
+  setupSidebarToggle();
+
   // Sidebar functionality is now handled by modular files
-  
+
   console.log('App initialized successfully');
 }
 

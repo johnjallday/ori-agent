@@ -289,3 +289,38 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 	}
 	json.NewEncoder(w).Encode(response)
 }
+
+// HandleHelp handles the /help command to show available commands
+func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	helpResponse := `## 🤖 Available Commands
+
+**System Commands:**
+- **/help** - Show this help message
+- **/agent** - Display agent status dashboard
+- **/switch <agent-name>** - Switch to a different agent
+- **/tools** - List all available plugin tools and operations
+
+**Agent Management:**
+- Use **/agent** to see current agent status and available agents
+- Use **/switch** to change between configured agents
+- Each agent can have different plugins and configurations
+
+**Plugin Tools:**
+- Use **/tools** to see all available plugin operations
+- Each tool shows available options and parameters
+- Tools are specific to your current agent configuration
+
+**Tips:**
+- Commands must start with **/** (forward slash)
+- Agent names are case-sensitive when switching
+- Use the web interface to configure plugins and agents
+
+Type any command above to get started!`
+
+	response := map[string]any{
+		"response": helpResponse,
+	}
+	json.NewEncoder(w).Encode(response)
+}

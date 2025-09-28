@@ -762,19 +762,38 @@
     }
 
     /* Responsive design */
-    @media (max-width: 768px) {
+    @media (max-width: 991px) {
       .sidebar {
         transform: translateX(-100%);
         transition: transform 0.3s ease;
+        z-index: 1030;
       }
-      
+
       .sidebar.show {
         transform: translateX(0);
       }
-      
+
+      .sidebar-mobile-show {
+        transform: translateX(0) !important;
+        box-shadow: var(--shadow-xl);
+      }
+
       .main-content {
         margin-left: 0;
         max-width: 100vw;
+      }
+
+      /* Mobile overlay backdrop */
+      .sidebar-mobile-show::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: -1;
+        pointer-events: none;
       }
     }
   </style>
