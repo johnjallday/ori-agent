@@ -32,6 +32,19 @@ func (a *App) GetServerURL() string {
 	return "http://localhost:8080"
 }
 
+// GetConfig returns the current configuration
+func (a *App) GetConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"apiKey": "",
+	}
+}
+
+// SetAPIKey sets the API key
+func (a *App) SetAPIKey(apiKey string) error {
+	// For now, just return success - this would be implemented with proper config management
+	return nil
+}
+
 func main() {
 	// Create an instance of the app structure
 	app := NewApp()
