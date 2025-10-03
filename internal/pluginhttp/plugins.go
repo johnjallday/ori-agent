@@ -277,7 +277,13 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 		return nil, fmt.Errorf("plugin %s not found", pluginName)
 	}
 
-	return h.EnumExtractor.GetAllEnumsFromParameter(plugin.Definition)
+	// Get fresh definition to return latest dynamic enums
+	def := plugin.Definition
+	if plugin.Tool != nil {
+		def = plugin.Tool.Definition()
+	}
+
+	return h.EnumExtractor.GetAllEnumsFromParameter(def)
 }
 
 // ValidatePluginEnumValue validates an enum value for a specific plugin and property
@@ -293,7 +299,13 @@ func (h *Handler) ValidatePluginEnumValue(pluginName, propertyName, value string
 		return false, fmt.Errorf("plugin %s not found", pluginName)
 	}
 
-	return h.EnumExtractor.ValidateEnumValue(plugin.Definition, propertyName, value)
+	// Get fresh definition to validate against latest dynamic enums
+	def := plugin.Definition
+	if plugin.Tool != nil {
+		def = plugin.Tool.Definition()
+	}
+
+	return h.EnumExtractor.ValidateEnumValue(def, propertyName, value)
 }
 
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {

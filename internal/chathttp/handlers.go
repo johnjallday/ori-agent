@@ -88,9 +88,16 @@ func (h *Handler) checkUninitializedPlugins(agent *types.Agent) []map[string]any
 		if !isInitialized {
 			// Get required config for this plugin
 			configVars := initProvider.GetRequiredConfig()
+
+			// Get fresh definition for description
+			def := plugin.Definition
+			if plugin.Tool != nil {
+				def = plugin.Tool.Definition()
+			}
+
 			uninitializedPlugins = append(uninitializedPlugins, map[string]any{
 				"name":            name,
-				"description":     plugin.Definition.Description.String(),
+				"description":     def.Description.String(),
 				"required_config": configVars,
 			})
 		}
@@ -204,10 +211,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build tools
+	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []openai.ChatCompletionToolUnionParam{}
 	for _, pl := range ag.Plugins {
-		tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
+		// Call Tool.Definition() to get fresh definition with dynamic enums
+		if pl.Tool != nil {
+			freshDef := pl.Tool.Definition()
+			tools = append(tools, openai.ChatCompletionFunctionTool(freshDef))
+		} else {
+			// Fallback to cached definition if tool is not available
+			tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
+		}
 	}
 
 	// Get appropriate client for this agent
@@ -220,7 +234,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			systemPrompt += " Available tools: "
 			var toolNames []string
 			for _, pl := range ag.Plugins {
-				toolNames = append(toolNames, pl.Definition.Name)
+				// Use fresh definition to get correct tool name
+				if pl.Tool != nil {
+					toolNames = append(toolNames, pl.Tool.Definition().Name)
+				} else {
+					toolNames = append(toolNames, pl.Definition.Name)
+				}
 			}
 			systemPrompt += strings.Join(toolNames, ", ") + "."
 		}

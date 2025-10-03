@@ -109,24 +109,30 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 		toolsResponse.WriteString("No tools are currently loaded.")
 	} else {
 		for name, plugin := range ag.Plugins {
-			emoji := getPluginEmoji(name)
-			toolsResponse.WriteString(fmt.Sprintf("### %s %s\n\n", emoji, plugin.Definition.Name))
+			// Get fresh definition to show latest dynamic enums (e.g., script lists)
+			def := plugin.Definition
+			if plugin.Tool != nil {
+				def = plugin.Tool.Definition()
+			}
 
-			description := plugin.Definition.Description.String()
+			emoji := getPluginEmoji(name)
+			toolsResponse.WriteString(fmt.Sprintf("### %s %s\n\n", emoji, def.Name))
+
+			description := def.Description.String()
 			if description != "" {
 				toolsResponse.WriteString(fmt.Sprintf("**Description:** %s\n\n", description))
 			}
 
 			// Extract all enum values for this plugin and show them prominently with parameters
-			allEnums, err := ch.enumExtractor.GetAllEnumsFromParameter(plugin.Definition)
+			allEnums, err := ch.enumExtractor.GetAllEnumsFromParameter(def)
 			if err == nil && len(allEnums) > 0 {
 				toolsResponse.WriteString("**🎯 Available Options:**\n")
 
 				// Get parameter info for inline display
 				var parameterInfo map[string]map[string]any
 				var required []string
-				if plugin.Definition.Parameters != nil {
-					if props, ok := plugin.Definition.Parameters["properties"].(map[string]any); ok {
+				if def.Parameters != nil {
+					if props, ok := def.Parameters["properties"].(map[string]any); ok {
 						parameterInfo = make(map[string]map[string]any)
 						for paramName, paramData := range props {
 							if paramMap, ok := paramData.(map[string]any); ok {
@@ -135,7 +141,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 						}
 
 						// Get required fields
-						if reqField, exists := plugin.Definition.Parameters["required"]; exists {
+						if reqField, exists := def.Parameters["required"]; exists {
 							if reqSlice, ok := reqField.([]string); ok {
 								required = reqSlice
 							}
