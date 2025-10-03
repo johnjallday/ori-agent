@@ -296,6 +296,42 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 	json.NewEncoder(w).Encode(response)
 }
 
+// HandleAgentsList handles the /agents command to list all available agents
+func (ch *CommandHandler) HandleAgentsList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get all agents and current agent
+	names, current := ch.store.ListAgents()
+
+	if len(names) == 0 {
+		response := map[string]any{
+			"response": "No agents found.",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Build agents list response
+	var agentsResponse strings.Builder
+	agentsResponse.WriteString("## 🤖 Available Agents\n\n")
+
+	for _, name := range names {
+		if name == current {
+			agentsResponse.WriteString(fmt.Sprintf("- **%s** ✓ (current)\n", name))
+		} else {
+			agentsResponse.WriteString(fmt.Sprintf("- %s\n", name))
+		}
+	}
+
+	agentsResponse.WriteString(fmt.Sprintf("\n**Total agents:** %d\n", len(names)))
+	agentsResponse.WriteString("\n💡 **Tip:** Use `/switch <agent-name>` to switch to a different agent")
+
+	response := map[string]any{
+		"response": agentsResponse.String(),
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 // HandleHelp handles the /help command to show available commands
 func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -305,11 +341,13 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 **System Commands:**
 - **/help** - Show this help message
 - **/agent** - Display agent status dashboard
+- **/agents** - List all available agents
 - **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
 
 **Agent Management:**
 - Use **/agent** to see current agent status and available agents
+- Use **/agents** to see a list of all configured agents
 - Use **/switch** to change between configured agents
 - Each agent can have different plugins and configurations
 

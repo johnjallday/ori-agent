@@ -167,6 +167,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleAgentStatus(w, r)
 		return
 	}
+	if q == "/agents" {
+		h.commandHandler.HandleAgentsList(w, r)
+		return
+	}
 	if q == "/tools" {
 		h.commandHandler.HandleToolsList(w, r)
 		return
@@ -339,6 +343,37 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
+		// Check if any tool result is JSON - if so, return it directly without LLM processing
+		var combinedResult string
+		hasJsonResult := false
+		for i, tr := range toolResults {
+			result := tr["result"]
+			// Check if result is valid JSON array
+			if strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
+				var testJSON []interface{}
+				if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
+					hasJsonResult = true
+				}
+			}
+			if i > 0 {
+				combinedResult += "\n\n"
+			}
+			combinedResult += result
+		}
+
+		// If we have JSON results, return them directly for frontend table rendering
+		if hasJsonResult {
+			// Add assistant message with the raw result for conversation history
+			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
+			log.Printf("Chat (with JSON tool result) in %s", time.Since(start))
+			_ = h.store.SetAgent(current, ag)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"response":  combinedResult,
+				"toolCalls": toolResults,
+			})
+			return
+		}
+
 		// Ask model again with tool output, with guidance to focus on the tool result
 		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Model:       ag.Settings.Model,
@@ -349,13 +384,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
 			// If second turn fails, still return the tool results as a best-effort reply
-			var combinedResult string
-			for i, tr := range toolResults {
-				if i > 0 {
-					combinedResult += "\n\n"
-				}
-				combinedResult += tr["result"]
-			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response":  combinedResult,
 				"toolCalls": toolResults,

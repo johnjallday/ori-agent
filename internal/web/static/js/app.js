@@ -58,6 +58,81 @@ async function refreshAgentDisplay() {
 
 // ---- Chat Functionality ----
 
+// Try to parse and render JSON as a table
+function tryRenderJsonTable(message) {
+  // Extract JSON from message (handle case where message contains both text and JSON)
+  const jsonMatch = message.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+  if (!jsonMatch) return null;
+
+  try {
+    const jsonData = JSON.parse(jsonMatch[0]);
+
+    // Check if it's an array of objects
+    if (Array.isArray(jsonData) && jsonData.length > 0 && typeof jsonData[0] === 'object') {
+      // Get prefix text (text before JSON)
+      const prefixText = message.substring(0, jsonMatch.index).trim();
+
+      // Extract all unique keys from the objects
+      const allKeys = new Set();
+      jsonData.forEach(obj => {
+        Object.keys(obj).forEach(key => allKeys.add(key));
+      });
+      const keys = Array.from(allKeys);
+
+      // Build HTML table
+      let html = '';
+      if (prefixText) {
+        html += `<div style="margin-bottom: 12px;">${escapeHtml(prefixText)}</div>`;
+      }
+
+      html += '<div style="overflow-x: auto;"><table class="table table-sm table-bordered" style="margin-top: 8px;">';
+
+      // Table header
+      html += '<thead><tr>';
+      keys.forEach(key => {
+        html += `<th style="padding: 8px; background: var(--bg-hover);">${escapeHtml(key)}</th>`;
+      });
+      html += '</tr></thead>';
+
+      // Table body
+      html += '<tbody>';
+      jsonData.forEach(obj => {
+        html += '<tr>';
+        keys.forEach(key => {
+          const value = obj[key];
+          let displayValue = '';
+
+          // Handle different value types
+          if (value === null || value === undefined) {
+            displayValue = '-';
+          } else if (typeof value === 'object') {
+            displayValue = JSON.stringify(value);
+          } else {
+            displayValue = String(value);
+          }
+
+          html += `<td style="padding: 8px;">${escapeHtml(displayValue)}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      return html;
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// HTML escape helper function
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 // Add message to chat area
 function addMessageToChat(message, isUser = false, isError = false) {
   const chatArea = document.getElementById('chatArea');
@@ -81,9 +156,17 @@ function addMessageToChat(message, isUser = false, isError = false) {
     messageContent.style.color = 'var(--text-primary)';
   }
 
-  // Process message content (support markdown)
-  if (typeof marked !== 'undefined' && !isUser) {
-    messageContent.innerHTML = marked.parse(message);
+  // Process message content (support markdown and JSON tables)
+  if (!isUser) {
+    // Try to detect and render JSON tables
+    const tableContent = tryRenderJsonTable(message);
+    if (tableContent) {
+      messageContent.innerHTML = tableContent;
+    } else if (typeof marked !== 'undefined') {
+      messageContent.innerHTML = marked.parse(message);
+    } else {
+      messageContent.textContent = message;
+    }
   } else {
     messageContent.textContent = message;
   }
