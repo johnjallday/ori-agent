@@ -530,3 +530,64 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		"path":     filePath,
 	})
 }
+// PluginUpdatesCheckHandler checks for available updates for all installed plugins
+func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": "method not allowed",
+		})
+		return
+	}
+
+	// Load registry to get latest versions
+	reg, _, err := h.registryManager.Load()
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Get currently installed plugins
+	_, currentAgent := h.store.ListAgents()
+	ag, ok := h.store.GetAgent(currentAgent)
+	if !ok {
+		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Check for updates
+	var updates []map[string]any
+	for name, installedPlugin := range ag.Plugins {
+		// Find plugin in registry
+		for _, registryEntry := range reg.Plugins {
+			if registryEntry.Name == name && registryEntry.GitHubRepo != "" {
+				// Compare versions
+				if installedPlugin.Version != registryEntry.Version {
+					updates = append(updates, map[string]any{
+						"name":             name,
+						"currentVersion":   installedPlugin.Version,
+						"latestVersion":    registryEntry.Version,
+						"updateAvailable":  true,
+						"description":      registryEntry.Description,
+						"githubRepo":       registryEntry.GitHubRepo,
+						"downloadURL":      registryEntry.DownloadURL,
+					})
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":        true,
+		"updatesCount":   len(updates),
+		"updates":        updates,
+	})
+}

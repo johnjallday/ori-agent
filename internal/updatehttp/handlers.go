@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
 )
@@ -92,7 +93,8 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var request struct {
-		Version string `json:"version"`
+		Version       string `json:"version"`
+		AutoRestart   bool   `json:"autoRestart"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -112,11 +114,17 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	message := "Update downloaded successfully. Please restart dolphin-agent to use the new version."
+	if request.AutoRestart {
+		message = "Update downloaded successfully. Restarting application..."
+	}
+
 	response := map[string]interface{}{
-		"success":  true,
-		"version":  request.Version,
-		"filePath": filePath,
-		"message":  "Update downloaded successfully. Manual installation required.",
+		"success":     true,
+		"version":     request.Version,
+		"filePath":    filePath,
+		"message":     message,
+		"autoRestart": request.AutoRestart,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -124,6 +132,15 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 		log.Printf("Error encoding download response: %v", err)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
+	}
+
+	// If auto-restart is requested, trigger restart after response is sent
+	if request.AutoRestart {
+		go func() {
+			// Wait a bit to ensure response is sent
+			time.Sleep(1 * time.Second)
+			h.updateManager.RestartApplication()
+		}()
 	}
 }
 

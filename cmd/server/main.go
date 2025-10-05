@@ -196,6 +196,7 @@ func main() {
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler.PluginRegistryHandler)
 	mux.HandleFunc("/api/plugin-updates", pluginRegistryHandler.PluginUpdatesHandler)
 	mux.HandleFunc("/api/plugins/download", pluginRegistryHandler.PluginDownloadHandler)
+	mux.HandleFunc("/api/plugins/updates/check", pluginRegistryHandler.PluginUpdatesCheckHandler)
 	mux.HandleFunc("/api/plugins/execute", pluginInitHandler.PluginExecuteHandler)
 	mux.HandleFunc("/api/plugins/init-status", pluginInitHandler.PluginInitStatusHandler)
 

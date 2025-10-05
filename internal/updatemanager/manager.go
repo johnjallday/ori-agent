@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -300,33 +302,104 @@ func (m *Manager) findAssetForPlatform(assets []struct {
 }
 
 func (m *Manager) downloadFile(url, filename, version string) (string, error) {
-	// Create temporary directory
-	tempDir, err := os.MkdirTemp("", "dolphin-update-*")
+	// Get current working directory (where the app is running)
+	currentDir, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp directory: %w", err)
+		return "", fmt.Errorf("failed to get current directory: %w", err)
 	}
+
+	// Create temp file path with original name
+	tempFilePath := filepath.Join(currentDir, filename+".tmp")
 
 	// Download file
 	resp, err := http.Get(url)
 	if err != nil {
-		os.RemoveAll(tempDir)
 		return "", fmt.Errorf("failed to download update: %w", err)
 	}
 	defer resp.Body.Close()
 
-	filePath := filepath.Join(tempDir, filename)
-	file, err := os.Create(filePath)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	file, err := os.Create(tempFilePath)
 	if err != nil {
-		os.RemoveAll(tempDir)
 		return "", fmt.Errorf("failed to create download file: %w", err)
 	}
 	defer file.Close()
 
 	_, err = io.Copy(file, resp.Body)
 	if err != nil {
-		os.RemoveAll(tempDir)
+		os.Remove(tempFilePath) // Clean up partial download
 		return "", fmt.Errorf("failed to save download: %w", err)
 	}
 
-	return filePath, nil
+	// Close the file before renaming
+	file.Close()
+
+	// Determine the final filename - use "dolphin-agent" or "dolphin-agent.exe"
+	var finalName string
+	if runtime.GOOS == "windows" {
+		finalName = "dolphin-agent.exe"
+	} else {
+		finalName = "dolphin-agent"
+	}
+	finalPath := filepath.Join(currentDir, finalName)
+
+	// Backup current binary if it exists
+	if _, err := os.Stat(finalPath); err == nil {
+		backupPath := finalPath + ".old"
+		if err := os.Rename(finalPath, backupPath); err != nil {
+			os.Remove(tempFilePath)
+			return "", fmt.Errorf("failed to backup current binary: %w", err)
+		}
+	}
+
+	// Rename downloaded file to final name
+	if err := os.Rename(tempFilePath, finalPath); err != nil {
+		os.Remove(tempFilePath)
+		return "", fmt.Errorf("failed to rename downloaded file: %w", err)
+	}
+
+	// Make the downloaded file executable (for unix-like systems)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(finalPath, 0755); err != nil {
+			return "", fmt.Errorf("failed to make file executable: %w", err)
+		}
+	}
+
+	return finalPath, nil
+}
+
+// RestartApplication restarts the current application
+func (m *Manager) RestartApplication() {
+	log.Println("Restarting application...")
+
+	// Get the executable path
+	executable, err := os.Executable()
+	if err != nil {
+		log.Printf("Failed to get executable path: %v", err)
+		return
+	}
+
+	// Get the current working directory and arguments
+	args := os.Args
+	cwd, _ := os.Getwd()
+
+	// Start new process
+	cmd := exec.Command(executable, args[1:]...)
+	cmd.Dir = cwd
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("Failed to start new process: %v", err)
+		return
+	}
+
+	log.Printf("New process started with PID %d, shutting down current process...", cmd.Process.Pid)
+
+	// Exit current process
+	os.Exit(0)
 }

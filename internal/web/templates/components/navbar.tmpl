@@ -13,6 +13,15 @@
         <span class="status-indicator status-online"></span>
         <span class="fw-medium">{{.CurrentAgent}}</span>
       </span>
+      <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+        </svg>
+        <span>Update Available</span>
+        <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
+          <span class="visually-hidden">New update</span>
+        </span>
+      </button>
       <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
