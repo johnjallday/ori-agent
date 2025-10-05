@@ -21,14 +21,18 @@ function selectAgent(agentName) {
 function showAddAgentModal() {
   const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
   const agentNameInput = document.getElementById('agentName');
-  
-  // Clear previous input
+  const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
+
+  // Clear previous inputs
   if (agentNameInput) {
     agentNameInput.value = '';
   }
-  
+  if (agentSystemPromptInput) {
+    agentSystemPromptInput.value = '';
+  }
+
   modal.show();
-  
+
   // Focus on input after modal is shown
   setTimeout(() => {
     if (agentNameInput) {
@@ -40,47 +44,58 @@ function showAddAgentModal() {
 // Create new agent
 async function createNewAgent() {
   const agentNameInput = document.getElementById('agentName');
+  const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const createBtn = document.getElementById('createAgentBtn');
-  
+
   if (!agentNameInput) return;
-  
+
   const agentName = agentNameInput.value.trim();
   if (!agentName) {
     alert('Please enter an agent name');
     agentNameInput.focus();
     return;
   }
-  
+
   // Set loading state
   const originalText = createBtn.textContent;
   createBtn.disabled = true;
   createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
-  
+
   try {
+    const requestBody = { name: agentName };
+
+    // Add system prompt if provided
+    if (agentSystemPromptInput && agentSystemPromptInput.value.trim()) {
+      requestBody.system_prompt = agentSystemPromptInput.value.trim();
+    }
+
     const response = await fetch('/api/agents', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ name: agentName })
+      body: JSON.stringify(requestBody)
     });
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     // Success - close modal and refresh agent list
     const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
     if (modal) {
       modal.hide();
     }
-    
+
     // Clear form
     agentNameInput.value = '';
-    
+    if (agentSystemPromptInput) {
+      agentSystemPromptInput.value = '';
+    }
+
     // Show success message
     console.log('Agent created successfully:', agentName);
-    
+
     // Refresh the agent list
     await refreshAgentList();
     

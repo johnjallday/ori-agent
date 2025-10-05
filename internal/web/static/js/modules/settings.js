@@ -46,7 +46,7 @@ async function loadSettings() {
     const response = await fetch('/api/settings');
     if (response.ok) {
       const settings = await response.json();
-      
+
       // Update model dropdown
       const modelSelect = document.getElementById('gptModelSelect');
       // Handle both nested (settings.Settings.model) and flat (settings.model) formats
@@ -80,6 +80,13 @@ async function loadSettings() {
           temperatureValue.textContent = temperatureValueData.toFixed(1);
         }
       }
+
+      // Update system prompt
+      const systemPromptInput = document.getElementById('systemPromptInput');
+      const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
+      if (systemPromptInput) {
+        systemPromptInput.value = systemPromptValue;
+      }
     } else {
       console.error('Failed to load settings:', response.status);
     }
@@ -89,7 +96,7 @@ async function loadSettings() {
     const modelSelect = document.getElementById('gptModelSelect');
     const temperatureSlider = document.getElementById('temperatureSlider');
     const temperatureValue = document.getElementById('temperatureValue');
-    
+
     if (modelSelect) modelSelect.value = 'gpt-5-nano';
     if (temperatureSlider) temperatureSlider.value = 0;
     if (temperatureValue) temperatureValue.textContent = '0.0';
@@ -101,27 +108,32 @@ async function saveSettings() {
   try {
     const modelSelect = document.getElementById('gptModelSelect');
     const temperatureSlider = document.getElementById('temperatureSlider');
-    
+    const systemPromptInput = document.getElementById('systemPromptInput');
+
     if (!modelSelect || !temperatureSlider) {
       console.error('Settings elements not found');
       return;
     }
-    
+
+    const settingsData = {
+      model: modelSelect.value,
+      temperature: parseFloat(temperatureSlider.value)
+    };
+
+    // Add system prompt if it exists
+    if (systemPromptInput) {
+      settingsData.system_prompt = systemPromptInput.value;
+    }
+
     const response = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        model: modelSelect.value,
-        temperature: parseFloat(temperatureSlider.value)
-      })
+      body: JSON.stringify(settingsData)
     });
-    
+
     if (response.ok) {
-      console.log('Settings updated:', {
-        model: modelSelect.value,
-        temperature: parseFloat(temperatureSlider.value)
-      });
-      
+      console.log('Settings updated:', settingsData);
+
       // Show success notification
       showNotification('Settings updated successfully!', 'success');
     } else {

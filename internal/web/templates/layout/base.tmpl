@@ -73,6 +73,12 @@
               <label for="agentName" class="form-label" style="color: var(--text-primary);">Agent Name</label>
               <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required>
             </div>
+            <div class="mb-3">
+              <label for="agentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
+              <textarea id="agentSystemPrompt" class="form-control" rows="4"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                        placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+            </div>
           </form>
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
