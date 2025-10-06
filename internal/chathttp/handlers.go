@@ -233,7 +233,16 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add system message for better tool usage guidance
 	if len(ag.Messages) == 0 {
-		systemPrompt := "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
+		var systemPrompt string
+
+		// Use custom system prompt if set, otherwise use default
+		if ag.Settings.SystemPrompt != "" {
+			systemPrompt = ag.Settings.SystemPrompt
+		} else {
+			systemPrompt = "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
+		}
+
+		// Append available tools list if there are any
 		if len(tools) > 0 {
 			systemPrompt += " Available tools: "
 			var toolNames []string
@@ -247,6 +256,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			systemPrompt += strings.Join(toolNames, ", ") + "."
 		}
+
 		ag.Messages = append(ag.Messages, openai.SystemMessage(systemPrompt))
 	}
 

@@ -32,7 +32,11 @@ var (
 	// runtime state (moved behind Store)
 	st             store.Store
 	pluginReg      types.PluginRegistry
-	defaultConf    = types.Settings{Model: "gpt-5-nano", Temperature: 1}
+	defaultConf    = types.Settings{
+		Model:        "gpt-5-nano",
+		Temperature:  1,
+		SystemPrompt: "You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses.",
+	}
 	agentStorePath string
 	configManager  *config.Manager
 
@@ -196,6 +200,7 @@ func main() {
 	mux.HandleFunc("/api/plugin-registry", pluginRegistryHandler.PluginRegistryHandler)
 	mux.HandleFunc("/api/plugin-updates", pluginRegistryHandler.PluginUpdatesHandler)
 	mux.HandleFunc("/api/plugins/download", pluginRegistryHandler.PluginDownloadHandler)
+	mux.HandleFunc("/api/plugins/updates/check", pluginRegistryHandler.PluginUpdatesCheckHandler)
 	mux.HandleFunc("/api/plugins/execute", pluginInitHandler.PluginExecuteHandler)
 	mux.HandleFunc("/api/plugins/init-status", pluginInitHandler.PluginInitStatusHandler)
 

@@ -16,3 +16,36 @@
     </div>
   </div>
 </div>
+
+<!-- Update Available Modal -->
+<div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h1 class="modal-title fs-5" id="updateModalLabel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          </svg>
+          Update Available
+        </h1>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="updateModalBody">
+        <div class="text-center py-4">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Later</button>
+        <a id="downloadUpdateBtn" href="#" class="btn btn-primary" target="_blank" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          </svg>
+          Download Update
+        </a>
+      </div>
+    </div>
+  </div>
+</div>

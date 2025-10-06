@@ -107,9 +107,11 @@ function displayOnlinePlugins(onlinePlugins, installedPluginNames = new Set()) {
 }
 
 async function installOnlinePlugin(pluginName, downloadUrl) {
+  const button = event.target;
+  const originalText = button.innerHTML;
+
   try {
-    const button = event.target;
-    const originalText = button.innerHTML;
+    console.log('Installing plugin:', pluginName);
 
     // Show loading state
     button.disabled = true;
@@ -120,20 +122,25 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
       Installing...
     `;
 
-    const response = await fetch('/api/plugins/install', {
+    console.log('Sending request to /api/plugins/download with name:', pluginName);
+
+    const response = await fetch('/api/plugins/download', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        name: pluginName,
-        download_url: downloadUrl
+        name: pluginName
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to install plugin');
+    console.log('Response status:', response.status);
+
+    const result = await response.json();
+    console.log('Response result:', result);
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Failed to install plugin');
     }
 
     // Success - update button state
