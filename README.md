@@ -2,7 +2,7 @@
 
 A modern, extensible AI agent platform with a sleek web interface and powerful plugin system. Dolphin Agent allows you to create intelligent assistants that can be extended with custom tools and integrations.
 
-![Version](https://img.shields.io/badge/Version-v0.0.2-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.5-blue)
 ![Go](https://img.shields.io/badge/Go-1.24-00add8)
 ![UI](https://img.shields.io/badge/UI-Modern%20Design-6366f1)
 ![Plugin System](https://img.shields.io/badge/Plugins-Extensible-10b981)
