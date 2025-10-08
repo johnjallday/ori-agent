@@ -3,11 +3,18 @@
 
 let updateCheckInterval = null;
 let cachedUpdateInfo = null;
+let updateMessageShown = false; // Track if we've shown the update message this session
 
 // Check for updates on page load and periodically
 async function initUpdateChecker() {
   // Check immediately on load
-  await checkForUpdates();
+  const updateInfo = await checkForUpdates();
+
+  // If update is available on first load, show a chat message (only once per session)
+  if (updateInfo && updateInfo.updateAvailable && !updateMessageShown) {
+    showUpdateChatMessage(updateInfo);
+    updateMessageShown = true;
+  }
 
   // Check every 30 minutes
   updateCheckInterval = setInterval(checkForUpdates, 30 * 60 * 1000);
@@ -328,6 +335,28 @@ function showUpdateToast(updateInfo) {
 
   // Simple console notification for now
   console.log(`Update available: ${updateInfo.latestVersion}`);
+}
+
+// Show update message in chat
+function showUpdateChatMessage(updateInfo) {
+  // Wait a bit for the chat area to be ready
+  setTimeout(() => {
+    if (typeof addMessageToChat === 'function') {
+      const message = `🎉 **Update Available!**
+
+A new version of Dolphin Agent is available!
+
+**Current Version:** ${updateInfo.currentVersion}
+**Latest Version:** ${updateInfo.latestVersion}
+
+Click the **Update** button in the top navigation bar to download and install the latest version.
+
+---
+*This message is shown once per session when an update is available.*`;
+
+      addMessageToChat(message, false);
+    }
+  }, 1000); // Wait 1 second for DOM to be ready
 }
 
 // Make functions globally available
