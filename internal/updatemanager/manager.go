@@ -235,9 +235,13 @@ func (m *Manager) findLatestRelease(releases []GitHubRelease, includePrerelease 
 }
 
 func (m *Manager) isNewerVersion(latest, current string) bool {
+	// Normalize versions by removing 'v' prefix for comparison
+	latestNormalized := strings.TrimPrefix(latest, "v")
+	currentNormalized := strings.TrimPrefix(current, "v")
+
 	// Simple version comparison - you might want to use a proper semver library
 	// This handles basic cases like v1.2.3 vs v1.2.4
-	return latest != current && latest > current
+	return latestNormalized != currentNormalized && latestNormalized > currentNormalized
 }
 
 func (m *Manager) findAssetForPlatform(assets []struct {
