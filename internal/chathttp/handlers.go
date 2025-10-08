@@ -141,12 +141,21 @@ func (h *Handler) generateInitializationPrompt(uninitializedPlugins []map[string
 	return prompt.String()
 }
 
+// UploadedFile represents a file uploaded with a chat message
+type UploadedFile struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Size    int64  `json:"size"`
+	Content string `json:"content"`
+}
+
 // ChatHandler handles chat requests
 func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question string `json:"question"`
+		Question string         `json:"question"`
+		Files    []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -156,6 +165,23 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if q == "" {
 		http.Error(w, "empty question", http.StatusBadRequest)
 		return
+	}
+
+	// If files are attached, prepend their content to the question
+	if len(req.Files) > 0 {
+		var filesContext strings.Builder
+		filesContext.WriteString("Here are the uploaded documents:\n\n")
+
+		for _, file := range req.Files {
+			filesContext.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Name))
+			filesContext.WriteString(file.Content)
+			filesContext.WriteString("\n\n")
+		}
+
+		filesContext.WriteString("User's question about the documents:\n")
+		filesContext.WriteString(q)
+
+		q = filesContext.String()
 	}
 
 	// Handle special commands

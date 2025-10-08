@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/chathttp"
 	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/config"
+	"github.com/johnjallday/dolphin-agent/internal/filehttp"
 	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
 	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
@@ -223,6 +224,10 @@ func main() {
 	mux.HandleFunc("/api/updates/releases", updateHandler.ListReleasesHandler)
 	mux.HandleFunc("/api/updates/download", updateHandler.DownloadUpdateHandler)
 	mux.HandleFunc("/api/updates/version", updateHandler.GetVersionHandler)
+
+	// File parsing endpoint
+	fileHandler := filehttp.NewHandler()
+	mux.HandleFunc("/api/files/parse", fileHandler.ParseFileHandler)
 
 	addr := ":8080"
 	log.Printf("Listening on http://localhost%s", addr)

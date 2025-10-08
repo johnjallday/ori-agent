@@ -223,7 +223,7 @@ function hideTypingIndicator() {
 // Send message to chat API
 async function sendMessage(message) {
   if (isWaitingForResponse) return;
-  
+
   const trimmedMessage = message.trim();
   if (!trimmedMessage) return;
 
@@ -231,9 +231,17 @@ async function sendMessage(message) {
   promptHistory.unshift(trimmedMessage);
   historyIndex = -1;
 
-  // Add user message to chat
-  addMessageToChat(trimmedMessage, true);
-  
+  // Get uploaded files
+  const uploadedFiles = window.getUploadedFiles ? window.getUploadedFiles() : [];
+
+  // Add user message to chat (including file info if any)
+  let displayMessage = trimmedMessage;
+  if (uploadedFiles.length > 0) {
+    const fileNames = uploadedFiles.map(f => f.name).join(', ');
+    displayMessage += `\n\n📎 Attached: ${fileNames}`;
+  }
+  addMessageToChat(displayMessage, true);
+
   // Clear input
   const input = document.getElementById('input');
   if (input) {
@@ -247,14 +255,22 @@ async function sendMessage(message) {
   showTypingIndicator();
 
   try {
+    // Prepare request body with files
+    const requestBody = {
+      question: trimmedMessage
+    };
+
+    // Add files if any
+    if (uploadedFiles.length > 0) {
+      requestBody.files = uploadedFiles;
+    }
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        question: trimmedMessage
-      })
+      body: JSON.stringify(requestBody)
     });
 
     hideTypingIndicator();
@@ -264,11 +280,16 @@ async function sendMessage(message) {
     }
 
     const data = await response.json();
-    
+
     console.log('Received data:', data);
     console.log('data.response:', data.response);
     console.log('typeof data.response:', typeof data.response);
-    
+
+    // Clear uploaded files after successful send
+    if (window.clearFilesAfterSend) {
+      window.clearFilesAfterSend();
+    }
+
     if (data.response) {
       addMessageToChat(data.response, false);
 
