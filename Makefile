@@ -55,14 +55,21 @@ run-dev: ## Run the server directly with go run (requires OPENAI_API_KEY)
 	@if [ -z "$$OPENAI_API_KEY" ]; then echo "ERROR: OPENAI_API_KEY not set"; exit 1; fi
 	$(GO) run ./cmd/server
 
-# ---- Plugins (.so) ----
-# Pattern: plugins/<name>/<name>.so
-plugins/%/%.so: FORCE
-	@echo "Building plugin $*"
-	cd plugins/$* && $(GO) build -buildmode=plugin -o $*.so
-
+# ---- Plugins (RPC Executables) ----
 .PHONY: plugins
-plugins: $(PLUGINS) ## Build all plugins
+plugins: ## Build all RPC plugin executables
+	@echo "Building RPC plugin executables..."
+	@./scripts/build-plugins.sh
+
+.PHONY: plugins-cross
+plugins-cross: ## Build plugins for all platforms
+	@echo "Building plugins for multiple platforms..."
+	@GOOS=darwin GOARCH=amd64 ./scripts/build-plugins.sh
+	@GOOS=darwin GOARCH=arm64 ./scripts/build-plugins.sh
+	@GOOS=linux GOARCH=amd64 ./scripts/build-plugins.sh
+	@GOOS=linux GOARCH=arm64 ./scripts/build-plugins.sh
+	@GOOS=windows GOARCH=amd64 ./scripts/build-plugins.sh
+	@echo "Cross-platform plugin build complete!"
 
 # ---- Plugin Registry (embedded JSON) ----
 # Writes absolute paths for the built .so files into the embedded registry file

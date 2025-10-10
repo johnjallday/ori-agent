@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
@@ -78,5 +79,12 @@ func (m *mathTool) Version() string {
 	return "1.0.0"
 }
 
-// Tool is the exported symbol that the host application will look up.
-var Tool mathTool
+func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: pluginapi.Handshake,
+		Plugins: map[string]plugin.Plugin{
+			"tool": &pluginapi.ToolRPCPlugin{Impl: &mathTool{}},
+		},
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
+}

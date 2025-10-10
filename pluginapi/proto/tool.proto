@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package pluginapi;
+
+option go_package = "github.com/johnjallday/dolphin-agent/pluginapi";
+
+// ToolService defines the RPC service for plugin tools
+service ToolService {
+    // GetDefinition returns the OpenAI function definition for this tool
+    rpc GetDefinition(Empty) returns (FunctionDefinition);
+
+    // Call executes the tool with the given arguments
+    rpc Call(CallRequest) returns (CallResponse);
+
+    // GetVersion returns the plugin version (optional)
+    rpc GetVersion(Empty) returns (VersionResponse);
+
+    // SetAgentContext provides agent information to the plugin (optional)
+    rpc SetAgentContext(AgentContextRequest) returns (Empty);
+}
+
+// Empty message for RPCs that don't need parameters
+message Empty {}
+
+// FunctionDefinition represents an OpenAI function definition
+message FunctionDefinition {
+    string name = 1;
+    string description = 2;
+    string parameters_json = 3;  // JSON-encoded OpenAI parameters schema
+}
+
+// CallRequest contains the arguments for calling a tool
+message CallRequest {
+    string args_json = 1;  // JSON-encoded tool arguments
+}
+
+// CallResponse contains the result of a tool call
+message CallResponse {
+    string result_json = 1;  // JSON-encoded result on success
+    string error = 2;        // Error message on failure (empty on success)
+}
+
+// VersionResponse contains the plugin version
+message VersionResponse {
+    string version = 1;
+}
+
+// AgentContextRequest provides current agent information to the plugin
+message AgentContextRequest {
+    string name = 1;           // Agent name (e.g., "default", "my-agent")
+    string config_path = 2;    // Path to agent's config.json
+    string settings_path = 3;  // Path to agent's agent_settings.json
+    string agent_dir = 4;      // Path to agent's directory
+}

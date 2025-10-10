@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Clean plugin binaries script for dolphin-agent
-# Removes all compiled plugin .so files
+# Removes all compiled RPC plugin executables
 
 set -e  # Exit on any error
 
@@ -21,20 +21,22 @@ echo -e "${BLUE}Cleaning plugin binaries...${NC}"
 # Clean uploaded_plugins directory
 if [ -d "uploaded_plugins" ]; then
     echo -e "${YELLOW}Removing files from uploaded_plugins/...${NC}"
-    rm -f uploaded_plugins/*.so
+    rm -f uploaded_plugins/*
     echo -e "${GREEN}✓ Cleaned uploaded_plugins directory${NC}"
 else
     echo -e "${YELLOW}uploaded_plugins directory does not exist${NC}"
 fi
 
-# Clean .so files from individual plugin directories
+# Clean plugin executables from individual plugin directories
 for plugin_dir in plugins/*/; do
     if [ -d "$plugin_dir" ]; then
         plugin_name=$(basename "$plugin_dir")
-        echo -e "${YELLOW}Checking $plugin_name for .so files...${NC}"
-        
-        if find "$plugin_dir" -name "*.so" -delete -print | grep -q .; then
-            echo -e "${GREEN}✓ Cleaned .so files from $plugin_name${NC}"
+        echo -e "${YELLOW}Checking $plugin_name for executables...${NC}"
+
+        # Remove the plugin executable (same name as directory)
+        if [ -f "$plugin_dir/$plugin_name" ]; then
+            rm -f "$plugin_dir/$plugin_name"
+            echo -e "${GREEN}✓ Cleaned executable from $plugin_name${NC}"
         fi
     fi
 done

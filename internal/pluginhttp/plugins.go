@@ -21,11 +21,11 @@ type ToolLoader interface {
 	Load(path string) (pluginapi.Tool, error)
 }
 
-// NativeLoader uses the Go "plugin" package to load .so files.
+// NativeLoader uses the unified plugin loader to load both .so files and RPC executables.
 type NativeLoader struct{}
 
 func (NativeLoader) Load(path string) (pluginapi.Tool, error) {
-	return pluginloader.LoadWithCache(path)
+	return pluginloader.LoadPluginUnified(path)
 }
 
 // Handler serves /api/plugins (GET list, POST upload+load, DELETE unload).

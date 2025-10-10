@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/dolphin-agent/internal/types"
@@ -46,13 +48,46 @@ func (d *PluginDownloader) GetPlugin(entry types.PluginRegistryEntry) (string, b
 	return "", false, fmt.Errorf("plugin entry must have either path or url specified")
 }
 
+// getPlatformExtension returns the appropriate file extension for the current platform
+func (d *PluginDownloader) getPlatformExtension() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+// getPlatformFilename generates a platform-specific filename for a plugin
+func (d *PluginDownloader) getPlatformFilename(entry types.PluginRegistryEntry) string {
+	ext := d.getPlatformExtension()
+
+	// Check if the URL already has platform info
+	if strings.Contains(entry.URL, runtime.GOOS) {
+		// URL likely points to a platform-specific binary
+		if entry.Version != "" {
+			return fmt.Sprintf("%s-%s-%s-%s%s", entry.Name, entry.Version, runtime.GOOS, runtime.GOARCH, ext)
+		}
+		return fmt.Sprintf("%s-%s-%s%s", entry.Name, runtime.GOOS, runtime.GOARCH, ext)
+	}
+
+	// Legacy .so file or generic URL
+	if strings.HasSuffix(entry.URL, ".so") {
+		if entry.Version != "" {
+			return fmt.Sprintf("%s-%s.so", entry.Name, entry.Version)
+		}
+		return fmt.Sprintf("%s.so", entry.Name)
+	}
+
+	// Default to executable naming
+	if entry.Version != "" {
+		return fmt.Sprintf("%s-%s%s", entry.Name, entry.Version, ext)
+	}
+	return fmt.Sprintf("%s%s", entry.Name, ext)
+}
+
 // downloadAndCache downloads a plugin from URL and caches it locally
 func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (string, bool, error) {
-	// Generate cache filename based on plugin name and version
-	cacheFilename := fmt.Sprintf("%s-%s.so", entry.Name, entry.Version)
-	if entry.Version == "" {
-		cacheFilename = fmt.Sprintf("%s.so", entry.Name)
-	}
+	// Generate cache filename based on plugin name, version, and platform
+	cacheFilename := d.getPlatformFilename(entry)
 	cachePath := filepath.Join(d.CacheDir, cacheFilename)
 
 	// Check if plugin is already cached and valid
@@ -60,10 +95,19 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 		return cachePath, true, nil
 	}
 
+	// Build platform-specific download URL if needed
+	downloadURL := entry.URL
+	if entry.DownloadURL != "" {
+		// Use DownloadURL template with platform substitution
+		downloadURL = strings.ReplaceAll(entry.DownloadURL, "{os}", runtime.GOOS)
+		downloadURL = strings.ReplaceAll(downloadURL, "{arch}", runtime.GOARCH)
+		downloadURL = strings.ReplaceAll(downloadURL, "{version}", entry.Version)
+	}
+
 	// Download the plugin
-	resp, err := d.HTTPClient.Get(entry.URL)
+	resp, err := d.HTTPClient.Get(downloadURL)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to download plugin from %s: %w", entry.URL, err)
+		return "", false, fmt.Errorf("failed to download plugin from %s: %w", downloadURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -72,7 +116,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	}
 
 	// Create temporary file
-	tempFile, err := os.CreateTemp(d.CacheDir, "plugin-*.so.tmp")
+	tempFile, err := os.CreateTemp(d.CacheDir, "plugin-*.tmp")
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -103,6 +147,13 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	if err != nil {
 		os.Remove(tempFile.Name())
 		return "", false, fmt.Errorf("failed to move plugin to cache: %w", err)
+	}
+
+	// Make the file executable on Unix-like systems
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(cachePath, 0755); err != nil {
+			return "", false, fmt.Errorf("failed to make plugin executable: %w", err)
+		}
 	}
 
 	return cachePath, false, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
@@ -52,5 +53,12 @@ func (w *weatherTool) Version() string {
 	return "1.0.0"
 }
 
-// Tool is the exported symbol that the host looks up.
-var Tool weatherTool
+func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: pluginapi.Handshake,
+		Plugins: map[string]plugin.Plugin{
+			"tool": &pluginapi.ToolRPCPlugin{Impl: &weatherTool{}},
+		},
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
+}

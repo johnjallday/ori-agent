@@ -114,8 +114,8 @@ func (m *Manager) ScanUploadedPlugins() error {
 		}
 
 		filename := entry.Name()
-		// Only process .so files
-		if !strings.HasSuffix(strings.ToLower(filename), ".so") {
+		// Skip hidden files and non-plugin files
+		if strings.HasPrefix(filename, ".") {
 			continue
 		}
 
@@ -126,15 +126,18 @@ func (m *Manager) ScanUploadedPlugins() error {
 			continue
 		}
 
-		// Try to extract plugin name from filename (remove .so extension)
-		pluginName := strings.TrimSuffix(filename, ".so")
+		// Plugin name is the filename (RPC executables don't have extensions)
+		pluginName := filename
 
-		// Try to load the plugin to get better information
+		// Try to load the plugin to get better information (using unified loader)
 		var description, version string
-		if tool, loadErr := pluginloader.LoadWithCache(pluginPath); loadErr == nil {
+		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
 			description = def.Description.String()
 			version = pluginloader.GetPluginVersion(tool)
+
+			// Clean up RPC plugins after getting metadata
+			pluginloader.CloseRPCPlugin(tool)
 		}
 
 		// Fallback values if loading failed

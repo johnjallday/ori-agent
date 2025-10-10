@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
@@ -188,5 +189,12 @@ func (t resultHandlerTool) Version() string {
 	return "0.0.1"
 }
 
-// Tool is the exported symbol the host looks up via plugin.Open().Lookup("Tool")
-var Tool = resultHandlerTool{}
+func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: pluginapi.Handshake,
+		Plugins: map[string]plugin.Plugin{
+			"tool": &pluginapi.ToolRPCPlugin{Impl: resultHandlerTool{}},
+		},
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
+}

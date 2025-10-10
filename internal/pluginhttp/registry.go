@@ -148,8 +148,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		// load plugin using cache
-		tool, err := pluginloader.LoadWithCache(entryPath)
+		// load plugin using unified loader (supports both .so and RPC executables)
+		tool, err := pluginloader.LoadPluginUnified(entryPath)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("load plugin %s: %v", entryPath, err), http.StatusInternalServerError)
 			return
@@ -274,6 +274,10 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		_, current := h.store.ListAgents()
 		ag, ok := h.store.GetAgent(current)
 		if ok && ag.Plugins != nil {
+			// Clean up RPC plugin if it is one
+			if loadedPlugin, exists := ag.Plugins[name]; exists {
+				pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
+			}
 			delete(ag.Plugins, name)
 			if err := h.store.SetAgent(current, ag); err != nil {
 				log.Printf("Warning: Failed to unload plugin %s from agent: %v", name, err)

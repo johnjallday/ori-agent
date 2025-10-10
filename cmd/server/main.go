@@ -122,16 +122,13 @@ func main() {
 		var failedPlugins []string
 
 		for key, lp := range ag.Plugins {
-			// If tool is already set, just add it to cache
+			// If tool is already set, skip reloading
 			if lp.Tool != nil {
-				absPath, err := filepath.Abs(lp.Path)
-				if err == nil {
-					pluginloader.AddToCache(absPath, lp.Tool)
-				}
 				continue
 			}
 
-			tool, err := pluginloader.LoadWithCache(lp.Path)
+			// Use unified loader (RPC executables only)
+			tool, err := pluginloader.LoadPluginUnified(lp.Path)
 			if err != nil {
 				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
 				log.Printf("removing failed plugin %s from agent %s config", key, agName)
