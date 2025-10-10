@@ -28,10 +28,16 @@ func NewHandler(store store.Store, configManager *config.Manager, clientFactory 
 func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		_, current := h.store.ListAgents()
-		ag, ok := h.store.GetAgent(current)
+		// Check if a specific agent name is requested
+		agentName := r.URL.Query().Get("agent")
+		if agentName == "" {
+			// If no agent specified, use current agent
+			_, agentName = h.store.ListAgents()
+		}
+
+		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
+			http.Error(w, "agent not found", http.StatusNotFound)
 			return
 		}
 		// Wrap settings in the expected format for frontend compatibility
@@ -48,14 +54,21 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		_, current := h.store.ListAgents()
-		ag, ok := h.store.GetAgent(current)
+
+		// Check if a specific agent name is requested
+		agentName := r.URL.Query().Get("agent")
+		if agentName == "" {
+			// If no agent specified, use current agent
+			_, agentName = h.store.ListAgents()
+		}
+
+		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
+			http.Error(w, "agent not found", http.StatusNotFound)
 			return
 		}
 		ag.Settings = s
-		if err := h.store.SetAgent(current, ag); err != nil {
+		if err := h.store.SetAgent(agentName, ag); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

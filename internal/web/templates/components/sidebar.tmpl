@@ -17,8 +17,8 @@
           </svg>
         </button>
       </div>
-      
-      <div id="agentsList" class="agents-list">
+
+      <div id="agentsList" class="agents-list accordion">
         <!-- Agents will be loaded dynamically -->
       </div>
     </div>
@@ -47,73 +47,6 @@
       
       <button id="pluginStoreBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
         Plugin Store
-      </button>
-    </div>
-  </div>
-
-  <!-- Settings Section -->
-  <div class="sidebar-section">
-    <div class="modern-card p-3">
-      <div class="d-flex align-items-center justify-content-between mb-3">
-        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
-          </svg>
-          Settings
-        </h6>
-      </div>
-      
-      <div id="settingsList" class="settings-list">
-        <div class="setting-item">
-          <div class="d-flex align-items-center justify-content-between">
-            <span style="color: var(--text-primary);">GPT Model</span>
-            <select id="gptModelSelect" class="form-select form-select-sm" style="width: auto; min-width: 140px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-              <option value="gpt-5">GPT-5</option>
-              <option value="gpt-5-mini">GPT-5 Mini</option>
-              <option value="gpt-5-nano">GPT-5 Nano</option>
-              <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
-              <option value="gpt-4.1">GPT-4.1</option>
-              <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-              <option value="gpt-4-turbo">GPT-4 Turbo</option>
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-            </select>
-          </div>
-        </div>
-        
-        <div class="setting-item">
-          <div class="d-flex flex-column">
-            <div class="d-flex align-items-center justify-content-between mb-2">
-              <span style="color: var(--text-primary);">Temperature</span>
-              <span id="temperatureValue" style="color: var(--text-secondary); font-size: 0.9em; cursor: pointer; padding: 2px 4px; border-radius: 3px;" title="Click to edit">0.0</span>
-              <input type="number" id="temperatureInput" style="color: var(--text-secondary); font-size: 0.9em; width: 60px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 3px; padding: 2px 4px; display: none;" min="0" max="2" step="0.1">
-            </div>
-            <div id="gpt5TempNotice" class="alert alert-info py-1 px-2 mb-2" style="font-size: 0.75em; background: rgba(13, 202, 240, 0.1); border: 1px solid rgba(13, 202, 240, 0.2); color: #0dcaf0; display: none;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-              </svg>
-              GPT-5 models require temperature 1.0
-            </div>
-            <input type="range" id="temperatureSlider" class="form-range" min="0" max="2" step="0.1" value="0" style="accent-color: var(--accent-color);">
-          </div>
-        </div>
-
-        <div class="setting-item">
-          <div class="d-flex flex-column">
-            <div class="d-flex align-items-center justify-content-between mb-2">
-              <span style="color: var(--text-primary);">System Prompt</span>
-            </div>
-            <textarea id="systemPromptInput" class="form-control" rows="4"
-                      style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;"
-                      placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
-          </div>
-        </div>
-      </div>
-      
-      <button id="updateSettingsBtn" class="modern-btn modern-btn-primary w-100 mt-2">
-        Update Settings
       </button>
     </div>
   </div>
