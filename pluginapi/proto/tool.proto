@@ -17,6 +17,9 @@ service ToolService {
 
     // SetAgentContext provides agent information to the plugin (optional)
     rpc SetAgentContext(AgentContextRequest) returns (Empty);
+
+    // GetDefaultSettings returns default settings as JSON (optional)
+    rpc GetDefaultSettings(Empty) returns (SettingsResponse);
 }
 
 // Empty message for RPCs that don't need parameters
@@ -51,4 +54,10 @@ message AgentContextRequest {
     string config_path = 2;    // Path to agent's config.json
     string settings_path = 3;  // Path to agent's agent_settings.json
     string agent_dir = 4;      // Path to agent's directory
+}
+
+// SettingsResponse contains plugin settings as JSON
+message SettingsResponse {
+    string settings_json = 1;  // JSON-encoded settings
+    string error = 2;          // Error message on failure (empty on success)
 }

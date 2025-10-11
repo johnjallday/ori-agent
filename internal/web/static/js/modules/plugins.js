@@ -46,8 +46,12 @@ async function loadPlugins() {
     }
     const activePlugins = await activeResponse.json();
 
-    // Create a set of active plugin names for quick lookup
-    const activePluginNames = new Set(activePlugins.plugins.map(p => p.name));
+    // Create a set of active plugin names for quick lookup (only enabled ones)
+    const activePluginNames = new Set(
+      activePlugins.plugins
+        .filter(p => p.enabled === true)
+        .map(p => p.name)
+    );
 
     // Filter to only show local plugins in sidebar (those without github_repo)
     const localPlugins = registry.plugins.filter(plugin => !plugin.github_repo);

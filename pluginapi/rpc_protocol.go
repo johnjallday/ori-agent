@@ -85,6 +85,19 @@ func (s *grpcServer) SetAgentContext(ctx context.Context, req *AgentContextReque
 	return &Empty{}, nil
 }
 
+func (s *grpcServer) GetDefaultSettings(ctx context.Context, _ *Empty) (*SettingsResponse, error) {
+	// Check if plugin implements DefaultSettingsProvider
+	if settingsProvider, ok := s.Impl.(DefaultSettingsProvider); ok {
+		settings, err := settingsProvider.GetDefaultSettings()
+		if err != nil {
+			return &SettingsResponse{Error: err.Error()}, nil
+		}
+		return &SettingsResponse{SettingsJson: settings}, nil
+	}
+	// Plugin doesn't implement settings, return empty
+	return &SettingsResponse{}, nil
+}
+
 // grpcClient is a local wrapper for the client implementation
 type grpcClient struct {
 	client ToolServiceClient
@@ -127,6 +140,17 @@ func (c *grpcClient) Version() string {
 	return resp.Version
 }
 
+func (c *grpcClient) GetDefaultSettings() (string, error) {
+	resp, err := c.client.GetDefaultSettings(context.Background(), &Empty{})
+	if err != nil {
+		return "", err
+	}
+	if resp.Error != "" {
+		return "", fmt.Errorf("%s", resp.Error)
+	}
+	return resp.SettingsJson, nil
+}
+
 func (c *grpcClient) SetAgentContext(ctx AgentContext) {
 	c.client.SetAgentContext(context.Background(), &AgentContextRequest{
 		Name:         ctx.Name,
@@ -135,3 +159,11 @@ func (c *grpcClient) SetAgentContext(ctx AgentContext) {
 		AgentDir:     ctx.AgentDir,
 	})
 }
+
+// Compile-time interface checks
+var (
+	_ Tool                    = (*grpcClient)(nil)
+	_ VersionedTool           = (*grpcClient)(nil)
+	_ DefaultSettingsProvider = (*grpcClient)(nil)
+	_ AgentAwareTool          = (*grpcClient)(nil)
+)

@@ -100,6 +100,14 @@ func (r *RPCPluginClient) SetAgentContext(ctx pluginapi.AgentContext) {
 	}
 }
 
+// GetDefaultSettings returns default settings if the plugin implements DefaultSettingsProvider
+func (r *RPCPluginClient) GetDefaultSettings() (string, error) {
+	if settingsProvider, ok := r.tool.(pluginapi.DefaultSettingsProvider); ok {
+		return settingsProvider.GetDefaultSettings()
+	}
+	return "", fmt.Errorf("plugin does not support default settings")
+}
+
 // Kill terminates the plugin process
 func (r *RPCPluginClient) Kill() {
 	if r.client != nil {

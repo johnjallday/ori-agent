@@ -89,22 +89,82 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
+	// Get enabled plugins for current agent
 	_, current := h.State.ListAgents()
-	ag, ok := h.State.GetAgent(current)
-	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+
+	// Create map of enabled plugins (empty if agent doesn't exist yet)
+	enabledPlugins := make(map[string]bool)
+	if ag, ok := h.State.GetAgent(current); ok {
+		for name := range ag.Plugins {
+			enabledPlugins[name] = true
+		}
+	}
+
+	// Load local registry to get all available plugins
+	registryPath := "local_plugin_registry.json"
+	var localReg types.PluginRegistry
+
+	data, err := os.ReadFile(registryPath)
+	if err != nil || json.Unmarshal(data, &localReg) != nil {
+		// Fallback to just enabled plugins if registry fails
+		plist := make([]map[string]any, 0)
+		if ag, ok := h.State.GetAgent(current); ok {
+			for name, pl := range ag.Plugins {
+				plist = append(plist, map[string]any{
+					"name":        name,
+					"description": pl.Definition.Description.String(),
+					"definition":  pl.Definition,
+					"path":        pl.Path,
+					"version":     pl.Version,
+					"enabled":     true,
+				})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
 		return
 	}
-	plist := make([]map[string]any, 0, len(ag.Plugins))
-	for name, pl := range ag.Plugins {
-		plist = append(plist, map[string]any{
-			"name":        name,
-			"description": pl.Definition.Description.String(),
-			"definition":  pl.Definition,
-			"path":        pl.Path,
-			"version":     pl.Version,
-		})
+
+	// Build list of all available plugins from registry
+	plist := make([]map[string]any, 0, len(localReg.Plugins))
+
+	// Get current agent for checking loaded plugins
+	ag, agentExists := h.State.GetAgent(current)
+
+	for _, registryPlugin := range localReg.Plugins {
+		// Check if plugin is enabled (only if agent exists)
+		var loadedPlugin *types.LoadedPlugin
+		isEnabled := false
+		if agentExists {
+			if lp, exists := ag.Plugins[registryPlugin.Name]; exists {
+				loadedPlugin = &lp
+				isEnabled = true
+			}
+		}
+
+		// If plugin is enabled, include its full definition
+		if isEnabled && loadedPlugin != nil {
+			pluginInfo := map[string]any{
+				"name":        registryPlugin.Name,
+				"description": registryPlugin.Description,
+				"path":        registryPlugin.Path,
+				"version":     registryPlugin.Version,
+				"enabled":     true,
+				"definition":  loadedPlugin.Definition,
+			}
+			plist = append(plist, pluginInfo)
+		} else {
+			// Plugin not enabled, show basic info
+			pluginInfo := map[string]any{
+				"name":        registryPlugin.Name,
+				"description": registryPlugin.Description,
+				"path":        registryPlugin.Path,
+				"version":     registryPlugin.Version,
+				"enabled":     false,
+			}
+			plist = append(plist, pluginInfo)
+		}
 	}
+
 	_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
 }
 

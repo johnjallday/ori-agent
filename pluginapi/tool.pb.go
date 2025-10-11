@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v3.20.3
-// source: pluginapi/proto/tool.proto
+// source: proto/tool.proto
 
 package pluginapi
 
@@ -30,7 +30,7 @@ type Empty struct {
 
 func (x *Empty) Reset() {
 	*x = Empty{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[0]
+	mi := &file_proto_tool_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +42,7 @@ func (x *Empty) String() string {
 func (*Empty) ProtoMessage() {}
 
 func (x *Empty) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[0]
+	mi := &file_proto_tool_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +55,7 @@ func (x *Empty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Empty.ProtoReflect.Descriptor instead.
 func (*Empty) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{0}
+	return file_proto_tool_proto_rawDescGZIP(), []int{0}
 }
 
 // FunctionDefinition represents an OpenAI function definition
@@ -70,7 +70,7 @@ type FunctionDefinition struct {
 
 func (x *FunctionDefinition) Reset() {
 	*x = FunctionDefinition{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[1]
+	mi := &file_proto_tool_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -82,7 +82,7 @@ func (x *FunctionDefinition) String() string {
 func (*FunctionDefinition) ProtoMessage() {}
 
 func (x *FunctionDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[1]
+	mi := &file_proto_tool_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -95,7 +95,7 @@ func (x *FunctionDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FunctionDefinition.ProtoReflect.Descriptor instead.
 func (*FunctionDefinition) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{1}
+	return file_proto_tool_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *FunctionDefinition) GetName() string {
@@ -129,7 +129,7 @@ type CallRequest struct {
 
 func (x *CallRequest) Reset() {
 	*x = CallRequest{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[2]
+	mi := &file_proto_tool_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -141,7 +141,7 @@ func (x *CallRequest) String() string {
 func (*CallRequest) ProtoMessage() {}
 
 func (x *CallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[2]
+	mi := &file_proto_tool_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -154,7 +154,7 @@ func (x *CallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallRequest.ProtoReflect.Descriptor instead.
 func (*CallRequest) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{2}
+	return file_proto_tool_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CallRequest) GetArgsJson() string {
@@ -175,7 +175,7 @@ type CallResponse struct {
 
 func (x *CallResponse) Reset() {
 	*x = CallResponse{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[3]
+	mi := &file_proto_tool_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -187,7 +187,7 @@ func (x *CallResponse) String() string {
 func (*CallResponse) ProtoMessage() {}
 
 func (x *CallResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[3]
+	mi := &file_proto_tool_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -200,7 +200,7 @@ func (x *CallResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallResponse.ProtoReflect.Descriptor instead.
 func (*CallResponse) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{3}
+	return file_proto_tool_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CallResponse) GetResultJson() string {
@@ -227,7 +227,7 @@ type VersionResponse struct {
 
 func (x *VersionResponse) Reset() {
 	*x = VersionResponse{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[4]
+	mi := &file_proto_tool_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -239,7 +239,7 @@ func (x *VersionResponse) String() string {
 func (*VersionResponse) ProtoMessage() {}
 
 func (x *VersionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[4]
+	mi := &file_proto_tool_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -252,7 +252,7 @@ func (x *VersionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VersionResponse.ProtoReflect.Descriptor instead.
 func (*VersionResponse) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{4}
+	return file_proto_tool_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *VersionResponse) GetVersion() string {
@@ -275,7 +275,7 @@ type AgentContextRequest struct {
 
 func (x *AgentContextRequest) Reset() {
 	*x = AgentContextRequest{}
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[5]
+	mi := &file_proto_tool_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +287,7 @@ func (x *AgentContextRequest) String() string {
 func (*AgentContextRequest) ProtoMessage() {}
 
 func (x *AgentContextRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pluginapi_proto_tool_proto_msgTypes[5]
+	mi := &file_proto_tool_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +300,7 @@ func (x *AgentContextRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentContextRequest.ProtoReflect.Descriptor instead.
 func (*AgentContextRequest) Descriptor() ([]byte, []int) {
-	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{5}
+	return file_proto_tool_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AgentContextRequest) GetName() string {
@@ -331,11 +331,64 @@ func (x *AgentContextRequest) GetAgentDir() string {
 	return ""
 }
 
-var File_pluginapi_proto_tool_proto protoreflect.FileDescriptor
+// SettingsResponse contains plugin settings as JSON
+type SettingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SettingsJson  string                 `protobuf:"bytes,1,opt,name=settings_json,json=settingsJson,proto3" json:"settings_json,omitempty"` // JSON-encoded settings
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`                                   // Error message on failure (empty on success)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_pluginapi_proto_tool_proto_rawDesc = "" +
+func (x *SettingsResponse) Reset() {
+	*x = SettingsResponse{}
+	mi := &file_proto_tool_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettingsResponse) ProtoMessage() {}
+
+func (x *SettingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_tool_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettingsResponse.ProtoReflect.Descriptor instead.
+func (*SettingsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_tool_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SettingsResponse) GetSettingsJson() string {
+	if x != nil {
+		return x.SettingsJson
+	}
+	return ""
+}
+
+func (x *SettingsResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+var File_proto_tool_proto protoreflect.FileDescriptor
+
+const file_proto_tool_proto_rawDesc = "" +
 	"\n" +
-	"\x1apluginapi/proto/tool.proto\x12\tpluginapi\"\a\n" +
+	"\x10proto/tool.proto\x12\tpluginapi\"\a\n" +
 	"\x05Empty\"s\n" +
 	"\x12FunctionDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
@@ -354,71 +407,78 @@ const file_pluginapi_proto_tool_proto_rawDesc = "" +
 	"\vconfig_path\x18\x02 \x01(\tR\n" +
 	"configPath\x12#\n" +
 	"\rsettings_path\x18\x03 \x01(\tR\fsettingsPath\x12\x1b\n" +
-	"\tagent_dir\x18\x04 \x01(\tR\bagentDir2\x89\x02\n" +
+	"\tagent_dir\x18\x04 \x01(\tR\bagentDir\"M\n" +
+	"\x10SettingsResponse\x12#\n" +
+	"\rsettings_json\x18\x01 \x01(\tR\fsettingsJson\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error2\xce\x02\n" +
 	"\vToolService\x12@\n" +
 	"\rGetDefinition\x12\x10.pluginapi.Empty\x1a\x1d.pluginapi.FunctionDefinition\x127\n" +
 	"\x04Call\x12\x16.pluginapi.CallRequest\x1a\x17.pluginapi.CallResponse\x12:\n" +
 	"\n" +
 	"GetVersion\x12\x10.pluginapi.Empty\x1a\x1a.pluginapi.VersionResponse\x12C\n" +
-	"\x0fSetAgentContext\x12\x1e.pluginapi.AgentContextRequest\x1a\x10.pluginapi.EmptyB0Z.github.com/johnjallday/dolphin-agent/pluginapib\x06proto3"
+	"\x0fSetAgentContext\x12\x1e.pluginapi.AgentContextRequest\x1a\x10.pluginapi.Empty\x12C\n" +
+	"\x12GetDefaultSettings\x12\x10.pluginapi.Empty\x1a\x1b.pluginapi.SettingsResponseB0Z.github.com/johnjallday/dolphin-agent/pluginapib\x06proto3"
 
 var (
-	file_pluginapi_proto_tool_proto_rawDescOnce sync.Once
-	file_pluginapi_proto_tool_proto_rawDescData []byte
+	file_proto_tool_proto_rawDescOnce sync.Once
+	file_proto_tool_proto_rawDescData []byte
 )
 
-func file_pluginapi_proto_tool_proto_rawDescGZIP() []byte {
-	file_pluginapi_proto_tool_proto_rawDescOnce.Do(func() {
-		file_pluginapi_proto_tool_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pluginapi_proto_tool_proto_rawDesc), len(file_pluginapi_proto_tool_proto_rawDesc)))
+func file_proto_tool_proto_rawDescGZIP() []byte {
+	file_proto_tool_proto_rawDescOnce.Do(func() {
+		file_proto_tool_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_tool_proto_rawDesc), len(file_proto_tool_proto_rawDesc)))
 	})
-	return file_pluginapi_proto_tool_proto_rawDescData
+	return file_proto_tool_proto_rawDescData
 }
 
-var file_pluginapi_proto_tool_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_pluginapi_proto_tool_proto_goTypes = []any{
+var file_proto_tool_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_proto_tool_proto_goTypes = []any{
 	(*Empty)(nil),               // 0: pluginapi.Empty
 	(*FunctionDefinition)(nil),  // 1: pluginapi.FunctionDefinition
 	(*CallRequest)(nil),         // 2: pluginapi.CallRequest
 	(*CallResponse)(nil),        // 3: pluginapi.CallResponse
 	(*VersionResponse)(nil),     // 4: pluginapi.VersionResponse
 	(*AgentContextRequest)(nil), // 5: pluginapi.AgentContextRequest
+	(*SettingsResponse)(nil),    // 6: pluginapi.SettingsResponse
 }
-var file_pluginapi_proto_tool_proto_depIdxs = []int32{
+var file_proto_tool_proto_depIdxs = []int32{
 	0, // 0: pluginapi.ToolService.GetDefinition:input_type -> pluginapi.Empty
 	2, // 1: pluginapi.ToolService.Call:input_type -> pluginapi.CallRequest
 	0, // 2: pluginapi.ToolService.GetVersion:input_type -> pluginapi.Empty
 	5, // 3: pluginapi.ToolService.SetAgentContext:input_type -> pluginapi.AgentContextRequest
-	1, // 4: pluginapi.ToolService.GetDefinition:output_type -> pluginapi.FunctionDefinition
-	3, // 5: pluginapi.ToolService.Call:output_type -> pluginapi.CallResponse
-	4, // 6: pluginapi.ToolService.GetVersion:output_type -> pluginapi.VersionResponse
-	0, // 7: pluginapi.ToolService.SetAgentContext:output_type -> pluginapi.Empty
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	0, // 4: pluginapi.ToolService.GetDefaultSettings:input_type -> pluginapi.Empty
+	1, // 5: pluginapi.ToolService.GetDefinition:output_type -> pluginapi.FunctionDefinition
+	3, // 6: pluginapi.ToolService.Call:output_type -> pluginapi.CallResponse
+	4, // 7: pluginapi.ToolService.GetVersion:output_type -> pluginapi.VersionResponse
+	0, // 8: pluginapi.ToolService.SetAgentContext:output_type -> pluginapi.Empty
+	6, // 9: pluginapi.ToolService.GetDefaultSettings:output_type -> pluginapi.SettingsResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_pluginapi_proto_tool_proto_init() }
-func file_pluginapi_proto_tool_proto_init() {
-	if File_pluginapi_proto_tool_proto != nil {
+func init() { file_proto_tool_proto_init() }
+func file_proto_tool_proto_init() {
+	if File_proto_tool_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pluginapi_proto_tool_proto_rawDesc), len(file_pluginapi_proto_tool_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_tool_proto_rawDesc), len(file_proto_tool_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_pluginapi_proto_tool_proto_goTypes,
-		DependencyIndexes: file_pluginapi_proto_tool_proto_depIdxs,
-		MessageInfos:      file_pluginapi_proto_tool_proto_msgTypes,
+		GoTypes:           file_proto_tool_proto_goTypes,
+		DependencyIndexes: file_proto_tool_proto_depIdxs,
+		MessageInfos:      file_proto_tool_proto_msgTypes,
 	}.Build()
-	File_pluginapi_proto_tool_proto = out.File
-	file_pluginapi_proto_tool_proto_goTypes = nil
-	file_pluginapi_proto_tool_proto_depIdxs = nil
+	File_proto_tool_proto = out.File
+	file_proto_tool_proto_goTypes = nil
+	file_proto_tool_proto_depIdxs = nil
 }

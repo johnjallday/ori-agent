@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.20.3
-// source: pluginapi/proto/tool.proto
+// source: proto/tool.proto
 
 package pluginapi
 
@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ToolService_GetDefinition_FullMethodName   = "/pluginapi.ToolService/GetDefinition"
-	ToolService_Call_FullMethodName            = "/pluginapi.ToolService/Call"
-	ToolService_GetVersion_FullMethodName      = "/pluginapi.ToolService/GetVersion"
-	ToolService_SetAgentContext_FullMethodName = "/pluginapi.ToolService/SetAgentContext"
+	ToolService_GetDefinition_FullMethodName      = "/pluginapi.ToolService/GetDefinition"
+	ToolService_Call_FullMethodName               = "/pluginapi.ToolService/Call"
+	ToolService_GetVersion_FullMethodName         = "/pluginapi.ToolService/GetVersion"
+	ToolService_SetAgentContext_FullMethodName    = "/pluginapi.ToolService/SetAgentContext"
+	ToolService_GetDefaultSettings_FullMethodName = "/pluginapi.ToolService/GetDefaultSettings"
 )
 
 // ToolServiceClient is the client API for ToolService service.
@@ -39,6 +40,8 @@ type ToolServiceClient interface {
 	GetVersion(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*VersionResponse, error)
 	// SetAgentContext provides agent information to the plugin (optional)
 	SetAgentContext(ctx context.Context, in *AgentContextRequest, opts ...grpc.CallOption) (*Empty, error)
+	// GetDefaultSettings returns default settings as JSON (optional)
+	GetDefaultSettings(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SettingsResponse, error)
 }
 
 type toolServiceClient struct {
@@ -89,6 +92,16 @@ func (c *toolServiceClient) SetAgentContext(ctx context.Context, in *AgentContex
 	return out, nil
 }
 
+func (c *toolServiceClient) GetDefaultSettings(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SettingsResponse)
+	err := c.cc.Invoke(ctx, ToolService_GetDefaultSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ToolServiceServer is the server API for ToolService service.
 // All implementations must embed UnimplementedToolServiceServer
 // for forward compatibility.
@@ -103,6 +116,8 @@ type ToolServiceServer interface {
 	GetVersion(context.Context, *Empty) (*VersionResponse, error)
 	// SetAgentContext provides agent information to the plugin (optional)
 	SetAgentContext(context.Context, *AgentContextRequest) (*Empty, error)
+	// GetDefaultSettings returns default settings as JSON (optional)
+	GetDefaultSettings(context.Context, *Empty) (*SettingsResponse, error)
 	mustEmbedUnimplementedToolServiceServer()
 }
 
@@ -124,6 +139,9 @@ func (UnimplementedToolServiceServer) GetVersion(context.Context, *Empty) (*Vers
 }
 func (UnimplementedToolServiceServer) SetAgentContext(context.Context, *AgentContextRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetAgentContext not implemented")
+}
+func (UnimplementedToolServiceServer) GetDefaultSettings(context.Context, *Empty) (*SettingsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDefaultSettings not implemented")
 }
 func (UnimplementedToolServiceServer) mustEmbedUnimplementedToolServiceServer() {}
 func (UnimplementedToolServiceServer) testEmbeddedByValue()                     {}
@@ -218,6 +236,24 @@ func _ToolService_SetAgentContext_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ToolService_GetDefaultSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).GetDefaultSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_GetDefaultSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).GetDefaultSettings(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ToolService_ServiceDesc is the grpc.ServiceDesc for ToolService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -241,7 +277,11 @@ var ToolService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "SetAgentContext",
 			Handler:    _ToolService_SetAgentContext_Handler,
 		},
+		{
+			MethodName: "GetDefaultSettings",
+			Handler:    _ToolService_GetDefaultSettings_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pluginapi/proto/tool.proto",
+	Metadata: "proto/tool.proto",
 }
