@@ -10,8 +10,8 @@
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "auto",
   "wails": {
-    "main": "./cmd/desktop-wails",
-    "frontend": "./cmd/desktop-wails/frontend/dist"
+    "main": "./cmd/wails",
+    "frontend": "./frontend/dist"
   },
   "author": {
     "name": "Dolphin Agent",

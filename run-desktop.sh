@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Convenience script to run Dolphin Desktop
-# This script simply calls the main run-desktop.sh script in the scripts directory
+# Dolphin Desktop Launcher
+# Double-click this file to run the desktop app
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/scripts/run-desktop.sh" "$@"
+cd "$(dirname "$0")"
+CGO_LDFLAGS="-framework UniformTypeIdentifiers" go run -tags dev cmd/wails/main.go

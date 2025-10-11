@@ -94,4 +94,4 @@ __pycache__/
 # Temporary files from various tools
 .tmp/
 *.tmp
-*.temp
+*.tempfrontend/dist/
