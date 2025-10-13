@@ -95,3 +95,9 @@ __pycache__/
 .tmp/
 *.tmp
 *.tempfrontend/dist/
+
+# Runtime data directories
+plugin_cache/
+uploaded_plugins/
+agents.json
+local_plugin_registry.json
