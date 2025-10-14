@@ -4,23 +4,33 @@
 // Plugin upload state management
 let uploadListenersSetup = false;
 
-// Check plugin configuration status - simplified approach
+// Check plugin configuration status - automatically detect by checking default-settings endpoint
 async function checkPluginConfigurationStatus(activePluginNames) {
   const configStatus = new Map();
 
-  // Define which plugins we know have configuration based on their operations
-  const knownConfigPlugins = new Set([
-    'music_project_manager', // has get_settings operation
-    'reascript_launcher',    // has settings for scripts_dir
-    // Add more plugins here as they're identified to have configuration
-  ]);
-
+  // Check each active plugin to see if it has configuration
   for (const pluginName of activePluginNames) {
-    const hasConfig = knownConfigPlugins.has(pluginName);
+    let hasConfig = false;
+
+    try {
+      // Try to fetch default-settings endpoint for this plugin
+      const response = await fetch(`/api/plugins/${pluginName}/default-settings`);
+
+      if (response.ok) {
+        // Plugin has default-settings endpoint, so it's configurable
+        hasConfig = true;
+        console.log(`Plugin ${pluginName} has configuration (default-settings endpoint found)`);
+      } else {
+        console.log(`Plugin ${pluginName} has no configuration (default-settings returned ${response.status})`);
+      }
+    } catch (error) {
+      console.log(`Plugin ${pluginName} configuration check failed:`, error);
+      hasConfig = false;
+    }
 
     configStatus.set(pluginName, {
       needsInit: false,        // For simplicity, assume plugins are initialized
-      hasConfig: hasConfig,    // Only show config for known configurable plugins
+      hasConfig: hasConfig,    // Show config if default-settings endpoint exists
       configVars: [],
       isLegacy: false
     });
@@ -179,7 +189,7 @@ function setupPluginToggles() {
   });
 
   // Setup plugin configuration buttons
-  console.log('UPDATED: Setting up plugin config buttons with new logic');
+  console.log('Setting up plugin config buttons');
   const configButtons = document.querySelectorAll('.plugin-config-btn');
   console.log(`Found ${configButtons.length} config buttons to set up`);
   configButtons.forEach(button => {
@@ -188,25 +198,11 @@ function setupPluginToggles() {
       const pluginName = button.dataset.pluginName;
       const pluginPath = button.dataset.pluginPath;
 
-      // For known configurable plugins, show configuration modal
-      console.log(`NEW HANDLER: Config button clicked for plugin: ${pluginName}`);
-      if (pluginName === 'reascript_launcher') {
-        console.log('Detected reascript_launcher, showing regular config modal');
-        // Use the regular config modal which will show current settings
-        await showPluginConfigModal(pluginName);
-      } else if (pluginName === 'music_project_manager') {
-        console.log('Detected music_project_manager, showing regular config modal');
-        // Use the regular config modal which will show current settings
-        await showPluginConfigModal(pluginName);
-      } else {
-        // For other plugins, use the original logic
-        const filepathFields = await checkPluginFilepathSettings(pluginName, pluginPath);
-        if (filepathFields) {
-          await showFilepathSettingsModal(pluginName, filepathFields);
-        } else {
-          await showPluginConfigModal(pluginName);
-        }
-      }
+      console.log(`Config button clicked for plugin: ${pluginName}`);
+
+      // All configurable plugins use the same modal
+      // The modal will fetch settings from /api/plugins/{name}/default-settings
+      await showPluginConfigModal(pluginName);
     });
   });
 
