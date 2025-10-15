@@ -458,6 +458,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Download the plugin file
+	log.Printf("Downloading plugin from URL: %s", pluginEntry.DownloadURL)
 	resp, err := http.Get(pluginEntry.DownloadURL)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -471,6 +472,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("Download failed for %s: status %d", pluginEntry.DownloadURL, resp.StatusCode)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]any{
