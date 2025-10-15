@@ -201,10 +201,7 @@ func (d *PluginDownloader) CheckForUpdates(registry types.PluginRegistry) ([]typ
 	for _, entry := range registry.Plugins {
 		if entry.URL != "" && entry.AutoUpdate {
 			// Check if cached version exists and is old
-			cacheFilename := fmt.Sprintf("%s-%s.so", entry.Name, entry.Version)
-			if entry.Version == "" {
-				cacheFilename = fmt.Sprintf("%s.so", entry.Name)
-			}
+			cacheFilename := d.getPlatformFilename(entry)
 			cachePath := filepath.Join(d.CacheDir, cacheFilename)
 
 			if !d.isCacheValid(cachePath, entry) {

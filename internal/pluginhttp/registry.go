@@ -520,6 +520,14 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Close file before setting permissions
+	file.Close()
+
+	// Make the file executable (for RPC plugins that are binaries)
+	if err := os.Chmod(filePath, 0755); err != nil {
+		log.Printf("Warning: failed to set executable permissions on %s: %v", filePath, err)
+	}
+
 	// Scan uploaded plugins to auto-register the newly downloaded plugin
 	if err := h.registryManager.ScanUploadedPlugins(); err != nil {
 		log.Printf("Warning: failed to scan uploaded_plugins after download: %v", err)
