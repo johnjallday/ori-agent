@@ -12,35 +12,54 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 
 ### 🔌 Extensible Plugin System
 - **Hot-loadable Plugins**: Add functionality without restarting the server
-- **Plugin Registry**: Local and external plugin support with auto-updates
+- **Plugin Registry**: Local and remote plugin support with auto-updates
 - **Security**: SHA256 checksum verification for external plugins
 - **Caching**: Intelligent plugin caching to prevent reload issues
 - **Plugin Configuration**: Advanced initialization and settings management
+- **Direct Tool Calls**: Execute plugin operations without OpenAI API calls via `/api/plugins/tool-call`
 
 ### 🤖 Multi-Agent Support
 - **Agent Management**: Create, switch, and delete agents through the UI
 - **Isolated Contexts**: Each agent maintains its own plugin configuration
 - **Status Tracking**: Visual indicators for active agents and loaded plugins
 - **Agent-Specific Settings**: Individual configurations per agent
-
-### ⚙️ Advanced Configuration
-- **Multiple AI Models**: Support for GPT-4o, GPT-4o-mini, GPT-4-turbo
-- **Temperature Control**: Fine-tune response creativity and focus
-- **API Key Management**: Secure storage and management
-- **Settings Persistence**: Configuration saved per agent
+- **Per-Agent Plugin State**: Plugins maintain separate state for each agent
 
 ### 📊 Structured Content Rendering
-- **Smart Detection**: Automatically identifies tables, lists, and formatted content
+- **Multiple Display Types**: Support for tables, modals, lists, cards, JSON, and text
+- **Smart Detection**: Automatically identifies and renders structured data
+- **Interactive Tables**: Sortable columns, click-to-copy cells, row selection
+- **Modal Dialogs**: Rich modals with multi-select support and action buttons
 - **Markdown Support**: Full GitHub Flavored Markdown rendering
-- **Interactive Tables**: Click-to-copy cells, row selection, hover effects
 - **Code Highlighting**: Syntax highlighting for code blocks and inline code
-- **Table Analytics**: Row/column counts and usage hints
+- **Metadata Support**: Custom actions and behaviors via metadata fields
+
+### ⚙️ Advanced Configuration
+- **Multiple AI Models**: Support for GPT-4o, GPT-4o-mini, GPT-4-turbo, o1-preview, o1-mini
+- **Temperature Control**: Fine-tune response creativity and focus
+- **API Key Management**: Secure storage in `settings.json` or environment variables
+- **Settings Persistence**: Configuration saved per agent
+- **System Prompts**: Customizable system prompts per agent
+
+### 🔄 Auto-Update System
+- **Version Checking**: Automatic checks for new releases from GitHub
+- **Release Management**: Download and install updates through the UI
+- **Version Display**: Current version shown in settings panel
+- **Release Notes**: View changelog and release information
+
+### 🎨 Modern UI/UX
+- **Responsive Design**: Works on desktop, tablet, and mobile
+- **Dark Theme**: Easy on the eyes with modern color scheme
+- **Smooth Animations**: CSS transitions for better user experience
+- **Real-time Updates**: Dynamic content updates without page reload
+- **Accessibility**: Keyboard navigation and screen reader support
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Go 1.24 or later
-- Modern web browser
+- Modern web browser (Chrome, Firefox, Safari, Edge)
+- OpenAI API key
 
 ### Installation
 
@@ -56,16 +75,20 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
    ```
 
 3. **Set up environment variables**
+
+   Option 1: Environment variable
    ```bash
    export OPENAI_API_KEY="your-openai-api-key"
    ```
 
-   Or Simply enter your api key on the bottom of the sidebar
+   Option 2: settings.json file
    ```json
    {
      "openai_api_key": "your-openai-api-key"
    }
    ```
+
+   Option 3: Enter via UI (sidebar settings)
 
 4. **Build the project**
    ```bash
@@ -75,12 +98,12 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
    # Or build components separately:
    ./scripts/build-server.sh        # Server only
    ./scripts/build-plugins.sh       # Built-in plugins
-   ./scripts/build-external-plugins.sh  # External plugins
    ```
 
 5. **Run the server**
    ```bash
    ./bin/dolphin-agent
+
    # Or during development:
    go run cmd/server/main.go
    ```
@@ -93,38 +116,56 @@ A modern, extensible AI agent platform with a sleek web interface and powerful p
 ## 🔧 Usage
 
 ### Creating Agents
-1. Open the sidebar using the hamburger menu
+1. Open the sidebar using the hamburger menu (☰)
 2. Navigate to the "Agents" tab
-3. Enter a name and click "Create"
+3. Enter a name and click "Create Agent"
 4. Switch between agents using the "Switch" button
+5. Delete agents with the "Delete" button (except the current agent)
 
 ### Managing Plugins
 1. Go to the "Plugins" tab in the sidebar
-2. **Load from Registry**: Click "Load" next to available plugins
-3. **Upload Custom**: Use the file input to upload `.so` plugin files
-4. **Configure Plugins**: Click "Configure" to set up plugin-specific settings
-5. **View Loaded**: See all plugins loaded for the current agent
+2. **Browse Registry**: View available plugins from the remote registry
+3. **Load Plugins**: Click "Load" next to available plugins
+4. **Upload Custom**: Use the file input to upload `.so` plugin files
+5. **Configure Plugins**: Click "Configure" to set up plugin-specific settings
+6. **View Loaded**: See all plugins loaded for the current agent
+7. **Check Updates**: See if newer versions of plugins are available
+
+### Direct Plugin Tool Calls
+Execute plugin operations directly without using the chat interface:
+
+```bash
+curl -X POST http://localhost:8080/api/plugins/tool-call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "plugin_name": "reaper-script-launcher",
+    "operation": "list",
+    "args": {}
+  }'
+```
+
+This bypasses OpenAI API calls for faster, free plugin execution.
 
 ### Configuring Settings
 1. Access the "Settings" tab
 2. Select your preferred AI model
-3. Adjust temperature (creativity vs. focus)
+3. Adjust temperature (0.0 = focused, 2.0 = creative)
 4. Update API key if needed
-5. Click "Save Settings"
+5. Modify system prompt (optional)
+6. Click "Save Settings"
 
-#### Special Commands
+### Special Commands
 - **`/agent`** - Display comprehensive agent status dashboard
   - Shows current agent name and configuration
   - Lists model settings (model type, temperature)
   - Displays API key status
-  - Shows all loaded plugins with versions and emojis
+  - Shows all loaded plugins with versions
   - Provides system status information
 
 - **`/tools`** - List all available tools and functions
   - Shows all loaded plugins with descriptions
   - Displays function parameters (required vs optional)
   - Lists available options for enum parameters
-  - Includes helpful emojis for easy identification
   - Works entirely offline without API calls
 
 ## 🔌 Plugin Development
@@ -134,40 +175,71 @@ For detailed information on creating custom plugins, see the [Plugin Development
 **Quick Overview:**
 - Plugins are Go shared libraries (`.so` files) that implement the `pluginapi.Tool` interface
 - Support for initialization, configuration, and agent-specific contexts
-- Example plugins included: Math, Weather, and Result Handler
+- Can return structured results (tables, modals, lists) for enhanced UI display
+- Example plugins included: Math, Weather, Result Handler, and REAPER Script Launcher
 
-**Getting Started:**
-1. Implement the `pluginapi.Tool` interface
-2. Build with `go build -buildmode=plugin`
-3. Upload via the UI or API
-4. Configure through the web interface
+**Structured Result System:**
 
-See the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md) for complete examples, advanced features, and best practices.
+Plugins can return structured data that the UI automatically renders:
+
+```go
+// Table result
+result := pluginapi.NewTableResult(
+    "Project List",
+    []string{"Name", "Path", "Date"},
+    rows,
+)
+
+// Modal result with multi-select
+result := pluginapi.NewModalResult(
+    "Available Scripts",
+    "Select scripts to download",
+    items,
+)
+result.Metadata["action"] = "download_script"
+result.Metadata["buttonLabel"] = "Download"
+
+return result.ToJSON()
+```
+
+**Display Types:**
+- `table` - Sortable, interactive tables
+- `modal` - Pop-up dialogs with actions
+- `list` - Bulleted/numbered lists
+- `card` - Card-based layouts
+- `json` - Formatted JSON display
+- `text` - Plain text (default)
+
+See the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md) for complete examples.
 
 ## 🌐 API Reference
 
 For detailed API documentation including request/response formats, authentication, and examples, see the [API Reference Guide](API_REFERENCE.md).
 
 **Available Endpoints:**
-- **Agents**: Create, list, switch, and delete agents
-- **Plugins**: Upload, configure, and manage plugins
-- **Plugin Registry**: Browse and install plugins from registry
-- **Settings**: Manage agent configuration and API keys
-- **Chat**: Send messages and interact with agents
-- **Updates**: Check for and install software updates
+- **Agents**: `/api/agents` - Create, list, switch, and delete agents
+- **Plugins**: `/api/plugins` - Upload, configure, and manage plugins
+- **Plugin Registry**: `/api/plugin-registry` - Browse and install plugins
+- **Plugin Tool Calls**: `/api/plugins/tool-call` - Direct plugin execution
+- **Settings**: `/api/settings` - Manage agent configuration and API keys
+- **Chat**: `/api/chat` - Send messages and interact with agents
+- **Updates**: `/api/updates/*` - Check for and install updates
 
-See the [API Reference Guide](API_REFERENCE.md) for complete endpoint documentation with examples.
+## 📁 Project Structure
 
-
-### Project Structure
 ```
 dolphin-agent/
 ├── cmd/server/           # Main server application
 ├── internal/
+│   ├── server/          # HTTP server and routing
 │   ├── agenthttp/       # Agent HTTP handlers
 │   ├── chathttp/        # Chat HTTP handlers
 │   ├── settingshttp/    # Settings HTTP handlers
-│   ├── pluginhttp/      # Plugin HTTP handlers (modular)
+│   ├── pluginhttp/      # Plugin HTTP handlers
+│   │   ├── plugins.go   # Core plugin operations
+│   │   ├── registry.go  # Plugin registry management
+│   │   ├── init.go      # Plugin initialization
+│   │   └── tool_call.go # Direct tool call endpoint
 │   ├── pluginloader/    # Plugin loading and caching
 │   ├── plugindownloader/# External plugin downloading
 │   ├── registry/        # Plugin registry management
@@ -178,34 +250,52 @@ dolphin-agent/
 │   ├── config/          # Configuration management
 │   ├── client/          # OpenAI client factory
 │   ├── version/         # Version information
+│   ├── filehttp/        # File parsing handlers
 │   └── web/             # Web server and static files
+│       ├── static/      # CSS, JS, and assets
+│       └── templates/   # HTML templates
 ├── plugins/
 │   ├── math/            # Example math plugin
 │   ├── weather/         # Example weather plugin
 │   └── result-handler/  # File/URL handler plugin
-├── pluginapi/           # Plugin interface definition
+├── pluginapi/           # Plugin interface definitions
+│   ├── plugin.go        # Core plugin interface
+│   └── result.go        # Structured result types
 ├── scripts/             # Build and maintenance scripts
 ├── uploaded_plugins/    # User-uploaded plugin binaries
 ├── agents/              # Agent-specific configurations
 ├── plugin_cache/        # External plugin cache
+├── settings.json        # Global configuration
+├── agents.json          # Agent configurations
 └── go.mod               # Go module definition
 ```
 
-### Key Architecture Improvements
+## 🏗️ Architecture Highlights
 
-#### Modular Handler System (Recent Update)
-- **Separated Concerns**: Chat, settings, and plugin handlers in separate modules
-- **Improved Maintainability**: Each handler module focuses on specific functionality
-- **Better Testing**: Independent handler modules can be tested separately
-- **Cleaner Code**: Reduced main.go from 1700+ lines to ~300 lines
+### Modular Handler System
+- **Separated Concerns**: Each domain has its own handler module
+- **Improved Maintainability**: Focused, single-responsibility modules
+- **Better Testing**: Independent modules can be tested separately
+- **Cleaner Code**: Main server reduced from 1700+ to ~300 lines
 
-#### Handler Modules
-- **`settingshttp`**: Agent settings and API key management
-- **`chathttp`**: Chat interactions and agent status
-- **`pluginhttp`**: Plugin management split into:
-  - `plugins.go`: Core plugin operations (load, list, upload)
-  - `registry.go`: Plugin registry and download operations
-  - `init.go`: Plugin initialization and configuration
+### Plugin System
+- **HashiCorp go-plugin**: Robust plugin architecture with RPC communication
+- **Version Support**: Plugins can report their version information
+- **Settings Support**: Plugins can define and manage their own settings
+- **Agent Context**: Plugins receive agent-specific context and storage paths
+- **Schema Extraction**: Automatic extraction of plugin settings schemas
+
+### Structured Results
+- **Type-Safe**: Defined result types with validation
+- **Extensible**: Easy to add new display types
+- **Metadata Support**: Custom actions and behaviors
+- **Backward Compatible**: Plain text results still work
+
+### State Management
+- **File-Based Storage**: JSON files for persistence
+- **In-Memory Cache**: Fast access to frequently used data
+- **Per-Agent Isolation**: Each agent has isolated state
+- **Atomic Writes**: Safe concurrent access
 
 ## 🛡️ Security
 
@@ -215,11 +305,12 @@ dolphin-agent/
 - **Error Handling**: Comprehensive error handling prevents crashes
 - **No Secrets Exposure**: API keys and sensitive data never logged
 - **Secure Configuration**: Settings stored locally with proper permissions
+- **CORS Support**: Configurable CORS for API access
 
 ## 🔧 Environment Configuration
 
 ### Environment Variables
-- `OPENAI_API_KEY` - Your OpenAI API key
+- `OPENAI_API_KEY` - Your OpenAI API key (can also be set in settings.json)
 - `AGENT_STORE_PATH` - Custom path for agent storage (default: `agents.json`)
 - `PLUGIN_CACHE_DIR` - Custom plugin cache directory (default: `plugin_cache`)
 
@@ -228,39 +319,59 @@ dolphin-agent/
 - `agents.json` - Agent configurations and state
 - `local_plugin_registry.json` - User-uploaded plugin registry
 - `plugin_registry_cache.json` - Cached remote plugin registry
+- `agents/<agent-name>/config.json` - Agent-specific plugin configurations
 
 ## 🎯 Roadmap
 
+- [x] ~~Structured content rendering (tables, modals)~~
+- [x] ~~Direct plugin tool call API~~
+- [x] ~~Auto-update system~~
 - [ ] WebSocket support for real-time chat
-- [ ] Plugin marketplace integration
+- [ ] Plugin marketplace UI
 - [ ] Voice interface support
 - [ ] Multi-user support with authentication
-- [ ] Plugin sandboxing and security enhancements
+- [ ] Plugin sandboxing enhancements
 - [ ] Conversation history and export
 - [ ] Custom model integration (Ollama, local models)
 - [ ] Plugin dependency management
-- [ ] Advanced plugin configuration UI
 - [ ] Real-time plugin status monitoring
+- [ ] Browser extension integration
+- [ ] Mobile app
 
 ## 🤝 Contributing
 
+Contributions are welcome! Please follow these guidelines:
 
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Development Guidelines
+- Follow Go best practices and idioms
+- Write tests for new features
+- Update documentation for API changes
+- Use meaningful commit messages
+- Keep PRs focused and atomic
 
 ### Building and Testing
 
 ```bash
 # Build all components
-make build
+./scripts/build.sh
 
-# Clean and rebuild
-make clean && make build
-
-# Build specific components
+# Build server only
 ./scripts/build-server.sh
+
+# Build plugins
 ./scripts/build-plugins.sh
 
-# Clean up development artifacts
+# Clean build artifacts
 ./scripts/cleanup.sh
+
+# Run tests
+go test ./...
 ```
 
 ## 📄 License
@@ -270,15 +381,34 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - [OpenAI](https://openai.com/) for the GPT APIs
+- [HashiCorp go-plugin](https://github.com/hashicorp/go-plugin) for the plugin system
 - [Bootstrap](https://getbootstrap.com/) for the UI framework
 - [Inter](https://rsms.me/inter/) font family
 - Go community for excellent tooling and libraries
 
 ## 💬 Support
 
-- 🐛 Issues: [GitHub Issues](https://github.com/johnjallday/dolphin-agent/issues)
-- 📖 Documentation: [GitHub Wiki](https://github.com/johnjallday/dolphin-agent/wiki)
-- 💡 Feature Requests: Open an issue with the "enhancement" label
+- 🐛 **Issues**: [GitHub Issues](https://github.com/johnjallday/dolphin-agent/issues)
+- 📖 **Documentation**: [GitHub Wiki](https://github.com/johnjallday/dolphin-agent/wiki)
+- 💡 **Feature Requests**: Open an issue with the "enhancement" label
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/dolphin-agent/discussions)
+
+## 🌟 Example Plugins
+
+### Built-in Plugins
+- **Math**: Basic arithmetic operations
+- **Weather**: Weather information lookup
+- **Result Handler**: File and URL processing
+
+### External Plugins
+- **REAPER Script Launcher**: Control REAPER DAW with scripts
+  - List and run ReaScripts
+  - Download scripts from repository
+  - Register scripts to REAPER
+  - Get current project context
+  - Clean orphaned script entries
+
+See individual plugin directories for detailed documentation.
 
 ---
 

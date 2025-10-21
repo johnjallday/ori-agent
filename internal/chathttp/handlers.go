@@ -358,8 +358,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Execute tool with its own reasonable timeout
-			toolCtx, toolCancel := context.WithTimeout(base, 20*time.Second)
+			// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
+			toolCtx, toolCancel := context.WithTimeout(base, 30*time.Second)
 			defer toolCancel()
 
 			result, err := pl.Tool.Call(toolCtx, args)
@@ -379,16 +379,31 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		// Check if any tool result is JSON - if so, return it directly without LLM processing
+		// Check if any tool result is a structured result or legacy JSON - if so, return it directly without LLM processing
 		var combinedResult string
-		hasJsonResult := false
+		hasStructuredResult := false
+		var structuredResultData *pluginapi.StructuredResult
+
 		for i, tr := range toolResults {
 			result := tr["result"]
-			// Check if result is valid JSON array
+
+			// First, check if this is a structured result
+			if sr, err := pluginapi.ParseStructuredResult(result); err == nil {
+				hasStructuredResult = true
+				structuredResultData = sr
+				// For structured results, we'll use the raw result as-is
+				if i > 0 {
+					combinedResult += "\n\n"
+				}
+				combinedResult += result
+				continue
+			}
+
+			// Legacy: Check if result is valid JSON array
 			if strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
 				var testJSON []interface{}
 				if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
-					hasJsonResult = true
+					hasStructuredResult = true
 				}
 			}
 			if i > 0 {
@@ -397,16 +412,27 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			combinedResult += result
 		}
 
-		// If we have JSON results, return them directly for frontend table rendering
-		if hasJsonResult {
+		// If we have structured or JSON results, return them directly for frontend rendering
+		if hasStructuredResult {
 			// Add assistant message with the raw result for conversation history
 			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
-			log.Printf("Chat (with JSON tool result) in %s", time.Since(start))
+			log.Printf("Chat (with structured tool result) in %s", time.Since(start))
 			_ = h.store.SetAgent(current, ag)
-			_ = json.NewEncoder(w).Encode(map[string]any{
+
+			response := map[string]any{
 				"response":  combinedResult,
 				"toolCalls": toolResults,
-			})
+			}
+
+			// Add structured result metadata if available
+			if structuredResultData != nil {
+				response["structured"] = true
+				response["displayType"] = string(structuredResultData.DisplayType)
+				response["title"] = structuredResultData.Title
+				response["description"] = structuredResultData.Description
+			}
+
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 

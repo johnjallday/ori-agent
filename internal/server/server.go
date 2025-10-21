@@ -198,6 +198,7 @@ func (s *Server) Handler() http.Handler {
 	// Create a handler instance for save-settings
 	pluginMainHandler := pluginhttp.New(s.st, pluginhttp.NativeLoader{})
 	mux.HandleFunc("/api/plugins/save-settings", pluginMainHandler.ServeHTTP)
+	mux.HandleFunc("/api/plugins/tool-call", pluginMainHandler.DirectToolCallHandler)
 	mux.Handle("/api/plugins", pluginMainHandler)
 	mux.HandleFunc("/api/plugins/", s.pluginInitHandler.PluginInitHandler)
 

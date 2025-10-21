@@ -58,8 +58,317 @@ async function refreshAgentDisplay() {
 
 // ---- Chat Functionality ----
 
-// Try to parse and render JSON as a table
+// Render structured result based on displayType
+function renderStructuredResult(structuredData) {
+  const { displayType, title, description, data, metadata } = structuredData;
+
+  let html = '';
+
+  // Add title if present
+  if (title) {
+    html += `<h5 style="margin-bottom: 8px;">${escapeHtml(title)}</h5>`;
+  }
+
+  // Add description if present
+  if (description) {
+    html += `<p style="margin-bottom: 12px; color: var(--text-secondary);">${escapeHtml(description)}</p>`;
+  }
+
+  switch (displayType) {
+    case 'table':
+      html += renderTable(data, metadata);
+      break;
+    case 'modal':
+      html += renderModal(data, metadata);
+      break;
+    case 'list':
+      html += renderList(data);
+      break;
+    case 'card':
+      html += renderCards(data);
+      break;
+    case 'json':
+      html += renderJSON(data);
+      break;
+    case 'text':
+    default:
+      html += escapeHtml(typeof data === 'string' ? data : JSON.stringify(data));
+  }
+
+  return html;
+}
+
+// Render table display
+function renderTable(data, metadata) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return '<p>No data to display</p>';
+  }
+
+  const columns = metadata?.columns || Object.keys(data[0]);
+
+  let html = '<div style="overflow-x: auto;"><table class="table table-sm table-bordered table-hover" style="margin-top: 8px;">';
+
+  // Table header
+  html += '<thead class="table-light"><tr>';
+  columns.forEach(col => {
+    html += `<th style="padding: 10px; font-weight: 600;">${escapeHtml(col)}</th>`;
+  });
+  html += '</tr></thead>';
+
+  // Table body
+  html += '<tbody>';
+  data.forEach(row => {
+    html += '<tr>';
+    columns.forEach(col => {
+      const key = col.toLowerCase();
+      const value = row[key];
+      let displayValue = '';
+
+      if (value === null || value === undefined) {
+        displayValue = '-';
+      } else if (typeof value === 'object') {
+        displayValue = JSON.stringify(value);
+      } else {
+        displayValue = String(value);
+      }
+
+      html += `<td style="padding: 10px;">${escapeHtml(displayValue)}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  return html;
+}
+
+// Render modal display (interactive modal with buttons/actions)
+function renderModal(data, metadata) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return '<p>No items available</p>';
+  }
+
+  const modalId = 'modal-' + Date.now();
+  const buttonLabel = metadata?.buttonLabel || 'Select';
+  const operation = metadata?.operation || '';
+  const action = metadata?.action || '';
+
+  let html = `
+    <div class="modal-script-selector" id="${modalId}">
+      <div class="list-group mb-3" style="max-height: 400px; overflow-y: auto;">
+        ${data.map((item, index) => `
+          <label class="list-group-item list-group-item-action d-flex align-items-start" style="cursor: pointer;">
+            <input type="checkbox" name="script-select-${modalId}" value="${index}" class="me-3 mt-1 form-check-input" data-filename="${escapeHtml(item.filename || '')}" data-item-index="${index}">
+            <div class="flex-grow-1">
+              <div class="d-flex w-100 justify-content-between">
+                <h6 class="mb-1">${escapeHtml(item.name || item.title || `Item ${index + 1}`)}</h6>
+                ${item.size ? `<small class="text-muted">${escapeHtml(item.size)}</small>` : ''}
+              </div>
+              ${item.description ? `<p class="mb-1 small text-muted">${escapeHtml(item.description)}</p>` : ''}
+              ${item.filename ? `<small class="text-primary">📄 ${escapeHtml(item.filename)}</small>` : ''}
+            </div>
+          </label>
+        `).join('')}
+      </div>
+      <div class="d-flex justify-content-between align-items-center">
+        <span class="text-muted small" id="selected-count-${modalId}">0 selected</span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" id="select-all-btn-${modalId}">Select All</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="clear-btn-${modalId}">Clear All</button>
+          <button type="button" class="btn btn-primary" id="download-btn-${modalId}">
+            <span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add click handlers after rendering
+  setTimeout(() => {
+    const checkboxes = document.querySelectorAll(`input[name="script-select-${modalId}"]`);
+    const selectedCount = document.getElementById(`selected-count-${modalId}`);
+    const selectAllBtn = document.getElementById(`select-all-btn-${modalId}`);
+    const clearBtn = document.getElementById(`clear-btn-${modalId}`);
+    const downloadBtn = document.getElementById(`download-btn-${modalId}`);
+
+    // Update selected count
+    function updateCount() {
+      const checked = document.querySelectorAll(`input[name="script-select-${modalId}"]:checked`).length;
+      if (selectedCount) {
+        selectedCount.textContent = `${checked} selected`;
+      }
+    }
+
+    // Add change listener to all checkboxes
+    checkboxes.forEach(cb => {
+      cb.addEventListener('change', updateCount);
+    });
+
+    // Select All button
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', function() {
+        checkboxes.forEach(cb => cb.checked = true);
+        updateCount();
+      });
+    }
+
+    // Clear All button
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function() {
+        checkboxes.forEach(cb => cb.checked = false);
+        updateCount();
+      });
+    }
+
+    // Download button
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', async function() {
+        const selected = document.querySelectorAll(`input[name="script-select-${modalId}"]:checked`);
+        if (selected.length === 0) {
+          alert('Please select at least one script');
+          return;
+        }
+
+        // Get all selected filenames
+        const filenames = Array.from(selected).map(cb => {
+          const index = parseInt(cb.value);
+          const item = data[index];
+          return item.filename || item.name;
+        });
+
+        // Disable button and show loading
+        downloadBtn.disabled = true;
+        downloadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Downloading ${filenames.length} script(s)...`;
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        try {
+          // Download each script sequentially using direct API call
+          for (const filename of filenames) {
+            try {
+              const response = await fetch('/api/plugins/tool-call', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  plugin_name: "reaper-script-launcher",
+                  operation: "download_script",
+                  args: {
+                    filename: filename
+                  }
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+
+              const result = await response.json();
+
+              if (result.success) {
+                successCount++;
+                addMessageToChat(result.result, false);
+              } else {
+                errorCount++;
+                addMessageToChat(`Error downloading ${filename}: ${result.error}`, false, true);
+              }
+            } catch (error) {
+              console.error(`Error downloading ${filename}:`, error);
+              errorCount++;
+              addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
+            }
+          }
+
+          // Show summary
+          if (successCount > 0) {
+            downloadBtn.innerHTML = `<span class="download-icon">✅</span> Downloaded ${successCount}!`;
+          } else {
+            downloadBtn.innerHTML = `<span class="download-icon">❌</span> All failed`;
+          }
+
+          setTimeout(() => {
+            downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
+            downloadBtn.disabled = false;
+            // Uncheck all checkboxes
+            selected.forEach(cb => cb.checked = false);
+            updateCount();
+          }, 2000);
+
+        } catch (error) {
+          console.error('Download error:', error);
+          addMessageToChat(`Error: ${error.message}`, false, true);
+          downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
+          downloadBtn.disabled = false;
+        }
+      });
+    }
+  }, 100);
+
+  return html;
+}
+
+// Render list display
+function renderList(data) {
+  if (!Array.isArray(data)) {
+    data = [data];
+  }
+
+  let html = '<ul class="list-unstyled">';
+  data.forEach(item => {
+    if (typeof item === 'object') {
+      html += `<li style="padding: 6px 0;">• ${escapeHtml(item.name || item.title || JSON.stringify(item))}</li>`;
+    } else {
+      html += `<li style="padding: 6px 0;">• ${escapeHtml(String(item))}</li>`;
+    }
+  });
+  html += '</ul>';
+
+  return html;
+}
+
+// Render cards display
+function renderCards(data) {
+  if (!Array.isArray(data)) {
+    data = [data];
+  }
+
+  let html = '<div class="row g-3">';
+  data.forEach(item => {
+    html += `
+      <div class="col-md-6 col-lg-4">
+        <div class="card">
+          <div class="card-body">
+            <h6 class="card-title">${escapeHtml(item.title || item.name || 'Card')}</h6>
+            ${item.description ? `<p class="card-text small">${escapeHtml(item.description)}</p>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+
+  return html;
+}
+
+// Render JSON display
+function renderJSON(data) {
+  const jsonStr = JSON.stringify(data, null, 2);
+  return `<pre style="background: var(--bg-hover); padding: 12px; border-radius: 4px; overflow-x: auto;"><code>${escapeHtml(jsonStr)}</code></pre>`;
+}
+
+// Try to parse and render JSON as a table (legacy support)
 function tryRenderJsonTable(message) {
+  // First, try to parse as structured result
+  try {
+    const structuredData = JSON.parse(message);
+    if (structuredData.displayType && structuredData.data) {
+      return renderStructuredResult(structuredData);
+    }
+  } catch (e) {
+    // Not a structured result, continue with legacy parsing
+  }
+
   // Extract JSON from message (handle case where message contains both text and JSON)
   const jsonMatch = message.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
   if (!jsonMatch) return null;
@@ -67,7 +376,12 @@ function tryRenderJsonTable(message) {
   try {
     const jsonData = JSON.parse(jsonMatch[0]);
 
-    // Check if it's an array of objects
+    // Check if it's a structured result
+    if (jsonData.displayType && jsonData.data) {
+      return renderStructuredResult(jsonData);
+    }
+
+    // Check if it's an array of objects (legacy)
     if (Array.isArray(jsonData) && jsonData.length > 0 && typeof jsonData[0] === 'object') {
       // Get prefix text (text before JSON)
       const prefixText = message.substring(0, jsonMatch.index).trim();
@@ -79,43 +393,13 @@ function tryRenderJsonTable(message) {
       });
       const keys = Array.from(allKeys);
 
-      // Build HTML table
+      // Build HTML table (legacy rendering)
       let html = '';
       if (prefixText) {
         html += `<div style="margin-bottom: 12px;">${escapeHtml(prefixText)}</div>`;
       }
 
-      html += '<div style="overflow-x: auto;"><table class="table table-sm table-bordered" style="margin-top: 8px;">';
-
-      // Table header
-      html += '<thead><tr>';
-      keys.forEach(key => {
-        html += `<th style="padding: 8px; background: var(--bg-hover);">${escapeHtml(key)}</th>`;
-      });
-      html += '</tr></thead>';
-
-      // Table body
-      html += '<tbody>';
-      jsonData.forEach(obj => {
-        html += '<tr>';
-        keys.forEach(key => {
-          const value = obj[key];
-          let displayValue = '';
-
-          // Handle different value types
-          if (value === null || value === undefined) {
-            displayValue = '-';
-          } else if (typeof value === 'object') {
-            displayValue = JSON.stringify(value);
-          } else {
-            displayValue = String(value);
-          }
-
-          html += `<td style="padding: 8px;">${escapeHtml(displayValue)}</td>`;
-        });
-        html += '</tr>';
-      });
-      html += '</tbody></table></div>';
+      html += renderTable(jsonData, { columns: keys });
 
       return html;
     }
