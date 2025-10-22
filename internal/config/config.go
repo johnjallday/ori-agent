@@ -9,8 +9,9 @@ import (
 
 // Settings holds application-wide configuration
 type Settings struct {
-	CurrentAgent string `json:"current_agent"`
-	OpenAIAPIKey string `json:"openai_api_key"`
+	CurrentAgent    string `json:"current_agent"`
+	OpenAIAPIKey    string `json:"openai_api_key"`
+	AnthropicAPIKey string `json:"anthropic_api_key"`
 }
 
 // Manager handles configuration loading and saving
@@ -81,15 +82,26 @@ func (m *Manager) Update(settings Settings) error {
 	return m.validate()
 }
 
-// GetAPIKey returns the API key, checking settings first, then environment variable
+// GetAPIKey returns the OpenAI API key, checking settings first, then environment variable
 func (m *Manager) GetAPIKey() string {
 	// Check settings first
 	if m.settings.OpenAIAPIKey != "" {
 		return m.settings.OpenAIAPIKey
 	}
-	
+
 	// Fallback to environment variable
 	return os.Getenv("OPENAI_API_KEY")
+}
+
+// GetAnthropicAPIKey returns the Anthropic API key, checking settings first, then environment variable
+func (m *Manager) GetAnthropicAPIKey() string {
+	// Check settings first
+	if m.settings.AnthropicAPIKey != "" {
+		return m.settings.AnthropicAPIKey
+	}
+
+	// Fallback to environment variable
+	return os.Getenv("ANTHROPIC_API_KEY")
 }
 
 // SetAPIKey updates the API key in settings

@@ -293,19 +293,37 @@ function createAgentElement(agentName, currentAgent) {
 
         <div class="setting-item mb-3">
           <div class="d-flex align-items-center justify-content-between">
-            <span style="color: var(--text-primary); font-size: 0.85rem;">GPT Model</span>
-            <select id="gptModelSelect-${accordionId}" class="form-select form-select-sm" style="width: auto; min-width: 120px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
-              <option value="gpt-5">GPT-5</option>
-              <option value="gpt-5-mini">GPT-5 Mini</option>
-              <option value="gpt-5-nano">GPT-5 Nano</option>
-              <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
-              <option value="gpt-4.1">GPT-4.1</option>
-              <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-              <option value="gpt-4-turbo">GPT-4 Turbo</option>
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            <span style="color: var(--text-primary); font-size: 0.85rem;">Model</span>
+            <select id="gptModelSelect-${accordionId}" class="form-select form-select-sm" style="width: auto; min-width: 180px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
+              <optgroup label="OpenAI GPT-5">
+                <option value="gpt-5">GPT-5</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+              </optgroup>
+              <optgroup label="OpenAI GPT-4.1">
+                <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                <option value="gpt-4.1">GPT-4.1</option>
+                <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
+              </optgroup>
+              <optgroup label="OpenAI GPT-4">
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                <option value="gpt-4">GPT-4</option>
+              </optgroup>
+              <optgroup label="OpenAI GPT-3.5">
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              </optgroup>
+              <optgroup label="Claude 3.5">
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Oct 2024)</option>
+                <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet (Jun 2024)</option>
+                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+              </optgroup>
+              <optgroup label="Claude 3">
+                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+              </optgroup>
             </select>
           </div>
         </div>

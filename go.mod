@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.14.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/fredbi/uri v1.1.0 // indirect

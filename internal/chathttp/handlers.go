@@ -12,28 +12,106 @@ import (
 	"github.com/openai/openai-go/v2"
 
 	"github.com/johnjallday/dolphin-agent/internal/client"
+	"github.com/johnjallday/dolphin-agent/internal/llm"
 	"github.com/johnjallday/dolphin-agent/internal/store"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 )
 
 type Handler struct {
-	store         store.Store
-	clientFactory *client.Factory
+	store          store.Store
+	clientFactory  *client.Factory
+	llmFactory     *llm.Factory
 	commandHandler *CommandHandler
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 	return &Handler{
-		store:         store,
-		clientFactory: clientFactory,
+		store:          store,
+		clientFactory:  clientFactory,
+		llmFactory:     nil,
 		commandHandler: NewCommandHandler(store),
 	}
+}
+
+// SetLLMFactory sets the LLM factory
+func (h *Handler) SetLLMFactory(factory *llm.Factory) {
+	h.llmFactory = factory
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
 func (h *Handler) getClientForAgent(ag *types.Agent) openai.Client {
 	return h.clientFactory.GetForAgent(ag)
+}
+
+// handleClaudeChat handles chat requests for Claude models using the provider system
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *types.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
+	defer cancel()
+
+	// Get Claude provider
+	provider, err := h.llmFactory.GetProvider("claude")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: Claude provider not available: %v", err),
+		})
+		return
+	}
+
+	// Build simple message list - just system + history + new message
+	var messages []llm.Message
+
+	// Add system message if present - just use system prompt from settings
+	systemPrompt := ""
+	if ag.Settings.SystemPrompt != "" {
+		systemPrompt = ag.Settings.SystemPrompt
+		messages = append(messages, llm.NewSystemMessage(systemPrompt))
+	}
+
+	// Add user message
+	messages = append(messages, llm.NewUserMessage(userMessage))
+
+	// Convert tools
+	var llmTools []llm.Tool
+	for _, tool := range tools {
+		if tool.OfFunction != nil {
+			// Extract function definition
+			fn := tool.OfFunction.Function
+
+			// Get description string
+			desc := fn.Description.String()
+
+			// Parameters is already map[string]interface{}
+			llmTools = append(llmTools, llm.Tool{
+				Name:        fn.Name,
+				Description: desc,
+				Parameters:  fn.Parameters,
+			})
+		}
+	}
+
+	// Call Claude
+	start := time.Now()
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model:       ag.Settings.Model,
+		Messages:    messages,
+		Tools:       llmTools,
+		Temperature: ag.Settings.Temperature,
+		MaxTokens:   4000,
+	})
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: %v", err),
+		})
+		return
+	}
+
+	// Store response in OpenAI format for history
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+
+	log.Printf("Claude chat response in %s", time.Since(start))
+	h.store.SetAgent(agentName, ag)
+	json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
 }
 
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
@@ -288,6 +366,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare and call the model
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
+
+	// Check if this is a Claude model - if so, use provider system
+	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
+		// Use Claude provider
+		h.handleClaudeChat(w, r, ag, q, tools, current, base)
+		return
+	}
+
 	params := openai.ChatCompletionNewParams{
 		Model:       ag.Settings.Model,
 		Temperature: openai.Float(ag.Settings.Temperature),

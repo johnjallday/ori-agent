@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/config"
 	"github.com/johnjallday/dolphin-agent/internal/filehttp"
+	"github.com/johnjallday/dolphin-agent/internal/llm"
 	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
 	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
@@ -29,6 +30,7 @@ import (
 // Server holds all the dependencies and state for the HTTP server
 type Server struct {
 	clientFactory         *client.Factory
+	llmFactory            *llm.Factory
 	registryManager       *registry.Manager
 	st                    store.Store
 	pluginReg             types.PluginRegistry
@@ -68,8 +70,27 @@ func New() (*Server, error) {
 		return nil, log.New(os.Stderr, "", 0).Output(1, "OPENAI_API_KEY must be set either in settings.json or as environment variable").(error)
 	}
 
-	// Initialize OpenAI client factory
+	// Initialize OpenAI client factory (deprecated - will be replaced by LLM factory)
 	s.clientFactory = client.NewFactory(apiKey)
+
+	// Initialize LLM factory with available providers
+	s.llmFactory = llm.NewFactory()
+
+	// Register OpenAI provider
+	openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
+		APIKey: apiKey,
+	})
+	s.llmFactory.Register("openai", openaiProvider)
+
+	// Register Claude provider if API key is available
+	claudeAPIKey := s.configManager.GetAnthropicAPIKey()
+	if claudeAPIKey != "" {
+		claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
+			APIKey: claudeAPIKey,
+		})
+		s.llmFactory.Register("claude", claudeProvider)
+		log.Printf("Claude provider registered")
+	}
 
 	// init store (persists agents/plugins/settings; not messages)
 	s.agentStorePath = "agents.json"
@@ -167,6 +188,7 @@ func New() (*Server, error) {
 	// initialize HTTP handlers
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
+	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager)
 
