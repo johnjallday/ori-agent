@@ -1,6 +1,7 @@
 # 🐬 Dolphin Agent
 
-A modern, extensible AI agent platform with a sleek web interface and powerful plugin system. Dolphin Agent allows you to create intelligent assistants that can be extended with custom tools and integrations.
+A modular, plugin-driven framework for building tool-calling AI agents.
+It provides secure plugin loading, agent orchestration, and HTTP/WebSocket interfaces — letting you create lightweight autonomous systems that can use tools or sub-agents efficiently.
 
 ![Version](https://img.shields.io/badge/Version-v0.0.6-blue)
 ![Go](https://img.shields.io/badge/Go-1.24-00add8)
@@ -272,6 +273,40 @@ dolphin-agent/
 
 ## 🏗️ Architecture Highlights
 
++-------------------------------+
+|        Tool-Calling Agent     |  ← top-level controller
+|-------------------------------|
+|  • Parses user requests       |
+|  • Chooses the best tool/agent|
+|  • Enforces budgets/timeouts  |
++-------------------------------+
+            ↓
+   +-------------------------+
+   |  Plugin / Tool Layer    |
+   |-------------------------|
+   |  • Atomic tools (calc,  |
+   |    search, db, etc.)    |
+   |  • Complex sub-agents   |
+   |    (research, code, etc.)|
+   +-------------------------+
+            ↓
+   +-------------------------+
+   |  Plugin Registry        |
+   |-------------------------|
+   |  • Signature + checksum |
+   |  • Version + caching    |
+   |  • Remote registry sync |
+   +-------------------------+
+            ↓
+   +-------------------------+
+   |  Runtime / Workspace    |
+   |-------------------------|
+   |  • Agent isolation      |
+   |  • Context + memory     |
+   |  • Result handler       |
+   +-------------------------+
+
+
 ### Modular Handler System
 - **Separated Concerns**: Each domain has its own handler module
 - **Improved Maintainability**: Focused, single-responsibility modules
@@ -296,6 +331,19 @@ dolphin-agent/
 - **In-Memory Cache**: Fast access to frequently used data
 - **Per-Agent Isolation**: Each agent has isolated state
 - **Atomic Writes**: Safe concurrent access
+
+### 🧠 Core Concepts
+
+
+| Concept                | Description                                                                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Tool-Calling Agent** | The main orchestrator. Routes tasks to tools or sub-agents based on intent, keywords, or routing models.                      |
+| **Plugins**            | Self-contained tools or agents that expose a consistent interface. Each declares its metadata, side-effects, and permissions. |
+| **Plugin Registry**    | Secure manifest system that stores, validates, and caches plugins (with SHA256 verification).                                 |
+| **Plugin Loader**      | Dynamically loads plugins at runtime, checks signatures, and isolates their execution.                                        |
+| **Workspace**          | Per-agent sandbox that handles session state, memory, and file I/O.                                                           |
+| **Result Handler**     | Renders or exports agent outputs (text, structured data, downloadable results).                                               |
+
 
 ## 🛡️ Security
 
@@ -323,37 +371,17 @@ dolphin-agent/
 
 ## 🎯 Roadmap
 
-- [x] ~~Structured content rendering (tables, modals)~~
-- [x] ~~Direct plugin tool call API~~
-- [x] ~~Auto-update system~~
+- [ ] Ollama Support
+- [ ] MCP Support
 - [ ] WebSocket support for real-time chat
-- [ ] Plugin marketplace UI
 - [ ] Voice interface support
 - [ ] Multi-user support with authentication
 - [ ] Plugin sandboxing enhancements
 - [ ] Conversation history and export
-- [ ] Custom model integration (Ollama, local models)
 - [ ] Plugin dependency management
 - [ ] Real-time plugin status monitoring
 - [ ] Browser extension integration
 - [ ] Mobile app
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Guidelines
-- Follow Go best practices and idioms
-- Write tests for new features
-- Update documentation for API changes
-- Use meaningful commit messages
-- Keep PRs focused and atomic
 
 ### Building and Testing
 
@@ -392,6 +420,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 📖 **Documentation**: [GitHub Wiki](https://github.com/johnjallday/dolphin-agent/wiki)
 - 💡 **Feature Requests**: Open an issue with the "enhancement" label
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/dolphin-agent/discussions)
+
+- buymeacoffee.com/johnjallday
 
 ## 🌟 Example Plugins
 

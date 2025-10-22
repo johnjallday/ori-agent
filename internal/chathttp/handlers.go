@@ -106,12 +106,163 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *t
 		return
 	}
 
+	// Tool-call branch
+	if len(resp.ToolCalls) > 0 {
+		log.Printf("Claude requested %d tool call(s)", len(resp.ToolCalls))
+
+		// Add the assistant message with tool calls to conversation history
+		assistantMsg := llm.NewAssistantMessage(resp.Content)
+		messages = append(messages, assistantMsg)
+
+		// Also store in OpenAI format for agent history
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+
+		// Process ALL tool calls
+		var toolResults []map[string]string
+		for _, tc := range resp.ToolCalls {
+			name := tc.Name
+			args := tc.Arguments
+
+			log.Printf("Executing tool: %s with args: %s", name, args)
+
+			// Find plugin by function definition name
+			var pl types.LoadedPlugin
+			var found bool
+			for _, plugin := range ag.Plugins {
+				if plugin.Definition.Name == name {
+					pl = plugin
+					found = true
+					break
+				}
+			}
+
+			if !found || pl.Tool == nil {
+				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
+				return
+			}
+
+			// Execute tool with timeout (30s for operations like API calls)
+			toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+			defer toolCancel()
+
+			result, err := pl.Tool.Call(toolCtx, args)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
+				return
+			}
+
+			log.Printf("Tool %s returned: %s", name, result)
+
+			// Add tool result message
+			messages = append(messages, llm.NewToolMessage(tc.ID, result))
+
+			// Also store in OpenAI format for agent history
+			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
+
+			// Store result for final response
+			toolResults = append(toolResults, map[string]string{
+				"function": name,
+				"args":     args,
+				"result":   result,
+			})
+		}
+
+		// Check if any tool result is a structured result or legacy JSON
+		var combinedResult string
+		hasStructuredResult := false
+		var structuredResultData *pluginapi.StructuredResult
+
+		for i, tr := range toolResults {
+			result := tr["result"]
+
+			// Check if this is a structured result
+			if sr, err := pluginapi.ParseStructuredResult(result); err == nil {
+				hasStructuredResult = true
+				structuredResultData = sr
+				if i > 0 {
+					combinedResult += "\n\n"
+				}
+				combinedResult += result
+				continue
+			}
+
+			// Legacy: Check if result is valid JSON array
+			if strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
+				var testJSON []interface{}
+				if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
+					hasStructuredResult = true
+				}
+			}
+			if i > 0 {
+				combinedResult += "\n\n"
+			}
+			combinedResult += result
+		}
+
+		// If we have structured or JSON results, return them directly
+		if hasStructuredResult {
+			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
+			log.Printf("Claude chat (with structured tool result) in %s", time.Since(start))
+			_ = h.store.SetAgent(agentName, ag)
+
+			response := map[string]any{
+				"response":  combinedResult,
+				"toolCalls": toolResults,
+			}
+
+			if structuredResultData != nil {
+				response["structured"] = true
+				response["displayType"] = string(structuredResultData.DisplayType)
+				response["title"] = structuredResultData.Title
+				response["description"] = structuredResultData.Description
+			}
+
+			_ = json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Ask Claude again with tool results
+		resp2, err := provider.Chat(ctx, llm.ChatRequest{
+			Model:       ag.Settings.Model,
+			Messages:    append(messages, llm.NewSystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation.")),
+			Tools:       llmTools,
+			Temperature: ag.Settings.Temperature,
+			MaxTokens:   4000,
+		})
+
+		if err != nil || resp2 == nil {
+			// If second turn fails, return the tool results as best-effort reply
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"response":  combinedResult,
+				"toolCalls": toolResults,
+			})
+			return
+		}
+
+		// Store final response
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp2.Content))
+
+		log.Printf("Claude chat (with tool) in %s", time.Since(start))
+		_ = h.store.SetAgent(agentName, ag)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"response":  resp2.Content,
+			"toolCalls": toolResults,
+		})
+		return
+	}
+
+	// Plain answer path (no tool calls)
+	text := strings.TrimSpace(resp.Content)
+	if text == "" {
+		text = "I couldn't generate a reply just now. Please try again."
+	}
+
 	// Store response in OpenAI format for history
-	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	log.Printf("Claude chat response in %s", time.Since(start))
 	h.store.SetAgent(agentName, ag)
-	json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
+	json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
 
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
