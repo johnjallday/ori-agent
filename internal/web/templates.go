@@ -46,6 +46,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",
 		"templates/pages/index.tmpl",
+		"templates/pages/settings.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -66,6 +67,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	}
 
 	tr.templates["index"] = tmpl
+	tr.templates["settings"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
@@ -81,10 +83,10 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	}
 
 	var buf strings.Builder
-	// For index, we want to execute the base template
-	templateName := "base.tmpl"
-	if name != "index" {
-		templateName = name + ".tmpl"
+	// For index and settings, we want to execute their specific templates
+	templateName := name + ".tmpl"
+	if name == "index" {
+		templateName = "base.tmpl"
 	}
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)

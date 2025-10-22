@@ -199,6 +199,7 @@ func New() (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.serveIndex)
+	mux.HandleFunc("/settings", s.serveSettings)
 
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", s.serveStaticFile)
@@ -292,6 +293,33 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("index", data)
 	if err != nil {
 		log.Printf("Failed to render template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("settings", data)
+	if err != nil {
+		log.Printf("Failed to render settings template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

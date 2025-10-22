@@ -52,7 +52,7 @@
     }
     
     body {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
       color: var(--text-primary);
       min-height: 100vh;
       font-size: 14px;
@@ -62,7 +62,7 @@
     }
 
     .dark-mode body {
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%) !important;
     }
 
     /* Animated background particles */
@@ -377,12 +377,7 @@
       color: white !important;
       box-shadow: var(--shadow-sm);
     }
-    
-    /* Body background update */
-    body {
-      background: var(--bg-secondary) !important;
-    }
-    
+
     /* Dark mode button update */
     .dark-mode #darkModeToggle span {
       display: none;
@@ -636,9 +631,8 @@
 
     /* Sidebar styling */
     .main-content-wrapper {
-      display: flex;
+      position: relative;
       min-height: 100vh;
-      padding-top: 76px;
     }
 
     .sidebar {
@@ -704,11 +698,19 @@
     }
 
     .main-content {
-      flex: 1;
-      margin-left: var(--sidebar-width, 300px);
       padding: 1rem;
-      max-width: calc(100vw - var(--sidebar-width, 300px));
+      padding-top: 92px;
       transition: margin-left 0.1s ease, max-width 0.1s ease;
+      min-height: 100vh;
+    }
+
+    /* Only apply sidebar margin on large screens where sidebar is visible */
+    @media (min-width: 992px) {
+      .main-content {
+        margin-left: var(--sidebar-width, 300px);
+        max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
+        width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
+      }
     }
 
     /* Resize handle */
