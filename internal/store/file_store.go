@@ -34,10 +34,15 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	}
 	if _, ok := fs.agents[fs.current]; !ok {
 		fs.agents[fs.current] = &types.Agent{
+			Type:     types.AgentTypeToolCalling, // Default to cheapest tier
 			Settings: defaultSettings,
 			Plugins:  make(map[string]types.LoadedPlugin),
 		}
 	}
+
+	// Migrate existing agents to have types
+	fs.migrateAgentTypesUnlocked()
+
 	_ = fs.saveUnlocked()
 
 	// Write agents.json for plugins on startup
@@ -61,6 +66,7 @@ func (s *fileStore) CreateAgent(name string) error {
 	defer s.mu.Unlock()
 	if _, exists := s.agents[name]; !exists {
 		s.agents[name] = &types.Agent{
+			Type:     types.AgentTypeToolCalling,    // Default to cheapest tier
 			Settings: s.agents[s.current].Settings, // copy defaults
 			Plugins:  make(map[string]types.LoadedPlugin),
 		}
@@ -199,6 +205,7 @@ func (s *fileStore) saveUnlocked() error {
 	
 	// Save individual agent files in nested structure
 	type persistSettings struct {
+		Type     string                         `json:"type"`     // Agent type
 		Settings types.Settings                `json:"Settings"`
 		Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 	}
@@ -210,9 +217,10 @@ func (s *fileStore) saveUnlocked() error {
 			return err
 		}
 
-		// Only save agent_settings.json with everything (Settings + Plugins)
+		// Only save agent_settings.json with everything (Type + Settings + Plugins)
 		// Don't create config.json unless necessary
 		agentSettings := persistSettings{
+			Type:     agent.Type,
 			Settings: agent.Settings,
 			Plugins:  agent.Plugins,
 		}
@@ -327,13 +335,15 @@ func (s *fileStore) load() error {
 
 					var agent types.Agent
 
-					// Load agent_settings.json (Settings + Plugins)
+					// Load agent_settings.json (Type + Settings + Plugins)
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
 						var settings struct {
+							Type     string                         `json:"type"`
 							Settings types.Settings                `json:"Settings"`
 							Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 						}
 						if err := json.Unmarshal(settingsData, &settings); err == nil {
+							agent.Type = settings.Type
 							agent.Settings = settings.Settings
 							agent.Plugins = settings.Plugins
 						}
@@ -370,6 +380,25 @@ func (s *fileStore) load() error {
 			}
 		}
 	}
-	
+
 	return nil
+}
+
+// migrateAgentTypesUnlocked migrates existing agents to have types based on their current model
+// Assumes lock is already held
+func (s *fileStore) migrateAgentTypesUnlocked() {
+	for _, agent := range s.agents {
+		// If agent already has a type, skip migration
+		if agent.Type != "" {
+			continue
+		}
+
+		// Determine type based on current model
+		agent.Type = types.GetAgentTypeForModel(agent.Settings.Model)
+
+		// If model wasn't found in any tier, set it to default cheap model
+		if agent.Type == types.AgentTypeToolCalling && !types.IsModelAllowedForType(agent.Settings.Model, types.AgentTypeToolCalling) {
+			agent.Settings.Model = "gpt-5-nano"
+		}
+	}
 }

@@ -21,6 +21,7 @@ function selectAgent(agentName) {
 function showAddAgentModal() {
   const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
   const agentNameInput = document.getElementById('agentName');
+  const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
@@ -30,11 +31,16 @@ function showAddAgentModal() {
   if (agentNameInput) {
     agentNameInput.value = '';
   }
+  if (agentTypeInput) {
+    agentTypeInput.value = 'tool-calling'; // Default to cheapest tier
+  }
   if (agentSystemPromptInput) {
     agentSystemPromptInput.value = '';
   }
   if (agentModelInput) {
     agentModelInput.value = 'gpt-5-nano';
+    // Filter models based on default type
+    filterModelsByType('tool-calling', agentModelInput);
   }
   if (agentTemperatureInput) {
     agentTemperatureInput.value = '1.0';
@@ -53,9 +59,39 @@ function showAddAgentModal() {
   }, 500);
 }
 
+// Filter models based on agent type
+function filterModelsByType(agentType, modelSelect) {
+  if (!modelSelect) return;
+
+  const allOptions = modelSelect.querySelectorAll('option');
+  allOptions.forEach(option => {
+    const optionType = option.getAttribute('data-type');
+    if (optionType === agentType || !optionType) {
+      option.style.display = '';
+      option.disabled = false;
+    } else {
+      option.style.display = 'none';
+      option.disabled = true;
+    }
+  });
+
+  // Ensure a valid option is selected
+  const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+  if (selectedOption && selectedOption.disabled) {
+    // Find first enabled option for this type
+    for (let i = 0; i < modelSelect.options.length; i++) {
+      if (!modelSelect.options[i].disabled) {
+        modelSelect.selectedIndex = i;
+        break;
+      }
+    }
+  }
+}
+
 // Create new agent
 async function createNewAgent() {
   const agentNameInput = document.getElementById('agentName');
+  const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
@@ -77,6 +113,11 @@ async function createNewAgent() {
 
   try {
     const requestBody = { name: agentName };
+
+    // Add agent type if provided
+    if (agentTypeInput && agentTypeInput.value) {
+      requestBody.type = agentTypeInput.value;
+    }
 
     // Add model if provided
     if (agentModelInput && agentModelInput.value) {
@@ -445,6 +486,15 @@ function setupAgentManagement() {
   if (agentTemperatureInput && temperatureValueSpan) {
     agentTemperatureInput.addEventListener('input', (e) => {
       temperatureValueSpan.textContent = e.target.value;
+    });
+  }
+
+  // Agent type selector update - filter models when type changes
+  const agentTypeInput = document.getElementById('agentType');
+  const agentModelInput = document.getElementById('agentModel');
+  if (agentTypeInput && agentModelInput) {
+    agentTypeInput.addEventListener('change', (e) => {
+      filterModelsByType(e.target.value, agentModelInput);
     });
   }
 
