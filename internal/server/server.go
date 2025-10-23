@@ -14,6 +14,8 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/config"
 	"github.com/johnjallday/dolphin-agent/internal/filehttp"
 	"github.com/johnjallday/dolphin-agent/internal/llm"
+	"github.com/johnjallday/dolphin-agent/internal/onboarding"
+	"github.com/johnjallday/dolphin-agent/internal/onboardinghttp"
 	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
 	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
@@ -43,6 +45,8 @@ type Server struct {
 	chatHandler           *chathttp.Handler
 	pluginRegistryHandler *pluginhttp.RegistryHandler
 	pluginInitHandler     *pluginhttp.InitHandler
+	onboardingMgr         *onboarding.Manager
+	onboardingHandler     *onboardinghttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -185,12 +189,16 @@ func New() (*Server, error) {
 		return nil, err
 	}
 
+	// initialize onboarding manager
+	s.onboardingMgr = onboarding.NewManager("app_state.json")
+
 	// initialize HTTP handlers
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager)
+	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 
 	return s, nil
 }
@@ -242,6 +250,13 @@ func (s *Server) Handler() http.Handler {
 	// File parsing endpoint
 	fileHandler := filehttp.NewHandler()
 	mux.HandleFunc("/api/files/parse", fileHandler.ParseFileHandler)
+
+	// Onboarding endpoints
+	mux.HandleFunc("/api/onboarding/status", s.onboardingHandler.GetStatus)
+	mux.HandleFunc("/api/onboarding/step", s.onboardingHandler.CompleteStep)
+	mux.HandleFunc("/api/onboarding/skip", s.onboardingHandler.Skip)
+	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
+	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
 
 	// CORS middleware
 	return s.corsHandler(mux)

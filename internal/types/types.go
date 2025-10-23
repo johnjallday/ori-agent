@@ -1,6 +1,8 @@
 package types
 
 import (
+	"time"
+
 	"github.com/johnjallday/dolphin-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
@@ -11,6 +13,21 @@ type Settings struct {
 	Temperature  float64 `json:"temperature"`
 	APIKey       string  `json:"api_key,omitempty"`       // OpenAI API key (optional, falls back to env var)
 	SystemPrompt string  `json:"system_prompt,omitempty"` // Custom system prompt for the agent
+}
+
+// OnboardingState tracks user's onboarding progress
+type OnboardingState struct {
+	Completed      bool      `json:"completed"`
+	CurrentStep    int       `json:"current_step"`
+	StepsCompleted []string  `json:"steps_completed"`
+	SkippedAt      time.Time `json:"skipped_at,omitempty"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+}
+
+// AppState tracks application-level state (persisted separately from agent data)
+type AppState struct {
+	Onboarding OnboardingState `json:"onboarding"`
+	Version    string          `json:"version"`
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use

@@ -772,7 +772,7 @@ function setupSidebarToggle() {
 }
 
 // Initialize application
-function initializeApp() {
+async function initializeApp() {
   // Set up dark mode functionality
   setupDarkMode();
 
@@ -781,6 +781,14 @@ function initializeApp() {
 
   // Set up sidebar toggle functionality
   setupSidebarToggle();
+
+  // Initialize onboarding for first-time users
+  try {
+    const { onboardingManager } = await import('./modules/onboarding.js');
+    await onboardingManager.init();
+  } catch (error) {
+    console.error('Failed to initialize onboarding:', error);
+  }
 
   // Sidebar functionality is now handled by modular files
 
