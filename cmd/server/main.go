@@ -3,7 +3,10 @@ package main
 import (
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"time"
 
 	"github.com/johnjallday/dolphin-agent/internal/server"
 )
@@ -22,7 +25,17 @@ func main() {
 
 	// Start HTTP server
 	addr := ":8080"
-	log.Printf("Listening on http://localhost%s", addr)
+	url := "http://localhost" + addr
+	log.Printf("Listening on %s", url)
+
+	// Launch browser in background after a short delay
+	go func() {
+		time.Sleep(500 * time.Millisecond) // Wait for server to start
+		if err := openBrowser(url); err != nil {
+			log.Printf("Failed to open browser: %v", err)
+		}
+	}()
+
 	log.Fatal(srv.HTTPServer(addr).ListenAndServe())
 }
 
@@ -66,4 +79,22 @@ func ensureDataDirectory() error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// openBrowser opens the specified URL in the default browser
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin": // macOS
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return nil // Unsupported platform, silently skip
+	}
+
+	return cmd.Start()
 }
