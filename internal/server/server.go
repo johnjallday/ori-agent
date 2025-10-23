@@ -263,6 +263,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Device endpoints
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
+	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
 
 	// CORS middleware
 	return s.corsHandler(mux)

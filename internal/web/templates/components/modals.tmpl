@@ -124,16 +124,73 @@
         <!-- Progress indicator -->
         <div class="mb-4">
           <div class="d-flex justify-content-between mb-2">
-            <span class="text-muted small">Step <span id="currentStepNum">1</span> of <span id="totalStepsNum">3</span></span>
+            <span class="text-muted small">Step <span id="currentStepNum">1</span> of <span id="totalStepsNum">4</span></span>
           </div>
           <div class="progress" style="height: 4px;">
-            <div id="onboardingProgress" class="progress-bar" role="progressbar" style="width: 33%;" aria-valuenow="33" aria-valuemin="0" aria-valuemax="100"></div>
+            <div id="onboardingProgress" class="progress-bar" role="progressbar" style="width: 25%;" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+        </div>
+
+        <!-- Step 0: Device Detection -->
+        <div class="onboarding-step" id="step-0" role="tabpanel" aria-labelledby="step-0-title">
+          <h3 class="mb-3" id="step-0-title">Device Detection</h3>
+          <p class="mb-4">We've detected information about your device to optimize your experience.</p>
+
+          <div class="card mb-3" id="deviceInfoCard">
+            <div class="card-body">
+              <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Detecting device...</span>
+                </div>
+                <p class="mt-2 mb-0 text-muted">Detecting your device...</p>
+              </div>
+            </div>
+          </div>
+
+          <div id="deviceInfoContent" class="d-none">
+            <div class="card mb-3">
+              <div class="card-body">
+                <h5 class="card-title mb-3">Detected Information:</h5>
+                <div class="row">
+                  <div class="col-md-4 mb-2">
+                    <small class="text-muted d-block">Device Type</small>
+                    <strong id="detectedType" class="text-capitalize">-</strong>
+                  </div>
+                  <div class="col-md-4 mb-2">
+                    <small class="text-muted d-block">Operating System</small>
+                    <strong id="detectedOS" class="text-capitalize">-</strong>
+                  </div>
+                  <div class="col-md-4 mb-2">
+                    <small class="text-muted d-block">Architecture</small>
+                    <strong id="detectedArch">-</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="alert alert-info mb-3">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+              </svg>
+              If the detected device type is incorrect, you can change it below:
+            </div>
+
+            <div class="mb-3">
+              <label for="deviceTypeSelect" class="form-label">Device Type:</label>
+              <select class="form-select" id="deviceTypeSelect" aria-label="Select device type">
+                <option value="desktop">Desktop</option>
+                <option value="laptop">Laptop</option>
+                <option value="server">Server</option>
+                <option value="unknown">Unknown</option>
+              </select>
+              <div class="form-text">This helps us optimize the interface and features for your setup.</div>
+            </div>
           </div>
         </div>
 
         <!-- Step 1: Welcome -->
-        <div class="onboarding-step" id="step-0" role="tabpanel" aria-labelledby="step-0-title">
-          <h3 class="mb-3" id="step-0-title">Get Started with Dolphin Agent</h3>
+        <div class="onboarding-step d-none" id="step-1" role="tabpanel" aria-labelledby="step-1-title">
+          <h3 class="mb-3" id="step-1-title">Get Started with Dolphin Agent</h3>
           <p class="lead mb-4">Your AI-powered assistant with customizable plugins and tools.</p>
           <div class="alert alert-info mb-3">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
@@ -164,8 +221,8 @@
         </div>
 
         <!-- Step 2: Create Agent -->
-        <div class="onboarding-step d-none" id="step-1" role="tabpanel" aria-labelledby="step-1-title">
-          <h3 class="mb-3" id="step-1-title">Create Your First Agent</h3>
+        <div class="onboarding-step d-none" id="step-2" role="tabpanel" aria-labelledby="step-2-title">
+          <h3 class="mb-3" id="step-2-title">Create Your First Agent</h3>
           <p class="mb-4">Agents are AI assistants that can use plugins and tools to help you accomplish tasks.</p>
           <div class="card mb-3">
             <div class="card-body">
@@ -187,8 +244,8 @@
         </div>
 
         <!-- Step 3: Plugins -->
-        <div class="onboarding-step d-none" id="step-2" role="tabpanel" aria-labelledby="step-2-title">
-          <h3 class="mb-3" id="step-2-title">Extend with Plugins</h3>
+        <div class="onboarding-step d-none" id="step-3" role="tabpanel" aria-labelledby="step-3-title">
+          <h3 class="mb-3" id="step-3-title">Extend with Plugins</h3>
           <p class="mb-4">Plugins give your agents special abilities like web search, file operations, and more.</p>
           <div class="card mb-3">
             <div class="card-body">

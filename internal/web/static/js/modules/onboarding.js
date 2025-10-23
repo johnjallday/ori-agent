@@ -2,9 +2,10 @@
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 3;
+    this.totalSteps = 4;
     this.modal = null;
     this.modalInstance = null;
+    this.deviceInfo = null;
   }
 
   // Initialize the onboarding system
@@ -122,6 +123,88 @@ export class OnboardingManager {
       this.currentStep = 0;
       this.updateStepDisplay();
       this.modalInstance.show();
+
+      // Fetch device info when modal is shown
+      this.fetchDeviceInfo();
+    }
+  }
+
+  // Fetch device information from the backend
+  async fetchDeviceInfo() {
+    try {
+      const response = await fetch('/api/device/info');
+      if (!response.ok) {
+        throw new Error('Failed to fetch device info');
+      }
+
+      this.deviceInfo = await response.json();
+      this.displayDeviceInfo();
+    } catch (error) {
+      console.error('Error fetching device info:', error);
+      // Show error state
+      document.getElementById('deviceInfoCard').innerHTML = `
+        <div class="card-body">
+          <div class="alert alert-danger">
+            Failed to detect device information. Please try again later.
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // Display device information in the UI
+  displayDeviceInfo() {
+    if (!this.deviceInfo) return;
+
+    // Hide loading card
+    document.getElementById('deviceInfoCard').classList.add('d-none');
+
+    // Show device info content
+    document.getElementById('deviceInfoContent').classList.remove('d-none');
+
+    // Populate detected info
+    document.getElementById('detectedType').textContent = this.deviceInfo.type;
+    document.getElementById('detectedOS').textContent = this.deviceInfo.os;
+    document.getElementById('detectedArch').textContent = this.deviceInfo.arch;
+
+    // Set dropdown to detected type
+    const deviceTypeSelect = document.getElementById('deviceTypeSelect');
+    if (deviceTypeSelect) {
+      deviceTypeSelect.value = this.deviceInfo.type;
+
+      // Listen for changes to device type
+      deviceTypeSelect.addEventListener('change', async (e) => {
+        await this.updateDeviceType(e.target.value);
+      });
+    }
+  }
+
+  // Update device type when user changes selection
+  async updateDeviceType(newType) {
+    try {
+      const response = await fetch('/api/device/type', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ device_type: newType }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update device type');
+      }
+
+      // Update local device info
+      this.deviceInfo.type = newType;
+      this.deviceInfo.user_set = true;
+
+      // Update displayed info
+      document.getElementById('detectedType').textContent = newType;
+
+      console.log('Device type updated to:', newType);
+    } catch (error) {
+      console.error('Error updating device type:', error);
+      alert('Failed to update device type. Please try again.');
     }
   }
 

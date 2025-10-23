@@ -2,6 +2,7 @@ package device
 
 import (
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -25,6 +26,12 @@ func Detect() types.DeviceInfo {
 
 // detectDeviceType attempts to determine if this is a desktop, laptop, or server
 func detectDeviceType() string {
+	// Check for battery first (most reliable indicator of laptop)
+	// Even headless or SSH-connected laptops are still laptops
+	if hasBattery() {
+		return "laptop"
+	}
+
 	// Check for common server indicators
 	if isRunningAsService() {
 		return "server"
@@ -40,12 +47,7 @@ func detectDeviceType() string {
 		return "server"
 	}
 
-	// Check for battery (indicates laptop)
-	if hasBattery() {
-		return "laptop"
-	}
-
-	// Default to desktop for systems with display
+	// Default to desktop for systems with display and no battery
 	return "desktop"
 }
 
@@ -110,15 +112,57 @@ func hasBattery() bool {
 		}
 
 	case "darwin":
-		// On macOS, check for IOKit battery information
-		// For simplicity, we'll assume laptops for now
-		// A more robust check would use IOKit APIs
-		return true // Most macOS devices are laptops
+		// On macOS, use pmset to check for battery presence
+		return hasMacOSBattery()
 
 	case "windows":
 		// On Windows, could check SYSTEM_POWER_STATUS
 		// For now, return false
 		return false
+	}
+
+	return false
+}
+
+// hasMacOSBattery checks for battery on macOS using pmset command
+func hasMacOSBattery() bool {
+	// Execute pmset -g batt to check for battery presence
+	// Desktop Macs (Mac mini, Mac Studio, iMac, Mac Pro) will show "Now drawing from 'AC Power'"
+	// MacBooks will show battery information like "InternalBattery"
+
+	cmd := exec.Command("pmset", "-g", "batt")
+	output, err := cmd.Output()
+	if err != nil {
+		// If pmset fails, fallback to model detection
+		return hasMacOSBatteryByModel()
+	}
+
+	outputStr := string(output)
+
+	// Check for battery indicators
+	if strings.Contains(outputStr, "InternalBattery") ||
+	   strings.Contains(outputStr, "Battery") && !strings.Contains(outputStr, "No batteries") {
+		return true
+	}
+
+	return false
+}
+
+// hasMacOSBatteryByModel uses system_profiler to determine if this is a MacBook
+func hasMacOSBatteryByModel() bool {
+	// Use system_profiler to get hardware model
+	cmd := exec.Command("system_profiler", "SPHardwareDataType")
+	output, err := cmd.Output()
+	if err != nil {
+		// Conservative default - let user correct in UI
+		return false
+	}
+
+	outputStr := strings.ToLower(string(output))
+
+	// Check for MacBook in the model name
+	if strings.Contains(outputStr, "macbook") {
+		return true
 	}
 
 	return false
