@@ -7,7 +7,7 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/dolphin-agent/internal/agent"
 )
 
 // Factory provides methods for creating OpenAI clients
@@ -44,10 +44,10 @@ func (f *Factory) GetDefault() openai.Client {
 
 // GetForAgent returns an OpenAI client using the agent's API key if provided,
 // otherwise returns the default client
-func (f *Factory) GetForAgent(agent *types.Agent) openai.Client {
-	if agent.Settings.APIKey != "" {
+func (f *Factory) GetForAgent(ag *agent.Agent) openai.Client {
+	if ag.Settings.APIKey != "" {
 		return openai.NewClient(
-			option.WithAPIKey(agent.Settings.APIKey),
+			option.WithAPIKey(ag.Settings.APIKey),
 			option.WithHTTPClient(f.httpClient),
 		)
 	}

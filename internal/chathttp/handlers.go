@@ -11,6 +11,7 @@ import (
 
 	"github.com/openai/openai-go/v2"
 
+	"github.com/johnjallday/dolphin-agent/internal/agent"
 	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/llm"
 	"github.com/johnjallday/dolphin-agent/internal/store"
@@ -40,12 +41,12 @@ func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
-func (h *Handler) getClientForAgent(ag *types.Agent) openai.Client {
+func (h *Handler) getClientForAgent(ag *agent.Agent) openai.Client {
 	return h.clientFactory.GetForAgent(ag)
 }
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *types.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
 	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
 	defer cancel()
 
@@ -300,10 +301,10 @@ func getPluginEmoji(pluginName string) string {
 
 
 // checkUninitializedPlugins checks which plugins need initialization
-func (h *Handler) checkUninitializedPlugins(agent *types.Agent) []map[string]any {
+func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 	var uninitializedPlugins []map[string]any
 
-	for name, plugin := range agent.Plugins {
+	for name, plugin := range ag.Plugins {
 		// Check if plugin supports initialization
 		initProvider, supportsInit := plugin.Tool.(pluginapi.InitializationProvider)
 		if !supportsInit {

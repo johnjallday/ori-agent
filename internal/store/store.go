@@ -1,6 +1,6 @@
 package store
 
-import "github.com/johnjallday/dolphin-agent/internal/types"
+import "github.com/johnjallday/dolphin-agent/internal/agent"
 
 type Store interface {
 	// Agents
@@ -10,8 +10,8 @@ type Store interface {
 	DeleteAgent(name string) error
 
 	// Get/Set directly
-	GetAgent(name string) (*types.Agent, bool)
-	SetAgent(name string, ag *types.Agent) error
+	GetAgent(name string) (*agent.Agent, bool)
+	SetAgent(name string, ag *agent.Agent) error
 
 	// Persistence
 	Save() error

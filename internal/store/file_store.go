@@ -8,20 +8,21 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/johnjallday/dolphin-agent/internal/agent"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 )
 
 type fileStore struct {
 	mu      sync.Mutex
 	path    string
-	agents  map[string]*types.Agent
+	agents  map[string]*agent.Agent
 	current string
 }
 
 func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	fs := &fileStore{
 		path:   path,
-		agents: make(map[string]*types.Agent),
+		agents: make(map[string]*agent.Agent),
 	}
 	// try load
 	_ = fs.load()
@@ -33,8 +34,8 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		fs.current = "default"
 	}
 	if _, ok := fs.agents[fs.current]; !ok {
-		fs.agents[fs.current] = &types.Agent{
-			Type:     types.AgentTypeToolCalling, // Default to cheapest tier
+		fs.agents[fs.current] = &agent.Agent{
+			Type:     agent.TypeToolCalling, // Default to cheapest tier
 			Settings: defaultSettings,
 			Plugins:  make(map[string]types.LoadedPlugin),
 		}
@@ -65,8 +66,8 @@ func (s *fileStore) CreateAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.agents[name]; !exists {
-		s.agents[name] = &types.Agent{
-			Type:     types.AgentTypeToolCalling,    // Default to cheapest tier
+		s.agents[name] = &agent.Agent{
+			Type:     agent.TypeToolCalling,         // Default to cheapest tier
 			Settings: s.agents[s.current].Settings, // copy defaults
 			Plugins:  make(map[string]types.LoadedPlugin),
 		}
@@ -136,14 +137,14 @@ func (s *fileStore) DeleteAgent(name string) error {
 	return s.saveUnlocked()
 }
 
-func (s *fileStore) GetAgent(name string) (*types.Agent, bool) {
+func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ag, ok := s.agents[name]
 	return ag, ok
 }
 
-func (s *fileStore) SetAgent(name string, ag *types.Agent) error {
+func (s *fileStore) SetAgent(name string, ag *agent.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.agents[name] = ag
@@ -262,20 +263,20 @@ func (s *fileStore) load() error {
 	
 	// Initialize agents map if nil
 	if s.agents == nil {
-		s.agents = make(map[string]*types.Agent)
+		s.agents = make(map[string]*agent.Agent)
 	}
-	
+
 	// Try to parse the JSON first
 	var rawConfig map[string]interface{}
 	if err := json.Unmarshal(b, &rawConfig); err != nil {
 		return err
 	}
-	
+
 	// Check if this is the old format with "agents" key
 	if _, hasAgents := rawConfig["agents"]; hasAgents {
 		// Old format: {"agents": {...}, "current": "..."}
 		var in struct {
-			Agents  map[string]*types.Agent `json:"agents"`
+			Agents  map[string]*agent.Agent `json:"agents"`
 			Current string                  `json:"current"`
 		}
 		if err := json.Unmarshal(b, &in); err != nil {
@@ -333,7 +334,7 @@ func (s *fileStore) load() error {
 					agentName := entry.Name()
 					settingsPath := filepath.Join(agentsDir, agentName, "agent_settings.json")
 
-					var agent types.Agent
+					var ag agent.Agent
 
 					// Load agent_settings.json (Type + Settings + Plugins)
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
@@ -343,39 +344,39 @@ func (s *fileStore) load() error {
 							Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 						}
 						if err := json.Unmarshal(settingsData, &settings); err == nil {
-							agent.Type = settings.Type
-							agent.Settings = settings.Settings
-							agent.Plugins = settings.Plugins
+							ag.Type = settings.Type
+							ag.Settings = settings.Settings
+							ag.Plugins = settings.Plugins
 						}
 					}
 
 					// Ensure maps are initialized
-					if agent.Plugins == nil {
-						agent.Plugins = make(map[string]types.LoadedPlugin)
+					if ag.Plugins == nil {
+						ag.Plugins = make(map[string]types.LoadedPlugin)
 					}
 
-					s.agents[agentName] = &agent
+					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
 					// Legacy flat structure: agents/agent.json
 					agentName := entry.Name()[:len(entry.Name())-5] // remove .json
 					agentPath := filepath.Join(agentsDir, entry.Name())
-					
+
 					agentData, err := os.ReadFile(agentPath)
 					if err != nil {
 						continue
 					}
-					
-					var agent types.Agent
-					if err := json.Unmarshal(agentData, &agent); err != nil {
+
+					var ag agent.Agent
+					if err := json.Unmarshal(agentData, &ag); err != nil {
 						continue
 					}
-					
+
 					// ensure maps
-					if agent.Plugins == nil {
-						agent.Plugins = make(map[string]types.LoadedPlugin)
+					if ag.Plugins == nil {
+						ag.Plugins = make(map[string]types.LoadedPlugin)
 					}
-					
-					s.agents[agentName] = &agent
+
+					s.agents[agentName] = &ag
 				}
 			}
 		}
@@ -387,18 +388,18 @@ func (s *fileStore) load() error {
 // migrateAgentTypesUnlocked migrates existing agents to have types based on their current model
 // Assumes lock is already held
 func (s *fileStore) migrateAgentTypesUnlocked() {
-	for _, agent := range s.agents {
+	for _, ag := range s.agents {
 		// If agent already has a type, skip migration
-		if agent.Type != "" {
+		if ag.Type != "" {
 			continue
 		}
 
 		// Determine type based on current model
-		agent.Type = types.GetAgentTypeForModel(agent.Settings.Model)
+		ag.Type = agent.GetTypeForModel(ag.Settings.Model)
 
 		// If model wasn't found in any tier, set it to default cheap model
-		if agent.Type == types.AgentTypeToolCalling && !types.IsModelAllowedForType(agent.Settings.Model, types.AgentTypeToolCalling) {
-			agent.Settings.Model = "gpt-5-nano"
+		if ag.Type == agent.TypeToolCalling && !agent.IsModelAllowedForType(ag.Settings.Model, agent.TypeToolCalling) {
+			ag.Settings.Model = "gpt-5-nano"
 		}
 	}
 }
