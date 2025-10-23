@@ -1,17 +1,31 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/johnjallday/dolphin-agent/internal/server"
 )
 
 func main() {
+	// Define command-line flags
+	port := flag.Int("port", 8080, "Port to run server on")
+	flag.Parse()
+
+	// Check for PORT environment variable override
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			*port = p
+		}
+	}
+
 	// Ensure we're running in a proper data directory
 	if err := ensureDataDirectory(); err != nil {
 		log.Fatalf("Failed to setup data directory: %v", err)
@@ -23,9 +37,9 @@ func main() {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
 
-	// Start HTTP server
-	addr := ":8080"
-	url := "http://localhost" + addr
+	// Start HTTP server with configured port
+	addr := fmt.Sprintf(":%d", *port)
+	url := fmt.Sprintf("http://localhost:%d", *port)
 	log.Printf("Listening on %s", url)
 
 	// Launch browser in background after a short delay
