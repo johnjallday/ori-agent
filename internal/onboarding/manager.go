@@ -2,12 +2,19 @@ package onboarding
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/johnjallday/dolphin-agent/internal/device"
 	"github.com/johnjallday/dolphin-agent/internal/types"
 	"github.com/johnjallday/dolphin-agent/internal/version"
+)
+
+var (
+	// ErrInvalidDeviceType is returned when an invalid device type is provided
+	ErrInvalidDeviceType = errors.New("invalid device type")
 )
 
 // Manager handles onboarding state persistence and logic
@@ -155,4 +162,50 @@ func (m *Manager) Save() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.saveUnlocked()
+}
+
+// DetectAndStoreDevice automatically detects device information and stores it
+func (m *Manager) DetectAndStoreDevice() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Skip if device has already been detected
+	if m.state.Device.Detected {
+		return nil
+	}
+
+	// Perform detection
+	m.state.Device = device.Detect()
+
+	return m.saveUnlocked()
+}
+
+// GetDeviceInfo returns the current device information
+func (m *Manager) GetDeviceInfo() types.DeviceInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Device
+}
+
+// SetDeviceType allows user to manually set the device type
+func (m *Manager) SetDeviceType(deviceType string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !device.ValidateDeviceType(deviceType) {
+		return ErrInvalidDeviceType
+	}
+
+	m.state.Device.Type = deviceType
+	m.state.Device.UserSet = true
+	m.state.Device.Detected = true
+
+	return m.saveUnlocked()
+}
+
+// IsDeviceDetected returns true if device detection has been completed
+func (m *Manager) IsDeviceDetected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.Device.Detected
 }

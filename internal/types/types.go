@@ -24,9 +24,19 @@ type OnboardingState struct {
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 }
 
+// DeviceInfo tracks information about the user's device
+type DeviceInfo struct {
+	Type     string `json:"type"`      // "desktop", "server", "laptop", "unknown"
+	OS       string `json:"os"`        // Operating system (darwin, linux, windows)
+	Arch     string `json:"arch"`      // Architecture (amd64, arm64, etc.)
+	Detected bool   `json:"detected"`  // Whether device detection has been completed
+	UserSet  bool   `json:"user_set"`  // Whether user manually set device type
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
 	Onboarding OnboardingState `json:"onboarding"`
+	Device     DeviceInfo      `json:"device"`
 	Version    string          `json:"version"`
 }
 

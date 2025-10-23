@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/dolphin-agent/internal/chathttp"
 	"github.com/johnjallday/dolphin-agent/internal/client"
 	"github.com/johnjallday/dolphin-agent/internal/config"
+	"github.com/johnjallday/dolphin-agent/internal/devicehttp"
 	"github.com/johnjallday/dolphin-agent/internal/filehttp"
 	"github.com/johnjallday/dolphin-agent/internal/llm"
 	"github.com/johnjallday/dolphin-agent/internal/onboarding"
@@ -47,6 +48,7 @@ type Server struct {
 	pluginInitHandler     *pluginhttp.InitHandler
 	onboardingMgr         *onboarding.Manager
 	onboardingHandler     *onboardinghttp.Handler
+	deviceHandler         *devicehttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -199,6 +201,7 @@ func New() (*Server, error) {
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
+	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 
 	return s, nil
 }
@@ -257,6 +260,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/skip", s.onboardingHandler.Skip)
 	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
+
+	// Device endpoints
+	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 
 	// CORS middleware
 	return s.corsHandler(mux)

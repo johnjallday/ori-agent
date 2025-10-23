@@ -1,0 +1,17 @@
+{
+  "onboarding": {
+    "completed": false,
+    "current_step": 0,
+    "steps_completed": [],
+    "skipped_at": "0001-01-01T00:00:00Z",
+    "completed_at": "0001-01-01T00:00:00Z"
+  },
+  "device": {
+    "type": "server",
+    "os": "darwin",
+    "arch": "amd64",
+    "detected": true,
+    "user_set": false
+  },
+  "version": "dev"
+}
