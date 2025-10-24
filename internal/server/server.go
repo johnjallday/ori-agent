@@ -8,26 +8,26 @@ import (
 	"strings"
 	"time"
 
-	agenthttp "github.com/johnjallday/dolphin-agent/internal/agenthttp"
-	"github.com/johnjallday/dolphin-agent/internal/chathttp"
-	"github.com/johnjallday/dolphin-agent/internal/client"
-	"github.com/johnjallday/dolphin-agent/internal/config"
-	"github.com/johnjallday/dolphin-agent/internal/devicehttp"
-	"github.com/johnjallday/dolphin-agent/internal/filehttp"
-	"github.com/johnjallday/dolphin-agent/internal/llm"
-	"github.com/johnjallday/dolphin-agent/internal/onboarding"
-	"github.com/johnjallday/dolphin-agent/internal/onboardinghttp"
-	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
-	pluginhttp "github.com/johnjallday/dolphin-agent/internal/pluginhttp"
-	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
-	"github.com/johnjallday/dolphin-agent/internal/registry"
-	"github.com/johnjallday/dolphin-agent/internal/settingshttp"
-	"github.com/johnjallday/dolphin-agent/internal/store"
-	"github.com/johnjallday/dolphin-agent/internal/types"
-	"github.com/johnjallday/dolphin-agent/internal/updatehttp"
-	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
-	"github.com/johnjallday/dolphin-agent/internal/version"
-	web "github.com/johnjallday/dolphin-agent/internal/web"
+	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/filehttp"
+	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/plugindownloader"
+	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/updatehttp"
+	"github.com/johnjallday/ori-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/version"
+	web "github.com/johnjallday/ori-agent/internal/web"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -126,6 +126,11 @@ func New() (*Server, error) {
 	// scan uploaded_plugins directory and auto-register any new plugins
 	if err := s.registryManager.ScanUploadedPlugins(); err != nil {
 		log.Printf("Warning: failed to scan uploaded_plugins directory: %v", err)
+	}
+
+	// validate and update local plugin registry (check if plugins still exist at their paths)
+	if err := s.registryManager.ValidateAndUpdateLocal(); err != nil {
+		log.Printf("Warning: failed to validate local plugin registry: %v", err)
 	}
 
 	// init update manager

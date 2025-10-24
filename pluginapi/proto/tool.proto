@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package pluginapi;
 
-option go_package = "github.com/johnjallday/dolphin-agent/pluginapi";
+option go_package = "github.com/johnjallday/ori-agent/pluginapi";
 
 // ToolService defines the RPC service for plugin tools
 service ToolService {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Model Context Protocol (MCP) is a standardized protocol for communication between AI assistants and external tools/data sources. Adding MCP support will allow dolphin-agent to:
+Model Context Protocol (MCP) is a standardized protocol for communication between AI assistants and external tools/data sources. Adding MCP support will allow ori-agent to:
 - Connect to any MCP-compatible server
 - Access a broader ecosystem of tools beyond custom plugins
 - Support both stdio and SSE transport mechanisms
@@ -87,7 +87,7 @@ MCP is **completely provider-agnostic** and will work with ANY LLM provider that
 
 ### Phase 0: Complete Provider Abstraction (RECOMMENDED FIRST)
 
-**Goal**: Make dolphin-agent truly multi-provider before adding MCP
+**Goal**: Make ori-agent truly multi-provider before adding MCP
 
 **1. Implement Concrete Providers**
 
@@ -427,7 +427,7 @@ go get github.com/sourcegraph/jsonrpc2     # JSON-RPC 2.0 (or implement custom)
 ## File Structure After Implementation
 
 ```
-dolphin-agent/
+ori-agent/
 ├── internal/
 │   ├── mcp/
 │   │   ├── protocol.go      # MCP types

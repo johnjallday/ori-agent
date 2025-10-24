@@ -2,7 +2,7 @@ package web
 
 import (
 	"errors"
-	"github.com/johnjallday/dolphin-agent/internal/version"
+	"github.com/johnjallday/ori-agent/internal/version"
 	"html/template"
 	"log"
 	"path/filepath"

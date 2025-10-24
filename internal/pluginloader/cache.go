@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // GetPluginVersion extracts version information from a plugin tool.

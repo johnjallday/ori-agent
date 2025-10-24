@@ -1,4 +1,4 @@
-# 🐬 Dolphin Agent
+# 🦆 Ori Agent
 
 A modular, plugin-driven framework for building tool-calling AI agents.
 It provides secure plugin loading, agent orchestration, and HTTP/WebSocket interfaces — letting you create lightweight autonomous systems that can use tools or sub-agents efficiently.
@@ -66,8 +66,8 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/johnjallday/dolphin-agent.git
-   cd dolphin-agent
+   git clone https://github.com/johnjallday/ori-agent.git
+   cd ori-agent
    ```
 
 2. **Install dependencies**
@@ -103,7 +103,7 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 
 5. **Run the server**
    ```bash
-   ./bin/dolphin-agent
+   ./bin/ori-agent
 
    # Or during development:
    go run cmd/server/main.go
@@ -229,7 +229,7 @@ For detailed API documentation including request/response formats, authenticatio
 ## 📁 Project Structure
 
 ```
-dolphin-agent/
+ori-agent/
 ├── cmd/server/           # Main server application
 ├── internal/
 │   ├── server/          # HTTP server and routing
@@ -416,10 +416,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 💬 Support
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/johnjallday/dolphin-agent/issues)
-- 📖 **Documentation**: [GitHub Wiki](https://github.com/johnjallday/dolphin-agent/wiki)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/johnjallday/ori-agent/issues)
+- 📖 **Documentation**: [GitHub Wiki](https://github.com/johnjallday/ori-agent/wiki)
 - 💡 **Feature Requests**: Open an issue with the "enhancement" label
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/dolphin-agent/discussions)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/ori-agent/discussions)
 
 - buymeacoffee.com/johnjallday
 

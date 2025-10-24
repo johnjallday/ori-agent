@@ -190,12 +190,12 @@ $(git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s" | head -20)
   else
     print_error "Failed to create GitHub release"
     print_status "Tag has been created and pushed. You can create the release manually at:"
-    print_status "https://github.com/johnjallday/dolphin-agent/releases/new?tag=$VERSION"
+    print_status "https://github.com/johnjallday/ori-agent/releases/new?tag=$VERSION"
   fi
 else
   print_warning "GitHub CLI (gh) not found. Tag created but no GitHub release."
   print_status "Create release manually at:"
-  print_status "https://github.com/johnjallday/dolphin-agent/releases/new?tag=$VERSION"
+  print_status "https://github.com/johnjallday/ori-agent/releases/new?tag=$VERSION"
 fi
 
 print_success "Release $VERSION created successfully!"

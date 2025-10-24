@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // LocalRegistry manages the local plugin registry for uploaded plugins

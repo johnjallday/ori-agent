@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Cleanup script for dolphin-agent
+# Cleanup script for ori-agent
 # Removes plugin cache, agents directory, agents.json, plugin registry cache, and uploaded plugins
 # Run from scripts/ directory - operates on parent directory
 
@@ -8,7 +8,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "🧹 Cleaning up dolphin-agent..."
+echo "🧹 Cleaning up ori-agent..."
 echo "   Working in: $PROJECT_DIR"
 
 cd "$PROJECT_DIR" || exit 1

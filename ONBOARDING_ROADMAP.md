@@ -268,7 +268,7 @@
 
 2. **Start the server**:
    ```bash
-   ./dolphin-agent
+   ./ori-agent
    ```
 
 3. **Open browser**:

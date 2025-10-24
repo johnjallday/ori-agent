@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Cross-platform build script for dolphin-agent plugins
+# Cross-platform build script for ori-agent plugins
 # Builds RPC plugin executables for Windows, Linux, and macOS
 
 set -e # Exit on any error

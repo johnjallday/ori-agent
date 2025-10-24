@@ -252,7 +252,7 @@ function renderModal(data, metadata) {
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  plugin_name: "reaper-script-launcher",
+                  plugin_name: "dolphin-reaper",
                   operation: "download_script",
                   args: {
                     filename: filename

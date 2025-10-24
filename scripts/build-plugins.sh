@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build all plugins script for dolphin-agent
+# Build all plugins script for ori-agent
 # This script rebuilds all plugins in the plugins/ directory as RPC executables
 
 set -e # Exit on any error

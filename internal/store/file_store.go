@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/johnjallday/dolphin-agent/internal/agent"
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type fileStore struct {

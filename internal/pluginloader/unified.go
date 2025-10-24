@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // LoadPluginUnified loads a plugin as an RPC executable

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Clean plugin binaries script for dolphin-agent
+# Clean plugin binaries script for ori-agent
 # Removes all compiled RPC plugin executables
 
 set -e  # Exit on any error

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build script for dolphin-agent project
+# Build script for ori-agent project
 # Builds the main server binary and all plugins
 
 set -e # Exit on any error
@@ -18,7 +18,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-BINARY_NAME="dolphin-agent"
+BINARY_NAME="ori-agent"
 OUTPUT_DIR="bin"
 VERSION_FILE="VERSION"
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -30,7 +30,7 @@ if [ -f "$VERSION_FILE" ]; then
   VERSION=$(cat "$VERSION_FILE" | tr -d '\n\r')
 fi
 
-echo -e "${BLUE}🔨 Building dolphin-agent${NC}"
+echo -e "${BLUE}🔨 Building ori-agent${NC}"
 echo -e "${CYAN}Version: $VERSION${NC}"
 echo -e "${CYAN}Commit: $GIT_COMMIT${NC}"
 echo -e "${CYAN}Build Date: $BUILD_DATE${NC}"
@@ -40,7 +40,7 @@ echo ""
 mkdir -p "$OUTPUT_DIR"
 
 # Build flags for version information
-LDFLAGS="-X 'github.com/johnjallday/dolphin-agent/internal/version.Version=$VERSION' -X 'github.com/johnjallday/dolphin-agent/internal/version.GitCommit=$GIT_COMMIT' -X 'github.com/johnjallday/dolphin-agent/internal/version.BuildDate=$BUILD_DATE'"
+LDFLAGS="-X 'github.com/johnjallday/ori-agent/internal/version.Version=$VERSION' -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit=$GIT_COMMIT' -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$BUILD_DATE'"
 
 # Check if we should build for specific OS/ARCH
 TARGET_OS=${GOOS:-$(go env GOOS)}

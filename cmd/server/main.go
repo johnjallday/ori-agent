@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/internal/server"
+	"github.com/johnjallday/ori-agent/internal/server"
 )
 
 func main() {

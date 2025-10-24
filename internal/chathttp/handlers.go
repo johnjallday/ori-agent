@@ -11,12 +11,12 @@ import (
 
 	"github.com/openai/openai-go/v2"
 
-	"github.com/johnjallday/dolphin-agent/internal/agent"
-	"github.com/johnjallday/dolphin-agent/internal/client"
-	"github.com/johnjallday/dolphin-agent/internal/llm"
-	"github.com/johnjallday/dolphin-agent/internal/store"
-	"github.com/johnjallday/dolphin-agent/internal/types"
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 type Handler struct {

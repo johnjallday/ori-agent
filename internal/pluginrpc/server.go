@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // GRPCServer implements the gRPC server for plugins

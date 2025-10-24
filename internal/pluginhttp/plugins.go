@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/pluginapi"
 
-	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
-	"github.com/johnjallday/dolphin-agent/internal/store"
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // ToolLoader abstracts loading a plugin Tool from a path.

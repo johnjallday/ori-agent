@@ -1,6 +1,6 @@
 package store
 
-import "github.com/johnjallday/dolphin-agent/internal/agent"
+import "github.com/johnjallday/ori-agent/internal/agent"
 
 type Store interface {
 	// Agents

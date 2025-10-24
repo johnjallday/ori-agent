@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/internal/device"
-	"github.com/johnjallday/dolphin-agent/internal/types"
-	"github.com/johnjallday/dolphin-agent/internal/version"
+	"github.com/johnjallday/ori-agent/internal/device"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/version"
 )
 
 var (

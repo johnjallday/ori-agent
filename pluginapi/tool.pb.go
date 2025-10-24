@@ -417,7 +417,7 @@ const file_proto_tool_proto_rawDesc = "" +
 	"\n" +
 	"GetVersion\x12\x10.pluginapi.Empty\x1a\x1a.pluginapi.VersionResponse\x12C\n" +
 	"\x0fSetAgentContext\x12\x1e.pluginapi.AgentContextRequest\x1a\x10.pluginapi.Empty\x12C\n" +
-	"\x12GetDefaultSettings\x12\x10.pluginapi.Empty\x1a\x1b.pluginapi.SettingsResponseB0Z.github.com/johnjallday/dolphin-agent/pluginapib\x06proto3"
+	"\x12GetDefaultSettings\x12\x10.pluginapi.Empty\x1a\x1b.pluginapi.SettingsResponseB,Z*github.com/johnjallday/ori-agent/pluginapib\x06proto3"
 
 var (
 	file_proto_tool_proto_rawDescOnce sync.Once

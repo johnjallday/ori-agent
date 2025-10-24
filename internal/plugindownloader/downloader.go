@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // PluginDownloader handles downloading and caching of external plugins

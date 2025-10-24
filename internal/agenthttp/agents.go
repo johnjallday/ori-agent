@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/johnjallday/dolphin-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 type Handler struct {

@@ -21,7 +21,7 @@
     {
       "name": "music_project_manager",
       "description": "Manage music projects: scan for .RPP files, create new projects, and manage project templates",
-      "path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/dolphin-agent/uploaded_plugins/music_project_manager.so"
+      "path": "/Users/jj/Workspace/johnj-programming/projects/dolphin/ori-agent/uploaded_plugins/music_project_manager.so"
     }
   ]
 }

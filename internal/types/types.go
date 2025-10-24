@@ -3,7 +3,7 @@ package types
 import (
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
 
@@ -50,18 +50,47 @@ type LoadedPlugin struct {
 
 // PluginRegistryEntry represents a plugin in the plugin registry
 type PluginRegistryEntry struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Path        string `json:"path,omitempty"`         // Local path (for local plugins)
-	URL         string `json:"url,omitempty"`          // External URL (for remote plugins)
-	Version     string `json:"version,omitempty"`      // Plugin version
-	Checksum    string `json:"checksum,omitempty"`     // SHA256 checksum for verification
-	AutoUpdate  bool   `json:"auto_update,omitempty"`  // Whether to auto-update this plugin
-	GitHubRepo  string `json:"github_repo,omitempty"`  // GitHub repository (user/repo format)
-	DownloadURL string `json:"download_url,omitempty"` // Direct download URL for GitHub releases
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Path         string   `json:"path,omitempty"`          // Local path (for local plugins)
+	URL          string   `json:"url,omitempty"`           // External URL (for remote plugins)
+	Version      string   `json:"version,omitempty"`       // Plugin version
+	Checksum     string   `json:"checksum,omitempty"`      // SHA256 checksum for verification
+	AutoUpdate   bool     `json:"auto_update,omitempty"`   // Whether to auto-update this plugin
+	GitHubRepo   string   `json:"github_repo,omitempty"`   // GitHub repository (user/repo format)
+	DownloadURL  string   `json:"download_url,omitempty"`  // Direct download URL for GitHub releases
+	SupportedOS  []string `json:"supported_os,omitempty"`  // Supported operating systems (darwin, linux, windows, all)
+	SupportedArch []string `json:"supported_arch,omitempty"` // Supported architectures (amd64, arm64, all)
 }
 
 // PluginRegistry contains all available plugins
 type PluginRegistry struct {
 	Plugins []PluginRegistryEntry `json:"plugins"`
+}
+
+// IsCompatibleWithSystem checks if a plugin is compatible with the given OS and architecture
+func (p *PluginRegistryEntry) IsCompatibleWithSystem(os, arch string) bool {
+	// If no supported OS specified, assume it works on all platforms
+	if len(p.SupportedOS) == 0 {
+		return true
+	}
+
+	// Check if "all" is in supported OS
+	for _, supportedOS := range p.SupportedOS {
+		if supportedOS == "all" || supportedOS == os {
+			// Also check architecture if specified
+			if len(p.SupportedArch) == 0 {
+				return true
+			}
+			for _, supportedArch := range p.SupportedArch {
+				if supportedArch == "all" || supportedArch == arch {
+					return true
+				}
+			}
+			// OS matches but arch doesn't
+			return false
+		}
+	}
+
+	return false
 }

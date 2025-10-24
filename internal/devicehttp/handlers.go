@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/johnjallday/dolphin-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
 
 // Handler handles device-related HTTP requests

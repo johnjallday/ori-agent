@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to run both dolphin-agent server and Wails desktop app together
+# Script to run both ori-agent server and Wails desktop app together
 # This provides the complete desktop experience with both backend and frontend
 
 set -e # Exit on any error
@@ -26,9 +26,9 @@ cleanup() {
     echo ""
     echo -e "${YELLOW}🧹 Cleaning up background processes...${NC}"
 
-    # Kill dolphin-agent server
+    # Kill ori-agent server
     if [[ -n $SERVER_PID ]]; then
-        echo -e "${YELLOW}   Stopping dolphin-agent server (PID: $SERVER_PID)${NC}"
+        echo -e "${YELLOW}   Stopping ori-agent server (PID: $SERVER_PID)${NC}"
         kill $SERVER_PID 2>/dev/null || true
     fi
 
@@ -38,8 +38,8 @@ cleanup() {
         kill $WAILS_PID 2>/dev/null || true
     fi
 
-    # Kill any remaining dolphin-agent processes
-    pkill -f "dolphin-agent" 2>/dev/null || true
+    # Kill any remaining ori-agent processes
+    pkill -f "ori-agent" 2>/dev/null || true
 
     # Kill any remaining wails processes
     pkill -f "wails dev" 2>/dev/null || true
@@ -68,20 +68,20 @@ else
     echo -e "${GREEN}✅ Using API key from settings.json${NC}"
 fi
 
-# Check if dolphin-agent binary exists
-echo -e "${BLUE}🔍 Checking dolphin-agent binary...${NC}"
-if [[ ! -f "./bin/dolphin-agent" ]] && [[ ! -f "./dolphin-agent" ]]; then
-    echo -e "${RED}❌ Error: dolphin-agent binary not found${NC}"
-    echo -e "${YELLOW}   Building dolphin-agent...${NC}"
+# Check if ori-agent binary exists
+echo -e "${BLUE}🔍 Checking ori-agent binary...${NC}"
+if [[ ! -f "./bin/ori-agent" ]] && [[ ! -f "./ori-agent" ]]; then
+    echo -e "${RED}❌ Error: ori-agent binary not found${NC}"
+    echo -e "${YELLOW}   Building ori-agent...${NC}"
 
     # Try to build the server
-    if ! go build -o bin/dolphin-agent ./cmd/server; then
-        echo -e "${RED}❌ Failed to build dolphin-agent${NC}"
+    if ! go build -o bin/ori-agent ./cmd/server; then
+        echo -e "${RED}❌ Failed to build ori-agent${NC}"
         exit 1
     fi
-    echo -e "${GREEN}✅ Built dolphin-agent successfully${NC}"
+    echo -e "${GREEN}✅ Built ori-agent successfully${NC}"
 else
-    echo -e "${GREEN}✅ dolphin-agent binary found${NC}"
+    echo -e "${GREEN}✅ ori-agent binary found${NC}"
 fi
 
 # Check if wails is installed
@@ -98,12 +98,12 @@ echo ""
 echo -e "${PURPLE}🚀 Starting Dolphin Desktop Experience...${NC}"
 echo ""
 
-# Start dolphin-agent server in background
-echo -e "${BLUE}1. Starting dolphin-agent server...${NC}"
-if [[ -f "./bin/dolphin-agent" ]]; then
-    ./bin/dolphin-agent &
+# Start ori-agent server in background
+echo -e "${BLUE}1. Starting ori-agent server...${NC}"
+if [[ -f "./bin/ori-agent" ]]; then
+    ./bin/ori-agent &
 else
-    ./dolphin-agent &
+    ./ori-agent &
 fi
 SERVER_PID=$!
 

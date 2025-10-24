@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 )
 
 func main() {

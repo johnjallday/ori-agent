@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build single plugin script for dolphin-agent
+# Build single plugin script for ori-agent
 # Usage: ./build-plugin.sh <plugin-name>
 # Example: ./build-plugin.sh weather
 

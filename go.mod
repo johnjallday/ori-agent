@@ -1,4 +1,4 @@
-module github.com/johnjallday/dolphin-agent
+module github.com/johnjallday/ori-agent
 
 go 1.24.1
 
@@ -6,6 +6,7 @@ toolchain go1.24.8
 
 require (
 	fyne.io/fyne/v2 v2.6.3
+	github.com/anthropics/anthropic-sdk-go v1.14.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
@@ -13,10 +14,10 @@ require (
 	github.com/wailsapp/wails/v2 v2.10.1
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.14.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/fredbi/uri v1.1.0 // indirect
@@ -64,5 +65,4 @@ require (
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

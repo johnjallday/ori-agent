@@ -10,14 +10,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/internal/plugindownloader"
-	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
-	"github.com/johnjallday/dolphin-agent/internal/registry"
-	"github.com/johnjallday/dolphin-agent/internal/store"
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/plugindownloader"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type RegistryHandler struct {
@@ -78,6 +79,24 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Get filter_compatible query parameter (defaults to "true")
+		filterCompatible := r.URL.Query().Get("filter_compatible")
+		if filterCompatible == "" || filterCompatible == "true" {
+			// Filter plugins by OS/arch compatibility
+			compatiblePlugins := []types.PluginRegistryEntry{}
+			currentOS := runtime.GOOS
+			currentArch := runtime.GOARCH
+
+			for _, plugin := range reg.Plugins {
+				if plugin.IsCompatibleWithSystem(currentOS, currentArch) {
+					compatiblePlugins = append(compatiblePlugins, plugin)
+				}
+			}
+
+			reg.Plugins = compatiblePlugins
+		}
+
 		_ = json.NewEncoder(w).Encode(reg)
 
 	case http.MethodPost:

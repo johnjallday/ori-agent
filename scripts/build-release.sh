@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# build-release.sh - Cross-platform release build script for dolphin-agent
+# build-release.sh - Cross-platform release build script for ori-agent
 # This script is called by devops-manager create-release process
 
 set -e
@@ -17,10 +17,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Building cross-platform release binaries for dolphin-agent${NC}"
+echo -e "${BLUE}🚀 Building cross-platform release binaries for ori-agent${NC}"
 
 # Configuration
-BINARY_NAME="dolphin-agent"
+BINARY_NAME="ori-agent"
 DIST_DIR="dist"
 VERSION_FILE="VERSION"
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -42,7 +42,7 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 # Build flags for version information
-LDFLAGS="-X 'github.com/johnjallday/dolphin-agent/internal/version.Version=$VERSION' -X 'github.com/johnjallday/dolphin-agent/internal/version.GitCommit=$GIT_COMMIT' -X 'github.com/johnjallday/dolphin-agent/internal/version.BuildDate=$BUILD_DATE'"
+LDFLAGS="-X 'github.com/johnjallday/ori-agent/internal/version.Version=$VERSION' -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit=$GIT_COMMIT' -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$BUILD_DATE'"
 
 # Platform configurations
 declare -a PLATFORMS=(

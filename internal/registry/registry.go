@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johnjallday/dolphin-agent/internal/types"
-	"github.com/johnjallday/dolphin-agent/internal/web"
-	"github.com/johnjallday/dolphin-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 )
 
 // Manager handles plugin registry operations
@@ -34,7 +34,7 @@ func NewManager() *Manager {
 func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
 	
-	resp, err := http.Get("https://raw.githubusercontent.com/johnjallday/dolphin-plugin-registry/main/plugin_registry.json")
+	resp, err := http.Get("https://raw.githubusercontent.com/johnjallday/ori-plugin-registry/main/plugin_registry.json")
 	if err != nil {
 		return reg, fmt.Errorf("failed to fetch from GitHub: %w", err)
 	}
@@ -196,6 +196,84 @@ func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry
 	}
 
 	return merged
+}
+
+// ValidateAndUpdateLocal checks that plugins in local registry exist and updates paths if needed
+func (m *Manager) ValidateAndUpdateLocal() error {
+	// Load current local registry
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	if len(localReg.Plugins) == 0 {
+		return nil // Nothing to validate
+	}
+
+	var validPlugins []types.PluginRegistryEntry
+	var updated bool
+
+	// Common search locations for plugins
+	searchDirs := []string{
+		"plugins",
+		"uploaded_plugins",
+		"example_plugins",
+		"../plugins",
+		"../uploaded_plugins",
+	}
+
+	for _, plugin := range localReg.Plugins {
+		// Check if plugin exists at its current path
+		if _, err := os.Stat(plugin.Path); err == nil {
+			validPlugins = append(validPlugins, plugin)
+			continue
+		}
+
+		// Plugin doesn't exist at specified path, try to find it
+		pluginName := plugin.Name
+		found := false
+		var newPath string
+
+		// Try each search directory
+		for _, dir := range searchDirs {
+			// Try with plugin name only
+			possiblePath := filepath.Join(dir, pluginName, pluginName)
+			if _, err := os.Stat(possiblePath); err == nil {
+				newPath = possiblePath
+				found = true
+				break
+			}
+
+			// Try with plugin name directly in directory
+			possiblePath = filepath.Join(dir, pluginName)
+			if _, err := os.Stat(possiblePath); err == nil {
+				newPath = possiblePath
+				found = true
+				break
+			}
+		}
+
+		if found {
+			fmt.Printf("Updated plugin path: %s -> %s\n", plugin.Path, newPath)
+			plugin.Path = newPath
+			validPlugins = append(validPlugins, plugin)
+			updated = true
+		} else {
+			fmt.Printf("Plugin not found, removing from registry: %s (was at %s)\n", plugin.Name, plugin.Path)
+			updated = true
+		}
+	}
+
+	// Save updated registry if changes were made
+	if updated {
+		localReg.Plugins = validPlugins
+		if err := m.SaveLocal(localReg); err != nil {
+			return fmt.Errorf("failed to save updated local registry: %w", err)
+		}
+		fmt.Printf("Updated local plugin registry (validated %d plugins, %d valid)\n", len(localReg.Plugins), len(validPlugins))
+	}
+
+	return nil
 }
 
 // Load reads the registry dynamically with fallbacks, merging online and local registries.

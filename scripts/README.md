@@ -1,6 +1,6 @@
 # Build Scripts
 
-This directory contains shell scripts for building the dolphin-agent project and its plugins.
+This directory contains shell scripts for building the ori-agent project and its plugins.
 
 ## Main Build Scripts
 
@@ -126,7 +126,7 @@ Builds plugins that are in separate repositories or directories outside the main
 # Typical development workflow
 ./scripts/clean-plugins.sh    # Clean old builds
 ./scripts/build.sh            # Build everything
-./bin/dolphin-agent          # Run the server
+./bin/ori-agent          # Run the server
 
 # Release workflow
 ./scripts/clean-plugins.sh    # Clean old builds

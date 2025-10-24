@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // Detect automatically detects device information

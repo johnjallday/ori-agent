@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build external plugins script for dolphin-agent
+# Build external plugins script for ori-agent
 # Builds plugins that are in separate repositories/directories
 
 set -e  # Exit on any error

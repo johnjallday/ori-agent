@@ -7,7 +7,7 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 
-	"github.com/johnjallday/dolphin-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/agent"
 )
 
 // Factory provides methods for creating OpenAI clients

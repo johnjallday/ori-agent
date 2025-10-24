@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"github.com/johnjallday/dolphin-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/openai/openai-go/v2"
 )
 

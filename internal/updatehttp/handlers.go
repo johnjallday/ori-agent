@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/johnjallday/dolphin-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/updatemanager"
 )
 
 // Handler handles update-related HTTP requests

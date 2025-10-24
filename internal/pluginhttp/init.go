@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/johnjallday/dolphin-agent/internal/registry"
-	"github.com/johnjallday/dolphin-agent/internal/store"
-	"github.com/johnjallday/dolphin-agent/pluginapi"
+	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 type InitHandler struct {

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/johnjallday/dolphin-agent/internal/pluginhttp"
-	"github.com/johnjallday/dolphin-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
+	"github.com/johnjallday/ori-agent/internal/store"
 )
 
 // CommandHandler handles special chat commands

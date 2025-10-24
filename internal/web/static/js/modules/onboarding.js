@@ -2,7 +2,7 @@
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 4;
+    this.totalSteps = 5;
     this.modal = null;
     this.modalInstance = null;
     this.deviceInfo = null;
@@ -61,6 +61,24 @@ export class OnboardingManager {
 
     if (closeBtn) {
       closeBtn.addEventListener('click', () => this.skipOnboarding());
+    }
+
+    // API Keys password toggle buttons
+    const toggleOpenaiBtn = document.getElementById('toggleOpenaiKey');
+    const toggleAnthropicBtn = document.getElementById('toggleAnthropicKey');
+
+    if (toggleOpenaiBtn) {
+      toggleOpenaiBtn.addEventListener('click', () => {
+        const input = document.getElementById('openaiApiKey');
+        input.type = input.type === 'password' ? 'text' : 'password';
+      });
+    }
+
+    if (toggleAnthropicBtn) {
+      toggleAnthropicBtn.addEventListener('click', () => {
+        const input = document.getElementById('anthropicApiKey');
+        input.type = input.type === 'password' ? 'text' : 'password';
+      });
     }
 
     // Keyboard navigation
@@ -126,6 +144,43 @@ export class OnboardingManager {
 
       // Fetch device info when modal is shown
       this.fetchDeviceInfo();
+
+      // Check if API keys are already configured
+      this.checkAPIKeyStatus();
+    }
+  }
+
+  // Check if API keys are configured (via env vars or settings)
+  async checkAPIKeyStatus() {
+    try {
+      const response = await fetch('/api/api-key');
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+
+      // Show info message if env vars are set
+      if (data.has_openai || data.has_anthropic) {
+        const providers = [];
+        if (data.has_openai) providers.push('OpenAI');
+        if (data.has_anthropic) providers.push('Anthropic');
+
+        const envInfo = document.getElementById('apiKeysEnvInfo');
+        if (envInfo) {
+          envInfo.innerHTML = `
+            <div class="alert alert-success">
+              <svg class="bi me-2" width="16" height="16" fill="currentColor">
+                <use xlink:href="#check-circle-fill"/>
+              </svg>
+              ${providers.join(' and ')} API key${providers.length > 1 ? 's are' : ' is'} already configured. You can skip this step or add additional keys.
+            </div>
+          `;
+          envInfo.classList.remove('d-none');
+        }
+      }
+    } catch (error) {
+      console.error('Error checking API key status:', error);
     }
   }
 
@@ -208,9 +263,82 @@ export class OnboardingManager {
     }
   }
 
+  // Save API keys from the onboarding form
+  async saveApiKeys() {
+    const openaiKey = document.getElementById('openaiApiKey').value.trim();
+    const anthropicKey = document.getElementById('anthropicApiKey').value.trim();
+
+    // Hide previous messages
+    document.getElementById('apiKeysSuccess').classList.add('d-none');
+    document.getElementById('apiKeysError').classList.add('d-none');
+
+    // Check if API keys are already configured (via env vars)
+    let hasExistingKeys = false;
+    try {
+      const statusResponse = await fetch('/api/api-key');
+      if (statusResponse.ok) {
+        const data = await statusResponse.json();
+        hasExistingKeys = data.has_openai || data.has_anthropic;
+      }
+    } catch (error) {
+      console.error('Error checking API key status:', error);
+    }
+
+    // If both are empty and no existing keys, show validation error
+    if (!openaiKey && !anthropicKey && !hasExistingKeys) {
+      document.getElementById('apiKeysError').classList.remove('d-none');
+      document.getElementById('apiKeysErrorMessage').textContent =
+        'Please provide at least one API key to continue, or set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variables.';
+      return false;
+    }
+
+    // If both are empty but keys exist, skip saving (user chose to use env vars)
+    if (!openaiKey && !anthropicKey) {
+      return true;
+    }
+
+    try {
+      const response = await fetch('/api/api-key', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          openai_api_key: openaiKey || undefined,
+          anthropic_api_key: anthropicKey || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save API keys');
+      }
+
+      // Show success message
+      document.getElementById('apiKeysSuccess').classList.remove('d-none');
+      console.log('API keys saved successfully');
+      return true;
+    } catch (error) {
+      console.error('Error saving API keys:', error);
+      // Show error message
+      document.getElementById('apiKeysError').classList.remove('d-none');
+      document.getElementById('apiKeysErrorMessage').textContent =
+        'Failed to save API keys. You can add them later in Settings.';
+      return false;
+    }
+  }
+
   // Move to next step
   async nextStep() {
     if (this.currentStep < this.totalSteps - 1) {
+      // Save API keys if leaving step-1
+      if (this.currentStep === 1) {
+        const saved = await this.saveApiKeys();
+        // Don't proceed if validation failed
+        if (saved === false) {
+          return;
+        }
+      }
+
       // Mark current step as completed
       await this.completeStep(`step-${this.currentStep}`);
 
