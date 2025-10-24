@@ -2,6 +2,7 @@ package pluginloader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,12 +39,68 @@ func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 }
 
 // ExtractPluginSettingsSchema checks if a plugin provides default settings and creates initial settings file.
-// If the plugin implements DefaultSettingsProvider, writes default settings to the agent settings file.
+// Priority order:
+// 1. InitializationProvider (modern, declarative)
+// 2. DefaultSettingsProvider (simple defaults)
+// 3. get_settings operation (legacy)
 func ExtractPluginSettingsSchema(tool pluginapi.Tool, agentName string) error {
 	// Get plugin definition
 	def := tool.Definition()
 
-	// First, check if plugin implements DefaultSettingsProvider interface
+	// First priority: Check if plugin implements InitializationProvider (modern approach)
+	if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+		// Get required config variables from the plugin
+		configVars := initProvider.GetRequiredConfig()
+
+		// Convert ConfigVariables to field types map for frontend compatibility
+		fieldTypes := make(map[string]string)
+		defaultValues := make(map[string]interface{})
+
+		for _, cv := range configVars {
+			// Map ConfigVariableType to simple field type string
+			fieldTypes[cv.Key] = string(cv.Type)
+
+			// Include default value if provided
+			if cv.DefaultValue != nil {
+				defaultValues[cv.Key] = cv.DefaultValue
+			}
+		}
+
+		// Create agent directory if it doesn't exist
+		agentDir := filepath.Join("agents", agentName)
+		if err := os.MkdirAll(agentDir, 0755); err != nil {
+			return fmt.Errorf("failed to create agent directory: %w", err)
+		}
+
+		// Write the settings schema to {plugin_name}_settings.json
+		settingsFileName := fmt.Sprintf("%s_settings.json", def.Name)
+		settingsPath := filepath.Join(agentDir, settingsFileName)
+
+		// Only create the file if it doesn't exist (don't overwrite existing settings)
+		if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+			// If we have default values, use them; otherwise just use field types
+			var settingsData []byte
+			var err error
+
+			if len(defaultValues) > 0 {
+				settingsData, err = json.MarshalIndent(defaultValues, "", "  ")
+			} else {
+				settingsData, err = json.MarshalIndent(fieldTypes, "", "  ")
+			}
+
+			if err != nil {
+				return fmt.Errorf("failed to marshal settings schema: %w", err)
+			}
+
+			if err := os.WriteFile(settingsPath, settingsData, 0644); err != nil {
+				return fmt.Errorf("failed to write plugin settings: %w", err)
+			}
+			fmt.Printf("✅ Extracted settings schema for plugin %s using InitializationProvider\n", def.Name)
+		}
+		return nil
+	}
+
+	// Second priority: Check if plugin implements DefaultSettingsProvider interface
 	if defaultProvider, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		// Get default settings from the interface method
 		defaultSettings, err := defaultProvider.GetDefaultSettings()

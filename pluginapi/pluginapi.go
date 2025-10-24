@@ -102,3 +102,12 @@ type InitializableTool interface {
 	Tool
 	InitializationProvider
 }
+
+// SettingsProvider allows plugins to get and set runtime configuration.
+// Plugins should implement this interface to support frontend settings management.
+type SettingsProvider interface {
+	// GetSettings returns current settings as a JSON string
+	GetSettings() (string, error)
+	// SetSettings updates settings from a JSON string
+	SetSettings(settingsJSON string) error
+}
