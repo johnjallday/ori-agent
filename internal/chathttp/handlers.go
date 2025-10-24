@@ -137,24 +137,32 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				}
 			}
 
+			var result string
+			var err error
+
 			if !found || pl.Tool == nil {
-				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
-				return
+				result = fmt.Sprintf("❌ Error: Plugin %q not found or not loaded", name)
+				err = fmt.Errorf("plugin not found")
+				log.Printf("Plugin %s not found", name)
+			} else {
+				// Execute tool with timeout (30s for operations like API calls)
+				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+				defer toolCancel()
+
+				result, err = pl.Tool.Call(toolCtx, args)
+
+				// IMPORTANT: Convert error to string result instead of returning HTTP error
+				// This prevents conversation history corruption
+				if err != nil {
+					errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
+					result = errorMsg
+					log.Printf("Tool %s failed: %v", name, err)
+				} else {
+					log.Printf("Tool %s returned: %s", name, result)
+				}
 			}
 
-			// Execute tool with timeout (30s for operations like API calls)
-			toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
-			defer toolCancel()
-
-			result, err := pl.Tool.Call(toolCtx, args)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
-				return
-			}
-
-			log.Printf("Tool %s returned: %s", name, result)
-
-			// Add tool result message
+			// Add tool result message (even if it's an error)
 			messages = append(messages, llm.NewToolMessage(tc.ID, result))
 
 			// Also store in OpenAI format for agent history
@@ -601,9 +609,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			defer toolCancel()
 
 			result, err := pl.Tool.Call(toolCtx, args)
+
+			// IMPORTANT: Always add a tool response message, even on error
+			// This prevents conversation history corruption when tool calls fail
 			if err != nil {
-				http.Error(w, fmt.Sprintf("tool %s error: %v", name, err), http.StatusBadGateway)
-				return
+				errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
+				result = errorMsg
+				log.Printf("Tool %s failed: %v", name, err)
 			}
 
 			// Add tool message response for this specific tool call ID

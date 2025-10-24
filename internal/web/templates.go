@@ -103,7 +103,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 // GetDefaultData returns default template data
 func GetDefaultData() TemplateData {
 	return TemplateData{
-		Title:        "Dolphin Agent Chatbot",
+		Title:        "Ori Agent Chatbot",
 		Theme:        "light",
 		CurrentAgent: "Default Agent",
 		Model:        "gpt-5-nano",
