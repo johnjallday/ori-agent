@@ -3,13 +3,13 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -348,12 +348,12 @@ func (s *fileStore) load() error {
 							ag.Type = settings.Type
 							ag.Settings = settings.Settings
 							ag.Plugins = settings.Plugins
-							fmt.Printf("✅ Loaded agent '%s' with %d plugins from %s\n", agentName, len(settings.Plugins), settingsPath)
+							logger.Verbosef("✅ Loaded agent '%s' with %d plugins from %s", agentName, len(settings.Plugins), settingsPath)
 						} else {
-							fmt.Printf("❌ Failed to unmarshal agent_settings.json for '%s': %v\n", agentName, err)
+							logger.Verbosef("❌ Failed to unmarshal agent_settings.json for '%s': %v", agentName, err)
 						}
 					} else {
-						fmt.Printf("⚠️ Could not read agent_settings.json for '%s': %v\n", agentName, err)
+						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
 					}
 
 					// Ensure maps are initialized

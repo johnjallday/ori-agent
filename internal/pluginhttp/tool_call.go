@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -55,12 +56,16 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Find the plugin
-	plugin, exists := agent.Plugins[req.PluginName]
+	// Normalize plugin name: OpenAI function names use underscores, but plugin names use hyphens
+	// Convert ori_reaper -> ori-reaper
+	pluginName := strings.ReplaceAll(req.PluginName, "_", "-")
+
+	// Find the plugin using normalized name
+	plugin, exists := agent.Plugins[pluginName]
 	if !exists || plugin.Tool == nil {
 		json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
-			Error:   fmt.Sprintf("Plugin %q not found or not loaded", req.PluginName),
+			Error:   fmt.Sprintf("Plugin %q not found or not loaded", pluginName),
 		})
 		return
 	}

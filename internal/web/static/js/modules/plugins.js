@@ -235,22 +235,6 @@ async function togglePlugin(pluginName, pluginPath, enable) {
   console.log(`togglePlugin called: ${pluginName}, enable: ${enable}`);
 
   if (enable) {
-    // Check if plugin has filepath settings that need user input
-    const hasFilepathSettings = await checkPluginFilepathSettings(pluginName, pluginPath);
-    if (hasFilepathSettings) {
-      const userSettings = await showFilepathSettingsModal(pluginName, hasFilepathSettings);
-      if (!userSettings) {
-        // User cancelled
-        return;
-      }
-      // Continue with enable process using user settings
-      await enablePluginWithSettings(pluginName, pluginPath, userSettings);
-
-      // Refresh the plugins list to show the updated state
-      await loadPlugins();
-      return;
-    }
-
     // For enabling, check if the file needs to be renamed back from .disabled
     const disabledPath = pluginPath + '.disabled';
 
@@ -264,7 +248,9 @@ async function togglePlugin(pluginName, pluginPath, enable) {
         return formData;
       })()
     });
-    
+
+    let enableResponseData = null;
+
     if (!enableResponse.ok) {
       const errorText = await enableResponse.text();
       // If it failed because the file doesn't exist, try to restore from .disabled
@@ -276,12 +262,12 @@ async function togglePlugin(pluginName, pluginPath, enable) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: pluginName, path: pluginPath })
         });
-        
+
         if (!restoreResponse.ok) {
           const restoreError = await restoreResponse.text();
           throw new Error(`Failed to restore plugin file: ${restoreError}`);
         }
-        
+
         // Now try to enable again
         const retryResponse = await fetch('/api/plugins', {
           method: 'POST',
@@ -292,17 +278,41 @@ async function togglePlugin(pluginName, pluginPath, enable) {
             return formData;
           })()
         });
-        
+
         if (!retryResponse.ok) {
           const retryError = await retryResponse.text();
           throw new Error(`Failed to enable plugin after restore: ${retryError}`);
         }
+
+        // Get response data from retry
+        try {
+          enableResponseData = await retryResponse.json();
+        } catch (e) {
+          console.log('Failed to parse retry response as JSON');
+        }
       } else {
         throw new Error(errorText || 'Failed to enable plugin');
+      }
+    } else {
+      // Get response data from successful enable
+      try {
+        enableResponseData = await enableResponse.json();
+      } catch (e) {
+        console.log('Failed to parse enable response as JSON');
       }
     }
 
     console.log(`Plugin ${pluginName} enabled successfully`);
+
+    // Check if plugin needs configuration modal
+    if (enableResponseData && enableResponseData.show_config_modal === true) {
+      console.log(`Plugin ${pluginName} requires configuration, showing modal...`);
+      // Refresh plugins list first
+      await loadPlugins();
+      // Show configuration modal
+      await showPluginConfigModal(pluginName);
+      return; // Don't refresh again after modal
+    }
 
     // Refresh the plugins list to show the updated state
     await loadPlugins();

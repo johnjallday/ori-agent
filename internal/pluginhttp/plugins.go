@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -175,23 +176,23 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 			var requiresSettings bool
 			var settingVariables []pluginapi.ConfigVariable
 
-			fmt.Printf("🔄 Temporarily loading plugin '%s' from path: %s\n", registryPlugin.Name, registryPlugin.Path)
+			logger.Verbosef("🔄 Temporarily loading plugin '%s' from path: %s", registryPlugin.Name, registryPlugin.Path)
 			if tool, err := h.Loader.Load(registryPlugin.Path); err == nil {
-				fmt.Printf("✓ Plugin loaded, type: %T\n", tool)
-				fmt.Printf("✓ Checking InitializationProvider interface...\n")
+				logger.Verbosef("✓ Plugin loaded, type: %T", tool)
+				logger.Verbosef("✓ Checking InitializationProvider interface...")
 				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
-					fmt.Printf("✅ Plugin implements InitializationProvider!\n")
+					logger.Verbosef("✅ Plugin implements InitializationProvider!")
 					settingVariables = initProvider.GetRequiredConfig()
-					fmt.Printf("✅ Got %d setting variables\n", len(settingVariables))
+					logger.Verbosef("✅ Got %d setting variables", len(settingVariables))
 					for i, sv := range settingVariables {
-						fmt.Printf("  [%d] %s (%s): %s\n", i, sv.Key, sv.Type, sv.Description)
+						fmt.Printf("  [%d] %s (%s): %s", i, sv.Key, sv.Type, sv.Description)
 					}
 					requiresSettings = len(settingVariables) > 0
 				} else {
-					fmt.Printf("❌ Plugin does NOT implement InitializationProvider (type: %T)\n", tool)
+					logger.Verbosef("❌ Plugin does NOT implement InitializationProvider (type: %T)", tool)
 				}
 			} else {
-				fmt.Printf("❌ Failed to load plugin: %v\n", err)
+				logger.Verbosef("❌ Failed to load plugin: %v", err)
 			}
 
 			pluginInfo := map[string]any{
@@ -321,7 +322,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		ag.Plugins = make(map[string]types.LoadedPlugin)
 	}
 
-	fmt.Printf("💾 Adding plugin '%s' to agent '%s' (current plugins: %d)\n", name, current, len(ag.Plugins))
+	logger.Verbosef("💾 Adding plugin '%s' to agent '%s' (current plugins: %d)", name, current, len(ag.Plugins))
 
 	ag.Plugins[name] = types.LoadedPlugin{
 		Tool:       tool,
@@ -330,25 +331,38 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		Version:    version,
 	}
 
-	fmt.Printf("💾 Agent now has %d plugins\n", len(ag.Plugins))
+	logger.Verbosef("💾 Agent now has %d plugins", len(ag.Plugins))
 
 	// Save updated agent
-	fmt.Printf("💾 Saving agent '%s' to state...\n", current)
+	logger.Verbosef("💾 Saving agent '%s' to state...", current)
 	if err := h.State.SetAgent(current, ag); err != nil {
-		fmt.Printf("❌ Failed to save agent: %v\n", err)
+		logger.Verbosef("❌ Failed to save agent: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Printf("✅ Agent saved successfully\n")
-	
+	logger.Verbosef("✅ Agent saved successfully")
+
+	// Check if plugin has required configuration fields
+	showConfigModal := false
+	if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+		configVars := initProvider.GetRequiredConfig()
+		for _, cv := range configVars {
+			if cv.Required {
+				showConfigModal = true
+				break
+			}
+		}
+	}
+
 	// Return success response
 	response := map[string]any{
-		"success":     true,
-		"name":        name,
-		"description": def.Description.String(),
-		"path":        path,
-		"version":     version,
-		"message":     "Plugin loaded successfully from registry",
+		"success":           true,
+		"name":              name,
+		"description":       def.Description.String(),
+		"path":              path,
+		"version":           version,
+		"message":           "Plugin loaded successfully from registry",
+		"show_config_modal": showConfigModal,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -398,18 +412,18 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 
 // GetPluginConfig gets configuration requirements from a specific plugin
 func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
-	fmt.Printf("🔍 GetPluginConfig called for plugin: %s\n", pluginName)
+	fmt.Printf("🔍 GetPluginConfig called for plugin: %s", pluginName)
 
 	names, current := h.State.ListAgents()
-	fmt.Printf("📋 Available agents: %v, current: %s\n", names, current)
+	logger.Verbosef("📋 Available agents: %v, current: %s", names, current)
 
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		fmt.Printf("❌ Current agent '%s' not found\n", current)
+		logger.Verbosef("❌ Current agent '%s' not found", current)
 		return nil, false, fmt.Errorf("current agent not found")
 	}
 
-	fmt.Printf("📦 Agent has %d plugins: %v\n", len(ag.Plugins), func() []string {
+	logger.Verbosef("📦 Agent has %d plugins: %v", len(ag.Plugins), func() []string {
 		keys := make([]string, 0, len(ag.Plugins))
 		for k := range ag.Plugins {
 			keys = append(keys, k)
@@ -419,7 +433,7 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 
 	plugin, exists := ag.Plugins[pluginName]
 	if !exists {
-		fmt.Printf("❌ Plugin '%s' not found in agent. Available: %v\n", pluginName, func() []string {
+		logger.Verbosef("❌ Plugin '%s' not found in agent. Available: %v", pluginName, func() []string {
 			keys := make([]string, 0, len(ag.Plugins))
 			for k := range ag.Plugins {
 				keys = append(keys, k)
@@ -429,37 +443,37 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 		return nil, false, fmt.Errorf("plugin %s not found", pluginName)
 	}
 
-	fmt.Printf("✓ Plugin found: %s, Path: %s, Tool: %v\n", pluginName, plugin.Path, plugin.Tool != nil)
+	logger.Verbosef("✓ Plugin found: %s, Path: %s, Tool: %v", pluginName, plugin.Path, plugin.Tool != nil)
 
 	// If Tool is not loaded, load it now
 	var tool pluginapi.Tool
 	if plugin.Tool != nil {
-		fmt.Printf("✓ Using already loaded tool\n")
+		logger.Verbosef("✓ Using already loaded tool")
 		tool = plugin.Tool
 	} else if plugin.Path != "" {
-		fmt.Printf("🔄 Loading plugin from path: %s\n", plugin.Path)
+		logger.Verbosef("🔄 Loading plugin from path: %s", plugin.Path)
 		// Load plugin from path
 		loadedTool, err := h.Loader.Load(plugin.Path)
 		if err != nil {
-			fmt.Printf("❌ Failed to load plugin: %v\n", err)
+			logger.Verbosef("❌ Failed to load plugin: %v", err)
 			return nil, false, fmt.Errorf("failed to load plugin: %w", err)
 		}
 		tool = loadedTool
-		fmt.Printf("✓ Plugin loaded successfully\n")
+		logger.Verbosef("✓ Plugin loaded successfully")
 	} else {
-		fmt.Printf("❌ Plugin has no tool instance or path\n")
+		logger.Verbosef("❌ Plugin has no tool instance or path")
 		return nil, false, fmt.Errorf("plugin has no tool instance or path")
 	}
 
 	// Check if plugin implements InitializationProvider
 	if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
-		fmt.Printf("✓ Plugin implements InitializationProvider\n")
+		logger.Verbosef("✓ Plugin implements InitializationProvider")
 		configVars := initProvider.GetRequiredConfig()
-		fmt.Printf("✓ Got %d config variables\n", len(configVars))
+		logger.Verbosef("✓ Got %d config variables", len(configVars))
 		return configVars, true, nil
 	}
 
-	fmt.Printf("❌ Plugin does NOT implement InitializationProvider\n")
+	logger.Verbosef("❌ Plugin does NOT implement InitializationProvider")
 	// Plugin doesn't support initialization
 	return nil, false, nil
 }
@@ -509,8 +523,53 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Normalize plugin name: OpenAI function names use underscores, but plugin names use hyphens
+	// Convert ori_reaper -> ori-reaper
+	pluginName := strings.ReplaceAll(req.PluginName, "_", "-")
+
 	// Get current agent
 	_, current := h.State.ListAgents()
+
+	// Normalize settings keys: Frontend may send display names, but we need to save config keys
+	// Get the plugin's config schema to build a mapping
+	normalizedSettings := make(map[string]string)
+	if configVars, supportsInit, err := h.GetPluginConfig(pluginName); err == nil && supportsInit {
+		// Build a mapping from display names to keys, and store default values
+		nameToKey := make(map[string]string)
+		keyToDefault := make(map[string]string)
+		for _, cv := range configVars {
+			nameToKey[cv.Name] = cv.Key
+			nameToKey[cv.Key] = cv.Key // Also map key to itself for idempotency
+
+			// Store default value for this key
+			if cv.DefaultValue != nil {
+				if defaultStr, ok := cv.DefaultValue.(string); ok {
+					keyToDefault[cv.Key] = defaultStr
+				}
+			}
+		}
+
+		// Transform the settings to use correct keys
+		for k, v := range req.Settings {
+			if correctKey, ok := nameToKey[k]; ok {
+				normalizedSettings[correctKey] = v
+			} else {
+				// If no mapping found, use the key as-is (might be already correct)
+				normalizedSettings[k] = v
+			}
+		}
+
+		// Fill in default values for empty fields
+		for key, defaultValue := range keyToDefault {
+			if normalizedSettings[key] == "" {
+				normalizedSettings[key] = defaultValue
+				logger.Verbosef("Using default value for %s: %s", key, defaultValue)
+			}
+		}
+	} else {
+		// Plugin doesn't support initialization, just use settings as-is
+		normalizedSettings = req.Settings
+	}
 
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", current)
@@ -519,12 +578,12 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save settings to plugin-specific file
-	settingsFileName := fmt.Sprintf("%s_settings.json", req.PluginName)
+	// Save settings to plugin-specific file using normalized name
+	settingsFileName := fmt.Sprintf("%s_settings.json", pluginName)
 	settingsPath := filepath.Join(agentDir, settingsFileName)
 
-	// Convert user settings to JSON
-	settingsData, err := json.MarshalIndent(req.Settings, "", "  ")
+	// Convert normalized settings to JSON
+	settingsData, err := json.MarshalIndent(normalizedSettings, "", "  ")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to marshal settings: %v", err), http.StatusInternalServerError)
 		return
@@ -535,12 +594,70 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Saved plugin settings for %s to %s\n", req.PluginName, settingsPath)
+	logger.Verbosef("Saved plugin settings for %s to %s", pluginName, settingsPath)
+
+	// Reload the plugin completely to regenerate tool definition with new settings
+	// This ensures the script enum in Definition() reflects the new scripts directory
+	ag, ok := h.State.GetAgent(current)
+	if ok {
+		if plugin, exists := ag.Plugins[pluginName]; exists && plugin.Path != "" {
+			logger.Verbosef("🔄 Reloading plugin %s to apply new settings...", pluginName)
+
+			// Kill old plugin process if it's an RPC plugin
+			if rpcPlugin, ok := plugin.Tool.(interface{ Kill() }); ok {
+				rpcPlugin.Kill()
+			}
+
+			// Reload the plugin from disk
+			newTool, err := h.Loader.Load(plugin.Path)
+			if err != nil {
+				logger.Verbosef("⚠️ Warning: Failed to reload plugin: %v", err)
+				// Don't fail the request, settings file was saved successfully
+			} else {
+				// Update the tool in the plugin
+				plugin.Tool = newTool
+				plugin.Definition = newTool.Definition()
+
+				// Convert normalizedSettings from map[string]string to map[string]interface{}
+				configMap := make(map[string]interface{})
+				for k, v := range normalizedSettings {
+					configMap[k] = v
+				}
+
+				// Initialize the new plugin instance with the saved settings
+				if initProvider, ok := newTool.(pluginapi.InitializationProvider); ok {
+					if err := initProvider.InitializeWithConfig(configMap); err != nil {
+						logger.Verbosef("⚠️ Warning: Failed to initialize reloaded plugin: %v", err)
+					}
+				}
+
+				// Set agent context if plugin supports it
+				if agentAware, ok := newTool.(pluginapi.AgentAwareTool); ok {
+					agentDir := filepath.Join("agents", current)
+					agentContext := pluginapi.AgentContext{
+						Name:         current,
+						ConfigPath:   filepath.Join(agentDir, "config.json"),
+						SettingsPath: filepath.Join(agentDir, "agent_settings.json"),
+						AgentDir:     agentDir,
+					}
+					agentAware.SetAgentContext(agentContext)
+				}
+
+				// Update agent state
+				ag.Plugins[pluginName] = plugin
+				if err := h.State.SetAgent(current, ag); err != nil {
+					logger.Verbosef("⚠️ Warning: Failed to save agent state: %v", err)
+				} else {
+					logger.Verbosef("✅ Successfully reloaded plugin %s with new settings", pluginName)
+				}
+			}
+		}
+	}
 
 	// Return success response
 	response := map[string]any{
 		"success": true,
-		"message": fmt.Sprintf("Settings saved for plugin %s", req.PluginName),
+		"message": fmt.Sprintf("Settings saved for plugin %s", pluginName),
 		"path":    settingsPath,
 	}
 
@@ -603,7 +720,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Uploaded config file %s for plugin %s to %s\n", req.Filename, req.PluginName, configPath)
+	logger.Verbosef("Uploaded config file %s for plugin %s to %s", req.Filename, req.PluginName, configPath)
 
 	// Return success response
 	response := map[string]any{

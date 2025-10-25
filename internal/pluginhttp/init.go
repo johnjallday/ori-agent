@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -181,10 +182,10 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	}
 
 	// Use the pluginHandler's GetPluginConfig to get fresh config from loaded plugin
-	fmt.Printf("📞 Calling GetPluginConfig for plugin: %s, pluginHandler is nil: %v\n", pluginName, h.pluginHandler == nil)
+	logger.Verbosef("📞 Calling GetPluginConfig for plugin: %s, pluginHandler is nil: %v", pluginName, h.pluginHandler == nil)
 	if h.pluginHandler != nil {
 		configVars, supportsInit, err := h.pluginHandler.GetPluginConfig(pluginName)
-		fmt.Printf("📊 GetPluginConfig returned: supportsInit=%v, err=%v, configVars count=%d\n", supportsInit, err, len(configVars))
+		logger.Verbosef("📊 GetPluginConfig returned: supportsInit=%v, err=%v, configVars count=%d", supportsInit, err, len(configVars))
 		if err == nil && supportsInit {
 			response := map[string]any{
 				"supports_initialization": true,
@@ -196,7 +197,7 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 			return
 		}
 		if err != nil {
-			fmt.Printf("⚠️ GetPluginConfig error: %v\n", err)
+			logger.Verbosef("⚠️ GetPluginConfig error: %v", err)
 		}
 	}
 

@@ -17,7 +17,11 @@ import (
 func main() {
 	// Define command-line flags
 	port := flag.Int("port", 8080, "Port to run server on")
+	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
+
+	// Set verbose mode globally
+	os.Setenv("ORI_VERBOSE", fmt.Sprintf("%t", *verbose))
 
 	// Check for PORT environment variable override
 	if envPort := os.Getenv("PORT"); envPort != "" {

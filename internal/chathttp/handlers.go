@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -320,8 +321,11 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 			continue
 		}
 
-		// Simplified: assume plugins with InitializationProvider need initialization
-		isInitialized := false
+		// Check if plugin is initialized by checking if settings file exists
+		_, currentAgent := h.store.ListAgents()
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, name)
+		_, err := os.Stat(settingsFilePath)
+		isInitialized := err == nil // If file exists, plugin is initialized
 
 		if !isInitialized {
 			// Get required config for this plugin
