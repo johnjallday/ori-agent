@@ -15,12 +15,14 @@ import (
 type InitHandler struct {
 	store           store.Store
 	registryManager *registry.Manager
+	pluginHandler   *Handler
 }
 
-func NewInitHandler(store store.Store, registryManager *registry.Manager) *InitHandler {
+func NewInitHandler(store store.Store, registryManager *registry.Manager, pluginHandler *Handler) *InitHandler {
 	return &InitHandler{
 		store:           store,
 		registryManager: registryManager,
+		pluginHandler:   pluginHandler,
 	}
 }
 
@@ -96,14 +98,16 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		if err == nil {
 			for _, regPlugin := range localReg.Plugins {
 				if regPlugin.Name == pluginName {
-					// For config action, we can proceed even if loading fails (to show existing settings)
+					// For config action, try to load plugin to check InitializationProvider
 					if action == "config" {
 						if r.Method != http.MethodGet {
 							w.WriteHeader(http.StatusMethodNotAllowed)
 							return
 						}
-						// Pass nil tool - handlePluginConfigDiscovery will handle it gracefully
-						h.handlePluginConfigDiscovery(w, nil, pluginName, current)
+						// Load plugin temporarily to check InitializationProvider
+						var tool pluginapi.Tool
+						tool, _ = NativeLoader{}.Load(regPlugin.Path) // Ignore error, handlePluginConfigDiscovery handles nil
+						h.handlePluginConfigDiscovery(w, tool, pluginName, current)
 						return
 					}
 
@@ -176,7 +180,27 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 		}
 	}
 
-	// If tool is provided, check if it supports initialization
+	// Use the pluginHandler's GetPluginConfig to get fresh config from loaded plugin
+	fmt.Printf("📞 Calling GetPluginConfig for plugin: %s, pluginHandler is nil: %v\n", pluginName, h.pluginHandler == nil)
+	if h.pluginHandler != nil {
+		configVars, supportsInit, err := h.pluginHandler.GetPluginConfig(pluginName)
+		fmt.Printf("📊 GetPluginConfig returned: supportsInit=%v, err=%v, configVars count=%d\n", supportsInit, err, len(configVars))
+		if err == nil && supportsInit {
+			response := map[string]any{
+				"supports_initialization": true,
+				"is_initialized":          isInitialized,
+				"required_config":         configVars,
+				"current_values":          currentValues,
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		if err != nil {
+			fmt.Printf("⚠️ GetPluginConfig error: %v\n", err)
+		}
+	}
+
+	// Fallback: check tool directly if pluginHandler method failed
 	if tool != nil {
 		if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
 			// Get required configuration variables

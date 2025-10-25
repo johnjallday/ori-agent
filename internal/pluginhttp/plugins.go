@@ -110,13 +110,17 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 		plist := make([]map[string]any, 0)
 		if ag, ok := h.State.GetAgent(current); ok {
 			for name, pl := range ag.Plugins {
+				// Check if plugin supports initialization
+				_, supportsInit := pl.Tool.(pluginapi.InitializationProvider)
+
 				plist = append(plist, map[string]any{
-					"name":        name,
-					"description": pl.Definition.Description.String(),
-					"definition":  pl.Definition,
-					"path":        pl.Path,
-					"version":     pl.Version,
-					"enabled":     true,
+					"name":                    name,
+					"description":             pl.Definition.Description.String(),
+					"definition":              pl.Definition,
+					"path":                    pl.Path,
+					"version":                 pl.Version,
+					"enabled":                 true,
+					"supports_initialization": supportsInit,
 				})
 			}
 		}
@@ -143,23 +147,62 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 
 		// If plugin is enabled, include its full definition
 		if isEnabled && loadedPlugin != nil {
+			// Check if plugin supports initialization and get config variables
+			var requiresSettings bool
+			var settingVariables []pluginapi.ConfigVariable
+
+			if loadedPlugin.Tool != nil {
+				if initProvider, ok := loadedPlugin.Tool.(pluginapi.InitializationProvider); ok {
+					settingVariables = initProvider.GetRequiredConfig()
+					requiresSettings = len(settingVariables) > 0
+				}
+			}
+
 			pluginInfo := map[string]any{
-				"name":        registryPlugin.Name,
-				"description": registryPlugin.Description,
-				"path":        registryPlugin.Path,
-				"version":     registryPlugin.Version,
-				"enabled":     true,
-				"definition":  loadedPlugin.Definition,
+				"name":                    registryPlugin.Name,
+				"description":             registryPlugin.Description,
+				"path":                    registryPlugin.Path,
+				"version":                 registryPlugin.Version,
+				"enabled":                 true,
+				"definition":              loadedPlugin.Definition,
+				"supports_initialization": requiresSettings,
+				"requires_settings":       requiresSettings,
+				"setting_variables":       settingVariables,
 			}
 			plist = append(plist, pluginInfo)
 		} else {
-			// Plugin not enabled, show basic info
+			// Plugin not enabled - temporarily load to check if it supports initialization
+			var requiresSettings bool
+			var settingVariables []pluginapi.ConfigVariable
+
+			fmt.Printf("🔄 Temporarily loading plugin '%s' from path: %s\n", registryPlugin.Name, registryPlugin.Path)
+			if tool, err := h.Loader.Load(registryPlugin.Path); err == nil {
+				fmt.Printf("✓ Plugin loaded, type: %T\n", tool)
+				fmt.Printf("✓ Checking InitializationProvider interface...\n")
+				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+					fmt.Printf("✅ Plugin implements InitializationProvider!\n")
+					settingVariables = initProvider.GetRequiredConfig()
+					fmt.Printf("✅ Got %d setting variables\n", len(settingVariables))
+					for i, sv := range settingVariables {
+						fmt.Printf("  [%d] %s (%s): %s\n", i, sv.Key, sv.Type, sv.Description)
+					}
+					requiresSettings = len(settingVariables) > 0
+				} else {
+					fmt.Printf("❌ Plugin does NOT implement InitializationProvider (type: %T)\n", tool)
+				}
+			} else {
+				fmt.Printf("❌ Failed to load plugin: %v\n", err)
+			}
+
 			pluginInfo := map[string]any{
-				"name":        registryPlugin.Name,
-				"description": registryPlugin.Description,
-				"path":        registryPlugin.Path,
-				"version":     registryPlugin.Version,
-				"enabled":     false,
+				"name":                    registryPlugin.Name,
+				"description":             registryPlugin.Description,
+				"path":                    registryPlugin.Path,
+				"version":                 registryPlugin.Version,
+				"enabled":                 false,
+				"supports_initialization": requiresSettings,
+				"requires_settings":       requiresSettings,
+				"setting_variables":       settingVariables,
 			}
 			plist = append(plist, pluginInfo)
 		}
@@ -277,19 +320,26 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	if ag.Plugins == nil {
 		ag.Plugins = make(map[string]types.LoadedPlugin)
 	}
-	
+
+	fmt.Printf("💾 Adding plugin '%s' to agent '%s' (current plugins: %d)\n", name, current, len(ag.Plugins))
+
 	ag.Plugins[name] = types.LoadedPlugin{
 		Tool:       tool,
 		Definition: def,
 		Path:       path,
 		Version:    version,
 	}
-	
+
+	fmt.Printf("💾 Agent now has %d plugins\n", len(ag.Plugins))
+
 	// Save updated agent
+	fmt.Printf("💾 Saving agent '%s' to state...\n", current)
 	if err := h.State.SetAgent(current, ag); err != nil {
+		fmt.Printf("❌ Failed to save agent: %v\n", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	fmt.Printf("✅ Agent saved successfully\n")
 	
 	// Return success response
 	response := map[string]any{
@@ -344,6 +394,74 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 	}
 
 	return h.EnumExtractor.GetAllEnumsFromParameter(def)
+}
+
+// GetPluginConfig gets configuration requirements from a specific plugin
+func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
+	fmt.Printf("🔍 GetPluginConfig called for plugin: %s\n", pluginName)
+
+	names, current := h.State.ListAgents()
+	fmt.Printf("📋 Available agents: %v, current: %s\n", names, current)
+
+	ag, ok := h.State.GetAgent(current)
+	if !ok {
+		fmt.Printf("❌ Current agent '%s' not found\n", current)
+		return nil, false, fmt.Errorf("current agent not found")
+	}
+
+	fmt.Printf("📦 Agent has %d plugins: %v\n", len(ag.Plugins), func() []string {
+		keys := make([]string, 0, len(ag.Plugins))
+		for k := range ag.Plugins {
+			keys = append(keys, k)
+		}
+		return keys
+	}())
+
+	plugin, exists := ag.Plugins[pluginName]
+	if !exists {
+		fmt.Printf("❌ Plugin '%s' not found in agent. Available: %v\n", pluginName, func() []string {
+			keys := make([]string, 0, len(ag.Plugins))
+			for k := range ag.Plugins {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
+		return nil, false, fmt.Errorf("plugin %s not found", pluginName)
+	}
+
+	fmt.Printf("✓ Plugin found: %s, Path: %s, Tool: %v\n", pluginName, plugin.Path, plugin.Tool != nil)
+
+	// If Tool is not loaded, load it now
+	var tool pluginapi.Tool
+	if plugin.Tool != nil {
+		fmt.Printf("✓ Using already loaded tool\n")
+		tool = plugin.Tool
+	} else if plugin.Path != "" {
+		fmt.Printf("🔄 Loading plugin from path: %s\n", plugin.Path)
+		// Load plugin from path
+		loadedTool, err := h.Loader.Load(plugin.Path)
+		if err != nil {
+			fmt.Printf("❌ Failed to load plugin: %v\n", err)
+			return nil, false, fmt.Errorf("failed to load plugin: %w", err)
+		}
+		tool = loadedTool
+		fmt.Printf("✓ Plugin loaded successfully\n")
+	} else {
+		fmt.Printf("❌ Plugin has no tool instance or path\n")
+		return nil, false, fmt.Errorf("plugin has no tool instance or path")
+	}
+
+	// Check if plugin implements InitializationProvider
+	if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
+		fmt.Printf("✓ Plugin implements InitializationProvider\n")
+		configVars := initProvider.GetRequiredConfig()
+		fmt.Printf("✓ Got %d config variables\n", len(configVars))
+		return configVars, true, nil
+	}
+
+	fmt.Printf("❌ Plugin does NOT implement InitializationProvider\n")
+	// Plugin doesn't support initialization
+	return nil, false, nil
 }
 
 // ValidatePluginEnumValue validates an enum value for a specific plugin and property

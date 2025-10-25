@@ -19,6 +19,32 @@ func GetPluginVersion(tool pluginapi.Tool) string {
 	return ""
 }
 
+// mapConfigTypeToFrontendType converts ConfigVariableType to frontend-compatible type strings
+func mapConfigTypeToFrontendType(configType pluginapi.ConfigVariableType) string {
+	switch configType {
+	case pluginapi.ConfigTypeString:
+		return "string"
+	case pluginapi.ConfigTypeInt:
+		return "int"
+	case pluginapi.ConfigTypeFloat:
+		return "float"
+	case pluginapi.ConfigTypeBool:
+		return "bool"
+	case pluginapi.ConfigTypeFilePath:
+		return "filepath"
+	case pluginapi.ConfigTypeDirPath:
+		return "filepath" // Frontend uses "filepath" for both files and directories
+	case pluginapi.ConfigTypePassword:
+		return "password"
+	case pluginapi.ConfigTypeURL:
+		return "string" // Frontend treats URLs as strings
+	case pluginapi.ConfigTypeEmail:
+		return "string" // Frontend treats emails as strings
+	default:
+		return "string" // Default to string for unknown types
+	}
+}
+
 // SetAgentContext sets the agent context for plugins that support it.
 func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 	if agentAwareTool, ok := tool.(pluginapi.AgentAwareTool); ok {
@@ -57,8 +83,8 @@ func ExtractPluginSettingsSchema(tool pluginapi.Tool, agentName string) error {
 		defaultValues := make(map[string]interface{})
 
 		for _, cv := range configVars {
-			// Map ConfigVariableType to simple field type string
-			fieldTypes[cv.Key] = string(cv.Type)
+			// Map ConfigVariableType to frontend-compatible field type string
+			fieldTypes[cv.Key] = mapConfigTypeToFrontendType(cv.Type)
 
 			// Include default value if provided
 			if cv.DefaultValue != nil {

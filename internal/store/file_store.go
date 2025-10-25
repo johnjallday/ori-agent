@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,7 +348,12 @@ func (s *fileStore) load() error {
 							ag.Type = settings.Type
 							ag.Settings = settings.Settings
 							ag.Plugins = settings.Plugins
+							fmt.Printf("✅ Loaded agent '%s' with %d plugins from %s\n", agentName, len(settings.Plugins), settingsPath)
+						} else {
+							fmt.Printf("❌ Failed to unmarshal agent_settings.json for '%s': %v\n", agentName, err)
 						}
+					} else {
+						fmt.Printf("⚠️ Could not read agent_settings.json for '%s': %v\n", agentName, err)
 					}
 
 					// Ensure maps are initialized

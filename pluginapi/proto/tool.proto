@@ -20,6 +20,16 @@ service ToolService {
 
     // GetDefaultSettings returns default settings as JSON (optional)
     rpc GetDefaultSettings(Empty) returns (SettingsResponse);
+
+    // InitializationProvider methods
+    // GetRequiredConfig returns configuration variables needed for initialization
+    rpc GetRequiredConfig(Empty) returns (ConfigVariablesResponse);
+
+    // ValidateConfig validates the provided configuration
+    rpc ValidateConfig(ValidateConfigRequest) returns (ConfigResponse);
+
+    // InitializeWithConfig initializes the plugin with the provided configuration
+    rpc InitializeWithConfig(InitializeConfigRequest) returns (ConfigResponse);
 }
 
 // Empty message for RPCs that don't need parameters
@@ -60,4 +70,38 @@ message AgentContextRequest {
 message SettingsResponse {
     string settings_json = 1;  // JSON-encoded settings
     string error = 2;          // Error message on failure (empty on success)
+}
+
+// ProtoConfigVariable describes a single configuration variable (protobuf version)
+message ProtoConfigVariable {
+    string key = 1;
+    string name = 2;
+    string description = 3;
+    string type = 4;  // "string", "int", "filepath", "dirpath", "password", etc.
+    bool required = 5;
+    string default_value_json = 6;  // JSON-encoded default value (optional)
+    string validation = 7;          // Validation rules (optional)
+    repeated string options = 8;    // List of valid options (optional)
+    string placeholder = 9;         // Placeholder text (optional)
+}
+
+// ConfigVariablesResponse contains the list of required config variables
+message ConfigVariablesResponse {
+    repeated ProtoConfigVariable config_vars = 1;
+}
+
+// ValidateConfigRequest contains configuration to validate
+message ValidateConfigRequest {
+    string config_json = 1;  // JSON-encoded configuration map
+}
+
+// InitializeConfigRequest contains configuration for initialization
+message InitializeConfigRequest {
+    string config_json = 1;  // JSON-encoded configuration map
+}
+
+// ConfigResponse contains the result of config operations
+message ConfigResponse {
+    bool success = 1;
+    string error = 2;  // Error message on failure (empty on success)
 }

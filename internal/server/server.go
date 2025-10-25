@@ -44,6 +44,7 @@ type Server struct {
 	updateMgr             *updatemanager.Manager
 	settingsHandler       *settingshttp.Handler
 	chatHandler           *chathttp.Handler
+	pluginHandler         *pluginhttp.Handler
 	pluginRegistryHandler *pluginhttp.RegistryHandler
 	pluginInitHandler     *pluginhttp.InitHandler
 	onboardingMgr         *onboarding.Manager
@@ -204,7 +205,10 @@ func New() (*Server, error) {
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
-	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager)
+
+	// Create plugin main handler first so we can pass it to init handler
+	s.pluginHandler = pluginhttp.New(s.st, pluginhttp.NativeLoader{})
+	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager, s.pluginHandler)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 
@@ -234,11 +238,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/plugins/execute", s.pluginInitHandler.PluginExecuteHandler)
 	mux.HandleFunc("/api/plugins/init-status", s.pluginInitHandler.PluginInitStatusHandler)
 
-	// Create a handler instance for save-settings
-	pluginMainHandler := pluginhttp.New(s.st, pluginhttp.NativeLoader{})
-	mux.HandleFunc("/api/plugins/save-settings", pluginMainHandler.ServeHTTP)
-	mux.HandleFunc("/api/plugins/tool-call", pluginMainHandler.DirectToolCallHandler)
-	mux.Handle("/api/plugins", pluginMainHandler)
+	// Reuse the plugin handler instance
+	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
+	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
+	mux.Handle("/api/plugins", s.pluginHandler)
 	mux.HandleFunc("/api/plugins/", s.pluginInitHandler.PluginInitHandler)
 
 	// Settings and configuration endpoints

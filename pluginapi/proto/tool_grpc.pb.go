@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.20.3
-// source: tool.proto
+// source: proto/tool.proto
 
 package pluginapi
 
@@ -405,5 +405,5 @@ var ToolService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tool.proto",
+	Metadata: "proto/tool.proto",
 }

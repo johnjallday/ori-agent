@@ -108,6 +108,30 @@ func (r *RPCPluginClient) GetDefaultSettings() (string, error) {
 	return "", fmt.Errorf("plugin does not support default settings")
 }
 
+// GetRequiredConfig returns required config if the plugin implements InitializationProvider
+func (r *RPCPluginClient) GetRequiredConfig() []pluginapi.ConfigVariable {
+	if initProvider, ok := r.tool.(pluginapi.InitializationProvider); ok {
+		return initProvider.GetRequiredConfig()
+	}
+	return []pluginapi.ConfigVariable{}
+}
+
+// ValidateConfig validates config if the plugin implements InitializationProvider
+func (r *RPCPluginClient) ValidateConfig(config map[string]interface{}) error {
+	if initProvider, ok := r.tool.(pluginapi.InitializationProvider); ok {
+		return initProvider.ValidateConfig(config)
+	}
+	return fmt.Errorf("plugin does not support initialization")
+}
+
+// InitializeWithConfig initializes the plugin if it implements InitializationProvider
+func (r *RPCPluginClient) InitializeWithConfig(config map[string]interface{}) error {
+	if initProvider, ok := r.tool.(pluginapi.InitializationProvider); ok {
+		return initProvider.InitializeWithConfig(config)
+	}
+	return fmt.Errorf("plugin does not support initialization")
+}
+
 // Kill terminates the plugin process
 func (r *RPCPluginClient) Kill() {
 	if r.client != nil {
