@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -64,41 +63,57 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 
 // PluginInitHandler handles plugin config discovery and initialization
 func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("🎯 PluginInitHandler called: %s %s\n", r.Method, r.URL.Path)
+
 	// Parse URL path to extract plugin name and action
 	// Expected paths: /api/plugins/{name}/config or /api/plugins/{name}/initialize
 	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/plugins/"), "/")
+	fmt.Printf("📋 Path parts: %v (count: %d)\n", pathParts, len(pathParts))
+
 	if len(pathParts) < 2 {
+		fmt.Printf("❌ Invalid path format - not enough parts\n")
 		http.Error(w, "invalid path format", http.StatusBadRequest)
 		return
 	}
 
 	pluginName := pathParts[0]
 	action := pathParts[1]
+	fmt.Printf("🔧 Plugin: %s, Action: %s\n", pluginName, action)
 
 	if pluginName == "" {
+		fmt.Printf("❌ Plugin name is empty\n")
 		http.Error(w, "plugin name required", http.StatusBadRequest)
 		return
 	}
 
 	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
+	fmt.Printf("📁 Current agent: %s\n", current)
+
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
+		fmt.Printf("❌ Agent '%s' not found\n", current)
 		http.Error(w, "current agent not found", http.StatusInternalServerError)
 		return
 	}
 
+	fmt.Printf("✓ Agent has %d plugins\n", len(ag.Plugins))
+
 	// Find the plugin
 	plugin, exists := ag.Plugins[pluginName]
+	fmt.Printf("🔍 Plugin '%s' exists in agent: %v\n", pluginName, exists)
 
 	// For default-settings and config, also check local registry if plugin not loaded in agent
 	// OR if plugin exists but tool is nil (failed to load)
 	if (!exists || (exists && plugin.Tool == nil)) && (action == "default-settings" || action == "config") {
+		fmt.Printf("🔄 Plugin not in agent or tool is nil, trying local registry...\n")
 		// Try to load plugin from local registry temporarily
 		localReg, err := h.registryManager.LoadLocal()
 		if err == nil {
+			fmt.Printf("✓ Local registry has %d plugins\n", len(localReg.Plugins))
 			for _, regPlugin := range localReg.Plugins {
 				if regPlugin.Name == pluginName {
+					fmt.Printf("✓ Found '%s' in local registry at: %s\n", pluginName, regPlugin.Path)
 					// For config action, try to load plugin to check InitializationProvider
 					if action == "config" {
 						if r.Method != http.MethodGet {
@@ -106,8 +121,14 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 							return
 						}
 						// Load plugin temporarily to check InitializationProvider
+						fmt.Printf("🔄 Loading plugin temporarily from: %s\n", regPlugin.Path)
 						var tool pluginapi.Tool
-						tool, _ = NativeLoader{}.Load(regPlugin.Path) // Ignore error, handlePluginConfigDiscovery handles nil
+						tool, loadErr := NativeLoader{}.Load(regPlugin.Path)
+						if loadErr != nil {
+							fmt.Printf("❌ Failed to load plugin: %v\n", loadErr)
+						} else {
+							fmt.Printf("✓ Plugin loaded successfully\n")
+						}
 						h.handlePluginConfigDiscovery(w, tool, pluginName, current)
 						return
 					}
@@ -182,10 +203,10 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	}
 
 	// Use the pluginHandler's GetPluginConfig to get fresh config from loaded plugin
-	logger.Verbosef("📞 Calling GetPluginConfig for plugin: %s, pluginHandler is nil: %v", pluginName, h.pluginHandler == nil)
+	fmt.Printf("📞 Calling GetPluginConfig for plugin: %s, pluginHandler is nil: %v\n", pluginName, h.pluginHandler == nil)
 	if h.pluginHandler != nil {
 		configVars, supportsInit, err := h.pluginHandler.GetPluginConfig(pluginName)
-		logger.Verbosef("📊 GetPluginConfig returned: supportsInit=%v, err=%v, configVars count=%d", supportsInit, err, len(configVars))
+		fmt.Printf("📊 GetPluginConfig returned: supportsInit=%v, err=%v, configVars count=%d\n", supportsInit, err, len(configVars))
 		if err == nil && supportsInit {
 			response := map[string]any{
 				"supports_initialization": true,
@@ -193,11 +214,12 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 				"required_config":         configVars,
 				"current_values":          currentValues,
 			}
+			fmt.Printf("✅ Sending config response: %+v\n", response)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 		if err != nil {
-			logger.Verbosef("⚠️ GetPluginConfig error: %v", err)
+			fmt.Printf("⚠️ GetPluginConfig error: %v\n", err)
 		}
 	}
 

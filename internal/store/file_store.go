@@ -14,16 +14,18 @@ import (
 )
 
 type fileStore struct {
-	mu      sync.Mutex
-	path    string
-	agents  map[string]*agent.Agent
-	current string
+	mu              sync.Mutex
+	path            string
+	agents          map[string]*agent.Agent
+	current         string
+	defaultSettings types.Settings
 }
 
 func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	fs := &fileStore{
-		path:   path,
-		agents: make(map[string]*agent.Agent),
+		path:            path,
+		agents:          make(map[string]*agent.Agent),
+		defaultSettings: defaultSettings,
 	}
 	// try load
 	_ = fs.load()
@@ -67,9 +69,19 @@ func (s *fileStore) CreateAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.agents[name]; !exists {
+		// Get default settings - either from current agent or use hardcoded defaults
+		var defaultSettings types.Settings
+		if s.current != "" && s.agents[s.current] != nil {
+			// Copy from current agent
+			defaultSettings = s.agents[s.current].Settings
+		} else {
+			// Use hardcoded defaults if no current agent exists
+			defaultSettings = s.defaultSettings
+		}
+
 		s.agents[name] = &agent.Agent{
-			Type:     agent.TypeToolCalling,         // Default to cheapest tier
-			Settings: s.agents[s.current].Settings, // copy defaults
+			Type:     agent.TypeToolCalling, // Default to cheapest tier
+			Settings: defaultSettings,
 			Plugins:  make(map[string]types.LoadedPlugin),
 		}
 	}

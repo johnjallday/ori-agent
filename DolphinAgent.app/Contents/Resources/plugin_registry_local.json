@@ -1,0 +1,63 @@
+{
+  "plugins": [
+    {
+      "name": "math",
+      "description": "Perform basic math operations: add, subtract, multiply, divide",
+      "path": "example_plugins/math/math",
+      "version": "1.0.0"
+    },
+    {
+      "name": "result-handler",
+      "description": "Handle actions on chat results like opening directories, files, or URLs",
+      "path": "example_plugins/result-handler/result-handler",
+      "version": "0.0.1"
+    },
+    {
+      "name": "weather",
+      "description": "Get weather for a given location",
+      "path": "example_plugins/weather/weather",
+      "version": "1.0.0"
+    },
+    {
+      "name": "dolphin-reaper",
+      "description": "Plugin: dolphin-reaper",
+      "path": "uploaded_plugins/dolphin-reaper",
+      "version": "unknown",
+      "supported_os": [
+        "darwin",
+        "windows",
+        "linux"
+      ],
+      "supported_arch": [
+        "amd64",
+        "arm64"
+      ]
+    },
+    {
+      "name": "music-project-manager",
+      "description": "Manage music projects: create projects, open existing projects, scan for .RPP files, list existing projects, filter recent projects, and view settings",
+      "path": "uploaded_plugins/music-project-manager",
+      "version": "0.0.5",
+      "supported_os": [
+        "darwin",
+        "windows"
+      ],
+      "supported_arch": [
+        "amd64",
+        "arm64"
+      ]
+    },
+    {
+      "name": "ori-meta-threads-manager",
+      "description": "Manage Meta Threads posts: create text posts, post with media, get profile info, and manage authentication",
+      "path": "uploaded_plugins/ori-meta-threads-manager",
+      "version": "dev"
+    },
+    {
+      "name": "ori_reaper",
+      "description": "Manage REAPER ReaScripts: list available scripts, launch them, add new scripts, delete them, download scripts from repository, or configure setup",
+      "path": "uploaded_plugins/ori-reaper",
+      "version": "dev"
+    }
+  ]
+}

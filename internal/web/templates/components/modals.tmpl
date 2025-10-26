@@ -118,7 +118,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h1 class="modal-title fs-5" id="onboardingModalLabel">Welcome to Dolphin Agent</h1>
-        <button type="button" class="btn-close" id="onboardingCloseBtn" aria-label="Close"></button>
+        <button type="button" class="btn-close" id="onboardingCloseBtn" aria-label="Close" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; z-index: 10001;"></button>
       </div>
       <div class="modal-body">
         <!-- Progress indicator -->
@@ -329,10 +329,10 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" id="skipOnboardingBtn">Skip Tour</button>
+        <button type="button" class="btn btn-outline-secondary" id="skipOnboardingBtn" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; position: relative; z-index: 10000;">Skip Tour</button>
         <div class="ms-auto">
           <button type="button" class="btn btn-secondary d-none" id="prevStepBtn">Previous</button>
-          <button type="button" class="btn btn-primary" id="nextStepBtn">Next</button>
+          <button type="button" class="btn btn-primary" id="nextStepBtn" style="pointer-events: auto !important;">Next</button>
           <button type="button" class="btn btn-primary d-none" id="completeOnboardingBtn">Get Started</button>
         </div>
       </div>

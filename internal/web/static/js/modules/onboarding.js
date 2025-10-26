@@ -52,7 +52,13 @@ export class OnboardingManager {
     }
 
     if (skipBtn) {
-      skipBtn.addEventListener('click', () => this.skipOnboarding());
+      console.log('✅ Skip button found, adding click listener');
+      skipBtn.addEventListener('click', () => {
+        console.log('🖱️ Skip button clicked!');
+        this.skipOnboarding();
+      });
+    } else {
+      console.warn('⚠️ Skip button not found in DOM!');
     }
 
     if (completeBtn) {
@@ -428,7 +434,9 @@ export class OnboardingManager {
 
   // Skip onboarding
   async skipOnboarding() {
+    console.log('🚀 skipOnboarding called!');
     try {
+      console.log('📡 Sending skip request to /api/onboarding/skip');
       const response = await fetch('/api/onboarding/skip', {
         method: 'POST',
         headers: {
@@ -436,15 +444,23 @@ export class OnboardingManager {
         },
       });
 
+      console.log(`📊 Skip response: status=${response.status}, ok=${response.ok}`);
+
       if (!response.ok) {
         throw new Error('Failed to skip onboarding');
       }
 
+      console.log('✅ Onboarding skipped successfully, hiding modal');
       if (this.modalInstance) {
         this.modalInstance.hide();
       }
+
+      // Reload the page to show main UI
+      console.log('🔄 Reloading page to show main interface');
+      window.location.reload();
     } catch (error) {
-      console.error('Error skipping onboarding:', error);
+      console.error('❌ Error skipping onboarding:', error);
+      alert('Failed to skip onboarding. Please try again or check the console for errors.');
     }
   }
 

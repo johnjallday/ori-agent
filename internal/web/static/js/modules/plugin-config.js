@@ -3,18 +3,24 @@
 
 // Show plugin configuration modal
 async function showPluginConfigModal(pluginName) {
+  console.log(`🎯 showPluginConfigModal called for: ${pluginName}`);
   try {
     // Fetch plugin configuration info
+    console.log(`📡 Fetching config from: /api/plugins/${encodeURIComponent(pluginName)}/config`);
     const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/config`);
+    console.log(`📊 Response status: ${response.status}, ok: ${response.ok}`);
+
     if (!response.ok) {
       throw new Error('Failed to fetch plugin configuration');
     }
 
     const configData = await response.json();
+    console.log(`📦 Config data received:`, configData);
 
     // Handle modern plugins with required_config
     const configVars = configData.required_config || [];
     const currentValues = configData.current_values || {};
+    console.log(`🔧 Config vars count: ${configVars.length}, Current values count: ${Object.keys(currentValues).length}`);
 
     // If no required_config but we have current_values, create form fields from existing values
     let finalConfigVars = configVars;
@@ -26,13 +32,18 @@ async function showPluginConfigModal(pluginName) {
         description: `Configuration for ${key}`,
         required: false
       }));
+      console.log(`📋 Created config vars from current values: ${finalConfigVars.length} fields`);
     }
 
     if (finalConfigVars.length === 0) {
       // No configuration needed and no existing values
+      console.log(`ℹ️ No configuration needed for ${pluginName}`);
       alert(`${pluginName} plugin is ready to use - no configuration required.`);
       return;
     }
+
+    console.log(`✅ Proceeding with ${finalConfigVars.length} config variables`);
+    console.log(`📝 Config variables:`, finalConfigVars);
 
     // Create modal HTML
     const modalHtml = `
@@ -123,11 +134,14 @@ async function showPluginConfigModal(pluginName) {
     // Remove existing modal if present
     const existingModal = document.getElementById('pluginConfigModal');
     if (existingModal) {
+      console.log(`🗑️ Removing existing modal`);
       existingModal.remove();
     }
 
     // Add modal to page
+    console.log(`➕ Adding modal HTML to page`);
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    console.log(`✅ Modal HTML added successfully`);
 
 
     // Setup browse button event listeners
@@ -256,11 +270,22 @@ async function showPluginConfigModal(pluginName) {
     });
 
     // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('pluginConfigModal'));
+    console.log(`🎬 Creating Bootstrap modal instance`);
+    const modalElement = document.getElementById('pluginConfigModal');
+    console.log(`📦 Modal element found:`, modalElement !== null);
+
+    if (!modalElement) {
+      throw new Error('Modal element not found in DOM after insertion!');
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
+    console.log(`✅ Bootstrap modal created, calling show()`);
     modal.show();
+    console.log(`🎉 Modal.show() called successfully`);
 
   } catch (error) {
-    console.error('Error showing plugin config modal:', error);
+    console.error('❌ Error showing plugin config modal:', error);
+    console.error('Error stack:', error.stack);
     alert(`Failed to show plugin configuration: ${error.message}`);
   }
 }

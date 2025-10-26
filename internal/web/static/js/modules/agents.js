@@ -165,10 +165,16 @@ async function createNewAgent() {
     }
 
     // Show success message
-    console.log('Agent created successfully:', agentName);
+    console.log('✅ Agent created successfully:', agentName);
 
     // Refresh the agent list
+    console.log('🔄 Refreshing agent list...');
     await refreshAgentList();
+    console.log('✅ Agent list refreshed');
+
+    // Force page reload to ensure UI updates
+    console.log('🔄 Reloading page to show new agent...');
+    window.location.reload();
 
   } catch (error) {
     console.error('Error creating agent:', error);
@@ -182,17 +188,22 @@ async function createNewAgent() {
 
 // Load and display agents
 async function loadAgents() {
+  console.log('📡 Loading agents from /api/agents...');
   try {
     const response = await fetch('/api/agents');
+    console.log(`📊 Response: status=${response.status}, ok=${response.ok}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
+    console.log(`📦 Received agents:`, data);
+    console.log(`👥 Agent count: ${data.agents?.length || 0}, Current: ${data.current}`);
     displayAgents(data.agents, data.current);
-    
+    console.log('✅ Agents displayed');
+
   } catch (error) {
-    console.error('Error loading agents:', error);
+    console.error('❌ Error loading agents:', error);
     const agentsList = document.getElementById('agentsList');
     if (agentsList) {
       agentsList.innerHTML = '<div class="text-muted small p-2">Failed to load agents</div>';
@@ -202,28 +213,40 @@ async function loadAgents() {
 
 // Display agents in the sidebar with pagination
 function displayAgents(agents, currentAgent) {
+  console.log(`🎨 displayAgents called with ${agents?.length || 0} agents`);
   const agentsList = document.getElementById('agentsList');
-  if (!agentsList) return;
-  
+  if (!agentsList) {
+    console.warn('⚠️ agentsList element not found!');
+    return;
+  }
+
   // Store the data for pagination
   allAgents = agents;
   currentAgentName = currentAgent;
-  
+  console.log(`📋 Stored agents: ${allAgents?.length || 0}, current: ${currentAgentName}`);
+
   renderAgents();
 }
 
 function renderAgents() {
+  console.log(`🖼️ renderAgents called, total agents: ${allAgents?.length || 0}, visible count: ${visibleAgentCount}`);
   const agentsList = document.getElementById('agentsList');
-  if (!agentsList) return;
+  if (!agentsList) {
+    console.warn('⚠️ agentsList element not found in renderAgents!');
+    return;
+  }
 
   // Clear existing agents
+  console.log('🗑️ Clearing existing agents...');
   agentsList.innerHTML = '';
 
   // Show only the first 'visibleAgentCount' agents
   const agentsToShow = allAgents.slice(0, visibleAgentCount);
+  console.log(`📋 Rendering ${agentsToShow.length} agents:`, agentsToShow);
 
   // Add each visible agent
   agentsToShow.forEach(agentName => {
+    console.log(`➕ Adding agent: ${agentName}`);
     const agentItem = createAgentElement(agentName, currentAgentName);
     agentsList.appendChild(agentItem);
   });

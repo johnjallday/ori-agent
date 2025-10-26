@@ -412,7 +412,7 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 
 // GetPluginConfig gets configuration requirements from a specific plugin
 func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
-	fmt.Printf("🔍 GetPluginConfig called for plugin: %s", pluginName)
+	fmt.Printf("🔍 GetPluginConfig called for plugin: %s\n", pluginName)
 
 	names, current := h.State.ListAgents()
 	logger.Verbosef("📋 Available agents: %v, current: %s", names, current)
