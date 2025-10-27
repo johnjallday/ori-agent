@@ -47,6 +47,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/navbar.tmpl",
 		"templates/pages/index.tmpl",
 		"templates/pages/settings.tmpl",
+		"templates/pages/marketplace.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -68,6 +69,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 
 	tr.templates["index"] = tmpl
 	tr.templates["settings"] = tmpl
+	tr.templates["marketplace"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
@@ -87,6 +89,10 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
+	}
+	// Marketplace and settings use their own template names
+	if name == "marketplace" || name == "settings" {
+		templateName = name
 	}
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)

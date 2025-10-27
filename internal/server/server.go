@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,12 +15,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/filehttp"
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -28,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -42,11 +46,14 @@ type Server struct {
 	templateRenderer      *web.TemplateRenderer
 	pluginDownloader      *plugindownloader.PluginDownloader
 	updateMgr             *updatemanager.Manager
+	healthManager         *healthhttp.Manager
 	settingsHandler       *settingshttp.Handler
 	chatHandler           *chathttp.Handler
 	pluginHandler         *pluginhttp.Handler
 	pluginRegistryHandler *pluginhttp.RegistryHandler
 	pluginInitHandler     *pluginhttp.InitHandler
+	healthHandler         *healthhttp.Handler
+	pluginUpdateHandler   *pluginupdate.Handler
 	onboardingMgr         *onboarding.Manager
 	onboardingHandler     *onboardinghttp.Handler
 	deviceHandler         *devicehttp.Handler
@@ -114,6 +121,9 @@ func New() (*Server, error) {
 		return nil, err
 	}
 
+	// initialize health manager (must be before plugin loading)
+	s.healthManager = healthhttp.NewManager()
+
 	// init plugin downloader
 	pluginCacheDir := "plugin_cache"
 	if p := os.Getenv("PLUGIN_CACHE_DIR"); p != "" {
@@ -140,6 +150,8 @@ func New() (*Server, error) {
 
 	// restore plugin Tool instances for any persisted plugins
 	names, _ := s.st.ListAgents()
+	var healthySummary, degradedSummary, unhealthySummary []string
+
 	for _, agName := range names {
 		ag, ok := s.st.GetAgent(agName)
 		if !ok {
@@ -155,10 +167,34 @@ func New() (*Server, error) {
 
 			tool, err := pluginloader.LoadPluginUnified(lp.Path)
 			if err != nil {
-				log.Printf("failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
-				log.Printf("removing failed plugin %s from agent %s config", key, agName)
+				log.Printf("❌ Failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
+				log.Printf("   Removing failed plugin %s from agent %s config", key, agName)
 				failedPlugins = append(failedPlugins, key)
 				continue
+			}
+
+			// Run health check on the loaded plugin
+			healthResult := s.healthManager.CheckAndCachePlugin(key, tool)
+			if !healthResult.Health.Compatible {
+				if healthResult.Health.Status == "unhealthy" {
+					log.Printf("❌ Plugin %s is UNHEALTHY", key)
+					for _, err := range healthResult.Health.Errors {
+						log.Printf("   Error: %s", err)
+					}
+					if healthResult.Health.Recommendation != "" {
+						log.Printf("   💡 Recommendation: %s", healthResult.Health.Recommendation)
+					}
+					unhealthySummary = append(unhealthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
+				} else {
+					log.Printf("⚠️  Plugin %s is DEGRADED", key)
+					for _, warn := range healthResult.Health.Warnings {
+						log.Printf("   Warning: %s", warn)
+					}
+					degradedSummary = append(degradedSummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
+				}
+			} else {
+				log.Printf("✅ Plugin %s v%s health check passed", key, healthResult.Health.Version)
+				healthySummary = append(healthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 			}
 
 			agentSpecificStorePath := filepath.Join("agents", agName, "config.json")
@@ -184,9 +220,82 @@ func New() (*Server, error) {
 		}
 	}
 
+	// Print health summary
+	if len(healthySummary) > 0 || len(degradedSummary) > 0 || len(unhealthySummary) > 0 {
+		log.Println("")
+		log.Println("╔════════════════════════════════════════════════════════════════════════════════╗")
+		log.Println("║  🏥 Plugin Health Summary                                                      ║")
+		log.Println("╠════════════════════════════════════════════════════════════════════════════════╣")
+
+		if len(healthySummary) > 0 {
+			log.Printf("║  ✅ %d Healthy: %-66s║", len(healthySummary), truncateString(strings.Join(healthySummary, ", "), 66))
+			if len(healthySummary) > 1 {
+				// Show additional lines if list is long
+				healthyList := strings.Join(healthySummary, ", ")
+				for i := 66; i < len(healthyList); i += 73 {
+					end := i + 73
+					if end > len(healthyList) {
+						end = len(healthyList)
+					}
+					log.Printf("║     %-74s║", healthyList[i:end])
+				}
+			}
+		} else {
+			log.Println("║  ✅ 0 Healthy                                                                  ║")
+		}
+
+		if len(degradedSummary) > 0 {
+			log.Printf("║  ⚠️  %d Degraded: %-64s║", len(degradedSummary), truncateString(strings.Join(degradedSummary, ", "), 64))
+			if len(degradedSummary) > 1 {
+				degradedList := strings.Join(degradedSummary, ", ")
+				for i := 64; i < len(degradedList); i += 73 {
+					end := i + 73
+					if end > len(degradedList) {
+						end = len(degradedList)
+					}
+					log.Printf("║     %-74s║", degradedList[i:end])
+				}
+			}
+		} else {
+			log.Println("║  ⚠️  0 Degraded                                                                ║")
+		}
+
+		if len(unhealthySummary) > 0 {
+			log.Printf("║  ❌ %d Unhealthy: %-63s║", len(unhealthySummary), truncateString(strings.Join(unhealthySummary, ", "), 63))
+			if len(unhealthySummary) > 1 {
+				unhealthyList := strings.Join(unhealthySummary, ", ")
+				for i := 63; i < len(unhealthyList); i += 73 {
+					end := i + 73
+					if end > len(unhealthyList) {
+						end = len(unhealthyList)
+					}
+					log.Printf("║     %-74s║", unhealthyList[i:end])
+				}
+			}
+		} else {
+			log.Println("║  ❌ 0 Unhealthy                                                                ║")
+		}
+
+		log.Println("╚════════════════════════════════════════════════════════════════════════════════╝")
+		log.Println("")
+	}
+
 	// load plugin registry
 	if reg, _, err := s.registryManager.Load(); err == nil {
 		s.pluginReg = reg
+
+		// Set registry for health manager (for update checking)
+		s.healthManager.SetRegistry(func() []healthhttp.PluginRegistryEntry {
+			entries := make([]healthhttp.PluginRegistryEntry, len(reg.Plugins))
+			for i, p := range reg.Plugins {
+				entries[i] = healthhttp.PluginRegistryEntry{
+					Name:    p.Name,
+					Version: p.Version,
+					URL:     p.URL,
+				}
+			}
+			return entries
+		})
 	} else {
 		log.Printf("failed to load plugin registry: %v", err)
 	}
@@ -204,13 +313,43 @@ func New() (*Server, error) {
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
+	s.chatHandler.SetHealthManager(s.healthManager) // Inject health manager
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 
 	// Create plugin main handler first so we can pass it to init handler
 	s.pluginHandler = pluginhttp.New(s.st, pluginhttp.NativeLoader{})
+	s.pluginHandler.HealthManager = s.healthManager // Inject health manager
 	s.pluginInitHandler = pluginhttp.NewInitHandler(s.st, s.registryManager, s.pluginHandler)
+	s.healthHandler = healthhttp.NewHandler(s.healthManager, s.st)
+	s.pluginUpdateHandler = pluginupdate.NewHandler(s.st, s.healthManager.GetChecker())
+	s.pluginUpdateHandler.SetPluginRegistry(&s.pluginReg)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
+
+	// Start periodic health checks
+	s.healthManager.StartPeriodicChecks(func() map[string]pluginapi.Tool {
+		plugins := make(map[string]pluginapi.Tool)
+
+		// Get current agent
+		_, current := s.st.ListAgents()
+		if current == "" {
+			return plugins
+		}
+
+		agent, ok := s.st.GetAgent(current)
+		if !ok {
+			return plugins
+		}
+
+		// Collect all loaded plugins
+		for name, lp := range agent.Plugins {
+			if lp.Tool != nil {
+				plugins[name] = lp.Tool
+			}
+		}
+
+		return plugins
+	})
 
 	return s, nil
 }
@@ -220,6 +359,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
+	mux.HandleFunc("/marketplace", s.serveMarketplace)
 
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", s.serveStaticFile)
@@ -238,11 +378,35 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/plugins/execute", s.pluginInitHandler.PluginExecuteHandler)
 	mux.HandleFunc("/api/plugins/init-status", s.pluginInitHandler.PluginInitStatusHandler)
 
+	// Plugin health check endpoints (must be before catch-all /api/plugins/ pattern)
+	mux.HandleFunc("/api/plugins/health", s.healthHandler.HandleAllPluginsHealth)
+	mux.HandleFunc("/api/plugins/check-updates", s.pluginUpdateHandler.HandleCheckUpdates)
+	mux.HandleFunc("/api/plugins/backups", s.pluginUpdateHandler.HandleListBackups)
+	mux.HandleFunc("/api/plugins/backups/clean", s.pluginUpdateHandler.HandleCleanBackups)
+	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a health endpoint for a specific plugin
+		if strings.HasSuffix(r.URL.Path, "/health") {
+			s.healthHandler.HandlePluginHealth(w, r)
+			return
+		}
+		// Check if this is an update endpoint
+		if strings.HasSuffix(r.URL.Path, "/update") {
+			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)
+			return
+		}
+		// Check if this is a rollback endpoint
+		if strings.HasSuffix(r.URL.Path, "/rollback") {
+			s.pluginUpdateHandler.HandleRollbackPlugin(w, r)
+			return
+		}
+		// Otherwise, delegate to init handler
+		s.pluginInitHandler.PluginInitHandler(w, r)
+	})
+
 	// Reuse the plugin handler instance
 	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
 	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
 	mux.Handle("/api/plugins", s.pluginHandler)
-	mux.HandleFunc("/api/plugins/", s.pluginInitHandler.PluginInitHandler)
 
 	// Settings and configuration endpoints
 	mux.HandleFunc("/api/settings", s.settingsHandler.SettingsHandler)
@@ -358,6 +522,28 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(html))
 }
 
+func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
+	if err != nil {
+		log.Printf("Failed to render marketplace template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	path := "static" + r.URL.Path
 
@@ -387,4 +573,15 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Expires", "0")
 
 	w.Write(content)
+}
+
+// truncateString truncates a string to a maximum length with ellipsis
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }

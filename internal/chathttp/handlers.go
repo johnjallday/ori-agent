@@ -14,6 +14,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -24,6 +25,7 @@ type Handler struct {
 	store          store.Store
 	clientFactory  *client.Factory
 	llmFactory     *llm.Factory
+	healthManager  *healthhttp.Manager
 	commandHandler *CommandHandler
 }
 
@@ -39,6 +41,11 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 // SetLLMFactory sets the LLM factory
 func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 	h.llmFactory = factory
+}
+
+// SetHealthManager sets the health manager
+func (h *Handler) SetHealthManager(manager *healthhttp.Manager) {
+	h.healthManager = manager
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -150,7 +157,19 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
 				defer toolCancel()
 
+				// Track plugin call stats
+				startTime := time.Now()
 				result, err = pl.Tool.Call(toolCtx, args)
+				duration := time.Since(startTime)
+
+				// Record call stats in health manager
+				if h.healthManager != nil {
+					if err != nil {
+						h.healthManager.RecordCallFailure(name, duration, err)
+					} else {
+						h.healthManager.RecordCallSuccess(name, duration)
+					}
+				}
 
 				// IMPORTANT: Convert error to string result instead of returning HTTP error
 				// This prevents conversation history corruption
@@ -612,7 +631,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			toolCtx, toolCancel := context.WithTimeout(base, 30*time.Second)
 			defer toolCancel()
 
+			// Track plugin call stats
+			startTime := time.Now()
 			result, err := pl.Tool.Call(toolCtx, args)
+			duration := time.Since(startTime)
+
+			// Record call stats in health manager
+			if h.healthManager != nil {
+				if err != nil {
+					h.healthManager.RecordCallFailure(name, duration, err)
+				} else {
+					h.healthManager.RecordCallSuccess(name, duration)
+				}
+			}
 
 			// IMPORTANT: Always add a tool response message, even on error
 			// This prevents conversation history corruption when tool calls fail

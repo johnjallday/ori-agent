@@ -14,6 +14,9 @@ var (
 	BuildDate = "unknown" // Build timestamp
 )
 
+// Plugin API version - increment when making breaking changes to plugin interface
+const APIVersion = "v1"
+
 // GetVersion reads the version from the VERSION file or returns build-time version
 func GetVersion() string {
 	// If version was set at build time, use it
@@ -48,9 +51,10 @@ func GetVersion() string {
 // GetBuildInfo returns comprehensive build information
 func GetBuildInfo() map[string]string {
 	return map[string]string{
-		"version":    GetVersion(),
-		"git_commit": GitCommit,
-		"build_date": BuildDate,
+		"version":     GetVersion(),
+		"git_commit":  GitCommit,
+		"build_date":  BuildDate,
+		"api_version": APIVersion,
 	}
 }
 

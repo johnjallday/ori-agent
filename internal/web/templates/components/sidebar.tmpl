@@ -44,10 +44,42 @@
       <div id="pluginsList" class="plugins-list">
         <!-- Plugins will be loaded dynamically -->
       </div>
-      
-      <button id="pluginStoreBtn" class="modern-btn modern-btn-secondary w-100 mt-2">
+    </div>
+  </div>
+
+  <!-- Plugin Health Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M10.5,13H8V17H10.5C12.43,17 14,15.43 14,13.5C14,11.57 12.43,10 10.5,10H8V7H14V5H8C6.89,5 6,5.9 6,7V13C6,14.1 6.89,15 8,15H10.5C11.33,15 12,15.67 12,16.5C12,17.33 11.33,18 10.5,18H6V20H10.5C12.43,20 14,18.43 14,16.5C14,14.57 12.43,13 10.5,13M17,7H19V9H21V11H19V13H17V11H15V9H17V7Z"/>
+          </svg>
+          Plugin Health
+        </h6>
+      </div>
+
+      <div id="pluginHealthDashboard">
+        <!-- Health dashboard will be loaded dynamically -->
+        <div class="text-center text-muted small">
+          <div class="spinner-border spinner-border-sm me-2" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          Loading health data...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Marketplace Section -->
+  <div class="sidebar-section">
+    <div class="modern-card p-3">
+      <a href="/marketplace" class="modern-btn modern-btn-secondary w-100" style="text-decoration: none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+          <path d="M18,13H20V17H22V19H16V13H18M18,5H22V11H18M8,13H14V19H8M8,1H14V11H8V1Z"/>
+        </svg>
         Plugin Store
-      </button>
+      </a>
     </div>
   </div>
 

@@ -21,6 +21,31 @@ type VersionedTool interface {
 	Version() string
 }
 
+// PluginMetadata extends Tool with detailed version compatibility information.
+// Plugins should implement this interface to enable health checking and compatibility validation.
+type PluginMetadata interface {
+	Tool
+	// Version returns the plugin version (e.g., "0.0.5", "1.2.3-beta")
+	Version() string
+	// MinAgentVersion returns the minimum ori-agent version required (e.g., "0.0.6")
+	// Return empty string if no minimum requirement
+	MinAgentVersion() string
+	// MaxAgentVersion returns the maximum compatible ori-agent version (e.g., "1.0.0")
+	// Return empty string if no maximum limit
+	MaxAgentVersion() string
+	// APIVersion returns the plugin API version (e.g., "v1", "v2")
+	// This should match the agent's API version for compatibility
+	APIVersion() string
+}
+
+// HealthCheckProvider allows plugins to implement custom health checks.
+// Plugins can optionally implement this to validate their runtime state.
+type HealthCheckProvider interface {
+	// HealthCheck performs a plugin-specific health check
+	// Return nil if healthy, error with description if unhealthy
+	HealthCheck() error
+}
+
 // DefaultSettingsProvider allows plugins to provide default configuration values.
 // This is useful for plugins that need default file paths or configuration.
 type DefaultSettingsProvider interface {

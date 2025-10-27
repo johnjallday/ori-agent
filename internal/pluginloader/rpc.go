@@ -93,6 +93,38 @@ func (r *RPCPluginClient) Version() string {
 	return ""
 }
 
+// MinAgentVersion returns the minimum agent version if the plugin implements PluginMetadata
+func (r *RPCPluginClient) MinAgentVersion() string {
+	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+		return metadata.MinAgentVersion()
+	}
+	return ""
+}
+
+// MaxAgentVersion returns the maximum agent version if the plugin implements PluginMetadata
+func (r *RPCPluginClient) MaxAgentVersion() string {
+	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+		return metadata.MaxAgentVersion()
+	}
+	return ""
+}
+
+// APIVersion returns the plugin API version if the plugin implements PluginMetadata
+func (r *RPCPluginClient) APIVersion() string {
+	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+		return metadata.APIVersion()
+	}
+	return ""
+}
+
+// HealthCheck runs a health check if the plugin implements HealthCheckProvider
+func (r *RPCPluginClient) HealthCheck() error {
+	if healthProvider, ok := r.tool.(pluginapi.HealthCheckProvider); ok {
+		return healthProvider.HealthCheck()
+	}
+	return nil // No custom health check provided
+}
+
 // SetAgentContext sets agent context if the plugin implements AgentAwareTool
 func (r *RPCPluginClient) SetAgentContext(ctx pluginapi.AgentContext) {
 	if agentAware, ok := r.tool.(pluginapi.AgentAwareTool); ok {

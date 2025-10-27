@@ -85,7 +85,20 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	// Track plugin call stats
+	startTime := time.Now()
 	result, err := plugin.Tool.Call(ctx, string(argsJSON))
+	duration := time.Since(startTime)
+
+	// Record call stats in health manager
+	if h.HealthManager != nil {
+		if err != nil {
+			h.HealthManager.RecordCallFailure(pluginName, duration, err)
+		} else {
+			h.HealthManager.RecordCallSuccess(pluginName, duration)
+		}
+	}
+
 	if err != nil {
 		json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,

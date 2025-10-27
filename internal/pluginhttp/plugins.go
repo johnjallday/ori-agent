@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -35,6 +36,7 @@ type Handler struct {
 	Loader        ToolLoader
 	LocalRegistry *LocalRegistry
 	EnumExtractor *EnumExtractor
+	HealthManager *healthhttp.Manager
 }
 
 func New(state store.Store, loader ToolLoader) *Handler {
