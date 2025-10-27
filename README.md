@@ -3,7 +3,7 @@
 A modular, plugin-driven framework for building tool-calling AI agents.
 It provides secure plugin loading, agent orchestration, and HTTP/WebSocket interfaces — letting you create lightweight autonomous systems that can use tools or sub-agents efficiently.
 
-![Version](https://img.shields.io/badge/Version-v0.0.6-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.7-blue)
 ![Go](https://img.shields.io/badge/Go-1.24-00add8)
 ![UI](https://img.shields.io/badge/UI-Modern%20Design-6366f1)
 ![Plugin System](https://img.shields.io/badge/Plugins-Extensible-10b981)
