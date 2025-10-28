@@ -13,5 +13,6 @@
     "detected": true,
     "user_set": false
   },
-  "version": "dev"
+  "version": "dev",
+  "theme": "light"
 }

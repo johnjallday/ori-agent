@@ -4,12 +4,6 @@
 {{template "head.tmpl" .}}
 
 <body>
-    <script>
-      // Apply dark mode to body immediately
-      if (localStorage.getItem('theme') === 'dark') {
-        document.body.classList.add('dark-mode');
-      }
-    </script>
     {{template "navbar.tmpl" .}}
 
     <div class="container-fluid">

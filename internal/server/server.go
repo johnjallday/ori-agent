@@ -429,6 +429,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
 
+	// Theme endpoints
+	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.onboardingHandler.GetTheme(w, r)
+		} else if r.Method == http.MethodPost {
+			s.onboardingHandler.SetTheme(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Device endpoints
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
@@ -467,6 +478,9 @@ func (s *Server) corsHandler(next http.Handler) http.Handler {
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
 	if agents, current := s.st.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
 		if currentAgentName == "" {
@@ -494,6 +508,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
 	if agents, current := s.st.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
 		if currentAgentName == "" {
@@ -520,6 +537,9 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
 
 	if agents, current := s.st.ListAgents(); len(agents) > 0 {
 		currentAgentName := current

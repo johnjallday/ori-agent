@@ -146,3 +146,63 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
+
+// ThemeResponse represents the theme response
+type ThemeResponse struct {
+	Theme string `json:"theme"`
+}
+
+// SetThemeRequest represents a request to set the theme
+type SetThemeRequest struct {
+	Theme string `json:"theme"`
+}
+
+// GetTheme returns the current theme preference
+// GET /api/theme
+func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	theme := h.onboardingMgr.GetTheme()
+
+	response := ThemeResponse{
+		Theme: theme,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// SetTheme sets the theme preference
+// POST /api/theme
+func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req SetThemeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Theme == "" {
+		http.Error(w, "theme is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.onboardingMgr.SetTheme(req.Theme); err != nil {
+		http.Error(w, "Failed to set theme: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := ThemeResponse{
+		Theme: req.Theme,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

@@ -209,3 +209,27 @@ func (m *Manager) IsDeviceDetected() bool {
 	defer m.mu.RUnlock()
 	return m.state.Device.Detected
 }
+
+// GetTheme returns the current theme ("light" or "dark")
+func (m *Manager) GetTheme() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.state.Theme == "" {
+		return "light" // default to light
+	}
+	return m.state.Theme
+}
+
+// SetTheme sets the theme preference ("light" or "dark")
+func (m *Manager) SetTheme(theme string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Validate theme value
+	if theme != "light" && theme != "dark" {
+		return errors.New("theme must be 'light' or 'dark'")
+	}
+
+	m.state.Theme = theme
+	return m.saveUnlocked()
+}

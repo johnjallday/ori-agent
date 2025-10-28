@@ -3,11 +3,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{.Title}}</title>
   <script>
-    // Apply dark mode immediately to prevent flash - runs before any rendering
+    // Apply server-side theme immediately to prevent flash
     (function() {
-      if (localStorage.getItem('theme') === 'dark') {
+      {{if eq .Theme "dark"}}
         document.documentElement.classList.add('dark-mode');
-      }
+      {{else}}
+        document.documentElement.classList.remove('dark-mode');
+      {{end}}
     })();
   </script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -69,7 +71,12 @@
       position: relative;
     }
 
-    .dark-mode body {
+    /* Dark mode body backgrounds - handle all cases */
+    .dark-mode body,
+    body.dark-mode,
+    .dark-mode .bg-light,
+    .dark-mode body.bg-light,
+    body.dark-mode.bg-light {
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%) !important;
     }
 
@@ -1318,24 +1325,20 @@
     }
   </style>
   <script>
-    // Global dark mode handler - runs on every page
+    // Global dark mode handler - uses server-side theme management
     (function() {
-      // Check for saved dark mode preference
-      const savedTheme = localStorage.getItem('theme');
-      const isDarkMode = savedTheme === 'dark';
+      // Get theme from server template
+      const serverTheme = '{{.Theme}}';
+      const isDarkMode = serverTheme === 'dark';
 
-      // Apply dark mode class to html element immediately
-      if (isDarkMode) {
-        document.documentElement.classList.add('dark-mode');
-      }
-
-      // Helper function to apply dark mode to body
-      function applyDarkMode() {
-        const isDark = localStorage.getItem('theme') === 'dark';
+      // Helper function to apply dark mode
+      function applyDarkMode(isDark) {
         if (isDark) {
           document.body.classList.add('dark-mode');
+          document.documentElement.classList.add('dark-mode');
         } else {
           document.body.classList.remove('dark-mode');
+          document.documentElement.classList.remove('dark-mode');
         }
         return isDark;
       }
@@ -1363,30 +1366,37 @@
 
       // Setup dark mode when DOM is ready
       document.addEventListener('DOMContentLoaded', function() {
-        // Apply dark mode class to body based on saved preference
-        const isDark = applyDarkMode();
+        // Apply dark mode based on server theme
+        applyDarkMode(isDarkMode);
 
         // Update button to match current theme
-        updateDarkModeButton(isDark);
+        updateDarkModeButton(isDarkMode);
 
         // Add event listener to dark mode toggle button
         const darkModeToggle = document.getElementById('darkModeToggle');
         if (darkModeToggle) {
-          darkModeToggle.addEventListener('click', function() {
-            // Toggle dark mode
-            const currentTheme = localStorage.getItem('theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            localStorage.setItem('theme', newTheme);
+          darkModeToggle.addEventListener('click', async function() {
+            // Toggle theme and save to server
+            const newTheme = isDarkMode ? 'light' : 'dark';
 
-            // Apply to body
-            if (newTheme === 'dark') {
-              document.body.classList.add('dark-mode');
-            } else {
-              document.body.classList.remove('dark-mode');
+            try {
+              const response = await fetch('/api/theme', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ theme: newTheme })
+              });
+
+              if (response.ok) {
+                // Reload page to apply new theme
+                window.location.reload();
+              } else {
+                console.error('Failed to set theme');
+              }
+            } catch (error) {
+              console.error('Error setting theme:', error);
             }
-
-            // Update button
-            updateDarkModeButton(newTheme === 'dark');
           });
         }
       });

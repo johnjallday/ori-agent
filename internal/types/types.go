@@ -38,6 +38,7 @@ type AppState struct {
 	Onboarding OnboardingState `json:"onboarding"`
 	Device     DeviceInfo      `json:"device"`
 	Version    string          `json:"version"`
+	Theme      string          `json:"theme,omitempty"` // "light" or "dark", defaults to "light"
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use
