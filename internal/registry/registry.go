@@ -173,6 +173,80 @@ func (m *Manager) ScanUploadedPlugins() error {
 	return nil
 }
 
+// RefreshLocalRegistry completely rebuilds the local registry from uploaded_plugins directory
+// This refreshes all metadata (version, description) for all plugins
+func (m *Manager) RefreshLocalRegistry() error {
+	// Check if uploaded_plugins directory exists
+	if _, err := os.Stat(m.uploadedPluginsDir); os.IsNotExist(err) {
+		// No uploaded plugins directory - create empty registry
+		emptyReg := types.PluginRegistry{Plugins: []types.PluginRegistryEntry{}}
+		return m.SaveLocal(emptyReg)
+	}
+
+	// Create new registry from scratch
+	newReg := types.PluginRegistry{
+		Plugins: []types.PluginRegistryEntry{},
+	}
+
+	// Read uploaded_plugins directory
+	entries, err := os.ReadDir(m.uploadedPluginsDir)
+	if err != nil {
+		return fmt.Errorf("failed to read uploaded_plugins directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+		// Skip hidden files
+		if strings.HasPrefix(filename, ".") {
+			continue
+		}
+
+		pluginPath := filepath.Join(m.uploadedPluginsDir, filename)
+		pluginName := filename
+
+		// Try to load the plugin to get metadata
+		var description, version string
+		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
+			def := tool.Definition()
+			description = def.Description.String()
+			version = pluginloader.GetPluginVersion(tool)
+
+			// Clean up RPC plugins after getting metadata
+			pluginloader.CloseRPCPlugin(tool)
+		}
+
+		// Fallback values if loading failed
+		if description == "" {
+			description = fmt.Sprintf("Plugin: %s", pluginName)
+		}
+		if version == "" {
+			version = "unknown"
+		}
+
+		// Add to new registry
+		newPlugin := types.PluginRegistryEntry{
+			Name:        pluginName,
+			Description: description,
+			Path:        pluginPath,
+			Version:     version,
+		}
+
+		newReg.Plugins = append(newReg.Plugins, newPlugin)
+	}
+
+	// Save refreshed registry
+	if err := m.SaveLocal(newReg); err != nil {
+		return fmt.Errorf("failed to save refreshed local registry: %w", err)
+	}
+
+	fmt.Printf("✅ Refreshed local plugin registry with %d plugin(s) from uploaded_plugins/\n", len(newReg.Plugins))
+	return nil
+}
+
 // Merge combines online and local plugin registries
 func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry {
 	merged := types.PluginRegistry{}

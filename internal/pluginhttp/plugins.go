@@ -116,6 +116,9 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				// Check if plugin supports initialization
 				_, supportsInit := pl.Tool.(pluginapi.InitializationProvider)
 
+				// Check if plugin binary exists in uploaded_plugins
+				isInstalled := h.isPluginInstalled(name, pl.Path)
+
 				plist = append(plist, map[string]any{
 					"name":                    name,
 					"description":             pl.Definition.Description.String(),
@@ -123,6 +126,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 					"path":                    pl.Path,
 					"version":                 pl.Version,
 					"enabled":                 true,
+					"installed":               isInstalled,
 					"supports_initialization": supportsInit,
 				})
 			}
@@ -138,6 +142,9 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 	ag, agentExists := h.State.GetAgent(current)
 
 	for _, registryPlugin := range localReg.Plugins {
+		// Check if plugin binary is installed (exists in uploaded_plugins/)
+		isInstalled := h.isPluginInstalled(registryPlugin.Name, registryPlugin.Path)
+
 		// Check if plugin is enabled (only if agent exists)
 		var loadedPlugin *types.LoadedPlugin
 		isEnabled := false
@@ -167,6 +174,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				"path":                    registryPlugin.Path,
 				"version":                 registryPlugin.Version,
 				"enabled":                 true,
+				"installed":               isInstalled,
 				"definition":              loadedPlugin.Definition,
 				"supports_initialization": requiresSettings,
 				"requires_settings":       requiresSettings,
@@ -203,6 +211,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				"path":                    registryPlugin.Path,
 				"version":                 registryPlugin.Version,
 				"enabled":                 false,
+				"installed":               isInstalled,
 				"supports_initialization": requiresSettings,
 				"requires_settings":       requiresSettings,
 				"setting_variables":       settingVariables,
@@ -734,4 +743,33 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// isPluginInstalled checks if a plugin binary exists in the uploaded_plugins directory
+func (h *Handler) isPluginInstalled(pluginName, pluginPath string) bool {
+	// If path is empty, check by plugin name in uploaded_plugins
+	if pluginPath == "" {
+		uploadedPath := filepath.Join("uploaded_plugins", pluginName)
+		if _, err := os.Stat(uploadedPath); err == nil {
+			return true
+		}
+		return false
+	}
+
+	// Check if the plugin path contains uploaded_plugins directory
+	if strings.Contains(pluginPath, "uploaded_plugins/") || strings.Contains(pluginPath, "uploaded_plugins"+string(filepath.Separator)) {
+		// Check if file exists at the specified path
+		if _, err := os.Stat(pluginPath); err == nil {
+			return true
+		}
+	}
+
+	// Also check by plugin name in uploaded_plugins directory
+	// This handles cases where the plugin might have been moved
+	uploadedPath := filepath.Join("uploaded_plugins", pluginName)
+	if _, err := os.Stat(uploadedPath); err == nil {
+		return true
+	}
+
+	return false
 }

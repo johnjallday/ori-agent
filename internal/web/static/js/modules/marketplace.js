@@ -23,25 +23,18 @@ class PluginMarketplace {
 
     async loadMarketplaceData() {
         try {
-            // Load registry plugins
-            const registryResp = await fetch('/api/plugin-registry');
-            const registryData = await registryResp.json();
-            this.plugins = registryData.plugins || [];
+            // Load all plugins (includes installed status from uploaded_plugins)
+            const pluginsResp = await fetch('/api/plugins');
+            const pluginsData = await pluginsResp.json();
+            this.plugins = pluginsData.plugins || [];
 
-            // Load installed plugins (from agents)
-            const agentsResp = await fetch('/api/agents');
-            const agentsData = await agentsResp.json();
-
+            // Build set of installed plugins (from uploaded_plugins directory)
             this.installedPlugins = new Set();
-            if (agentsData.agents) {
-                agentsData.agents.forEach(agent => {
-                    if (agent.plugins) {
-                        Object.keys(agent.plugins).forEach(pluginName => {
-                            this.installedPlugins.add(pluginName);
-                        });
-                    }
-                });
-            }
+            this.plugins.forEach(plugin => {
+                if (plugin.installed) {
+                    this.installedPlugins.add(plugin.name);
+                }
+            });
 
             // Load available updates
             const updatesResp = await fetch('/api/plugins/check-updates');

@@ -134,14 +134,10 @@ func New() (*Server, error) {
 	log.Printf("Using plugin cache: %s", pluginCacheDir)
 	s.pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
 
-	// scan uploaded_plugins directory and auto-register any new plugins
-	if err := s.registryManager.ScanUploadedPlugins(); err != nil {
-		log.Printf("Warning: failed to scan uploaded_plugins directory: %v", err)
-	}
-
-	// validate and update local plugin registry (check if plugins still exist at their paths)
-	if err := s.registryManager.ValidateAndUpdateLocal(); err != nil {
-		log.Printf("Warning: failed to validate local plugin registry: %v", err)
+	// refresh local plugin registry from uploaded_plugins directory
+	// This rebuilds the registry from scratch, ensuring all metadata is current
+	if err := s.registryManager.RefreshLocalRegistry(); err != nil {
+		log.Printf("Warning: failed to refresh local plugin registry: %v", err)
 	}
 
 	// init update manager
