@@ -22,26 +22,9 @@ async function loadAvailableProviders() {
 
 // Populate model select with options from available providers
 function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
-  if (!modelSelect) return;
+  if (!modelSelect || availableProviders.length === 0) return;
 
-  // Only populate if we have providers loaded, otherwise keep existing options
-  if (availableProviders.length === 0) {
-    // Fallback: just filter existing hardcoded options by type
-    const allOptions = modelSelect.querySelectorAll('option');
-    allOptions.forEach(option => {
-      const optionType = option.getAttribute('data-type');
-      if (optionType === selectedType || !optionType) {
-        option.style.display = '';
-        option.disabled = false;
-      } else {
-        option.style.display = 'none';
-        option.disabled = true;
-      }
-    });
-    return;
-  }
-
-  // Clear existing options only if we have providers to replace them with
+  // Clear existing options
   modelSelect.innerHTML = '';
 
   // Group models by provider
@@ -77,6 +60,24 @@ function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
   }
 }
 
+// Initialize models on page load
+async function initializeModels() {
+  await loadAvailableProviders();
+
+  // Populate the model select in the create agent modal
+  const agentModelSelect = document.getElementById('agentModel');
+  if (agentModelSelect) {
+    populateModelSelect(agentModelSelect, 'tool-calling');
+  }
+}
+
+// Call initialization when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeModels);
+} else {
+  initializeModels();
+}
+
 // Agent Management Functions
 function selectAgent(agentName) {
   console.log('Selecting agent:', agentName);
@@ -89,7 +90,7 @@ function selectAgent(agentName) {
 }
 
 // Show add agent modal
-async function showAddAgentModal() {
+function showAddAgentModal() {
   const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
   const agentNameInput = document.getElementById('agentName');
   const agentTypeInput = document.getElementById('agentType');
@@ -97,11 +98,6 @@ async function showAddAgentModal() {
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const temperatureValueSpan = document.getElementById('temperatureValue');
-
-  // Load providers if not already loaded
-  if (availableProviders.length === 0) {
-    await loadAvailableProviders();
-  }
 
   // Clear previous inputs
   if (agentNameInput) {
@@ -114,7 +110,7 @@ async function showAddAgentModal() {
     agentSystemPromptInput.value = '';
   }
   if (agentModelInput) {
-    // Populate model select with dynamic providers
+    // Re-filter models based on default type (models already loaded on page init)
     populateModelSelect(agentModelInput, 'tool-calling');
   }
   if (agentTemperatureInput) {
@@ -212,7 +208,11 @@ async function createNewAgent() {
       agentSystemPromptInput.value = '';
     }
     if (agentModelInput) {
-      agentModelInput.value = 'gpt-5-nano';
+      // Select first available tool-calling model
+      const firstToolCallingOption = agentModelInput.querySelector('option[data-type="tool-calling"]:not([disabled])');
+      if (firstToolCallingOption) {
+        agentModelInput.value = firstToolCallingOption.value;
+      }
     }
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
@@ -413,11 +413,8 @@ function createAgentElement(agentName, currentAgent) {
           <div class="d-flex align-items-center justify-content-between">
             <span style="color: var(--text-primary); font-size: 0.85rem;">Model</span>
             <select id="gptModelSelect-${accordionId}" class="form-select form-select-sm" style="width: auto; min-width: 180px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
-              <optgroup label="Cheap Models (Recommended for Agents)">
-                <option value="gpt-5-nano">GPT-5 Nano</option>
-                <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
-                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-              </optgroup>
+              <!-- Models will be loaded dynamically from /api/providers -->
+              <option value="">Loading models...</option>
             </select>
           </div>
         </div>
@@ -668,12 +665,40 @@ function setupAccordionListeners() {
 // Load settings for a specific agent accordion
 async function loadAgentSettings(agentName, accordionId) {
   try {
+    // Ensure providers are loaded
+    if (availableProviders.length === 0) {
+      await loadAvailableProviders();
+    }
+
+    // Populate model dropdown from API
+    const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
+    if (modelSelect) {
+      // Clear existing options
+      modelSelect.innerHTML = '';
+
+      // Add all models from all providers (no tier filtering for agent settings)
+      availableProviders.forEach(provider => {
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+
+        provider.models.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model.value;
+          option.textContent = model.label;
+          option.setAttribute('data-type', model.type);
+          option.setAttribute('data-provider', model.provider);
+          providerGroup.appendChild(option);
+        });
+
+        modelSelect.appendChild(providerGroup);
+      });
+    }
+
     const response = await fetch(`/api/settings?agent=${encodeURIComponent(agentName)}`);
     if (response.ok) {
       const settings = await response.json();
 
-      // Update model dropdown
-      const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
+      // Update model dropdown with current value
       const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
       if (modelSelect && modelValue) {
         modelSelect.value = modelValue;
