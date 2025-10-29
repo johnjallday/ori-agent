@@ -31,7 +31,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -57,6 +56,7 @@ type Server struct {
 	onboardingMgr         *onboarding.Manager
 	onboardingHandler     *onboardinghttp.Handler
 	deviceHandler         *devicehttp.Handler
+	webPageHandler        *pluginhttp.WebPageHandler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -105,6 +105,17 @@ func New() (*Server, error) {
 		s.llmFactory.Register("claude", claudeProvider)
 		log.Printf("Claude provider registered")
 	}
+
+	// Register Ollama provider (always available, no API key required)
+	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
+	if ollamaBaseURL == "" {
+		ollamaBaseURL = "http://localhost:11434"
+	}
+	ollamaProvider := llm.NewOllamaProvider(llm.ProviderConfig{
+		BaseURL: ollamaBaseURL,
+	})
+	s.llmFactory.Register("ollama", ollamaProvider)
+	log.Printf("Ollama provider registered (base URL: %s)", ollamaBaseURL)
 
 	// init store (persists agents/plugins/settings; not messages)
 	s.agentStorePath = "agents.json"
@@ -276,6 +287,33 @@ func New() (*Server, error) {
 		log.Println("")
 	}
 
+	// Health check all uploaded plugins (not just agent-loaded ones)
+	log.Println("Running initial health checks for all uploaded plugins...")
+	localReg, err := s.registryManager.LoadLocal()
+	if err == nil {
+		for _, pluginEntry := range localReg.Plugins {
+			// Check if we already health checked this plugin (from agent loading)
+			if _, exists := s.healthManager.GetPluginHealth(pluginEntry.Name); exists {
+				continue // Skip if already checked
+			}
+
+			// Load and health check this plugin
+			tool, err := pluginloader.LoadPluginRPC(pluginEntry.Path)
+			if err != nil {
+				log.Printf("Warning: could not load plugin %s for initial health check: %v", pluginEntry.Name, err)
+				continue
+			}
+
+			// Run health check and cache the result
+			healthResult := s.healthManager.CheckAndCachePlugin(pluginEntry.Name, tool)
+			if healthResult.Health.Compatible {
+				log.Printf("✅ Plugin %s v%s health check passed", pluginEntry.Name, healthResult.Health.Version)
+			} else {
+				log.Printf("⚠️  Plugin %s v%s health check issues: %v", pluginEntry.Name, healthResult.Health.Version, healthResult.Health.Warnings)
+			}
+		}
+	}
+
 	// load plugin registry
 	if reg, _, err := s.registryManager.Load(); err == nil {
 		s.pluginReg = reg
@@ -306,7 +344,7 @@ func New() (*Server, error) {
 	s.onboardingMgr = onboarding.NewManager("app_state.json")
 
 	// initialize HTTP handlers
-	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory)
+	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
 	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
 	s.chatHandler.SetHealthManager(s.healthManager) // Inject health manager
@@ -321,31 +359,7 @@ func New() (*Server, error) {
 	s.pluginUpdateHandler.SetPluginRegistry(&s.pluginReg)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
-
-	// Start periodic health checks
-	s.healthManager.StartPeriodicChecks(func() map[string]pluginapi.Tool {
-		plugins := make(map[string]pluginapi.Tool)
-
-		// Get current agent
-		_, current := s.st.ListAgents()
-		if current == "" {
-			return plugins
-		}
-
-		agent, ok := s.st.GetAgent(current)
-		if !ok {
-			return plugins
-		}
-
-		// Collect all loaded plugins
-		for name, lp := range agent.Plugins {
-			if lp.Tool != nil {
-				plugins[name] = lp.Tool
-			}
-		}
-
-		return plugins
-	})
+	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
 
 	return s, nil
 }
@@ -380,6 +394,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/plugins/backups", s.pluginUpdateHandler.HandleListBackups)
 	mux.HandleFunc("/api/plugins/backups/clean", s.pluginUpdateHandler.HandleCleanBackups)
 	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a web page request
+		if strings.Contains(r.URL.Path, "/pages/") {
+			s.webPageHandler.ServeHTTP(w, r)
+			return
+		}
+		// Check if this is a pages list request
+		if strings.HasSuffix(r.URL.Path, "/pages") {
+			s.webPageHandler.ListPages(w, r)
+			return
+		}
 		// Check if this is a health endpoint for a specific plugin
 		if strings.HasSuffix(r.URL.Path, "/health") {
 			s.healthHandler.HandlePluginHealth(w, r)
@@ -407,6 +431,7 @@ func (s *Server) Handler() http.Handler {
 	// Settings and configuration endpoints
 	mux.HandleFunc("/api/settings", s.settingsHandler.SettingsHandler)
 	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
+	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
 
 	// Chat endpoint
 	mux.HandleFunc("/api/chat", s.chatHandler.ChatHandler)

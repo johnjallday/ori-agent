@@ -179,6 +179,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				"supports_initialization": requiresSettings,
 				"requires_settings":       requiresSettings,
 				"setting_variables":       settingVariables,
+				"metadata":                registryPlugin.Metadata,
 			}
 			plist = append(plist, pluginInfo)
 		} else {
@@ -215,6 +216,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				"supports_initialization": requiresSettings,
 				"requires_settings":       requiresSettings,
 				"setting_variables":       settingVariables,
+				"metadata":                registryPlugin.Metadata,
 			}
 			plist = append(plist, pluginInfo)
 		}

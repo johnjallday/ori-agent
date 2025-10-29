@@ -157,6 +157,34 @@ func (s *grpcServer) InitializeWithConfig(ctx context.Context, req *InitializeCo
 	return &ConfigResponse{Success: false, Error: "plugin does not implement InitializationProvider"}, nil
 }
 
+func (s *grpcServer) GetMetadata(ctx context.Context, _ *Empty) (*MetadataResponse, error) {
+	// Check if plugin implements MetadataProvider
+	if metadataProvider, ok := s.Impl.(MetadataProvider); ok {
+		metadata, err := metadataProvider.GetMetadata()
+		if err != nil {
+			return &MetadataResponse{Error: err.Error()}, nil
+		}
+
+		// metadata is already a *PluginMetadata from the proto
+		return &MetadataResponse{Metadata: metadata}, nil
+	}
+	// Plugin doesn't implement MetadataProvider, return empty
+	return &MetadataResponse{}, nil
+}
+
+func (s *grpcServer) GetCompatibilityInfo(ctx context.Context, _ *Empty) (*CompatibilityInfoResponse, error) {
+	// Check if plugin implements PluginCompatibility
+	if compatTool, ok := s.Impl.(PluginCompatibility); ok {
+		return &CompatibilityInfoResponse{
+			MinAgentVersion: compatTool.MinAgentVersion(),
+			MaxAgentVersion: compatTool.MaxAgentVersion(),
+			ApiVersion:      compatTool.APIVersion(),
+		}, nil
+	}
+	// Plugin doesn't implement PluginCompatibility, return empty
+	return &CompatibilityInfoResponse{}, nil
+}
+
 // grpcClient is a local wrapper for the client implementation
 type grpcClient struct {
 	client ToolServiceClient
@@ -289,11 +317,95 @@ func (c *grpcClient) InitializeWithConfig(config map[string]interface{}) error {
 	return nil
 }
 
+func (c *grpcClient) GetMetadata() (*PluginMetadata, error) {
+	resp, err := c.client.GetMetadata(context.Background(), &Empty{})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf("%s", resp.Error)
+	}
+
+	// Return the proto-generated metadata directly
+	return resp.Metadata, nil
+}
+
+func (c *grpcClient) MinAgentVersion() string {
+	resp, err := c.client.GetCompatibilityInfo(context.Background(), &Empty{})
+	if err != nil {
+		return ""
+	}
+	return resp.MinAgentVersion
+}
+
+func (c *grpcClient) MaxAgentVersion() string {
+	resp, err := c.client.GetCompatibilityInfo(context.Background(), &Empty{})
+	if err != nil {
+		return ""
+	}
+	return resp.MaxAgentVersion
+}
+
+func (c *grpcClient) APIVersion() string {
+	resp, err := c.client.GetCompatibilityInfo(context.Background(), &Empty{})
+	if err != nil {
+		return ""
+	}
+	return resp.ApiVersion
+}
+
+func (s *grpcServer) GetWebPages(ctx context.Context, _ *Empty) (*WebPagesResponse, error) {
+	if webProvider, ok := s.Impl.(WebPageProvider); ok {
+		pages := webProvider.GetWebPages()
+		return &WebPagesResponse{Pages: pages}, nil
+	}
+	return &WebPagesResponse{}, nil
+}
+
+func (s *grpcServer) ServeWebPage(ctx context.Context, req *WebPageRequest) (*WebPageResponse, error) {
+	if webProvider, ok := s.Impl.(WebPageProvider); ok {
+		content, contentType, err := webProvider.ServeWebPage(req.Path, req.Query)
+		if err != nil {
+			return &WebPageResponse{Error: err.Error()}, nil
+		}
+		return &WebPageResponse{
+			Content:     content,
+			ContentType: contentType,
+		}, nil
+	}
+	return &WebPageResponse{Error: "plugin does not implement WebPageProvider"}, nil
+}
+
+func (c *grpcClient) GetWebPages() []string {
+	resp, err := c.client.GetWebPages(context.Background(), &Empty{})
+	if err != nil || resp == nil {
+		return []string{}
+	}
+	return resp.Pages
+}
+
+func (c *grpcClient) ServeWebPage(path string, query map[string]string) (string, string, error) {
+	resp, err := c.client.ServeWebPage(context.Background(), &WebPageRequest{
+		Path:  path,
+		Query: query,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if resp.Error != "" {
+		return "", "", fmt.Errorf("%s", resp.Error)
+	}
+	return resp.Content, resp.ContentType, nil
+}
+
 // Compile-time interface checks
 var (
 	_ Tool                    = (*grpcClient)(nil)
 	_ VersionedTool           = (*grpcClient)(nil)
+	_ PluginCompatibility     = (*grpcClient)(nil)
+	_ MetadataProvider        = (*grpcClient)(nil)
 	_ DefaultSettingsProvider = (*grpcClient)(nil)
 	_ AgentAwareTool          = (*grpcClient)(nil)
 	_ InitializationProvider  = (*grpcClient)(nil)
+	_ WebPageProvider         = (*grpcClient)(nil)
 )

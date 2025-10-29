@@ -87,20 +87,20 @@ func (c *Checker) CheckPlugin(name string, tool pluginapi.Tool) CheckResult {
 		Checks: make([]CompatibilityCheck, 0),
 	}
 
-	// Check if plugin implements PluginMetadata
-	metadata, hasMetadata := tool.(pluginapi.PluginMetadata)
+	// Check if plugin implements PluginCompatibility
+	metadata, hasMetadata := tool.(pluginapi.PluginCompatibility)
 
 	if !hasMetadata {
 		// Try VersionedTool as fallback
 		if versionedTool, ok := tool.(pluginapi.VersionedTool); ok {
 			result.Health.Version = versionedTool.Version()
 			result.Health.Warnings = append(result.Health.Warnings,
-				"Plugin uses legacy VersionedTool interface - consider upgrading to PluginMetadata")
+				"Plugin uses legacy VersionedTool interface - consider upgrading to PluginCompatibility")
 			result.Health.Status = "degraded"
 			result.Checks = append(result.Checks, CompatibilityCheck{
 				Type:    "metadata",
 				Passed:  false,
-				Details: "Plugin does not implement PluginMetadata interface",
+				Details: "Plugin does not implement PluginCompatibility interface",
 			})
 			return result
 		}

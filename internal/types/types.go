@@ -49,19 +49,37 @@ type LoadedPlugin struct {
 	Version    string                         `json:"Version,omitempty"`
 }
 
+// Maintainer represents a single plugin maintainer/contributor
+type Maintainer struct {
+	Name         string `json:"name"`                   // Full name
+	Email        string `json:"email,omitempty"`        // Contact email
+	Organization string `json:"organization,omitempty"` // Organization affiliation
+	Website      string `json:"website,omitempty"`      // Personal/project website
+	Role         string `json:"role"`                   // "author", "maintainer", "contributor"
+	Primary      bool   `json:"primary,omitempty"`      // Is this the primary/original author?
+}
+
+// PluginMetadata contains comprehensive plugin information
+type PluginMetadata struct {
+	Maintainers []Maintainer `json:"maintainers,omitempty"`
+	License     string       `json:"license,omitempty"`    // e.g., "MIT", "Apache-2.0", "GPL-3.0"
+	Repository  string       `json:"repository,omitempty"` // Source code repository URL
+}
+
 // PluginRegistryEntry represents a plugin in the plugin registry
 type PluginRegistryEntry struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Path         string   `json:"path,omitempty"`          // Local path (for local plugins)
-	URL          string   `json:"url,omitempty"`           // External URL (for remote plugins)
-	Version      string   `json:"version,omitempty"`       // Plugin version
-	Checksum     string   `json:"checksum,omitempty"`      // SHA256 checksum for verification
-	AutoUpdate   bool     `json:"auto_update,omitempty"`   // Whether to auto-update this plugin
-	GitHubRepo   string   `json:"github_repo,omitempty"`   // GitHub repository (user/repo format)
-	DownloadURL  string   `json:"download_url,omitempty"`  // Direct download URL for GitHub releases
-	SupportedOS  []string `json:"supported_os,omitempty"`  // Supported operating systems (darwin, linux, windows, all)
-	SupportedArch []string `json:"supported_arch,omitempty"` // Supported architectures (amd64, arm64, all)
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Path          string          `json:"path,omitempty"`           // Local path (for local plugins)
+	URL           string          `json:"url,omitempty"`            // External URL (for remote plugins)
+	Version       string          `json:"version,omitempty"`        // Plugin version
+	Checksum      string          `json:"checksum,omitempty"`       // SHA256 checksum for verification
+	AutoUpdate    bool            `json:"auto_update,omitempty"`    // Whether to auto-update this plugin
+	GitHubRepo    string          `json:"github_repo,omitempty"`    // GitHub repository (user/repo format)
+	DownloadURL   string          `json:"download_url,omitempty"`   // Direct download URL for GitHub releases
+	SupportedOS   []string        `json:"supported_os,omitempty"`   // Supported operating systems (darwin, linux, windows, all)
+	SupportedArch []string        `json:"supported_arch,omitempty"` // Supported architectures (amd64, arm64, all)
+	Metadata      *PluginMetadata `json:"metadata,omitempty"`       // Plugin metadata (maintainers, license, repository)
 }
 
 // PluginRegistry contains all available plugins

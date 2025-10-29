@@ -101,3 +101,5 @@ plugin_cache/
 uploaded_plugins/
 agents.json
 local_plugin_registry.json
+
+ori-agent

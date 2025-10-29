@@ -93,25 +93,25 @@ func (r *RPCPluginClient) Version() string {
 	return ""
 }
 
-// MinAgentVersion returns the minimum agent version if the plugin implements PluginMetadata
+// MinAgentVersion returns the minimum agent version if the plugin implements PluginCompatibility
 func (r *RPCPluginClient) MinAgentVersion() string {
-	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+	if metadata, ok := r.tool.(pluginapi.PluginCompatibility); ok {
 		return metadata.MinAgentVersion()
 	}
 	return ""
 }
 
-// MaxAgentVersion returns the maximum agent version if the plugin implements PluginMetadata
+// MaxAgentVersion returns the maximum agent version if the plugin implements PluginCompatibility
 func (r *RPCPluginClient) MaxAgentVersion() string {
-	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+	if metadata, ok := r.tool.(pluginapi.PluginCompatibility); ok {
 		return metadata.MaxAgentVersion()
 	}
 	return ""
 }
 
-// APIVersion returns the plugin API version if the plugin implements PluginMetadata
+// APIVersion returns the plugin API version if the plugin implements PluginCompatibility
 func (r *RPCPluginClient) APIVersion() string {
-	if metadata, ok := r.tool.(pluginapi.PluginMetadata); ok {
+	if metadata, ok := r.tool.(pluginapi.PluginCompatibility); ok {
 		return metadata.APIVersion()
 	}
 	return ""
@@ -162,6 +162,30 @@ func (r *RPCPluginClient) InitializeWithConfig(config map[string]interface{}) er
 		return initProvider.InitializeWithConfig(config)
 	}
 	return fmt.Errorf("plugin does not support initialization")
+}
+
+// GetMetadata returns plugin metadata if the plugin implements MetadataProvider
+func (r *RPCPluginClient) GetMetadata() (*pluginapi.PluginMetadata, error) {
+	if metadataProvider, ok := r.tool.(pluginapi.MetadataProvider); ok {
+		return metadataProvider.GetMetadata()
+	}
+	return nil, nil // Plugin doesn't provide metadata
+}
+
+// GetWebPages returns available web pages if the plugin implements WebPageProvider
+func (r *RPCPluginClient) GetWebPages() []string {
+	if webProvider, ok := r.tool.(pluginapi.WebPageProvider); ok {
+		return webProvider.GetWebPages()
+	}
+	return []string{} // Plugin doesn't provide web pages
+}
+
+// ServeWebPage serves a web page if the plugin implements WebPageProvider
+func (r *RPCPluginClient) ServeWebPage(path string, query map[string]string) (string, string, error) {
+	if webProvider, ok := r.tool.(pluginapi.WebPageProvider); ok {
+		return webProvider.ServeWebPage(path, query)
+	}
+	return "", "", nil // Plugin doesn't provide web pages
 }
 
 // Kill terminates the plugin process

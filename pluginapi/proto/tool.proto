@@ -30,6 +30,19 @@ service ToolService {
 
     // InitializeWithConfig initializes the plugin with the provided configuration
     rpc InitializeWithConfig(InitializeConfigRequest) returns (ConfigResponse);
+
+    // GetMetadata returns plugin metadata (optional)
+    rpc GetMetadata(Empty) returns (MetadataResponse);
+
+    // GetCompatibilityInfo returns plugin compatibility information (optional)
+    rpc GetCompatibilityInfo(Empty) returns (CompatibilityInfoResponse);
+
+    // WebPageProvider methods
+    // GetWebPages returns a list of available web pages this plugin provides
+    rpc GetWebPages(Empty) returns (WebPagesResponse);
+
+    // ServeWebPage handles a web page request and returns HTML/JSON content
+    rpc ServeWebPage(WebPageRequest) returns (WebPageResponse);
 }
 
 // Empty message for RPCs that don't need parameters
@@ -104,4 +117,52 @@ message InitializeConfigRequest {
 message ConfigResponse {
     bool success = 1;
     string error = 2;  // Error message on failure (empty on success)
+}
+
+// Maintainer represents a single plugin maintainer/contributor
+message Maintainer {
+    string name = 1;                   // Full name
+    string email = 2;                  // Contact email
+    string organization = 3;           // Organization affiliation
+    string website = 4;                // Personal/project website
+    string role = 5;                   // "author", "maintainer", "contributor"
+    bool primary = 6;                  // Is this the primary/original author?
+}
+
+// PluginMetadata contains comprehensive plugin information
+message PluginMetadata {
+    repeated Maintainer maintainers = 1;
+    string license = 2;                // e.g., "MIT", "Apache-2.0", "GPL-3.0"
+    string repository = 3;             // Source code repository URL
+}
+
+// MetadataResponse contains plugin metadata
+message MetadataResponse {
+    PluginMetadata metadata = 1;
+    string error = 2;  // Error message on failure (empty on success)
+}
+
+// CompatibilityInfoResponse contains plugin compatibility information
+message CompatibilityInfoResponse {
+    string min_agent_version = 1;  // Minimum ori-agent version required
+    string max_agent_version = 2;  // Maximum ori-agent version supported
+    string api_version = 3;         // Plugin API version
+}
+
+// WebPagesResponse contains the list of available web pages
+message WebPagesResponse {
+    repeated string pages = 1;  // List of page paths (e.g., "marketplace", "settings")
+}
+
+// WebPageRequest contains the web page request parameters
+message WebPageRequest {
+    string path = 1;  // The requested path (e.g., "marketplace")
+    map<string, string> query = 2;  // URL query parameters
+}
+
+// WebPageResponse contains the web page content
+message WebPageResponse {
+    string content = 1;  // HTML or JSON content
+    string content_type = 2;  // MIME type (e.g., "text/html", "application/json")
+    string error = 3;  // Error message on failure (empty on success)
 }

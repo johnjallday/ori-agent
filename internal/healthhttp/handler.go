@@ -462,37 +462,14 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get current agent
-	_, current := h.store.ListAgents()
-	if current == "" {
-		http.Error(w, "no active agent", http.StatusInternalServerError)
-		return
-	}
-
-	agent, ok := h.store.GetAgent(current)
-	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
-		return
-	}
-
 	// Get agent info from checker
 	agentInfo := h.manager.checker.GetAgentInfo()
 
-	// Collect health info for all loaded plugins
+	// Collect health info for ALL health-checked plugins (not just agent-loaded ones)
 	var pluginHealthList []health.PluginHealth
-	for pluginName := range agent.Plugins {
-		if result, ok := h.manager.GetPluginHealth(pluginName); ok {
-			pluginHealthList = append(pluginHealthList, result.Health)
-		} else {
-			// Plugin not checked yet, return basic info
-			pluginHealthList = append(pluginHealthList, health.PluginHealth{
-				Name:       pluginName,
-				Status:     "unknown",
-				Compatible: false,
-				LastCheck:  time.Time{},
-				Errors:     []string{"Health check not performed yet"},
-			})
-		}
+	allHealth := h.manager.GetAllHealth()
+	for _, result := range allHealth {
+		pluginHealthList = append(pluginHealthList, result.Health)
 	}
 
 	response := AllPluginsHealthResponse{

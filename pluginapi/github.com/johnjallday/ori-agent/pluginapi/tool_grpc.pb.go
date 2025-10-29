@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.20.3
-// source: proto/tool.proto
+// source: pluginapi/proto/tool.proto
 
 package pluginapi
 
@@ -27,6 +27,10 @@ const (
 	ToolService_GetRequiredConfig_FullMethodName    = "/pluginapi.ToolService/GetRequiredConfig"
 	ToolService_ValidateConfig_FullMethodName       = "/pluginapi.ToolService/ValidateConfig"
 	ToolService_InitializeWithConfig_FullMethodName = "/pluginapi.ToolService/InitializeWithConfig"
+	ToolService_GetMetadata_FullMethodName          = "/pluginapi.ToolService/GetMetadata"
+	ToolService_GetCompatibilityInfo_FullMethodName = "/pluginapi.ToolService/GetCompatibilityInfo"
+	ToolService_GetWebPages_FullMethodName          = "/pluginapi.ToolService/GetWebPages"
+	ToolService_ServeWebPage_FullMethodName         = "/pluginapi.ToolService/ServeWebPage"
 )
 
 // ToolServiceClient is the client API for ToolService service.
@@ -52,6 +56,15 @@ type ToolServiceClient interface {
 	ValidateConfig(ctx context.Context, in *ValidateConfigRequest, opts ...grpc.CallOption) (*ConfigResponse, error)
 	// InitializeWithConfig initializes the plugin with the provided configuration
 	InitializeWithConfig(ctx context.Context, in *InitializeConfigRequest, opts ...grpc.CallOption) (*ConfigResponse, error)
+	// GetMetadata returns plugin metadata (optional)
+	GetMetadata(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*MetadataResponse, error)
+	// GetCompatibilityInfo returns plugin compatibility information (optional)
+	GetCompatibilityInfo(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*CompatibilityInfoResponse, error)
+	// WebPageProvider methods
+	// GetWebPages returns a list of available web pages this plugin provides
+	GetWebPages(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WebPagesResponse, error)
+	// ServeWebPage handles a web page request and returns HTML/JSON content
+	ServeWebPage(ctx context.Context, in *WebPageRequest, opts ...grpc.CallOption) (*WebPageResponse, error)
 }
 
 type toolServiceClient struct {
@@ -142,6 +155,46 @@ func (c *toolServiceClient) InitializeWithConfig(ctx context.Context, in *Initia
 	return out, nil
 }
 
+func (c *toolServiceClient) GetMetadata(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*MetadataResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MetadataResponse)
+	err := c.cc.Invoke(ctx, ToolService_GetMetadata_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *toolServiceClient) GetCompatibilityInfo(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*CompatibilityInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompatibilityInfoResponse)
+	err := c.cc.Invoke(ctx, ToolService_GetCompatibilityInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *toolServiceClient) GetWebPages(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WebPagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WebPagesResponse)
+	err := c.cc.Invoke(ctx, ToolService_GetWebPages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *toolServiceClient) ServeWebPage(ctx context.Context, in *WebPageRequest, opts ...grpc.CallOption) (*WebPageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WebPageResponse)
+	err := c.cc.Invoke(ctx, ToolService_ServeWebPage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ToolServiceServer is the server API for ToolService service.
 // All implementations must embed UnimplementedToolServiceServer
 // for forward compatibility.
@@ -165,6 +218,15 @@ type ToolServiceServer interface {
 	ValidateConfig(context.Context, *ValidateConfigRequest) (*ConfigResponse, error)
 	// InitializeWithConfig initializes the plugin with the provided configuration
 	InitializeWithConfig(context.Context, *InitializeConfigRequest) (*ConfigResponse, error)
+	// GetMetadata returns plugin metadata (optional)
+	GetMetadata(context.Context, *Empty) (*MetadataResponse, error)
+	// GetCompatibilityInfo returns plugin compatibility information (optional)
+	GetCompatibilityInfo(context.Context, *Empty) (*CompatibilityInfoResponse, error)
+	// WebPageProvider methods
+	// GetWebPages returns a list of available web pages this plugin provides
+	GetWebPages(context.Context, *Empty) (*WebPagesResponse, error)
+	// ServeWebPage handles a web page request and returns HTML/JSON content
+	ServeWebPage(context.Context, *WebPageRequest) (*WebPageResponse, error)
 	mustEmbedUnimplementedToolServiceServer()
 }
 
@@ -198,6 +260,18 @@ func (UnimplementedToolServiceServer) ValidateConfig(context.Context, *ValidateC
 }
 func (UnimplementedToolServiceServer) InitializeWithConfig(context.Context, *InitializeConfigRequest) (*ConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InitializeWithConfig not implemented")
+}
+func (UnimplementedToolServiceServer) GetMetadata(context.Context, *Empty) (*MetadataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetMetadata not implemented")
+}
+func (UnimplementedToolServiceServer) GetCompatibilityInfo(context.Context, *Empty) (*CompatibilityInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCompatibilityInfo not implemented")
+}
+func (UnimplementedToolServiceServer) GetWebPages(context.Context, *Empty) (*WebPagesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWebPages not implemented")
+}
+func (UnimplementedToolServiceServer) ServeWebPage(context.Context, *WebPageRequest) (*WebPageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ServeWebPage not implemented")
 }
 func (UnimplementedToolServiceServer) mustEmbedUnimplementedToolServiceServer() {}
 func (UnimplementedToolServiceServer) testEmbeddedByValue()                     {}
@@ -364,6 +438,78 @@ func _ToolService_InitializeWithConfig_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ToolService_GetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).GetMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_GetMetadata_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).GetMetadata(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ToolService_GetCompatibilityInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).GetCompatibilityInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_GetCompatibilityInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).GetCompatibilityInfo(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ToolService_GetWebPages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).GetWebPages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_GetWebPages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).GetWebPages(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ToolService_ServeWebPage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebPageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).ServeWebPage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_ServeWebPage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).ServeWebPage(ctx, req.(*WebPageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ToolService_ServiceDesc is the grpc.ServiceDesc for ToolService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -403,7 +549,23 @@ var ToolService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "InitializeWithConfig",
 			Handler:    _ToolService_InitializeWithConfig_Handler,
 		},
+		{
+			MethodName: "GetMetadata",
+			Handler:    _ToolService_GetMetadata_Handler,
+		},
+		{
+			MethodName: "GetCompatibilityInfo",
+			Handler:    _ToolService_GetCompatibilityInfo_Handler,
+		},
+		{
+			MethodName: "GetWebPages",
+			Handler:    _ToolService_GetWebPages_Handler,
+		},
+		{
+			MethodName: "ServeWebPage",
+			Handler:    _ToolService_ServeWebPage_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/tool.proto",
+	Metadata: "pluginapi/proto/tool.proto",
 }

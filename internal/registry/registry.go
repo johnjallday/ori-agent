@@ -131,10 +131,32 @@ func (m *Manager) ScanUploadedPlugins() error {
 
 		// Try to load the plugin to get better information (using unified loader)
 		var description, version string
+		var metadata *types.PluginMetadata
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
 			description = def.Description.String()
 			version = pluginloader.GetPluginVersion(tool)
+
+			// Extract metadata if available
+			if protoMeta, metaErr := pluginloader.GetPluginMetadata(tool); metaErr == nil && protoMeta != nil {
+				// Convert pluginapi.PluginMetadata (proto) to types.PluginMetadata
+				maintainers := make([]types.Maintainer, len(protoMeta.Maintainers))
+				for i, m := range protoMeta.Maintainers {
+					maintainers[i] = types.Maintainer{
+						Name:         m.Name,
+						Email:        m.Email,
+						Organization: m.Organization,
+						Website:      m.Website,
+						Role:         m.Role,
+						Primary:      m.Primary,
+					}
+				}
+				metadata = &types.PluginMetadata{
+					Maintainers: maintainers,
+					License:     protoMeta.License,
+					Repository:  protoMeta.Repository,
+				}
+			}
 
 			// Clean up RPC plugins after getting metadata
 			pluginloader.CloseRPCPlugin(tool)
@@ -154,6 +176,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 			Description: description,
 			Path:        pluginPath,
 			Version:     version,
+			Metadata:    metadata,
 		}
 
 		localReg.Plugins = append(localReg.Plugins, newPlugin)
@@ -210,10 +233,32 @@ func (m *Manager) RefreshLocalRegistry() error {
 
 		// Try to load the plugin to get metadata
 		var description, version string
+		var metadata *types.PluginMetadata
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
 			description = def.Description.String()
 			version = pluginloader.GetPluginVersion(tool)
+
+			// Extract metadata if available
+			if protoMeta, metaErr := pluginloader.GetPluginMetadata(tool); metaErr == nil && protoMeta != nil {
+				// Convert pluginapi.PluginMetadata (proto) to types.PluginMetadata
+				maintainers := make([]types.Maintainer, len(protoMeta.Maintainers))
+				for i, m := range protoMeta.Maintainers {
+					maintainers[i] = types.Maintainer{
+						Name:         m.Name,
+						Email:        m.Email,
+						Organization: m.Organization,
+						Website:      m.Website,
+						Role:         m.Role,
+						Primary:      m.Primary,
+					}
+				}
+				metadata = &types.PluginMetadata{
+					Maintainers: maintainers,
+					License:     protoMeta.License,
+					Repository:  protoMeta.Repository,
+				}
+			}
 
 			// Clean up RPC plugins after getting metadata
 			pluginloader.CloseRPCPlugin(tool)
@@ -233,6 +278,7 @@ func (m *Manager) RefreshLocalRegistry() error {
 			Description: description,
 			Path:        pluginPath,
 			Version:     version,
+			Metadata:    metadata,
 		}
 
 		newReg.Plugins = append(newReg.Plugins, newPlugin)

@@ -5,6 +5,77 @@
 let allAgents = [];
 let currentAgentName = '';
 let visibleAgentCount = 3;
+let availableProviders = []; // Cache for available providers and models
+
+// Fetch available providers and models from API
+async function loadAvailableProviders() {
+  try {
+    const response = await fetch('/api/providers');
+    const data = await response.json();
+    availableProviders = data.providers || [];
+    return availableProviders;
+  } catch (error) {
+    console.error('Failed to load providers:', error);
+    return [];
+  }
+}
+
+// Populate model select with options from available providers
+function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
+  if (!modelSelect) return;
+
+  // Only populate if we have providers loaded, otherwise keep existing options
+  if (availableProviders.length === 0) {
+    // Fallback: just filter existing hardcoded options by type
+    const allOptions = modelSelect.querySelectorAll('option');
+    allOptions.forEach(option => {
+      const optionType = option.getAttribute('data-type');
+      if (optionType === selectedType || !optionType) {
+        option.style.display = '';
+        option.disabled = false;
+      } else {
+        option.style.display = 'none';
+        option.disabled = true;
+      }
+    });
+    return;
+  }
+
+  // Clear existing options only if we have providers to replace them with
+  modelSelect.innerHTML = '';
+
+  // Group models by provider
+  availableProviders.forEach(provider => {
+    const providerGroup = document.createElement('optgroup');
+    providerGroup.label = provider.display_name;
+
+    provider.models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model.value;
+      option.textContent = model.label;
+      option.setAttribute('data-type', model.type);
+      option.setAttribute('data-provider', model.provider);
+
+      // Only show models matching the selected type
+      if (model.type !== selectedType) {
+        option.style.display = 'none';
+        option.disabled = true;
+      }
+
+      providerGroup.appendChild(option);
+    });
+
+    modelSelect.appendChild(providerGroup);
+  });
+
+  // Select first available option
+  for (let i = 0; i < modelSelect.options.length; i++) {
+    if (!modelSelect.options[i].disabled) {
+      modelSelect.selectedIndex = i;
+      break;
+    }
+  }
+}
 
 // Agent Management Functions
 function selectAgent(agentName) {
@@ -18,7 +89,7 @@ function selectAgent(agentName) {
 }
 
 // Show add agent modal
-function showAddAgentModal() {
+async function showAddAgentModal() {
   const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
   const agentNameInput = document.getElementById('agentName');
   const agentTypeInput = document.getElementById('agentType');
@@ -26,6 +97,11 @@ function showAddAgentModal() {
   const agentModelInput = document.getElementById('agentModel');
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const temperatureValueSpan = document.getElementById('temperatureValue');
+
+  // Load providers if not already loaded
+  if (availableProviders.length === 0) {
+    await loadAvailableProviders();
+  }
 
   // Clear previous inputs
   if (agentNameInput) {
@@ -38,9 +114,8 @@ function showAddAgentModal() {
     agentSystemPromptInput.value = '';
   }
   if (agentModelInput) {
-    agentModelInput.value = 'gpt-5-nano';
-    // Filter models based on default type
-    filterModelsByType('tool-calling', agentModelInput);
+    // Populate model select with dynamic providers
+    populateModelSelect(agentModelInput, 'tool-calling');
   }
   if (agentTemperatureInput) {
     agentTemperatureInput.value = '1.0';
@@ -63,29 +138,8 @@ function showAddAgentModal() {
 function filterModelsByType(agentType, modelSelect) {
   if (!modelSelect) return;
 
-  const allOptions = modelSelect.querySelectorAll('option');
-  allOptions.forEach(option => {
-    const optionType = option.getAttribute('data-type');
-    if (optionType === agentType || !optionType) {
-      option.style.display = '';
-      option.disabled = false;
-    } else {
-      option.style.display = 'none';
-      option.disabled = true;
-    }
-  });
-
-  // Ensure a valid option is selected
-  const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-  if (selectedOption && selectedOption.disabled) {
-    // Find first enabled option for this type
-    for (let i = 0; i < modelSelect.options.length; i++) {
-      if (!modelSelect.options[i].disabled) {
-        modelSelect.selectedIndex = i;
-        break;
-      }
-    }
-  }
+  // Repopulate the select with filtered models
+  populateModelSelect(modelSelect, agentType);
 }
 
 // Create new agent

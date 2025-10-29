@@ -21,9 +21,10 @@ type VersionedTool interface {
 	Version() string
 }
 
-// PluginMetadata extends Tool with detailed version compatibility information.
+// PluginCompatibility extends Tool with detailed version compatibility information.
 // Plugins should implement this interface to enable health checking and compatibility validation.
-type PluginMetadata interface {
+// Note: This was renamed from PluginMetadata to avoid conflict with the proto-generated struct.
+type PluginCompatibility interface {
 	Tool
 	// Version returns the plugin version (e.g., "0.0.5", "1.2.3-beta")
 	Version() string
@@ -126,4 +127,28 @@ type InitializationProvider interface {
 type InitializableTool interface {
 	Tool
 	InitializationProvider
+}
+
+// MetadataProvider allows plugins to provide detailed authorship and licensing information.
+// Plugins can optionally implement this interface to provide metadata about maintainers, license, etc.
+// Note: Maintainer and PluginMetadata types are generated from proto/tool.proto
+type MetadataProvider interface {
+	// GetMetadata returns plugin metadata (maintainers, license, repository)
+	// Returns the proto-generated PluginMetadata struct
+	GetMetadata() (*PluginMetadata, error)
+}
+
+// WebPageProvider allows plugins to serve custom web pages through ori-agent.
+// Plugins can optionally implement this interface to provide custom UI pages.
+// Example use cases: script marketplace, configuration UI, data visualization, etc.
+type WebPageProvider interface {
+	// ServeWebPage handles a web page request and returns HTML content
+	// path: The requested path (e.g., "marketplace", "config", "stats")
+	// query: URL query parameters as key-value pairs
+	// Returns: HTML content, content-type (e.g., "text/html", "application/json"), error
+	ServeWebPage(path string, query map[string]string) (content string, contentType string, err error)
+
+	// GetWebPages returns a list of available web pages this plugin provides
+	// Each entry should be a path like "marketplace", "settings", etc.
+	GetWebPages() []string
 }

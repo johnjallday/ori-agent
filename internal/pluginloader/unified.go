@@ -35,3 +35,11 @@ func CloseRPCPlugin(tool pluginapi.Tool) {
 		rpcClient.Kill()
 	}
 }
+
+// GetPluginMetadata retrieves metadata from a plugin if it implements MetadataProvider
+func GetPluginMetadata(tool pluginapi.Tool) (*pluginapi.PluginMetadata, error) {
+	if metadataProvider, ok := tool.(pluginapi.MetadataProvider); ok {
+		return metadataProvider.GetMetadata()
+	}
+	return nil, nil // Plugin doesn't implement MetadataProvider
+}
