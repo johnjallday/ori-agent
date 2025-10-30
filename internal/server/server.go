@@ -424,6 +424,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
+	mux.HandleFunc("/workspaces", s.serveWorkspaces)
 
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", s.serveStaticFile)
@@ -654,15 +655,55 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
-	content, err := web.Static.ReadFile("static/workflows.html")
+	data := web.GetDefaultData()
+	data.Title = "Workflow Templates - Ori Agent"
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("workflows", data)
 	if err != nil {
-		log.Printf("Failed to read workflows.html: %v", err)
+		log.Printf("Failed to render workflows template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write(content)
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.Title = "Workspaces - Ori Agent"
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("workspaces", data)
+	if err != nil {
+		log.Printf("Failed to render workspaces template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }
 
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workspaces - Ori Agent</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/css/workspace.css">
+    <style>
+        body {
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .workspaces-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .page-title h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .page-title p {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+
+        .workspaces-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .workspace-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .workspace-card:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .workspace-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+
+        .workspace-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .workspace-id {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+
+        .workspace-status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .workspace-status.active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .workspace-status.completed {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .workspace-status.failed {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .workspace-meta {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .meta-label {
+            color: var(--text-muted);
+        }
+
+        .agent-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .agent-badge {
+            padding: 4px 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .workspace-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 700px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .modal-header h2 {
+            font-size: 22px;
+            margin: 0;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 0;
+            width: 30px;
+            height: 30px;
+        }
+
+        .close-btn:hover {
+            color: var(--text-color);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-help {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .required {
+            color: #dc3545;
+        }
+
+        .agent-selector {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .agent-selector-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .agent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .agent-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+        }
+
+        .agent-item input[type="checkbox"] {
+            width: auto;
+        }
+
+        .agent-info {
+            flex: 1;
+        }
+
+        .agent-name {
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .agent-role {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .workflow-designer {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            background: var(--bg-secondary);
+        }
+
+        .workflow-step {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .step-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            background: var(--primary-color);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .remove-step {
+            background: none;
+            border: none;
+            color: #dc3545;
+            cursor: pointer;
+            padding: 4px;
+        }
+
+        .add-step-btn {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed var(--border-color);
+            background: none;
+            color: var(--text-muted);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .add-step-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Dark mode */
+        [data-theme="dark"] .workspace-status.active {
+            background: #2e7d32;
+            color: #e8f5e9;
+        }
+
+        [data-theme="dark"] .workspace-status.completed {
+            background: #1565c0;
+            color: #e3f2fd;
+        }
+
+        [data-theme="dark"] .workspace-status.failed {
+            background: #c62828;
+            color: #ffebee;
+        }
+    </style>
+</head>
+<body>
+    <div class="workspaces-container">
+        <div class="page-header">
+            <div class="page-title">
+                <h1>Workspaces</h1>
+                <p>Manage multi-agent collaboration spaces</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" onclick="refreshWorkspaces()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                    Refresh
+                </button>
+                <button class="btn btn-primary" onclick="openCreateWorkspaceModal()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                    Create Workspace
+                </button>
+            </div>
+        </div>
+
+        <div id="workspaces-loading" style="display: none;">
+            <div class="empty-state">
+                <div class="spinner"></div>
+                <p>Loading workspaces...</p>
+            </div>
+        </div>
+
+        <div id="workspaces-grid" class="workspaces-grid"></div>
+
+        <div id="empty-state" class="empty-state" style="display: none;">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
+            </svg>
+            <h3>No workspaces yet</h3>
+            <p>Create your first workspace to start collaborating with multiple agents</p>
+            <button class="btn btn-primary" onclick="openCreateWorkspaceModal()" style="margin-top: 16px;">
+                Create Workspace
+            </button>
+        </div>
+    </div>
+
+    <!-- Create Workspace Modal -->
+    <div id="create-workspace-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Create Workspace</h2>
+                <button class="close-btn" onclick="closeCreateWorkspaceModal()">&times;</button>
+            </div>
+            <form id="create-workspace-form">
+                <div class="form-group">
+                    <label for="workspace-name">Workspace Name <span class="required">*</span></label>
+                    <input type="text" id="workspace-name" name="name" required placeholder="e.g., Research Project Alpha">
+                    <div class="form-help">Give your workspace a descriptive name</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="parent-agent">Parent Agent <span class="required">*</span></label>
+                    <select id="parent-agent" name="parent_agent" required>
+                        <option value="">Select parent agent...</option>
+                    </select>
+                    <div class="form-help">The agent that coordinates this workspace</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Participating Agents</label>
+                    <div class="agent-selector">
+                        <div class="agent-selector-header">
+                            <span style="font-size: 14px; font-weight: 500;">Select agents to collaborate</span>
+                            <button type="button" class="btn-secondary btn-sm" onclick="selectAllAgents()">Select All</button>
+                        </div>
+                        <div id="agent-list" class="agent-list">
+                            <!-- Agents will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Workflow Design (Optional)</label>
+                    <div class="workflow-designer" id="workflow-designer">
+                        <div id="workflow-steps"></div>
+                        <button type="button" class="add-step-btn" onclick="addWorkflowStep()">
+                            + Add Workflow Step
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="initial-context">Initial Context (JSON)</label>
+                    <textarea id="initial-context" name="initial_context" placeholder='{"goal": "Research topic", "deadline": "2024-12-31"}'></textarea>
+                    <div class="form-help">Optional: Provide initial data as JSON</div>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 24px;">
+                    <button type="submit" class="btn btn-primary">Create Workspace</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateWorkspaceModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- View Workspace Modal -->
+    <div id="view-workspace-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Workspace Details</h2>
+                <button class="close-btn" onclick="closeViewWorkspaceModal()">&times;</button>
+            </div>
+            <div id="workspace-details"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { workspaceManager } from '/js/modules/workspace.js';
+
+        let agents = [];
+        let workspaces = [];
+        let workflowSteps = [];
+
+        // Load workspaces on page load
+        async function loadWorkspaces() {
+            document.getElementById('workspaces-loading').style.display = 'block';
+            document.getElementById('workspaces-grid').innerHTML = '';
+            document.getElementById('empty-state').style.display = 'none';
+
+            try {
+                const data = await workspaceManager.fetchWorkspaces();
+                workspaces = data || [];
+
+                document.getElementById('workspaces-loading').style.display = 'none';
+
+                if (workspaces.length === 0) {
+                    document.getElementById('empty-state').style.display = 'block';
+                } else {
+                    renderWorkspaces();
+                }
+            } catch (error) {
+                console.error('Error loading workspaces:', error);
+                document.getElementById('workspaces-loading').style.display = 'none';
+                document.getElementById('empty-state').style.display = 'block';
+            }
+        }
+
+        // Load agents
+        async function loadAgents() {
+            try {
+                const response = await fetch('/api/agents');
+                agents = await response.json();
+            } catch (error) {
+                console.error('Error loading agents:', error);
+            }
+        }
+
+        // Render workspaces
+        function renderWorkspaces() {
+            const grid = document.getElementById('workspaces-grid');
+            grid.innerHTML = '';
+
+            workspaces.forEach(ws => {
+                const card = createWorkspaceCard(ws);
+                grid.appendChild(card);
+            });
+        }
+
+        // Create workspace card
+        function createWorkspaceCard(ws) {
+            const card = document.createElement('div');
+            card.className = 'workspace-card';
+            card.onclick = () => viewWorkspace(ws.id);
+
+            const statusClass = ws.status || 'active';
+            const agentCount = ws.agents?.length || 0;
+            const createdDate = new Date(ws.created_at).toLocaleDateString();
+
+            card.innerHTML = `
+                <div class="workspace-card-header">
+                    <div>
+                        <div class="workspace-name">${escapeHtml(ws.name)}</div>
+                        <div class="workspace-id">${ws.id}</div>
+                    </div>
+                    <span class="workspace-status ${statusClass}">${statusClass}</span>
+                </div>
+                <div class="workspace-meta">
+                    <div class="meta-row">
+                        <span class="meta-label">Parent Agent:</span>
+                        <strong>${escapeHtml(ws.parent_agent)}</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Agents:</span>
+                        <strong>${agentCount}</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Created:</span>
+                        <span>${createdDate}</span>
+                    </div>
+                </div>
+                ${agentCount > 0 ? `
+                    <div class="agent-badges">
+                        ${ws.agents.slice(0, 5).map(a => `<span class="agent-badge">${escapeHtml(a)}</span>`).join('')}
+                        ${agentCount > 5 ? `<span class="agent-badge">+${agentCount - 5} more</span>` : ''}
+                    </div>
+                ` : ''}
+                <div class="workspace-actions" onclick="event.stopPropagation()">
+                    <button class="btn btn-secondary btn-sm" onclick="viewWorkspace('${ws.id}')">View Details</button>
+                    <button class="btn btn-secondary btn-sm" onclick="deleteWorkspace('${ws.id}')">Delete</button>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Open create workspace modal
+        window.openCreateWorkspaceModal = async function() {
+            if (agents.length === 0) {
+                await loadAgents();
+            }
+
+            // Populate parent agent dropdown
+            const parentSelect = document.getElementById('parent-agent');
+            parentSelect.innerHTML = '<option value="">Select parent agent...</option>';
+            agents.forEach(agent => {
+                const option = document.createElement('option');
+                option.value = agent.name;
+                option.textContent = agent.name;
+                parentSelect.appendChild(option);
+            });
+
+            // Populate agent list
+            const agentList = document.getElementById('agent-list');
+            agentList.innerHTML = '';
+            agents.forEach(agent => {
+                const item = document.createElement('div');
+                item.className = 'agent-item';
+                item.innerHTML = `
+                    <input type="checkbox" id="agent-${agent.name}" value="${agent.name}">
+                    <div class="agent-info">
+                        <div class="agent-name">${escapeHtml(agent.name)}</div>
+                        <div class="agent-role">${agent.role || 'general'}</div>
+                    </div>
+                `;
+                agentList.appendChild(item);
+            });
+
+            // Reset workflow steps
+            workflowSteps = [];
+            document.getElementById('workflow-steps').innerHTML = '';
+
+            document.getElementById('create-workspace-modal').classList.add('active');
+        };
+
+        // Close create workspace modal
+        window.closeCreateWorkspaceModal = function() {
+            document.getElementById('create-workspace-modal').classList.remove('active');
+            document.getElementById('create-workspace-form').reset();
+        };
+
+        // Select all agents
+        window.selectAllAgents = function() {
+            const checkboxes = document.querySelectorAll('#agent-list input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = true);
+        };
+
+        // Add workflow step
+        window.addWorkflowStep = function() {
+            const stepId = Date.now();
+            workflowSteps.push({ id: stepId, agent: '', task: '' });
+            renderWorkflowSteps();
+        };
+
+        // Remove workflow step
+        window.removeWorkflowStep = function(stepId) {
+            workflowSteps = workflowSteps.filter(s => s.id !== stepId);
+            renderWorkflowSteps();
+        };
+
+        // Render workflow steps
+        function renderWorkflowSteps() {
+            const container = document.getElementById('workflow-steps');
+            container.innerHTML = '';
+
+            workflowSteps.forEach((step, index) => {
+                const stepEl = document.createElement('div');
+                stepEl.className = 'workflow-step';
+                stepEl.innerHTML = `
+                    <div class="step-header">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div class="step-number">${index + 1}</div>
+                            <strong>Step ${index + 1}</strong>
+                        </div>
+                        <button type="button" class="remove-step" onclick="removeWorkflowStep(${step.id})">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label style="font-size: 12px;">Agent</label>
+                        <select class="workflow-step-agent" data-step-id="${step.id}" style="padding: 6px;">
+                            <option value="">Select agent...</option>
+                            ${agents.map(a => `<option value="${a.name}">${a.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label style="font-size: 12px;">Task Description</label>
+                        <input type="text" class="workflow-step-task" data-step-id="${step.id}"
+                               placeholder="Describe what this agent should do..." style="padding: 6px;">
+                    </div>
+                `;
+                container.appendChild(stepEl);
+            });
+        }
+
+        // Handle form submission
+        document.getElementById('create-workspace-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(e.target);
+            const name = formData.get('name');
+            const parentAgent = formData.get('parent_agent');
+
+            // Get selected agents
+            const selectedAgents = [];
+            document.querySelectorAll('#agent-list input[type="checkbox"]:checked').forEach(cb => {
+                selectedAgents.push(cb.value);
+            });
+
+            // Parse initial context
+            let initialContext = {};
+            const contextStr = formData.get('initial_context');
+            if (contextStr) {
+                try {
+                    initialContext = JSON.parse(contextStr);
+                } catch (err) {
+                    alert('Invalid JSON in initial context');
+                    return;
+                }
+            }
+
+            // Create workspace
+            try {
+                const response = await fetch('/api/orchestration/workspace', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        parent_agent: parentAgent,
+                        participating_agents: selectedAgents,
+                        initial_context: initialContext
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(error);
+                }
+
+                const workspace = await response.json();
+                alert(`Workspace created successfully! ID: ${workspace.id}`);
+
+                closeCreateWorkspaceModal();
+                loadWorkspaces();
+            } catch (error) {
+                console.error('Error creating workspace:', error);
+                alert(`Failed to create workspace: ${error.message}`);
+            }
+        });
+
+        // View workspace
+        window.viewWorkspace = async function(workspaceId) {
+            try {
+                const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
+                const workspace = await response.json();
+
+                const details = document.getElementById('workspace-details');
+                details.innerHTML = `
+                    <div style="margin-bottom: 20px;">
+                        <h3>${escapeHtml(workspace.name)}</h3>
+                        <p style="color: var(--text-muted); font-family: monospace; font-size: 12px;">${workspace.id}</p>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <strong>Status:</strong> <span class="workspace-status ${workspace.status}">${workspace.status}</span>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <strong>Parent Agent:</strong> ${escapeHtml(workspace.parent_agent)}
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <strong>Participating Agents:</strong>
+                        <div class="agent-badges" style="margin-top: 8px;">
+                            ${workspace.agents.map(a => `<span class="agent-badge">${escapeHtml(a)}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <strong>Created:</strong> ${new Date(workspace.created_at).toLocaleString()}
+                    </div>
+                    ${workspace.updated_at ? `
+                        <div style="margin-bottom: 16px;">
+                            <strong>Updated:</strong> ${new Date(workspace.updated_at).toLocaleString()}
+                        </div>
+                    ` : ''}
+                    ${workspace.shared_data && Object.keys(workspace.shared_data).length > 0 ? `
+                        <div style="margin-bottom: 16px;">
+                            <strong>Shared Data:</strong>
+                            <pre style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px;">${JSON.stringify(workspace.shared_data, null, 2)}</pre>
+                        </div>
+                    ` : ''}
+                `;
+
+                document.getElementById('view-workspace-modal').classList.add('active');
+            } catch (error) {
+                console.error('Error loading workspace:', error);
+                alert('Failed to load workspace details');
+            }
+        };
+
+        // Close view workspace modal
+        window.closeViewWorkspaceModal = function() {
+            document.getElementById('view-workspace-modal').classList.remove('active');
+        };
+
+        // Delete workspace
+        window.deleteWorkspace = async function(workspaceId) {
+            if (!confirm('Are you sure you want to delete this workspace?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete workspace');
+                }
+
+                alert('Workspace deleted successfully');
+                loadWorkspaces();
+            } catch (error) {
+                console.error('Error deleting workspace:', error);
+                alert('Failed to delete workspace');
+            }
+        };
+
+        // Refresh workspaces
+        window.refreshWorkspaces = loadWorkspaces;
+
+        // Helper: Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize
+        loadWorkspaces();
+        loadAgents();
+    </script>
+</body>
+</html>
