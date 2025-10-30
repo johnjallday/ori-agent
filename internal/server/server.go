@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/client"
@@ -19,6 +20,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
+	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
@@ -31,6 +35,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -57,6 +62,8 @@ type Server struct {
 	onboardingHandler     *onboardinghttp.Handler
 	deviceHandler         *devicehttp.Handler
 	webPageHandler        *pluginhttp.WebPageHandler
+	workspaceStore        workspace.Store
+	orchestrationHandler  *orchestrationhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -361,6 +368,52 @@ func New() (*Server, error) {
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
 
+	// initialize workspace store
+	workspaceDir := "workspaces"
+	if p := os.Getenv("WORKSPACE_DIR"); p != "" {
+		workspaceDir = p
+	} else if abs, err := filepath.Abs(workspaceDir); err == nil {
+		workspaceDir = abs
+	}
+	log.Printf("Using workspace directory: %s", workspaceDir)
+
+	s.workspaceStore, err = workspace.NewFileStore(workspaceDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workspace store: %w", err)
+	}
+
+	// initialize agent communicator
+	communicator := agentcomm.NewCommunicator(s.workspaceStore)
+
+	// initialize orchestrator
+	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
+
+	// initialize orchestration handler (creates its own communicator internally)
+	s.orchestrationHandler = orchestrationhttp.NewHandler(s.st, s.workspaceStore)
+
+	// inject orchestrator into orchestration handler
+	s.orchestrationHandler.SetOrchestrator(orch)
+
+	// initialize template manager
+	templatesDir := "workflow_templates"
+	if p := os.Getenv("WORKFLOW_TEMPLATES_DIR"); p != "" {
+		templatesDir = p
+	} else if abs, err := filepath.Abs(templatesDir); err == nil {
+		templatesDir = abs
+	}
+	templateManager := templates.NewTemplateManager(templatesDir)
+	if err := templateManager.LoadTemplates(); err != nil {
+		log.Printf("⚠️  Warning: failed to load workflow templates: %v", err)
+	} else {
+		log.Printf("✅ Loaded %d workflow templates", len(templateManager.ListTemplates()))
+	}
+
+	// inject template manager into orchestration handler
+	s.orchestrationHandler.SetTemplateManager(templateManager)
+
+	// inject orchestrator into chat handler
+	s.chatHandler.SetOrchestrator(orch)
+
 	return s, nil
 }
 
@@ -370,9 +423,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
+	mux.HandleFunc("/workflows", s.serveWorkflows)
 
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", s.serveStaticFile)
+	mux.HandleFunc("/css/", s.serveStaticFile)
 	mux.HandleFunc("/js/", s.serveStaticFile)
 	mux.HandleFunc("/icons/", s.serveStaticFile)
 	mux.HandleFunc("/chat-area.html", s.serveStaticFile)
@@ -468,6 +523,19 @@ func (s *Server) Handler() http.Handler {
 	// Device endpoints
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
+
+	// Orchestration endpoints
+	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
+	mux.HandleFunc("/api/orchestration/messages", s.orchestrationHandler.MessagesHandler)
+	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
+	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
+	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
+	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
+	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
+
+	// Workflow template endpoints
+	mux.HandleFunc("/api/orchestration/templates", s.orchestrationHandler.TemplatesHandler)
+	mux.HandleFunc("/api/orchestration/templates/instantiate", s.orchestrationHandler.InstantiateTemplateHandler)
 
 	// CORS middleware
 	return s.corsHandler(mux)
@@ -583,6 +651,18 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
+}
+
+func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
+	content, err := web.Static.ReadFile("static/workflows.html")
+	if err != nil {
+		log.Printf("Failed to read workflows.html: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write(content)
 }
 
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {

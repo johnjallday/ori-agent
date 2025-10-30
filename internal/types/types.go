@@ -113,3 +113,28 @@ func (p *PluginRegistryEntry) IsCompatibleWithSystem(os, arch string) bool {
 
 	return false
 }
+
+// AgentRole represents the role of an agent in collaborative workflows
+type AgentRole string
+
+const (
+	RoleOrchestrator AgentRole = "orchestrator" // Coordinates multi-agent workflows
+	RoleResearcher   AgentRole = "researcher"   // Gathers information and data
+	RoleAnalyzer     AgentRole = "analyzer"     // Processes and analyzes data
+	RoleSynthesizer  AgentRole = "synthesizer"  // Combines findings into reports
+	RoleValidator    AgentRole = "validator"    // Fact-checks and validates results
+	RoleSpecialist   AgentRole = "specialist"   // Domain-specific specialist
+	RoleGeneral      AgentRole = "general"      // General-purpose agent (default)
+)
+
+// Capability constants for agent capabilities
+const (
+	CapabilityWebSearch      = "web_search"       // Can search the web
+	CapabilityCodeAnalysis   = "code_analysis"    // Can analyze code
+	CapabilityDataProcessing = "data_processing"  // Can process and analyze data
+	CapabilityFileOperations = "file_operations"  // Can perform file operations
+	CapabilityAPIIntegration = "api_integration"  // Can integrate with external APIs
+	CapabilityResearch       = "research"         // Research and information gathering
+	CapabilitySynthesis      = "synthesis"        // Can synthesize information
+	CapabilityValidation     = "validation"       // Can validate and fact-check
+)

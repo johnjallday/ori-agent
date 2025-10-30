@@ -1,0 +1,241 @@
+/* Workspace Monitoring Styles */
+
+.workspace-container {
+    padding: 20px;
+    background: var(--bg-color);
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.workspace-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.workspace-item {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.workspace-item:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.workspace-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.workspace-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.workspace-status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.workspace-meta {
+    margin-top: 6px;
+}
+
+/* Workflow Status Display */
+
+.workflow-status {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.status-header h6 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.progress-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.progress {
+    height: 8px;
+    border-radius: 4px;
+    background-color: var(--bg-secondary);
+}
+
+.progress-bar {
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* Task List */
+
+.task-summary {
+    margin-top: 16px;
+}
+
+.task-summary h6 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.task-item {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.task-agent {
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.task-status {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+.task-desc {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Workflow Meta */
+
+.workflow-meta {
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Phase-specific colors */
+
+.bg-info {
+    background-color: #17a2b8 !important;
+}
+
+.bg-warning {
+    background-color: #ffc107 !important;
+}
+
+.bg-primary {
+    background-color: #007bff !important;
+}
+
+.bg-success {
+    background-color: #28a745 !important;
+}
+
+.bg-danger {
+    background-color: #dc3545 !important;
+}
+
+.bg-secondary {
+    background-color: #6c757d !important;
+}
+
+/* Workspace Panel in Sidebar */
+
+.workspace-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.workspace-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.workspace-panel-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.workspace-refresh-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.workspace-refresh-btn:hover {
+    color: var(--primary-color);
+}
+
+/* Responsive adjustments */
+
+@media (max-width: 768px) {
+    .workspace-container {
+        padding: 12px;
+    }
+
+    .workflow-status {
+        padding: 12px;
+    }
+
+    .workspace-name {
+        font-size: 13px;
+    }
+}
+
+/* Dark mode support */
+
+[data-theme="dark"] .workspace-item {
+    background: #2d2d2d;
+    border-color: #404040;
+}
+
+[data-theme="dark"] .workspace-item:hover {
+    border-color: var(--primary-color);
+    background: #353535;
+}
+
+[data-theme="dark"] .workflow-status {
+    background: #2d2d2d;
+    border-color: #404040;
+}
+
+[data-theme="dark"] .task-item {
+    background: #252525;
+    border-color: #404040;
+}

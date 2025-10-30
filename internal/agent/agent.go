@@ -63,8 +63,10 @@ func IsModelAllowedForType(model, agentType string) bool {
 
 // Agent represents a configured AI agent with its settings and state
 type Agent struct {
-	Type     string                                   `json:"type"` // Agent type (tool-calling, general, research)
-	Settings types.Settings                           `json:"Settings"`
-	Plugins  map[string]types.LoadedPlugin            `json:"Plugins"`
-	Messages []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
+	Type         string                                   `json:"type"`         // Agent type (tool-calling, general, research)
+	Role         types.AgentRole                          `json:"role"`         // Agent role for orchestration (orchestrator, researcher, analyzer, etc.)
+	Capabilities []string                                 `json:"capabilities"` // Agent capabilities (web_search, code_analysis, etc.)
+	Settings     types.Settings                           `json:"Settings"`
+	Plugins      map[string]types.LoadedPlugin            `json:"Plugins"`
+	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
 }

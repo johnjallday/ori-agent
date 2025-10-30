@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -27,6 +28,7 @@ type Handler struct {
 	llmFactory     *llm.Factory
 	healthManager  *healthhttp.Manager
 	commandHandler *CommandHandler
+	orchestrator   *orchestration.Orchestrator
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
@@ -46,6 +48,11 @@ func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 // SetHealthManager sets the health manager
 func (h *Handler) SetHealthManager(manager *healthhttp.Manager) {
 	h.healthManager = manager
+}
+
+// SetOrchestrator sets the orchestrator
+func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
+	h.orchestrator = orch
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -500,6 +507,39 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			"uninitialized_plugins":   uninitializedPlugins,
 		})
 		return
+	}
+
+	// Check if orchestration is needed for this message
+	if h.orchestrator != nil && h.orchestrator.DetectOrchestrationNeed(q) {
+		log.Printf("🎯 Orchestration detected for message: %q", q)
+
+		// Identify required roles
+		roles := h.orchestrator.IdentifyRequiredRoles(q)
+
+		// Create collaborative task
+		task := orchestration.CollaborativeTask{
+			Goal:          q,
+			RequiredRoles: roles,
+			MaxDuration:   10 * time.Minute,
+			Context:       map[string]interface{}{},
+		}
+
+		// Execute collaborative task
+		result, err := h.orchestrator.ExecuteCollaborativeTask(ctx, current, task)
+		if err != nil {
+			log.Printf("❌ Orchestration failed: %v", err)
+			// Fall through to normal chat handling
+		} else {
+			// Return orchestration result
+			log.Printf("✅ Orchestration completed successfully")
+			json.NewEncoder(w).Encode(map[string]any{
+				"response":     result.FinalOutput,
+				"orchestrated": true,
+				"workspace_id": result.WorkspaceID,
+				"status":       result.Status,
+			})
+			return
+		}
 	}
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)

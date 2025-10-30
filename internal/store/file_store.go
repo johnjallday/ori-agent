@@ -80,9 +80,11 @@ func (s *fileStore) CreateAgent(name string) error {
 		}
 
 		s.agents[name] = &agent.Agent{
-			Type:     agent.TypeToolCalling, // Default to cheapest tier
-			Settings: defaultSettings,
-			Plugins:  make(map[string]types.LoadedPlugin),
+			Type:         agent.TypeToolCalling, // Default to cheapest tier
+			Role:         types.RoleGeneral,     // Default role
+			Capabilities: []string{},            // Empty capabilities by default
+			Settings:     defaultSettings,
+			Plugins:      make(map[string]types.LoadedPlugin),
 		}
 	}
 	return s.saveUnlocked()

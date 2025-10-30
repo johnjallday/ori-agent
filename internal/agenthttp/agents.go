@@ -18,8 +18,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		names, current := h.State.ListAgents()
+
+		// Build agent details list with name and type
+		type AgentInfo struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}
+		agentInfos := make([]AgentInfo, 0, len(names))
+		for _, name := range names {
+			agent, ok := h.State.GetAgent(name)
+			if ok && agent != nil {
+				agentInfos = append(agentInfos, AgentInfo{
+					Name: name,
+					Type: agent.Type,
+				})
+			} else {
+				// Fallback for agents that couldn't be loaded
+				agentInfos = append(agentInfos, AgentInfo{
+					Name: name,
+					Type: "tool-calling", // default
+				})
+			}
+		}
+
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"agents":  names,
+			"agents":  agentInfos,
 			"current": current,
 		})
 

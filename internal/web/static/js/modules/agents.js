@@ -299,9 +299,12 @@ function renderAgents() {
   console.log(`📋 Rendering ${agentsToShow.length} agents:`, agentsToShow);
 
   // Add each visible agent
-  agentsToShow.forEach(agentName => {
-    console.log(`➕ Adding agent: ${agentName}`);
-    const agentItem = createAgentElement(agentName, currentAgentName);
+  agentsToShow.forEach(agent => {
+    // Handle both old format (string) and new format (object with name and type)
+    const agentName = typeof agent === 'string' ? agent : agent.name;
+    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
+    console.log(`➕ Adding agent: ${agentName} (type: ${agentType})`);
+    const agentItem = createAgentElement(agentName, agentType, currentAgentName);
     agentsList.appendChild(agentItem);
   });
 
@@ -339,13 +342,15 @@ function renderAgents() {
   setupAccordionListeners();
 
   // Load settings for the current agent accordion when it's expanded
-  agentsToShow.forEach(agentName => {
+  agentsToShow.forEach(agent => {
+    const agentName = typeof agent === 'string' ? agent : agent.name;
+    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
     const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
     const collapseElement = document.getElementById(`collapse-${accordionId}`);
 
     if (collapseElement) {
       collapseElement.addEventListener('shown.bs.collapse', async function () {
-        await loadAgentSettings(agentName, accordionId);
+        await loadAgentSettings(agentName, agentType, accordionId);
       });
     }
   });
@@ -362,9 +367,17 @@ function hideAgents() {
 }
 
 // Create agent element with accordion
-function createAgentElement(agentName, currentAgent) {
+function createAgentElement(agentName, agentType, currentAgent) {
   const isCurrentAgent = agentName === currentAgent;
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
+
+  // Format type label
+  const typeLabels = {
+    'tool-calling': 'Tool Calling',
+    'general': 'General',
+    'research': 'Research'
+  };
+  const typeLabel = typeLabels[agentType] || agentType;
 
   const agentDiv = document.createElement('div');
   agentDiv.className = 'accordion-item mb-2';
@@ -386,7 +399,10 @@ function createAgentElement(agentName, currentAgent) {
                   style="color: var(--text-primary); width: 20px; height: 20px;">
           </button>
           ${isCurrentAgent ? '<div class="status-indicator status-online"></div>' : ''}
-          <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
+          <div class="d-flex flex-column">
+            <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
+            <span style="color: var(--text-secondary); font-size: 0.7rem;">${typeLabel}</span>
+          </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
           ${!isCurrentAgent ? `<button class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem;">
@@ -630,9 +646,16 @@ function setupAccordionListeners() {
   document.querySelectorAll('[id^="temperatureSlider-"]').forEach(slider => {
     const accordionId = slider.id.replace('temperatureSlider-', '');
     const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
+    const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
 
     if (temperatureValue) {
       slider.addEventListener('input', function(e) {
+        // Enforce GPT-5 temperature restriction
+        if (modelSelect && modelSelect.value.includes('gpt-5')) {
+          e.target.value = 1.0;
+          temperatureValue.textContent = '1.0';
+          return;
+        }
         temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
       });
     }
@@ -663,34 +686,42 @@ function setupAccordionListeners() {
 }
 
 // Load settings for a specific agent accordion
-async function loadAgentSettings(agentName, accordionId) {
+async function loadAgentSettings(agentName, agentType, accordionId) {
   try {
     // Ensure providers are loaded
     if (availableProviders.length === 0) {
       await loadAvailableProviders();
     }
 
-    // Populate model dropdown from API
+    // Populate model dropdown from API, filtering by agent type
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
     if (modelSelect) {
       // Clear existing options
       modelSelect.innerHTML = '';
 
-      // Add all models from all providers (no tier filtering for agent settings)
+      // Add models matching the agent's type from all providers
       availableProviders.forEach(provider => {
         const providerGroup = document.createElement('optgroup');
         providerGroup.label = provider.display_name;
+        let hasMatchingModels = false;
 
         provider.models.forEach(model => {
-          const option = document.createElement('option');
-          option.value = model.value;
-          option.textContent = model.label;
-          option.setAttribute('data-type', model.type);
-          option.setAttribute('data-provider', model.provider);
-          providerGroup.appendChild(option);
+          // Only add models matching the agent type
+          if (model.type === agentType) {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-type', model.type);
+            option.setAttribute('data-provider', model.provider);
+            providerGroup.appendChild(option);
+            hasMatchingModels = true;
+          }
         });
 
-        modelSelect.appendChild(providerGroup);
+        // Only add the provider group if it has matching models
+        if (hasMatchingModels) {
+          modelSelect.appendChild(providerGroup);
+        }
       });
     }
 
