@@ -48,7 +48,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Name string `json:"name"`
+			Name         string  `json:"name"`
+			Type         string  `json:"type,omitempty"`
+			Model        string  `json:"model,omitempty"`
+			Temperature  float64 `json:"temperature,omitempty"`
+			SystemPrompt string  `json:"system_prompt,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
@@ -56,14 +60,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, errMsg, http.StatusBadRequest)
 			return
 		}
-		log.Printf("📝 CreateAgent request: name=%q", req.Name)
+		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
+			req.Name, req.Type, req.Model, req.Temperature)
 		if req.Name == "" {
 			log.Printf("❌ CreateAgent error: name is empty")
 			http.Error(w, "name required", http.StatusBadRequest)
 			return
 		}
+
+		// Build config from request
+		config := &store.CreateAgentConfig{
+			Type:         req.Type,
+			Model:        req.Model,
+			Temperature:  req.Temperature,
+			SystemPrompt: req.SystemPrompt,
+		}
+
 		log.Printf("🔄 Creating agent: %s", req.Name)
-		if err := h.State.CreateAgent(req.Name); err != nil {
+		if err := h.State.CreateAgent(req.Name, config); err != nil {
 			log.Printf("❌ CreateAgent error: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -73,7 +87,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
-			"agent":   req.Name,
+			"message": "Agent '" + req.Name + "' created successfully",
 		})
 
 	case http.MethodPut:

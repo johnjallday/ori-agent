@@ -74,16 +74,27 @@ Get all available agents and the current active agent.
 
 ### Create Agent
 
-Create a new agent with the specified name.
+Create a new agent with the specified name and optional configuration.
 
 **Endpoint:** `POST /api/agents`
 
 **Request Body:**
 ```json
 {
-  "name": "my-new-agent"
+  "name": "my-new-agent",
+  "type": "tool-calling",
+  "model": "gpt-4o-mini",
+  "temperature": 0.7,
+  "system_prompt": "You are a helpful assistant."
 }
 ```
+
+**Parameters:**
+- `name` (required): Name of the agent
+- `type` (optional): Agent type - `"tool-calling"`, `"general"`, or `"research"`. Defaults to `"tool-calling"`. If `model` is provided without `type`, the type is auto-detected based on the model.
+- `model` (optional): Model to use (e.g., `"gpt-4o-mini"`, `"claude-3-haiku-20240307"`). Defaults to current agent's model or system default.
+- `temperature` (optional): Temperature setting (0.0-2.0). Defaults to current agent's temperature or system default.
+- `system_prompt` (optional): Custom system prompt. Defaults to current agent's system prompt or empty.
 
 **Response:**
 ```json

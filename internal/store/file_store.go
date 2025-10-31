@@ -65,7 +65,7 @@ func (s *fileStore) ListAgents() (names []string, current string) {
 	return names, s.current
 }
 
-func (s *fileStore) CreateAgent(name string) error {
+func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.agents[name]; !exists {
@@ -79,10 +79,31 @@ func (s *fileStore) CreateAgent(name string) error {
 			defaultSettings = s.defaultSettings
 		}
 
+		// Apply config overrides if provided
+		agentType := agent.TypeToolCalling // Default to cheapest tier
+		if config != nil {
+			if config.Type != "" {
+				agentType = config.Type
+			}
+			if config.Model != "" {
+				defaultSettings.Model = config.Model
+				// Auto-detect agent type from model if type not explicitly provided
+				if config.Type == "" {
+					agentType = agent.GetTypeForModel(config.Model)
+				}
+			}
+			if config.Temperature > 0 {
+				defaultSettings.Temperature = config.Temperature
+			}
+			if config.SystemPrompt != "" {
+				defaultSettings.SystemPrompt = config.SystemPrompt
+			}
+		}
+
 		s.agents[name] = &agent.Agent{
-			Type:         agent.TypeToolCalling, // Default to cheapest tier
-			Role:         types.RoleGeneral,     // Default role
-			Capabilities: []string{},            // Empty capabilities by default
+			Type:         agentType,
+			Role:         types.RoleGeneral, // Default role
+			Capabilities: []string{},        // Empty capabilities by default
 			Settings:     defaultSettings,
 			Plugins:      make(map[string]types.LoadedPlugin),
 		}
