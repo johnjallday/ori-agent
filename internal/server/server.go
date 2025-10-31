@@ -18,6 +18,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
@@ -33,6 +35,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
+	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -64,6 +67,11 @@ type Server struct {
 	webPageHandler        *pluginhttp.WebPageHandler
 	workspaceStore        workspace.Store
 	orchestrationHandler  *orchestrationhttp.Handler
+	costTracker           *llm.CostTracker
+	usageHandler          *usagehttp.Handler
+	mcpRegistry           *mcp.Registry
+	mcpConfigManager      *mcp.ConfigManager
+	mcpHandler            *mcphttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -350,11 +358,41 @@ func New() (*Server, error) {
 	// initialize onboarding manager
 	s.onboardingMgr = onboarding.NewManager("app_state.json")
 
+	// initialize cost tracker
+	usageDataDir := filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data")
+	s.costTracker = llm.NewCostTracker(usageDataDir)
+	log.Printf("💰 Cost tracker initialized: %s", usageDataDir)
+
+	// initialize MCP system
+	s.mcpRegistry = mcp.NewRegistry()
+	s.mcpConfigManager = mcp.NewConfigManager(".")
+	if err := s.mcpConfigManager.InitializeDefaultServers(); err != nil {
+		log.Printf("Warning: failed to initialize default MCP servers: %v", err)
+	}
+
+	// Load global MCP configuration
+	mcpGlobalConfig, err := s.mcpConfigManager.LoadGlobalConfig()
+	if err != nil {
+		log.Printf("Warning: failed to load MCP global config: %v", err)
+	} else {
+		// Add all configured servers to registry
+		for _, serverConfig := range mcpGlobalConfig.Servers {
+			if err := s.mcpRegistry.AddServer(serverConfig); err != nil {
+				log.Printf("Warning: failed to add MCP server %s to registry: %v", serverConfig.Name, err)
+			}
+		}
+		log.Printf("🔌 MCP system initialized with %d configured servers", len(mcpGlobalConfig.Servers))
+	}
+
 	// initialize HTTP handlers
+	s.usageHandler = usagehttp.NewHandler(s.costTracker)
+	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
-	s.chatHandler.SetLLMFactory(s.llmFactory) // Inject LLM factory
+	s.chatHandler.SetLLMFactory(s.llmFactory)       // Inject LLM factory
 	s.chatHandler.SetHealthManager(s.healthManager) // Inject health manager
+	s.chatHandler.SetCostTracker(s.costTracker)     // Inject cost tracker
+	s.chatHandler.SetMCPRegistry(s.mcpRegistry)     // Inject MCP registry
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 
 	// Create plugin main handler first so we can pass it to init handler
@@ -425,6 +463,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
+	mux.HandleFunc("/usage", s.serveUsage)
 
 	// Static file server for CSS, JS, icons, and other assets
 	mux.HandleFunc("/styles.css", s.serveStaticFile)
@@ -524,6 +563,42 @@ func (s *Server) Handler() http.Handler {
 	// Device endpoints
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
+
+	// Usage and cost tracking endpoints
+	mux.HandleFunc("/api/usage/stats/all", s.usageHandler.GetAllTimeStats)
+	mux.HandleFunc("/api/usage/stats/today", s.usageHandler.GetTodayStats)
+	mux.HandleFunc("/api/usage/stats/month", s.usageHandler.GetThisMonthStats)
+	mux.HandleFunc("/api/usage/stats/range", s.usageHandler.GetCustomRangeStats)
+	mux.HandleFunc("/api/usage/summary", s.usageHandler.GetSummary)
+	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
+
+	// MCP (Model Context Protocol) endpoints
+	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.mcpHandler.ListServersHandler(w, r)
+		case http.MethodPost:
+			s.mcpHandler.AddServerHandler(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
+		// Check for specific actions in the path
+		if strings.HasSuffix(r.URL.Path, "/enable") {
+			s.mcpHandler.EnableServerHandler(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/disable") {
+			s.mcpHandler.DisableServerHandler(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/tools") {
+			s.mcpHandler.GetServerToolsHandler(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/status") {
+			s.mcpHandler.GetServerStatusHandler(w, r)
+		} else if r.Method == http.MethodDelete {
+			s.mcpHandler.RemoveServerHandler(w, r)
+		} else {
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	})
 
 	// Orchestration endpoints
 	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
@@ -698,6 +773,32 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("workspaces", data)
 	if err != nil {
 		log.Printf("Failed to render workspaces template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.Title = "Usage & Cost Tracking - Ori Agent"
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("usage", data)
+	if err != nil {
+		log.Printf("Failed to render usage template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

@@ -18,7 +18,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -29,6 +28,8 @@ type Handler struct {
 	healthManager  *healthhttp.Manager
 	commandHandler *CommandHandler
 	orchestrator   *orchestration.Orchestrator
+	costTracker    *llm.CostTracker
+	mcpRegistry    interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
@@ -53,6 +54,43 @@ func (h *Handler) SetHealthManager(manager *healthhttp.Manager) {
 // SetOrchestrator sets the orchestrator
 func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
 	h.orchestrator = orch
+}
+
+// SetCostTracker sets the cost tracker
+func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
+	h.costTracker = tracker
+}
+
+// SetMCPRegistry sets the MCP registry
+func (h *Handler) SetMCPRegistry(registry interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }) {
+	h.mcpRegistry = registry
+}
+
+// findTool searches for a tool by name in both plugins and MCP servers
+func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.Tool, bool) {
+	// First check native plugins
+	for _, plugin := range ag.Plugins {
+		if plugin.Definition.Name == toolName && plugin.Tool != nil {
+			return plugin.Tool, true
+		}
+	}
+
+	// Then check MCP tools
+	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		for _, serverName := range ag.MCPServers {
+			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			if err != nil {
+				continue
+			}
+			for _, mcpTool := range mcpTools {
+				if mcpTool.Definition().Name == toolName {
+					return mcpTool, true
+				}
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -122,6 +160,13 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		return
 	}
 
+	// Track usage and cost
+	if h.costTracker != nil {
+		if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp.Usage, ""); err != nil {
+			log.Printf("Warning: failed to track usage: %v", err)
+		}
+	}
+
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
 		log.Printf("Claude requested %d tool call(s)", len(resp.ToolCalls))
@@ -141,32 +186,24 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 			log.Printf("Executing tool: %s with args: %s", name, args)
 
-			// Find plugin by function definition name
-			var pl types.LoadedPlugin
-			var found bool
-			for _, plugin := range ag.Plugins {
-				if plugin.Definition.Name == name {
-					pl = plugin
-					found = true
-					break
-				}
-			}
+			// Find tool by name (searches both plugins and MCP tools)
+			tool, found := h.findTool(ag, name)
 
 			var result string
 			var err error
 
-			if !found || pl.Tool == nil {
-				result = fmt.Sprintf("❌ Error: Plugin %q not found or not loaded", name)
-				err = fmt.Errorf("plugin not found")
-				log.Printf("Plugin %s not found", name)
+			if !found {
+				result = fmt.Sprintf("❌ Error: Tool %q not found", name)
+				err = fmt.Errorf("tool not found")
+				log.Printf("Tool %s not found", name)
 			} else {
 				// Execute tool with timeout (30s for operations like API calls)
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
 				defer toolCancel()
 
-				// Track plugin call stats
+				// Track tool call stats
 				startTime := time.Now()
-				result, err = pl.Tool.Call(toolCtx, args)
+				result, err = tool.Call(toolCtx, args)
 				duration := time.Since(startTime)
 
 				// Record call stats in health manager
@@ -273,6 +310,13 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				"toolCalls": toolResults,
 			})
 			return
+		}
+
+		// Track usage and cost for second call
+		if h.costTracker != nil && resp2 != nil {
+			if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp2.Usage, ""); err != nil {
+				log.Printf("Warning: failed to track usage: %v", err)
+			}
 		}
 
 		// Store final response
@@ -544,6 +588,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []openai.ChatCompletionToolUnionParam{}
+
+	// Add native plugin tools
 	for _, pl := range ag.Plugins {
 		// Call Tool.Definition() to get fresh definition with dynamic enums
 		if pl.Tool != nil {
@@ -552,6 +598,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Fallback to cached definition if tool is not available
 			tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
+		}
+	}
+
+	// Add MCP tools for enabled servers
+	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		for _, serverName := range ag.MCPServers {
+			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			if err != nil {
+				log.Printf("Warning: failed to get MCP tools for server %s: %v", serverName, err)
+				continue
+			}
+			for _, mcpTool := range mcpTools {
+				tools = append(tools, openai.ChatCompletionFunctionTool(mcpTool.Definition()))
+			}
+			log.Printf("Added %d MCP tools from server %s", len(mcpTools), serverName)
 		}
 	}
 
@@ -620,6 +681,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Track usage and cost for OpenAI
+	if h.costTracker != nil && resp.Usage.TotalTokens > 0 {
+		usage := llm.Usage{
+			PromptTokens:     int(resp.Usage.PromptTokens),
+			CompletionTokens: int(resp.Usage.CompletionTokens),
+			TotalTokens:      int(resp.Usage.TotalTokens),
+		}
+		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+			log.Printf("Warning: failed to track usage: %v", err)
+		}
+	}
+
 	choice := resp.Choices[0].Message
 
 	// Fallback if model answered with an empty assistant message and no tool calls
@@ -637,6 +711,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		if errFB == nil && respFB != nil && len(respFB.Choices) > 0 {
 			choice = respFB.Choices[0].Message
+
+			// Track usage for fallback call
+			if h.costTracker != nil && respFB.Usage.TotalTokens > 0 {
+				usage := llm.Usage{
+					PromptTokens:     int(respFB.Usage.PromptTokens),
+					CompletionTokens: int(respFB.Usage.CompletionTokens),
+					TotalTokens:      int(respFB.Usage.TotalTokens),
+				}
+				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+					log.Printf("Warning: failed to track fallback usage: %v", err)
+				}
+			}
 		}
 	}
 
@@ -651,19 +737,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			name := tc.Function.Name
 			args := tc.Function.Arguments
 
-			// Find plugin by function definition name
-			var pl types.LoadedPlugin
-			var found bool
-			for _, plugin := range ag.Plugins {
-				if plugin.Definition.Name == name {
-					pl = plugin
-					found = true
-					break
-				}
-			}
+			// Find tool by name (searches both plugins and MCP tools)
+			tool, found := h.findTool(ag, name)
 
-			if !found || pl.Tool == nil {
-				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
+			if !found {
+				http.Error(w, fmt.Sprintf("tool %q not found", name), http.StatusInternalServerError)
 				return
 			}
 
@@ -671,9 +749,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			toolCtx, toolCancel := context.WithTimeout(base, 30*time.Second)
 			defer toolCancel()
 
-			// Track plugin call stats
+			// Track tool call stats
 			startTime := time.Now()
-			result, err := pl.Tool.Call(toolCtx, args)
+			result, err := tool.Call(toolCtx, args)
 			duration := time.Since(startTime)
 
 			// Record call stats in health manager
@@ -777,6 +855,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
+		// Track usage for second OpenAI call (after tool execution)
+		if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
+			usage := llm.Usage{
+				PromptTokens:     int(resp2.Usage.PromptTokens),
+				CompletionTokens: int(resp2.Usage.CompletionTokens),
+				TotalTokens:      int(resp2.Usage.TotalTokens),
+			}
+			if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+				log.Printf("Warning: failed to track usage for tool response: %v", err)
+			}
+		}
+
 		final := resp2.Choices[0].Message
 		ag.Messages = append(ag.Messages, final.ToParam())
 

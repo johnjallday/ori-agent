@@ -68,5 +68,6 @@ type Agent struct {
 	Capabilities []string                                 `json:"capabilities"` // Agent capabilities (web_search, code_analysis, etc.)
 	Settings     types.Settings                           `json:"Settings"`
 	Plugins      map[string]types.LoadedPlugin            `json:"Plugins"`
-	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"` // in-memory only
+	MCPServers   []string                                 `json:"mcp_servers,omitempty"` // List of enabled MCP server names
+	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"`                     // in-memory only
 }

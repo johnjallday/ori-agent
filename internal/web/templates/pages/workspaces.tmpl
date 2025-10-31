@@ -203,7 +203,7 @@
 
     async function loadWorkspaces() {
       try {
-        const response = await fetch('/api/orchestration/workspaces');
+        const response = await fetch('/api/orchestration/workspace');
         const data = await response.json();
 
         if (data.error) {
@@ -406,7 +406,7 @@
       }
 
       try {
-        const response = await fetch('/api/orchestration/workspaces', {
+        const response = await fetch('/api/orchestration/workspace', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -437,7 +437,7 @@
 
     async function viewWorkspace(workspaceId) {
       try {
-        const response = await fetch(`/api/orchestration/workspaces/${workspaceId}/status`);
+        const response = await fetch(`/api/orchestration/workflow/status?workspace_id=${workspaceId}`);
         const data = await response.json();
 
         if (data.error) {
@@ -514,7 +514,7 @@
       }
 
       try {
-        const response = await fetch(`/api/orchestration/workspaces/${workspaceId}`, {
+        const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`, {
           method: 'DELETE'
         });
 

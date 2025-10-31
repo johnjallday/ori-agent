@@ -16,7 +16,10 @@ export class WorkspaceManager {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            const workspaces = await response.json();
+            const data = await response.json();
+
+            // Extract workspaces array from response object
+            const workspaces = data.workspaces || data;
 
             // Update local cache
             if (Array.isArray(workspaces)) {
