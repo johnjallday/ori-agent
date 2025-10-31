@@ -12,8 +12,8 @@ var Handshake = plugin.HandshakeConfig{
 	// that a plugin is intended to be launched. This is not a
 	// security feature, just a UX feature. If the magic cookie
 	// doesn't match, we show a friendly message to the user.
-	MagicCookieKey:   "DOLPHIN_PLUGIN",
-	MagicCookieValue: "dolphin-agent-v1",
+	MagicCookieKey:   "ORI_PLUGIN",
+	MagicCookieValue: "ori-agent-v1",
 }
 
 // PluginMap is the map of plugin name to implementation.

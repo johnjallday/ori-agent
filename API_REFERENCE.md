@@ -1,6 +1,6 @@
 # 🌐 API Reference
 
-This document provides comprehensive API documentation for Dolphin Agent, including all endpoints, request/response formats, and examples.
+This document provides comprehensive API documentation for Ori Agent, including all endpoints, request/response formats, and examples.
 
 ## Base URL
 
@@ -24,7 +24,7 @@ http://localhost:8080/api
 
 ## Authentication
 
-Currently, Dolphin Agent does not require authentication for local development. API keys are managed through the settings endpoints and stored locally.
+Currently, Ori Agent does not require authentication for local development. API keys are managed through the settings endpoints and stored locally.
 
 ## Response Formats
 
@@ -684,7 +684,7 @@ curl -X POST -H "Content-Type: application/json" \
 ### JavaScript Client Example
 
 ```javascript
-class DolphinAgentClient {
+class OriAgentClient {
   constructor(baseUrl = 'http://localhost:8080/api') {
     this.baseUrl = baseUrl;
   }
@@ -728,7 +728,7 @@ class DolphinAgentClient {
 }
 
 // Usage
-const client = new DolphinAgentClient();
+const client = new OriAgentClient();
 
 // Create and use agent
 await client.createAgent('my-agent');
@@ -742,7 +742,7 @@ console.log(response.response);
 import requests
 import json
 
-class DolphinAgentClient:
+class OriAgentClient:
     def __init__(self, base_url='http://localhost:8080/api'):
         self.base_url = base_url
 
@@ -773,7 +773,7 @@ class DolphinAgentClient:
         return self.chat('/tools')
 
 # Usage
-client = DolphinAgentClient()
+client = OriAgentClient()
 
 # Create agent and chat
 client.create_agent('python-agent')
@@ -807,4 +807,4 @@ if (result) {
 }
 ```
 
-This API reference provides complete documentation for integrating with Dolphin Agent programmatically. For additional help or examples, refer to the main [README](README.md) or check the web interface implementation in the `internal/web/` directory.
+This API reference provides complete documentation for integrating with Ori Agent programmatically. For additional help or examples, refer to the main [README](README.md) or check the web interface implementation in the `internal/web/` directory.

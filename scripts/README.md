@@ -101,7 +101,7 @@ Checks and reports stale plugin paths in `agents.json`.
 Builds plugins that are in separate repositories or directories outside the main project.
 
 **Features:**
-- Builds plugins from external directories (like `../dolphin-reaper`)
+- Builds plugins from external directories (like `../ori-reaper`)
 - Uses plugin's own build script if available
 - Falls back to direct Go build if `main.go` exists
 - Copies built plugins to `uploaded_plugins/` directory

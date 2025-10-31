@@ -114,7 +114,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	message := "Update downloaded successfully. Please restart dolphin-agent to use the new version."
+	message := "Update downloaded successfully. Please restart ori-agent to use the new version."
 	if request.AutoRestart {
 		message = "Update downloaded successfully. Restarting application..."
 	}

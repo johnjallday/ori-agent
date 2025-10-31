@@ -21,8 +21,8 @@ func main() {
 		testArgs   string
 	}{
 		{
-			name:       "Dolphin Reaper - Get Settings",
-			pluginPath: "../dolphin-reaper/dolphin-reaper",
+			name:       "Ori Reaper - Get Settings",
+			pluginPath: "../ori-reaper/ori-reaper",
 			testArgs:   `{"operation": "get_settings"}`,
 		},
 		{

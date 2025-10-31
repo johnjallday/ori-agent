@@ -46,7 +46,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 
 	// Create default data - in a real application, this would come from the request context
 	data := ComponentData{
-		Title:        "Dolphin Agent",
+		Title:        "Ori Agent",
 		Theme:        "light",
 		CurrentAgent: "default",
 		Model:        "gpt-4",

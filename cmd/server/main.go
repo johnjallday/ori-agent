@@ -58,27 +58,27 @@ func main() {
 }
 
 // ensureDataDirectory checks if runtime data files exist in current directory.
-// If they don't exist and we're running as a standalone binary, create a dolphin-agent folder.
+// If they don't exist and we're running as a standalone binary, create an ori-agent folder.
 func ensureDataDirectory() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	// Check if we're already in a dolphin-agent directory or if data files exist
+	// Check if we're already in an ori-agent directory or if data files exist
 	baseName := filepath.Base(cwd)
 	hasDataFiles := fileExists("agents.json") ||
 		fileExists("local_plugin_registry.json") ||
 		fileExists("plugin_cache") ||
 		fileExists("uploaded_plugins")
 
-	// If already in dolphin-agent directory or data files exist, we're good
-	if baseName == "dolphin-agent" || hasDataFiles {
+	// If already in ori-agent directory or data files exist, we're good
+	if baseName == "ori-agent" || hasDataFiles {
 		return nil
 	}
 
-	// Create dolphin-agent directory and change into it
-	dataDir := filepath.Join(cwd, "dolphin-agent")
+	// Create ori-agent directory and change into it
+	dataDir := filepath.Join(cwd, "ori-agent")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return err
 	}

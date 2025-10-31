@@ -6,7 +6,7 @@
 class ThemeManager {
   constructor() {
     this.currentTheme = 'light';
-    this.storageKey = 'dolphin-theme';
+    this.storageKey = 'ori-theme';
     this.observers = [];
   }
 

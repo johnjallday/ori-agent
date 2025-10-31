@@ -4,7 +4,7 @@ This package provides a unified interface for interacting with multiple Large La
 
 ## Overview
 
-The provider abstraction layer allows Dolphin Agent to support multiple LLM providers through a clean, consistent interface. This design makes it easy to:
+The provider abstraction layer allows Ori Agent to support multiple LLM providers through a clean, consistent interface. This design makes it easy to:
 
 - Switch between providers without changing business logic
 - Add new providers with minimal code changes

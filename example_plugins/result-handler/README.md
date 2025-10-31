@@ -1,10 +1,10 @@
 # 🔧 Result Handler Plugin
 
-A powerful utility plugin for Dolphin Agent that enables users to interact with chat results by opening directories, files, and URLs directly from conversation context.
+A powerful utility plugin for Ori Agent that enables users to interact with chat results by opening directories, files, and URLs directly from conversation context.
 
 ![Actions](https://img.shields.io/badge/Actions-File%20System-4f46e5)
 ![Cross Platform](https://img.shields.io/badge/Platform-Cross%20Platform-10b981)
-![Plugin](https://img.shields.io/badge/Plugin-Dolphin%20Agent-6366f1)
+![Plugin](https://img.shields.io/badge/Plugin-Ori%20Agent-6366f1)
 
 ## ✨ Features
 
@@ -109,8 +109,8 @@ go mod tidy
 go build -buildmode=plugin -o result-handler.so main.go
 ```
 
-### 2. Upload to Dolphin Agent
-- Start your Dolphin Agent server
+### 2. Upload to Ori Agent
+- Start your Ori Agent server
 - Open the web interface (http://localhost:8080)
 - Go to **Plugins** tab in the sidebar
 - Upload `result-handler.so` using the file input
@@ -265,7 +265,7 @@ This project is licensed under the MIT License - see the main project LICENSE fi
 ## 🙏 Acknowledgments
 
 - Cross-platform file operations inspired by various open source projects
-- Thanks to the Dolphin Agent community for feature requests and feedback
+- Thanks to the Ori Agent community for feature requests and feedback
 - Platform-specific implementations based on standard system practices
 
 ---

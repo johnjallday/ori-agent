@@ -168,7 +168,7 @@ func New() (*Server, error) {
 
 	// init update manager
 	currentVersion := version.GetVersion()
-	s.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "dolphin-agent")
+	s.updateMgr = updatemanager.NewManager(currentVersion, "johnjallday", "ori-agent")
 
 	// restore plugin Tool instances for any persisted plugins
 	names, _ := s.st.ListAgents()

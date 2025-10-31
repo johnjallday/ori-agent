@@ -1,4 +1,4 @@
-// Dolphin Agent Application JavaScript
+// Ori Agent Application JavaScript
 
 let currentAgent = '';
 let isComposing = false; // IME safety
@@ -252,7 +252,7 @@ function renderModal(data, metadata) {
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  plugin_name: "dolphin-reaper",
+                  plugin_name: "ori-reaper",
                   operation: "download_script",
                   args: {
                     filename: filename

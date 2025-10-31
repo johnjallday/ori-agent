@@ -10,7 +10,7 @@ import (
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║   Dolphin Agent RPC Plugin System Test                    ║")
+	fmt.Println("║   Ori Agent RPC Plugin System Test                        ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 

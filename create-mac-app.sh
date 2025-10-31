@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Create a proper macOS .app bundle for Dolphin Agent
+# Create a proper macOS .app bundle for Ori Agent
 
 APP_NAME="OriAgent"
 APP_DIR="${APP_NAME}.app"
@@ -26,19 +26,19 @@ cd "$RESOURCES_DIR"
 
 # Start the server
 if [ ! -f "./ori-agent" ]; then
-    osascript -e 'display dialog "Dolphin Agent server not found. Please build it first." buttons {"OK"} default button 1 with icon stop'
+    osascript -e 'display dialog "Ori Agent server not found. Please build it first." buttons {"OK"} default button 1 with icon stop'
     exit 1
 fi
 
 # Check if already running
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    osascript -e 'display dialog "Dolphin Agent is already running on port 8080" buttons {"OK"} default button 1 with icon note'
+    osascript -e 'display dialog "Ori Agent is already running on port 8080" buttons {"OK"} default button 1 with icon note'
     open http://localhost:8080
     exit 0
 fi
 
 # Start server in background
-./ori-agent > /tmp/dolphin-agent.log 2>&1 &
+./ori-agent > /tmp/ori-agent.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to start
@@ -46,7 +46,7 @@ sleep 2
 
 # Check if server started
 if ! kill -0 $SERVER_PID 2>/dev/null; then
-    osascript -e 'display dialog "Failed to start Dolphin Agent. Check logs at /tmp/dolphin-agent.log" buttons {"OK"} default button 1 with icon stop'
+    osascript -e 'display dialog "Failed to start Ori Agent. Check logs at /tmp/ori-agent.log" buttons {"OK"} default button 1 with icon stop'
     exit 1
 fi
 
@@ -55,7 +55,7 @@ sleep 1
 open http://localhost:8080
 
 # Show success message
-osascript -e 'display notification "Server running on port 8080" with title "Dolphin Agent Started"'
+osascript -e 'display notification "Server running on port 8080" with title "Ori Agent Started"'
 
 LAUNCHER
 
@@ -69,11 +69,11 @@ cat >"$APP_DIR/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>DolphinAgent</string>
+    <string>OriAgent</string>
     <key>CFBundleIdentifier</key>
-    <string>com.ori.dolphin-agent</string>
+    <string>com.ori.ori-agent</string>
     <key>CFBundleName</key>
-    <string>Dolphin Agent</string>
+    <string>Ori Agent</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -130,5 +130,5 @@ echo "  2. Your browser will open to http://localhost:8080"
 echo ""
 echo "To distribute:"
 echo "  - Drag ${APP_NAME}.app to Applications folder"
-echo "  - Or zip it: zip -r DolphinAgent.zip ${APP_NAME}.app"
+echo "  - Or zip it: zip -r OriAgent.zip ${APP_NAME}.app"
 echo ""

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# create-release.sh - Creates a new release for Dolphin Agent
+# create-release.sh - Creates a new release for Ori Agent
 # Usage: ./scripts/create-release.sh <version>
 # Example: ./scripts/create-release.sh v1.0.1
 
@@ -52,7 +52,7 @@ if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-print_status "Creating release $VERSION for Dolphin Agent"
+print_status "Creating release $VERSION for Ori Agent"
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -176,7 +176,7 @@ $(git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s" | head -20)
 
   # Create the release
   if gh release create "$VERSION" \
-    --title "Dolphin Agent $VERSION" \
+    --title "Ori Agent $VERSION" \
     --notes "$RELEASE_NOTES"; then
     print_success "GitHub release created successfully!"
 

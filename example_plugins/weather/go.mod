@@ -1,9 +1,9 @@
-module github.com/johnjallday/dolphin-agent/plugins/weather
+module github.com/johnjallday/ori-agent/plugins/weather
 
 go 1.24.0
 
 require (
-	github.com/johnjallday/dolphin-agent v0.0.0
+	github.com/johnjallday/ori-agent v0.0.0
 	github.com/openai/openai-go/v2 v2.0.2
 )
 
@@ -14,4 +14,4 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 )
 
-replace github.com/johnjallday/dolphin-agent => ../..
+replace github.com/johnjallday/ori-agent => ../..

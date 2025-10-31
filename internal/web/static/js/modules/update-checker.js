@@ -149,7 +149,7 @@ function displayUpdateInfo(updateInfo) {
         </svg>
         <strong>Platform detected:</strong> ${platform}
         <br>
-        <small>The update will be downloaded to the current directory. After download completes, restart dolphin-agent to use the new version.</small>
+        <small>The update will be downloaded to the current directory. After download completes, restart ori-agent to use the new version.</small>
       </div>
     ` : `
       <div class="alert alert-warning" role="alert">
@@ -242,7 +242,7 @@ async function downloadUpdate(version, asset) {
           <br>
           <small>File saved to: ${result.filePath}</small>
           <br>
-          <small class="text-muted">Please restart dolphin-agent to use the new version.</small>
+          <small class="text-muted">Please restart ori-agent to use the new version.</small>
         </div>
       `;
     }
@@ -344,7 +344,7 @@ function showUpdateChatMessage(updateInfo) {
     if (typeof addMessageToChat === 'function') {
       const message = `🎉 **Update Available!**
 
-A new version of Dolphin Agent is available!
+A new version of Ori Agent is available!
 
 **Current Version:** ${updateInfo.currentVersion}
 **Latest Version:** ${updateInfo.latestVersion}

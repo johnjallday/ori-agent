@@ -341,12 +341,12 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 	// Close the file before renaming
 	file.Close()
 
-	// Determine the final filename - use "dolphin-agent" or "dolphin-agent.exe"
+	// Determine the final filename - use "ori-agent" or "ori-agent.exe"
 	var finalName string
 	if runtime.GOOS == "windows" {
-		finalName = "dolphin-agent.exe"
+		finalName = "ori-agent.exe"
 	} else {
-		finalName = "dolphin-agent"
+		finalName = "ori-agent"
 	}
 	finalPath := filepath.Join(currentDir, finalName)
 
