@@ -66,6 +66,8 @@ type Server struct {
 	deviceHandler         *devicehttp.Handler
 	webPageHandler        *pluginhttp.WebPageHandler
 	workspaceStore        workspace.Store
+	taskExecutor          *workspace.TaskExecutor
+	stepExecutor          *workspace.StepExecutor
 	orchestrationHandler  *orchestrationhttp.Handler
 	costTracker           *llm.CostTracker
 	usageHandler          *usagehttp.Handler
@@ -393,6 +395,7 @@ func New() (*Server, error) {
 	s.chatHandler.SetHealthManager(s.healthManager) // Inject health manager
 	s.chatHandler.SetCostTracker(s.costTracker)     // Inject cost tracker
 	s.chatHandler.SetMCPRegistry(s.mcpRegistry)     // Inject MCP registry
+	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Inject workspace store for /workspace commands
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 
 	// Create plugin main handler first so we can pass it to init handler
@@ -422,6 +425,18 @@ func New() (*Server, error) {
 
 	// initialize agent communicator
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
+
+	// initialize task handler and executor
+	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory)
+	s.taskExecutor = workspace.NewTaskExecutor(s.workspaceStore, taskHandler, workspace.ExecutorConfig{
+		PollInterval:  10 * time.Second,
+		MaxConcurrent: 5,
+	})
+
+	// initialize step executor for workflow execution
+	s.stepExecutor = workspace.NewStepExecutor(s.workspaceStore, taskHandler, workspace.StepExecutorConfig{
+		PollInterval: 5 * time.Second,
+	})
 
 	// initialize orchestrator
 	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
@@ -617,8 +632,31 @@ func (s *Server) Handler() http.Handler {
 	return s.corsHandler(mux)
 }
 
+// Start starts background services (task executor, etc.)
+func (s *Server) Start() {
+	if s.taskExecutor != nil {
+		s.taskExecutor.Start()
+	}
+	if s.stepExecutor != nil {
+		s.stepExecutor.Start()
+	}
+}
+
+// Shutdown gracefully shuts down background services
+func (s *Server) Shutdown() {
+	if s.taskExecutor != nil {
+		s.taskExecutor.Stop()
+	}
+	if s.stepExecutor != nil {
+		s.stepExecutor.Stop()
+	}
+}
+
 // HTTPServer returns a fully configured http.Server
 func (s *Server) HTTPServer(addr string) *http.Server {
+	// Start background services
+	s.Start()
+
 	return &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
@@ -646,6 +684,7 @@ func (s *Server) corsHandler(next http.Handler) http.Handler {
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
+	data.CurrentPage = "index"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -676,6 +715,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
+	data.CurrentPage = "settings"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -706,6 +746,7 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
+	data.CurrentPage = "marketplace"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -732,6 +773,7 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Workflow Templates - Ori Agent"
+	data.CurrentPage = "workflows"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -758,6 +800,7 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Workspaces - Ori Agent"
+	data.CurrentPage = "workspaces"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -784,6 +827,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Usage & Cost Tracking - Ori Agent"
+	data.CurrentPage = "usage"
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()

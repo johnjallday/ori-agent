@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -64,6 +65,11 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 // SetMCPRegistry sets the MCP registry
 func (h *Handler) SetMCPRegistry(registry interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }) {
 	h.mcpRegistry = registry
+}
+
+// SetWorkspaceStore sets the workspace store for workspace commands
+func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
+	h.commandHandler.SetWorkspaceStore(ws)
 }
 
 // findTool searches for a tool by name in both plugins and MCP servers
@@ -521,6 +527,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			agentName = parts[1]
 		}
 		h.commandHandler.HandleSwitch(w, r, agentName)
+		return
+	}
+	if strings.HasPrefix(q, "/workspace") {
+		// Parse args after "/workspace"
+		args := strings.TrimPrefix(q, "/workspace")
+		h.commandHandler.HandleWorkspace(w, r, args)
 		return
 	}
 

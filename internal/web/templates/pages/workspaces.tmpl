@@ -412,8 +412,8 @@
           body: JSON.stringify({
             name: name,
             description: description,
-            parent_agent_name: parentAgent,
-            agents: Array.from(selectedAgents),
+            parent_agent: parentAgent,
+            participating_agents: Array.from(selectedAgents),
             workflow: workflowSteps.length > 0 ? {
               steps: workflowSteps
             } : undefined

@@ -194,7 +194,10 @@ func (o *Orchestrator) GetWorkflowStatus(workspaceID string) (*WorkflowStatus, e
 			StartedAt:   task.CreatedAt,
 		}
 
-		if task.IsComplete() {
+		if task.Status == workspace.TaskStatusCompleted ||
+		   task.Status == workspace.TaskStatusFailed ||
+		   task.Status == workspace.TaskStatusCancelled ||
+		   task.Status == workspace.TaskStatusTimeout {
 			completedCount++
 		}
 	}
@@ -236,7 +239,7 @@ func (o *Orchestrator) AggregateResults(workspaceID string, taskIDs []string) (s
 			continue
 		}
 
-		if task.Status == agentcomm.TaskStatusCompleted && task.Result != "" {
+		if task.Status == workspace.TaskStatusCompleted && task.Result != "" {
 			results = append(results, fmt.Sprintf("[%s]: %s", task.To, task.Result))
 		}
 	}

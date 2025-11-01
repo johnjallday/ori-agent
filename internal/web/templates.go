@@ -16,6 +16,7 @@ type TemplateData struct {
 	CurrentAgent string
 	Model        string
 	Version      string
+	CurrentPage  string
 }
 
 // TemplateRenderer handles template rendering

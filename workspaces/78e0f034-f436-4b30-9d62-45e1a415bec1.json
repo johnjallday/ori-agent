@@ -1,0 +1,13 @@
+{
+  "id": "78e0f034-f436-4b30-9d62-45e1a415bec1",
+  "name": "Ori Project Devops Manager",
+  "parent_agent": "default",
+  "agents": [
+    "resesarcher"
+  ],
+  "shared_data": null,
+  "messages": [],
+  "status": "active",
+  "created_at": "2025-10-31T20:32:54.330458-04:00",
+  "updated_at": "2025-10-31T20:32:54.330458-04:00"
+}

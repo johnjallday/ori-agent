@@ -143,6 +143,7 @@ func (h *Handler) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string                 `json:"name"`
+		Description string                 `json:"description"`
 		ParentAgent string                 `json:"parent_agent"`
 		Agents      []string               `json:"participating_agents"`
 		InitialData map[string]interface{} `json:"initial_context"`
@@ -183,6 +184,7 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	// Create workspace
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        req.Name,
+		Description: req.Description,
 		ParentAgent: req.ParentAgent,
 		Agents:      req.Agents,
 		InitialData: req.InitialData,
@@ -221,6 +223,10 @@ func (h *Handler) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	log.Printf("✅ Deleted workspace: %s", wsID)
 	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Workspace deleted successfully",
+	})
 }
 
 // MessagesHandler handles workspace message operations
@@ -554,7 +560,7 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Update task status
 	err := h.communicator.UpdateTaskStatus(
 		req.TaskID,
-		agentcomm.TaskStatus(req.Status),
+		workspace.TaskStatus(req.Status),
 		req.Result,
 		req.Error,
 	)

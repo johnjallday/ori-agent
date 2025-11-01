@@ -33,10 +33,13 @@ const (
 type Workspace struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
 	ParentAgent string                 `json:"parent_agent"`
 	Agents      []string               `json:"agents"`
 	SharedData  map[string]interface{} `json:"shared_data"`
 	Messages    []AgentMessage         `json:"messages"`
+	Tasks       []Task                 `json:"tasks"`
+	Workflows   map[string]Workflow    `json:"workflows,omitempty"`
 	Status      WorkspaceStatus        `json:"status"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time              `json:"updated_at"`
@@ -54,9 +57,41 @@ type AgentMessage struct {
 	Timestamp time.Time              `json:"timestamp"`
 }
 
+// Task represents a delegated task within a workspace
+type Task struct {
+	ID          string                 `json:"id"`
+	WorkspaceID string                 `json:"workspace_id"`
+	From        string                 `json:"from"`
+	To          string                 `json:"to"`
+	Description string                 `json:"description"`
+	Priority    int                    `json:"priority"`
+	Context     map[string]interface{} `json:"context"`
+	Timeout     time.Duration          `json:"timeout"`
+	Status      TaskStatus             `json:"status"`
+	Result      string                 `json:"result,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+}
+
+// TaskStatus represents the current state of a task
+type TaskStatus string
+
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusAssigned   TaskStatus = "assigned"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusCompleted  TaskStatus = "completed"
+	TaskStatusFailed     TaskStatus = "failed"
+	TaskStatusCancelled  TaskStatus = "cancelled"
+	TaskStatusTimeout    TaskStatus = "timeout"
+)
+
 // CreateWorkspaceParams contains parameters for creating a new workspace
 type CreateWorkspaceParams struct {
 	Name        string
+	Description string
 	ParentAgent string
 	Agents      []string
 	InitialData map[string]interface{}
@@ -68,10 +103,12 @@ func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 	return &Workspace{
 		ID:          uuid.New().String(),
 		Name:        params.Name,
+		Description: params.Description,
 		ParentAgent: params.ParentAgent,
 		Agents:      params.Agents,
 		SharedData:  params.InitialData,
 		Messages:    []AgentMessage{},
+		Tasks:       []Task{},
 		Status:      StatusActive,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -247,11 +284,143 @@ func (w *Workspace) GetSummary() map[string]interface{} {
 	return map[string]interface{}{
 		"id":            w.ID,
 		"name":          w.Name,
+		"description":   w.Description,
 		"parent_agent":  w.ParentAgent,
+		"agents":        w.Agents,
 		"agent_count":   len(w.Agents),
 		"message_count": len(w.Messages),
+		"task_count":    len(w.Tasks),
 		"status":        w.Status,
 		"created_at":    w.CreatedAt,
 		"updated_at":    w.UpdatedAt,
 	}
+}
+
+// AddTask adds a task to the workspace
+func (w *Workspace) AddTask(task Task) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Validate sender is part of workspace
+	if !w.hasAgent(task.From) && task.From != w.ParentAgent {
+		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
+	}
+
+	// Validate recipient if specified
+	if task.To != "" && !w.hasAgent(task.To) && task.To != w.ParentAgent {
+		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
+	}
+
+	// Set task ID and timestamp if not set
+	if task.ID == "" {
+		task.ID = uuid.New().String()
+	}
+	if task.CreatedAt.IsZero() {
+		task.CreatedAt = time.Now()
+	}
+
+	// Ensure workspace ID matches
+	task.WorkspaceID = w.ID
+
+	w.Tasks = append(w.Tasks, task)
+	w.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// GetTask retrieves a task by ID
+func (w *Workspace) GetTask(taskID string) (*Task, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == taskID {
+			return &w.Tasks[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("task %s not found in workspace", taskID)
+}
+
+// UpdateTask updates an existing task in the workspace
+func (w *Workspace) UpdateTask(task Task) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == task.ID {
+			w.Tasks[i] = task
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("task %s not found in workspace", task.ID)
+}
+
+// GetTasksForAgent returns all tasks assigned to a specific agent
+func (w *Workspace) GetTasksForAgent(agentName string) []Task {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	var tasks []Task
+	for _, task := range w.Tasks {
+		if task.To == agentName {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+// GetPendingTasksForAgent returns pending/assigned tasks for an agent
+func (w *Workspace) GetPendingTasksForAgent(agentName string) []Task {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	var tasks []Task
+	for _, task := range w.Tasks {
+		if task.To == agentName &&
+		   (task.Status == TaskStatusPending || task.Status == TaskStatusAssigned) {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+// GetTaskStats returns statistics about tasks in the workspace
+func (w *Workspace) GetTaskStats() map[string]int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	stats := map[string]int{
+		"total":       len(w.Tasks),
+		"pending":     0,
+		"assigned":    0,
+		"in_progress": 0,
+		"completed":   0,
+		"failed":      0,
+		"cancelled":   0,
+		"timeout":     0,
+	}
+
+	for _, task := range w.Tasks {
+		switch task.Status {
+		case TaskStatusPending:
+			stats["pending"]++
+		case TaskStatusAssigned:
+			stats["assigned"]++
+		case TaskStatusInProgress:
+			stats["in_progress"]++
+		case TaskStatusCompleted:
+			stats["completed"]++
+		case TaskStatusFailed:
+			stats["failed"]++
+		case TaskStatusCancelled:
+			stats["cancelled"]++
+		case TaskStatusTimeout:
+			stats["timeout"]++
+		}
+	}
+
+	return stats
 }
