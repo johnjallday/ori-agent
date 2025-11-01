@@ -68,6 +68,8 @@ type Server struct {
 	workspaceStore        workspace.Store
 	taskExecutor          *workspace.TaskExecutor
 	stepExecutor          *workspace.StepExecutor
+	eventBus              *workspace.EventBus
+	notificationService   *workspace.NotificationService
 	orchestrationHandler  *orchestrationhttp.Handler
 	costTracker           *llm.CostTracker
 	usageHandler          *usagehttp.Handler
@@ -423,6 +425,14 @@ func New() (*Server, error) {
 		return nil, fmt.Errorf("failed to create workspace store: %w", err)
 	}
 
+	// initialize event bus for real-time updates
+	s.eventBus = workspace.DefaultEventBus()
+	log.Println("✅ Event bus initialized")
+
+	// initialize notification service
+	s.notificationService = workspace.NewNotificationService(s.eventBus, 500) // Keep last 500 notifications
+	log.Println("✅ Notification service initialized")
+
 	// initialize agent communicator
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
 
@@ -432,6 +442,7 @@ func New() (*Server, error) {
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
+	s.taskExecutor.SetEventBus(s.eventBus) // Wire up event bus
 
 	// initialize step executor for workflow execution
 	s.stepExecutor = workspace.NewStepExecutor(s.workspaceStore, taskHandler, workspace.StepExecutorConfig{
@@ -446,6 +457,10 @@ func New() (*Server, error) {
 
 	// inject orchestrator into orchestration handler
 	s.orchestrationHandler.SetOrchestrator(orch)
+
+	// inject event bus and notification service
+	s.orchestrationHandler.SetEventBus(s.eventBus)
+	s.orchestrationHandler.SetNotificationService(s.notificationService)
 
 	// initialize template manager
 	templatesDir := "workflow_templates"
@@ -628,6 +643,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/orchestration/templates", s.orchestrationHandler.TemplatesHandler)
 	mux.HandleFunc("/api/orchestration/templates/instantiate", s.orchestrationHandler.InstantiateTemplateHandler)
 
+	// Notification endpoints
+	mux.HandleFunc("/api/orchestration/notifications", s.orchestrationHandler.NotificationsHandler)
+	mux.HandleFunc("/api/orchestration/notifications/stream", s.orchestrationHandler.NotificationStreamHandler)
+
+	// Event history endpoint
+	mux.HandleFunc("/api/orchestration/events", s.orchestrationHandler.EventHistoryHandler)
+
 	// CORS middleware
 	return s.corsHandler(mux)
 }
@@ -649,6 +671,12 @@ func (s *Server) Shutdown() {
 	}
 	if s.stepExecutor != nil {
 		s.stepExecutor.Stop()
+	}
+	if s.notificationService != nil {
+		s.notificationService.Shutdown()
+	}
+	if s.eventBus != nil {
+		s.eventBus.Shutdown()
 	}
 }
 

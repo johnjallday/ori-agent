@@ -189,16 +189,64 @@
   <script src="js/modules/plugin-update-checker.js"></script>
   <script src="js/modules/plugin-health.js"></script>
   <script src="js/modules/file-upload.js"></script>
+  <!-- Real-time workspace modules -->
+  <script src="js/modules/workspace-realtime.js"></script>
+  <script src="js/modules/message-timeline.js"></script>
+  <script src="js/modules/workspace-dashboard.js"></script>
+
+  <style>
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .status-online {
+      background-color: var(--success-color);
+      box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    .workspace-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-lg);
+    }
+  </style>
 
   <script>
     let availableAgents = [];
     let selectedAgents = new Set();
     let workflowSteps = [];
 
+    // Auto-refresh workspaces every 10 seconds
+    let workspaceRefreshInterval = null;
+
     // Load workspaces and agents on page load
     document.addEventListener('DOMContentLoaded', function() {
       loadWorkspaces();
       loadAgents();
+
+      // Enable auto-refresh
+      workspaceRefreshInterval = setInterval(() => {
+        loadWorkspaces();
+      }, 10000); // Refresh every 10 seconds
+    });
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      if (workspaceRefreshInterval) {
+        clearInterval(workspaceRefreshInterval);
+      }
     });
 
     async function loadWorkspaces() {
@@ -244,11 +292,22 @@
         const statusBadge = workspace.status === 'active' ? 'badge-success' :
                            workspace.status === 'completed' ? 'badge-info' : 'badge-secondary';
 
+        const isActive = workspace.status === 'active';
+        const activityIndicator = isActive ? `
+          <span class="d-inline-flex align-items-center gap-1 text-success" style="font-size: 0.75rem;">
+            <span class="status-indicator status-online"></span>
+            <span>Active</span>
+          </span>
+        ` : '';
+
         return `
           <div class="col-md-6 col-lg-4">
-            <div class="modern-card p-4 h-100 d-flex flex-column" onclick="viewWorkspace('${workspace.id}')">
+            <div class="modern-card p-4 h-100 d-flex flex-column workspace-card" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
               <div class="d-flex justify-content-between align-items-start mb-3">
-                <h5 style="color: var(--text-primary);">${escapeHtml(workspace.name || workspace.id)}</h5>
+                <div class="flex-grow-1">
+                  <h5 style="color: var(--text-primary);" class="mb-1">${escapeHtml(workspace.name || workspace.id)}</h5>
+                  ${activityIndicator}
+                </div>
                 <span class="modern-badge ${statusBadge}">${escapeHtml(workspace.status || 'unknown')}</span>
               </div>
 
@@ -435,25 +494,47 @@
       }
     });
 
+    let currentWorkspaceDashboard = null;
+
     async function viewWorkspace(workspaceId) {
       try {
-        const response = await fetch(`/api/orchestration/workflow/status?workspace_id=${workspaceId}`);
-        const data = await response.json();
-
-        if (data.error) {
-          showError('Failed to load workspace details');
-          return;
-        }
-
-        renderWorkspaceDetails(data);
-
+        // Show modal immediately
         const modal = new bootstrap.Modal(document.getElementById('workspaceDetailsModal'));
         modal.show();
+
+        // Clean up previous dashboard if exists
+        if (currentWorkspaceDashboard) {
+          currentWorkspaceDashboard.destroy();
+        }
+
+        // Show loading state
+        const container = document.getElementById('workspace-details-content');
+        container.innerHTML = `
+          <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3" style="color: var(--text-muted);">Loading workspace...</p>
+          </div>
+        `;
+
+        // Initialize real-time dashboard
+        currentWorkspaceDashboard = new WorkspaceDashboard(workspaceId, 'workspace-details-content');
+        await currentWorkspaceDashboard.init();
+
       } catch (error) {
         console.error('Error loading workspace details:', error);
         showError('Failed to load workspace details');
       }
     }
+
+    // Clean up dashboard when modal is closed
+    document.getElementById('workspaceDetailsModal').addEventListener('hidden.bs.modal', function() {
+      if (currentWorkspaceDashboard) {
+        currentWorkspaceDashboard.destroy();
+        currentWorkspaceDashboard = null;
+      }
+    });
 
     function renderWorkspaceDetails(workspace) {
       const container = document.getElementById('workspace-details-content');

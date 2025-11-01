@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,11 +18,13 @@ import (
 
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
-	agentStore      store.Store
-	workspaceStore  workspace.Store
-	communicator    *agentcomm.Communicator
-	orchestrator    *orchestration.Orchestrator
-	templateManager *templates.TemplateManager
+	agentStore          store.Store
+	workspaceStore      workspace.Store
+	communicator        *agentcomm.Communicator
+	orchestrator        *orchestration.Orchestrator
+	templateManager     *templates.TemplateManager
+	eventBus            *workspace.EventBus
+	notificationService *workspace.NotificationService
 }
 
 // NewHandler creates a new orchestration handler
@@ -31,6 +34,16 @@ func NewHandler(agentStore store.Store, workspaceStore workspace.Store) *Handler
 		workspaceStore: workspaceStore,
 		communicator:   agentcomm.NewCommunicator(workspaceStore),
 	}
+}
+
+// SetEventBus sets the event bus instance
+func (h *Handler) SetEventBus(eb *workspace.EventBus) {
+	h.eventBus = eb
+}
+
+// SetNotificationService sets the notification service instance
+func (h *Handler) SetNotificationService(ns *workspace.NotificationService) {
+	h.notificationService = ns
 }
 
 // SetOrchestrator sets the orchestrator instance
@@ -198,6 +211,22 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	}
 
 	log.Printf("✅ Created workspace: %s (ID: %s)", req.Name, ws.ID)
+
+	// Publish workspace created event
+	if h.eventBus != nil {
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceCreated,
+			ws.ID,
+			"api",
+			map[string]interface{}{
+				"name":         req.Name,
+				"description":  req.Description,
+				"parent_agent": req.ParentAgent,
+				"agents":       req.Agents,
+			},
+		)
+		h.eventBus.Publish(event)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -619,11 +648,6 @@ func (h *Handler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if h.orchestrator == nil {
-		http.Error(w, "orchestrator not initialized", http.StatusInternalServerError)
-		return
-	}
-
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		http.Error(w, "workspace_id is required", http.StatusBadRequest)
@@ -643,14 +667,97 @@ func (h *Handler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Create ticker for periodic updates (every 2 seconds)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
 	// Context with cancellation
 	ctx := r.Context()
 
 	log.Printf("🔄 Starting SSE stream for workspace %s", workspaceID)
+
+	// Use event bus if available for real-time updates
+	if h.eventBus != nil {
+		h.streamEventsFromBus(ctx, w, flusher, workspaceID)
+	} else {
+		// Fallback to polling-based streaming
+		h.streamEventsFromPolling(ctx, w, flusher, workspaceID)
+	}
+}
+
+// streamEventsFromBus streams events using the event bus (real-time)
+func (h *Handler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	// Create event channel
+	eventChan := make(chan workspace.Event, 50)
+
+	// Subscribe to workspace events
+	subID := h.eventBus.SubscribeToWorkspace(workspaceID, func(event workspace.Event) {
+		select {
+		case eventChan <- event:
+		default:
+			log.Printf("⚠️  Event channel full for workspace %s", workspaceID)
+		}
+	})
+	defer h.eventBus.Unsubscribe(subID)
+
+	// Also create a ticker for periodic status updates (every 5 seconds)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Send initial status immediately
+	h.sendWorkspaceStatus(w, flusher, workspaceID)
+
+	// Stream events
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected
+			log.Printf("⏹  SSE stream closed for workspace %s", workspaceID)
+			return
+
+		case event := <-eventChan:
+			// Send event to client
+			eventData := map[string]interface{}{
+				"type":         event.Type,
+				"workspace_id": event.WorkspaceID,
+				"timestamp":    event.Timestamp,
+				"source":       event.Source,
+				"data":         event.Data,
+			}
+
+			data, err := json.Marshal(eventData)
+			if err != nil {
+				log.Printf("❌ Failed to marshal event: %v", err)
+				continue
+			}
+
+			// Send with event type prefix
+			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
+			if err != nil {
+				log.Printf("❌ Failed to write SSE event: %v", err)
+				return
+			}
+			flusher.Flush()
+
+			// Check for completion events
+			if event.Type == workspace.EventWorkspaceCompleted || event.Type == workspace.EventWorkflowCompleted {
+				log.Printf("✅ Workspace %s completed, closing SSE stream", workspaceID)
+				return
+			}
+
+		case <-ticker.C:
+			// Send periodic status update
+			h.sendWorkspaceStatus(w, flusher, workspaceID)
+		}
+	}
+}
+
+// streamEventsFromPolling streams events using polling (fallback)
+func (h *Handler) streamEventsFromPolling(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	if h.orchestrator == nil {
+		http.Error(w, "orchestrator not initialized and event bus not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Create ticker for periodic updates (every 2 seconds)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
 	// Send initial status immediately
 	status, err := h.orchestrator.GetWorkflowStatus(workspaceID)
@@ -701,6 +808,39 @@ func (h *Handler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Req
 				return
 			}
 		}
+	}
+}
+
+// sendWorkspaceStatus sends the current workspace status
+func (h *Handler) sendWorkspaceStatus(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	// Try to get workspace
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return
+	}
+
+	statusData := map[string]interface{}{
+		"workspace_id": ws.ID,
+		"status":       ws.Status,
+		"updated_at":   ws.UpdatedAt,
+	}
+
+	// Add workflow status if orchestrator is available
+	if h.orchestrator != nil {
+		workflowStatus, err := h.orchestrator.GetWorkflowStatus(workspaceID)
+		if err == nil {
+			statusData["workflow"] = workflowStatus
+		}
+	}
+
+	data, err := json.Marshal(statusData)
+	if err != nil {
+		return
+	}
+
+	_, err = w.Write([]byte(fmt.Sprintf("event: status\ndata: %s\n\n", data)))
+	if err == nil {
+		flusher.Flush()
 	}
 }
 
@@ -850,5 +990,214 @@ func (h *Handler) InstantiateTemplateHandler(w http.ResponseWriter, r *http.Requ
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"instance": instance,
 		"result":   result,
+	})
+}
+
+// NotificationsHandler handles notification operations
+// GET: Retrieve notifications for an agent
+// POST: Mark notification(s) as read
+func (h *Handler) NotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if h.notificationService == nil {
+		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.handleGetNotifications(w, r)
+	case http.MethodPost:
+		h.handleMarkNotificationsRead(w, r)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetNotifications retrieves notifications
+func (h *Handler) handleGetNotifications(w http.ResponseWriter, r *http.Request) {
+	agentName := r.URL.Query().Get("agent")
+	unreadOnly := r.URL.Query().Get("unread") == "true"
+
+	if agentName != "" && unreadOnly {
+		// Get unread notifications for agent
+		notifications := h.notificationService.GetUnreadForAgent(agentName)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"notifications": notifications,
+			"count":         len(notifications),
+		})
+		return
+	}
+
+	// Get notification history
+	limit := 50
+	notifications := h.notificationService.GetHistory(limit)
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"notifications": notifications,
+		"count":         len(notifications),
+	})
+}
+
+// handleMarkNotificationsRead marks notifications as read
+func (h *Handler) handleMarkNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		NotificationID string `json:"notification_id,omitempty"`
+		AgentName      string `json:"agent_name,omitempty"`
+		MarkAll        bool   `json:"mark_all,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.MarkAll && req.AgentName != "" {
+		// Mark all notifications for agent as read
+		h.notificationService.MarkAllAsRead(req.AgentName)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "All notifications marked as read",
+		})
+		return
+	}
+
+	if req.NotificationID != "" {
+		// Mark specific notification as read
+		h.notificationService.MarkAsRead(req.NotificationID)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Notification marked as read",
+		})
+		return
+	}
+
+	http.Error(w, "notification_id or agent_name with mark_all required", http.StatusBadRequest)
+}
+
+// NotificationStreamHandler streams notifications using Server-Sent Events (SSE)
+// GET /api/orchestration/notifications/stream?agent=<name>
+func (h *Handler) NotificationStreamHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.notificationService == nil {
+		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	agentName := r.URL.Query().Get("agent")
+	if agentName == "" {
+		http.Error(w, "agent parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get flusher
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// Subscribe to notifications
+	notifChan := h.notificationService.Subscribe(agentName)
+	defer h.notificationService.Unsubscribe(agentName)
+
+	// Context with cancellation
+	ctx := r.Context()
+
+	log.Printf("🔔 Starting notification stream for agent %s", agentName)
+
+	// Send initial unread notifications
+	unread := h.notificationService.GetUnreadForAgent(agentName)
+	if len(unread) > 0 {
+		data, _ := json.Marshal(map[string]interface{}{
+			"notifications": unread,
+			"count":         len(unread),
+		})
+		_, _ = w.Write([]byte(fmt.Sprintf("event: initial\ndata: %s\n\n", data)))
+		flusher.Flush()
+	}
+
+	// Stream notifications
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected
+			log.Printf("🔕 Notification stream closed for agent %s", agentName)
+			return
+
+		case notification, ok := <-notifChan:
+			if !ok {
+				// Channel closed
+				log.Printf("🔕 Notification channel closed for agent %s", agentName)
+				return
+			}
+
+			// Send notification to client
+			data, err := json.Marshal(notification)
+			if err != nil {
+				log.Printf("❌ Failed to marshal notification: %v", err)
+				continue
+			}
+
+			_, err = w.Write([]byte(fmt.Sprintf("event: notification\ndata: %s\n\n", data)))
+			if err != nil {
+				log.Printf("❌ Failed to write notification: %v", err)
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// EventHistoryHandler retrieves event history
+// GET /api/orchestration/events?workspace_id=<id>&limit=<n>&since=<timestamp>
+func (h *Handler) EventHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.eventBus == nil {
+		http.Error(w, "event bus not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	workspaceID := r.URL.Query().Get("workspace_id")
+	sinceStr := r.URL.Query().Get("since")
+	limit := 100 // Default limit
+
+	var events []workspace.Event
+
+	if sinceStr != "" {
+		// Get events since timestamp
+		since, err := time.Parse(time.RFC3339, sinceStr)
+		if err != nil {
+			http.Error(w, "invalid since timestamp (use RFC3339)", http.StatusBadRequest)
+			return
+		}
+		events = h.eventBus.GetEventsSince(since, limit)
+	} else if workspaceID != "" {
+		// Get events for workspace
+		events = h.eventBus.GetWorkspaceHistory(workspaceID, limit)
+	} else {
+		// Get general event history
+		events = h.eventBus.GetHistory(nil, limit)
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"events": events,
+		"count":  len(events),
 	})
 }

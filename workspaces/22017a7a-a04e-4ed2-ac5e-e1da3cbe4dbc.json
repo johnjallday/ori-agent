@@ -1,0 +1,16 @@
+{
+  "id": "22017a7a-a04e-4ed2-ac5e-e1da3cbe4dbc",
+  "name": "ori devops manager",
+  "description": "hello",
+  "parent_agent": "resesarcher",
+  "agents": [
+    "test-configured-agent",
+    "resesarcher"
+  ],
+  "shared_data": null,
+  "messages": [],
+  "tasks": [],
+  "status": "active",
+  "created_at": "2025-11-01T10:37:02.786771-04:00",
+  "updated_at": "2025-11-01T10:37:02.786771-04:00"
+}

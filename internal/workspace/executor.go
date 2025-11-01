@@ -14,6 +14,7 @@ type TaskExecutor struct {
 	taskHandler    TaskHandler
 	pollInterval   time.Duration
 	maxConcurrent  int
+	eventBus       *EventBus // Optional event bus for publishing events
 
 	mu              sync.RWMutex
 	runningTasks    map[string]*taskExecution
@@ -59,6 +60,11 @@ func NewTaskExecutor(store Store, handler TaskHandler, config ExecutorConfig) *T
 		runningTasks:   make(map[string]*taskExecution),
 		stopChan:       make(chan struct{}),
 	}
+}
+
+// SetEventBus sets the event bus for publishing task events
+func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
+	te.eventBus = eventBus
 }
 
 // Start begins the task executor polling loop
@@ -192,6 +198,15 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		log.Printf("⚠️  Failed to save workspace: %v", err)
 	}
 
+	// Publish task started event
+	if te.eventBus != nil {
+		event := NewTaskEvent(EventTaskStarted, ws.ID, task.ID, task.To, map[string]interface{}{
+			"description": task.Description,
+			"priority":    task.Priority,
+		})
+		te.eventBus.Publish(event)
+	}
+
 	// Execute asynchronously
 	te.wg.Add(1)
 	go func() {
@@ -235,10 +250,28 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			log.Printf("❌ Task %s failed: %v", task.ID, err)
 			updatedTask.Status = TaskStatusFailed
 			updatedTask.Error = err.Error()
+
+			// Publish task failed event
+			if te.eventBus != nil {
+				event := NewTaskEvent(EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+					"description": task.Description,
+					"error":       err.Error(),
+				})
+				te.eventBus.Publish(event)
+			}
 		} else {
 			log.Printf("✅ Task %s completed successfully", task.ID)
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
+
+			// Publish task completed event
+			if te.eventBus != nil {
+				event := NewTaskEvent(EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+					"description": task.Description,
+					"result":      result,
+				})
+				te.eventBus.Publish(event)
+			}
 		}
 
 		// Save updated task
@@ -248,6 +281,15 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		}
 		if err := te.workspaceStore.Save(ws); err != nil {
 			log.Printf("⚠️  Failed to save workspace: %v", err)
+		}
+
+		// Publish workspace updated event
+		if te.eventBus != nil {
+			event := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "task-executor", map[string]interface{}{
+				"task_id": task.ID,
+				"status":  updatedTask.Status,
+			})
+			te.eventBus.Publish(event)
 		}
 	}()
 }
