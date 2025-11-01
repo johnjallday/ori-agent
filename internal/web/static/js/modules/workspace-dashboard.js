@@ -243,12 +243,58 @@ class WorkspaceDashboard {
 
             <!-- Task List -->
             <div class="modern-card p-4 mb-4">
-              <h5 style="color: var(--text-primary);" class="mb-3">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                  <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
-                </svg>
-                Tasks
-              </h5>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 style="color: var(--text-primary);" class="mb-0">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                    <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+                  </svg>
+                  Tasks
+                </h5>
+                <button class="modern-btn modern-btn-primary modern-btn-sm" onclick="workspaceDashboard.showCreateTaskForm()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Create Task
+                </button>
+              </div>
+              <div id="create-task-form" style="display: none; background: var(--surface-color); border-radius: var(--radius-md);" class="mb-3 p-3">
+                <form id="task-form" onsubmit="event.preventDefault(); workspaceDashboard.createTask();">
+                  <div class="mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
+                    <select id="task-from" class="form-control form-control-sm" required>
+                      <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
+                      ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">To (Recipient Agent)</label>
+                    <select id="task-to" class="form-control form-control-sm" required>
+                      ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Task Description</label>
+                    <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="What should this agent do?" required></textarea>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label small" style="color: var(--text-primary);">Priority</label>
+                    <select id="task-priority" class="form-control form-control-sm">
+                      <option value="0">Normal</option>
+                      <option value="1">High</option>
+                      <option value="2">Urgent</option>
+                    </select>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+                      </svg>
+                      Create
+                    </button>
+                    <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" onclick="workspaceDashboard.hideCreateTaskForm()">Cancel</button>
+                  </div>
+                </form>
+              </div>
               <div id="task-list-container">
                 ${this.renderTaskList()}
               </div>
@@ -642,6 +688,77 @@ class WorkspaceDashboard {
   switchTab(tab) {
     this.activeTab = tab;
     this.render();
+  }
+
+  /**
+   * Show create task form
+   */
+  showCreateTaskForm() {
+    const form = document.getElementById('create-task-form');
+    if (form) {
+      form.style.display = 'block';
+    }
+  }
+
+  /**
+   * Hide create task form
+   */
+  hideCreateTaskForm() {
+    const form = document.getElementById('create-task-form');
+    if (form) {
+      form.style.display = 'none';
+      // Reset form
+      document.getElementById('task-form').reset();
+    }
+  }
+
+  /**
+   * Create a new task
+   */
+  async createTask() {
+    const from = document.getElementById('task-from').value;
+    const to = document.getElementById('task-to').value;
+    const description = document.getElementById('task-description').value;
+    const priority = parseInt(document.getElementById('task-priority').value) || 0;
+
+    if (!from || !to || !description) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          from: from,
+          to: to,
+          description: description,
+          priority: priority,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to create task');
+      }
+
+      const result = await response.json();
+
+      // Hide form and reload tasks
+      this.hideCreateTaskForm();
+      await this.loadTasks();
+      this.renderTaskList();
+
+      // Show success notification
+      this.showToast('✅ Task created successfully!', 'success');
+    } catch (error) {
+      console.error('Error creating task:', error);
+      this.showToast('❌ Failed to create task: ' + error.message, 'error');
+    }
   }
 
   /**

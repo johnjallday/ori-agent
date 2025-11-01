@@ -513,6 +513,8 @@ func (h *Handler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.handleGetTasks(w, r)
+	case http.MethodPost:
+		h.handleCreateTask(w, r)
 	case http.MethodPut:
 		h.handleUpdateTask(w, r)
 	default:
@@ -564,6 +566,96 @@ func (h *Handler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdateTask updates a task's status
+// handleCreateTask creates a new task in a workspace
+func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		From        string `json:"from"`
+		To          string `json:"to"`
+		Description string `json:"description"`
+		Priority    int    `json:"priority"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.WorkspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" {
+		http.Error(w, "from (sender agent) is required", http.StatusBadRequest)
+		return
+	}
+	if req.To == "" {
+		http.Error(w, "to (recipient agent) is required", http.StatusBadRequest)
+		return
+	}
+	if req.Description == "" {
+		http.Error(w, "description is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
+		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Create task
+	task := workspace.Task{
+		WorkspaceID: req.WorkspaceID,
+		From:        req.From,
+		To:          req.To,
+		Description: req.Description,
+		Priority:    req.Priority,
+		Status:      workspace.TaskStatusPending,
+	}
+
+	// Add task to workspace
+	if err := ws.AddTask(task); err != nil {
+		log.Printf("❌ Failed to add task to workspace: %v", err)
+		http.Error(w, "Failed to add task: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		log.Printf("❌ Failed to save workspace: %v", err)
+		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the task we just added (it now has an ID)
+	// Find the most recently added task with matching properties
+	var createdTask *workspace.Task
+	for i := len(ws.Tasks) - 1; i >= 0; i-- {
+		if ws.Tasks[i].Description == req.Description && ws.Tasks[i].From == req.From && ws.Tasks[i].To == req.To {
+			createdTask = &ws.Tasks[i]
+			break
+		}
+	}
+
+	if createdTask == nil {
+		log.Printf("❌ Could not find created task")
+		http.Error(w, "Task created but could not be retrieved", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"task":    createdTask,
+	})
+}
+
 func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TaskID string `json:"task_id"`

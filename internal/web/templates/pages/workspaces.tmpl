@@ -522,6 +522,9 @@
         currentWorkspaceDashboard = new WorkspaceDashboard(workspaceId, 'workspace-details-content');
         await currentWorkspaceDashboard.init();
 
+        // Make it globally accessible for onclick handlers
+        window.workspaceDashboard = currentWorkspaceDashboard;
+
       } catch (error) {
         console.error('Error loading workspace details:', error);
         showError('Failed to load workspace details');

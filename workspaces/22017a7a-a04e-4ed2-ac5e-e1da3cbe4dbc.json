@@ -9,8 +9,24 @@
   ],
   "shared_data": null,
   "messages": [],
-  "tasks": [],
+  "tasks": [
+    {
+      "id": "944f8c2d-f4d6-4bfd-9810-507b2e4dcc5d",
+      "workspace_id": "22017a7a-a04e-4ed2-ac5e-e1da3cbe4dbc",
+      "from": "resesarcher",
+      "to": "test-configured-agent",
+      "description": "Test task from API",
+      "priority": 0,
+      "context": null,
+      "timeout": 0,
+      "status": "completed",
+      "result": "To assist you effectively, I need more details about the nature of the task. Since the description states \"Test task from API,\" could you please clarify what specific aspects or functionalities of the API you would like me to test? \n\nAdditionally, if there are any specific parameters, endpoints, or expected outcomes you would like me to consider during testing, please provide that information as well. Thank you!",
+      "created_at": "2025-11-01T12:31:21.84619-04:00",
+      "started_at": "2025-11-01T12:31:29.625271-04:00",
+      "completed_at": "2025-11-01T12:31:32.013519-04:00"
+    }
+  ],
   "status": "active",
   "created_at": "2025-11-01T10:37:02.786771-04:00",
-  "updated_at": "2025-11-01T10:37:02.786771-04:00"
+  "updated_at": "2025-11-01T12:31:32.013563-04:00"
 }
