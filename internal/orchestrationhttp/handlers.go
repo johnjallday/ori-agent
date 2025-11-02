@@ -25,6 +25,7 @@ type Handler struct {
 	templateManager     *templates.TemplateManager
 	eventBus            *workspace.EventBus
 	notificationService *workspace.NotificationService
+	taskHandler         workspace.TaskHandler
 }
 
 // NewHandler creates a new orchestration handler
@@ -44,6 +45,11 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 // SetNotificationService sets the notification service instance
 func (h *Handler) SetNotificationService(ns *workspace.NotificationService) {
 	h.notificationService = ns
+}
+
+// SetTaskHandler sets the task handler instance
+func (h *Handler) SetTaskHandler(th workspace.TaskHandler) {
+	h.taskHandler = th
 }
 
 // SetOrchestrator sets the orchestrator instance
@@ -1291,5 +1297,184 @@ func (h *Handler) EventHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"events": events,
 		"count":  len(events),
+	})
+}
+
+// ExecuteTaskHandler handles manual task execution
+func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.TaskID == "" {
+		http.Error(w, "task_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Find the task across all workspaces
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var foundWorkspace *workspace.Workspace
+	var foundTask *workspace.Task
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		task, err := ws.GetTask(req.TaskID)
+		if err == nil {
+			foundWorkspace = ws
+			foundTask = task
+			break
+		}
+	}
+
+	if foundTask == nil {
+		http.Error(w, fmt.Sprintf("Task %s not found", req.TaskID), http.StatusNotFound)
+		return
+	}
+
+	// Check if task is in a state that can be executed
+	if foundTask.Status == workspace.TaskStatusCompleted {
+		http.Error(w, "Task already completed", http.StatusBadRequest)
+		return
+	}
+
+	if foundTask.Status == workspace.TaskStatusInProgress {
+		http.Error(w, "Task is already in progress", http.StatusBadRequest)
+		return
+	}
+
+	// Check if task handler is available
+	if h.taskHandler == nil {
+		log.Printf("❌ Task handler not set")
+		http.Error(w, "Task execution not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Execute the task immediately in a goroutine
+	go func() {
+		ctx := context.Background()
+
+		// Update task status to in_progress
+		foundTask.Status = workspace.TaskStatusInProgress
+		now := time.Now()
+		foundTask.StartedAt = &now
+
+		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
+			log.Printf("❌ Failed to update task status: %v", err)
+			return
+		}
+		if err := h.workspaceStore.Save(foundWorkspace); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			return
+		}
+
+		// Publish task started event
+		if h.eventBus != nil {
+			event := workspace.NewTaskEvent(workspace.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
+				"description": foundTask.Description,
+				"priority":    foundTask.Priority,
+				"manual":      true,
+			})
+			h.eventBus.Publish(event)
+		}
+
+		log.Printf("▶️  Manually executing task %s for agent %s: %s", foundTask.ID, foundTask.To, foundTask.Description)
+
+		// Execute the task
+		result, execErr := h.taskHandler.ExecuteTask(ctx, foundTask.To, *foundTask)
+
+		// Reload workspace (may have changed)
+		ws, err := h.workspaceStore.Get(foundWorkspace.ID)
+		if err != nil {
+			log.Printf("❌ Failed to reload workspace %s: %v", foundWorkspace.ID, err)
+			return
+		}
+
+		// Find the task in the reloaded workspace
+		task, err := ws.GetTask(foundTask.ID)
+		if err != nil {
+			log.Printf("❌ Task %s not found in workspace after execution", foundTask.ID)
+			return
+		}
+
+		// Update task with result
+		completedAt := time.Now()
+		task.CompletedAt = &completedAt
+
+		if execErr != nil {
+			log.Printf("❌ Task %s failed: %v", task.ID, execErr)
+			task.Status = workspace.TaskStatusFailed
+			task.Error = execErr.Error()
+
+			// Publish task failed event
+			if h.eventBus != nil {
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+					"description": task.Description,
+					"error":       execErr.Error(),
+					"manual":      true,
+				})
+				h.eventBus.Publish(event)
+			}
+		} else {
+			log.Printf("✅ Task %s completed successfully", task.ID)
+			task.Status = workspace.TaskStatusCompleted
+			task.Result = result
+
+			// Publish task completed event
+			if h.eventBus != nil {
+				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+					"description": task.Description,
+					"result":      result,
+					"manual":      true,
+				})
+				h.eventBus.Publish(event)
+			}
+		}
+
+		// Save updated task
+		if err := ws.UpdateTask(*task); err != nil {
+			log.Printf("❌ Failed to update task: %v", err)
+			return
+		}
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+		}
+
+		// Publish workspace updated event
+		if h.eventBus != nil {
+			event := workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
+				"task_id": task.ID,
+				"status":  task.Status,
+			})
+			h.eventBus.Publish(event)
+		}
+	}()
+
+	log.Printf("✅ Started manual execution of task %s", req.TaskID)
+
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Task execution started",
+		"task_id": req.TaskID,
 	})
 }

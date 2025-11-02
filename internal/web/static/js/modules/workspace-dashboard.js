@@ -35,16 +35,14 @@ class WorkspaceDashboard {
     // Render dashboard
     this.render();
 
-    // Subscribe to real-time updates
+    // Subscribe to real-time updates (SSE)
     if (window.workspaceRealtime) {
       this.unsubscribe = window.workspaceRealtime.subscribeToWorkspace(
         this.workspaceId,
         (event) => this.handleRealtimeEvent(event)
       );
-    } else {
-      // Fallback to polling if realtime not available
-      this.startPolling();
     }
+    // Note: No automatic polling - use manual Refresh button if needed
   }
 
   /**
@@ -475,6 +473,7 @@ class WorkspaceDashboard {
   renderTask(task) {
     const statusBadge = this.getStatusBadgeClass(task.status);
     const statusIcon = this.getStatusIcon(task.status);
+    const canExecute = task.status === 'pending' || task.status === 'assigned';
 
     return `
       <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}">
@@ -495,9 +494,19 @@ class WorkspaceDashboard {
               </div>
             ` : ''}
           </div>
-          <span class="modern-badge ${statusBadge}">
-            ${this.escapeHtml(task.status)}
-          </span>
+          <div class="d-flex align-items-start gap-2">
+            ${canExecute ? `
+              <button class="modern-btn modern-btn-primary modern-btn-sm" onclick="workspaceDashboard.executeTask('${task.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                </svg>
+                Execute Now
+              </button>
+            ` : ''}
+            <span class="modern-badge ${statusBadge}">
+              ${this.escapeHtml(task.status)}
+            </span>
+          </div>
         </div>
       </div>
     `;
@@ -758,6 +767,44 @@ class WorkspaceDashboard {
     } catch (error) {
       console.error('Error creating task:', error);
       this.showToast('❌ Failed to create task: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Execute a task immediately
+   */
+  async executeTask(taskId) {
+    if (!confirm('Execute this task now?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: taskId,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to execute task');
+      }
+
+      const result = await response.json();
+
+      // Reload tasks to show updated status
+      await this.loadTasks();
+      this.renderTaskList();
+
+      // Show success notification
+      this.showToast('✅ Task execution started!', 'success');
+    } catch (error) {
+      console.error('Error executing task:', error);
+      this.showToast('❌ Failed to execute task: ' + error.message, 'error');
     }
   }
 
