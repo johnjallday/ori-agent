@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
@@ -261,6 +262,164 @@ func (h *Handler) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Workspace deleted successfully",
+	})
+}
+
+// WorkspaceAgentsHandler handles adding/removing agents from workspace
+// POST: Add agent to workspace
+// DELETE: Remove agent from workspace
+func (h *Handler) WorkspaceAgentsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodPost:
+		h.handleAddAgentToWorkspace(w, r)
+	case http.MethodDelete:
+		h.handleRemoveAgentFromWorkspace(w, r)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAddAgentToWorkspace adds an agent to a workspace
+func (h *Handler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		AgentName   string `json:"agent_name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.AgentName == "" {
+		http.Error(w, "agent_name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verify agent exists
+	_, ok := h.agentStore.GetAgent(req.AgentName)
+	if !ok {
+		http.Error(w, "agent not found: "+req.AgentName, http.StatusNotFound)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
+		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Add agent
+	if err := ws.AddAgent(req.AgentName); err != nil {
+		log.Printf("❌ Error adding agent to workspace: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		log.Printf("❌ Error saving workspace: %v", err)
+		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✅ Added agent %s to workspace %s", req.AgentName, req.WorkspaceID)
+
+	// Publish event
+	if h.eventBus != nil {
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
+			req.WorkspaceID,
+			"api",
+			map[string]interface{}{
+				"action": "agent_added",
+				"agent":  req.AgentName,
+			},
+		)
+		h.eventBus.Publish(event)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"message":  "Agent added successfully",
+		"agent":    req.AgentName,
+		"agents":   ws.Agents,
+	})
+}
+
+// handleRemoveAgentFromWorkspace removes an agent from a workspace
+func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	agentName := r.URL.Query().Get("agent_name")
+
+	if workspaceID == "" {
+		http.Error(w, "workspace_id parameter required", http.StatusBadRequest)
+		return
+	}
+	if agentName == "" {
+		http.Error(w, "agent_name parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
+		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Prevent removing parent agent
+	if agentName == ws.ParentAgent {
+		http.Error(w, "Cannot remove parent agent from workspace", http.StatusBadRequest)
+		return
+	}
+
+	// Remove agent
+	if err := ws.RemoveAgent(agentName); err != nil {
+		log.Printf("❌ Error removing agent from workspace: %v", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		log.Printf("❌ Error saving workspace: %v", err)
+		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("✅ Removed agent %s from workspace %s", agentName, workspaceID)
+
+	// Publish event
+	if h.eventBus != nil {
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
+			workspaceID,
+			"api",
+			map[string]interface{}{
+				"action": "agent_removed",
+				"agent":  agentName,
+			},
+		)
+		h.eventBus.Publish(event)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Agent removed successfully",
+		"agent":   agentName,
+		"agents":  ws.Agents,
 	})
 }
 
@@ -523,6 +682,8 @@ func (h *Handler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateTask(w, r)
 	case http.MethodPut:
 		h.handleUpdateTask(w, r)
+	case http.MethodDelete:
+		h.handleDeleteTask(w, r)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -703,6 +864,31 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"task_id": req.TaskID,
 		"status":  req.Status,
+	})
+}
+
+// handleDeleteTask deletes a task
+func (h *Handler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("id")
+	if taskID == "" {
+		http.Error(w, "id parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Delete task
+	err := h.communicator.DeleteTask(taskID)
+	if err != nil {
+		log.Printf("❌ Failed to delete task: %v", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	log.Printf("✅ Deleted task: %s", taskID)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Task deleted successfully",
+		"task_id": taskID,
 	})
 }
 
@@ -1477,4 +1663,554 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 		"message": "Task execution started",
 		"task_id": req.TaskID,
 	})
+}
+
+// ScheduledTasksHandler handles listing and creating scheduled tasks
+func (h *Handler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.handleListScheduledTasks(w, r)
+	case http.MethodPost:
+		h.handleCreateScheduledTask(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleListScheduledTasks lists all scheduled tasks for a workspace
+func (h *Handler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
+		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"scheduled_tasks": ws.ScheduledTasks,
+		"count":           len(ws.ScheduledTasks),
+	})
+}
+
+// handleCreateScheduledTask creates a new scheduled task
+func (h *Handler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkspaceID string                 `json:"workspace_id"`
+		Name        string                 `json:"name"`
+		Description string                 `json:"description"`
+		From        string                 `json:"from"`
+		To          string                 `json:"to"`
+		Prompt      string                 `json:"prompt"`
+		Priority    int                    `json:"priority"`
+		Schedule    workspace.ScheduleConfig `json:"schedule"`
+		Enabled     bool                   `json:"enabled"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.WorkspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Prompt == "" {
+		http.Error(w, "prompt is required", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" {
+		http.Error(w, "from is required", http.StatusBadRequest)
+		return
+	}
+	if req.To == "" {
+		http.Error(w, "to is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
+		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Create scheduled task
+	now := time.Now()
+	st := workspace.ScheduledTask{
+		WorkspaceID: req.WorkspaceID,
+		Name:        req.Name,
+		Description: req.Description,
+		From:        req.From,
+		To:          req.To,
+		Prompt:      req.Prompt,
+		Priority:    req.Priority,
+		Schedule:    req.Schedule,
+		Enabled:     req.Enabled,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// Calculate initial NextRun if enabled
+	if st.Enabled {
+		nextRun := calculateInitialNextRun(st.Schedule, now)
+		st.NextRun = nextRun
+	}
+
+	// Add to workspace
+	if err := ws.AddScheduledTask(st); err != nil {
+		log.Printf("❌ Failed to add scheduled task: %v", err)
+		http.Error(w, "Failed to add scheduled task: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		log.Printf("❌ Failed to save workspace: %v", err)
+		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the created scheduled task (now has ID)
+	var createdTask *workspace.ScheduledTask
+	for i := len(ws.ScheduledTasks) - 1; i >= 0; i-- {
+		if ws.ScheduledTasks[i].Name == req.Name {
+			createdTask = &ws.ScheduledTasks[i]
+			break
+		}
+	}
+
+	log.Printf("✅ Created scheduled task %s in workspace %s: %s", createdTask.ID, req.WorkspaceID, req.Name)
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":        true,
+		"scheduled_task": createdTask,
+	})
+}
+
+// ScheduledTaskHandler handles get/update/delete for a specific scheduled task
+func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract ID from URL path
+	// Path format: /api/orchestration/scheduled-tasks/{id} or /api/orchestration/scheduled-tasks/{id}/{action}
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+
+	// Minimum parts: ["", "api", "orchestration", "scheduled-tasks", "{id}"] = 5
+	if len(parts) < 5 {
+		http.Error(w, "Invalid URL: missing task ID", http.StatusBadRequest)
+		return
+	}
+
+	id := parts[4] // The ID is always at index 4
+
+	// Handle special actions (e.g., /api/orchestration/scheduled-tasks/{id}/enable)
+	if len(parts) >= 6 {
+		action := parts[5]
+
+		switch action {
+		case "enable":
+			h.handleEnableScheduledTask(w, r, id, true)
+			return
+		case "disable":
+			h.handleEnableScheduledTask(w, r, id, false)
+			return
+		case "trigger":
+			h.handleTriggerScheduledTask(w, r, id)
+			return
+		default:
+			http.Error(w, "Unknown action: "+action, http.StatusBadRequest)
+			return
+		}
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.handleGetScheduledTask(w, r, id)
+	case http.MethodPut:
+		h.handleUpdateScheduledTask(w, r, id)
+	case http.MethodDelete:
+		h.handleDeleteScheduledTask(w, r, id)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetScheduledTask retrieves a specific scheduled task
+func (h *Handler) handleGetScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+	// Find the scheduled task across all workspaces
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		st, err := ws.GetScheduledTask(id)
+		if err == nil {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"scheduled_task": st,
+			})
+			return
+		}
+	}
+
+	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+}
+
+// handleUpdateScheduledTask updates a scheduled task
+func (h *Handler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		Name        *string                   `json:"name,omitempty"`
+		Description *string                   `json:"description,omitempty"`
+		Prompt      *string                   `json:"prompt,omitempty"`
+		Priority    *int                      `json:"priority,omitempty"`
+		Schedule    *workspace.ScheduleConfig `json:"schedule,omitempty"`
+		Enabled     *bool                     `json:"enabled,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Find the scheduled task
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		st, err := ws.GetScheduledTask(id)
+		if err != nil {
+			continue
+		}
+
+		// Update fields if provided
+		if req.Name != nil {
+			st.Name = *req.Name
+		}
+		if req.Description != nil {
+			st.Description = *req.Description
+		}
+		if req.Prompt != nil {
+			st.Prompt = *req.Prompt
+		}
+		if req.Priority != nil {
+			st.Priority = *req.Priority
+		}
+		if req.Schedule != nil {
+			st.Schedule = *req.Schedule
+			// Recalculate NextRun if schedule changed
+			if st.Enabled {
+				now := time.Now()
+				nextRun := calculateInitialNextRun(st.Schedule, now)
+				st.NextRun = nextRun
+			}
+		}
+		if req.Enabled != nil {
+			wasEnabled := st.Enabled
+			st.Enabled = *req.Enabled
+
+			// Calculate NextRun when enabling
+			if st.Enabled && !wasEnabled {
+				now := time.Now()
+				nextRun := calculateInitialNextRun(st.Schedule, now)
+				st.NextRun = nextRun
+			} else if !st.Enabled && wasEnabled {
+				st.NextRun = nil
+			}
+		}
+
+		st.UpdatedAt = time.Now()
+
+		if err := ws.UpdateScheduledTask(*st); err != nil {
+			log.Printf("❌ Failed to update scheduled task: %v", err)
+			http.Error(w, "Failed to update scheduled task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Updated scheduled task %s", id)
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":        true,
+			"scheduled_task": st,
+		})
+		return
+	}
+
+	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+}
+
+// handleDeleteScheduledTask deletes a scheduled task
+func (h *Handler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		if err := ws.DeleteScheduledTask(id); err == nil {
+			if err := h.workspaceStore.Save(ws); err != nil {
+				log.Printf("❌ Failed to save workspace: %v", err)
+				http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("✅ Deleted scheduled task %s", id)
+
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+			})
+			return
+		}
+	}
+
+	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+}
+
+// handleEnableScheduledTask enables or disables a scheduled task
+func (h *Handler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Request, id string, enable bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		st, err := ws.GetScheduledTask(id)
+		if err != nil {
+			continue
+		}
+
+		st.Enabled = enable
+		st.UpdatedAt = time.Now()
+
+		// Calculate NextRun when enabling
+		if enable {
+			now := time.Now()
+			nextRun := calculateInitialNextRun(st.Schedule, now)
+			st.NextRun = nextRun
+		} else {
+			st.NextRun = nil
+		}
+
+		if err := ws.UpdateScheduledTask(*st); err != nil {
+			log.Printf("❌ Failed to update scheduled task: %v", err)
+			http.Error(w, "Failed to update scheduled task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		action := "disabled"
+		if enable {
+			action = "enabled"
+		}
+		log.Printf("✅ %s scheduled task %s", strings.Title(action), id)
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":        true,
+			"enabled":        enable,
+			"scheduled_task": st,
+		})
+		return
+	}
+
+	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+}
+
+// handleTriggerScheduledTask manually triggers a scheduled task
+func (h *Handler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		st, err := ws.GetScheduledTask(id)
+		if err != nil {
+			continue
+		}
+
+		// Create a task from the scheduled task
+		task := workspace.Task{
+			WorkspaceID: ws.ID,
+			From:        st.From,
+			To:          st.To,
+			Description: st.Prompt,
+			Priority:    st.Priority,
+			Context:     st.Context,
+			Status:      workspace.TaskStatusPending,
+		}
+
+		if err := ws.AddTask(task); err != nil {
+			log.Printf("❌ Failed to create task from scheduled task: %v", err)
+			http.Error(w, "Failed to create task: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Get the created task ID
+		var taskID string
+		if len(ws.Tasks) > 0 {
+			taskID = ws.Tasks[len(ws.Tasks)-1].ID
+		}
+
+		log.Printf("✅ Manually triggered scheduled task %s, created task %s", id, taskID)
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"task_id": taskID,
+		})
+		return
+	}
+
+	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+}
+
+// calculateInitialNextRun calculates the initial next run time for a schedule
+func calculateInitialNextRun(config workspace.ScheduleConfig, now time.Time) *time.Time {
+	switch config.Type {
+	case workspace.ScheduleOnce:
+		if config.ExecuteAt != nil {
+			return config.ExecuteAt
+		}
+		return nil
+
+	case workspace.ScheduleInterval:
+		if config.Interval == 0 {
+			return nil
+		}
+		next := now.Add(config.Interval)
+		return &next
+
+	case workspace.ScheduleDaily:
+		if config.TimeOfDay == "" {
+			return nil
+		}
+
+		var hour, minute int
+		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
+			return nil
+		}
+
+		// Calculate next occurrence
+		next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+		if next.Before(now) || next.Equal(now) {
+			// If time has passed today, schedule for tomorrow
+			next = next.AddDate(0, 0, 1)
+		}
+
+		return &next
+
+	case workspace.ScheduleWeekly:
+		if config.TimeOfDay == "" {
+			return nil
+		}
+
+		var hour, minute int
+		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
+			return nil
+		}
+
+		targetWeekday := time.Weekday(config.DayOfWeek)
+		currentWeekday := now.Weekday()
+
+		daysUntil := int(targetWeekday - currentWeekday)
+		if daysUntil < 0 {
+			daysUntil += 7
+		} else if daysUntil == 0 {
+			// Same day - check if time has passed
+			testTime := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+			if testTime.Before(now) || testTime.Equal(now) {
+				daysUntil = 7 // Next week
+			}
+		}
+
+		next := time.Date(
+			now.Year(),
+			now.Month(),
+			now.Day()+daysUntil,
+			hour,
+			minute,
+			0,
+			0,
+			now.Location(),
+		)
+
+		return &next
+
+	default:
+		return nil
+	}
 }

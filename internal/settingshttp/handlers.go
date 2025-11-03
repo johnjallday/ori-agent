@@ -3,6 +3,7 @@ package settingshttp
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -126,6 +127,12 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			// Update global client with new API key
 			h.clientFactory.UpdateDefaultClient(req.OpenAIAPIKey)
+
+			// Register/update OpenAI provider in LLM factory
+			openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
+				APIKey: req.OpenAIAPIKey,
+			})
+			h.llmFactory.Register("openai", openaiProvider)
 		}
 
 		// Update Anthropic API key if provided
@@ -135,6 +142,12 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Invalid Anthropic API key: "+err.Error(), http.StatusBadRequest)
 				return
 			}
+
+			// Register/update Claude provider in LLM factory
+			claudeProvider := llm.NewClaudeProvider(llm.ProviderConfig{
+				APIKey: req.AnthropicAPIKey,
+			})
+			h.llmFactory.Register("claude", claudeProvider)
 		}
 
 		// Save configuration
@@ -203,17 +216,20 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 		models := provider.DefaultModels()
 
 		// Convert models to ProviderModel format with categorization
-		providerModels := make([]ProviderModel, 0, len(models))
+		providerModels := make([]ProviderModel, 0, len(models)*2) // Allow for duplicates
 		for _, modelName := range models {
-			// Categorize models based on name patterns
-			modelType := categorizeModel(name, modelName)
+			// Check if model should appear in multiple categories
+			categories := getModelCategories(name, modelName)
 
-			providerModels = append(providerModels, ProviderModel{
-				Value:    modelName,
-				Label:    modelName,
-				Provider: name,
-				Type:     modelType,
-			})
+			// Add model for each category it supports
+			for _, category := range categories {
+				providerModels = append(providerModels, ProviderModel{
+					Value:    modelName,
+					Label:    modelName,
+					Provider: name,
+					Type:     category,
+				})
+			}
 		}
 
 		providers = append(providers, ProviderInfo{
@@ -230,6 +246,27 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"providers": providers,
 	})
+}
+
+// getModelCategories returns all categories a model should appear in
+// Some models (like llama3) appear in multiple categories
+func getModelCategories(provider, modelName string) []string {
+	switch provider {
+	case "ollama":
+		lowerName := strings.ToLower(modelName)
+
+		// llama3 models appear in all categories (they're versatile local models)
+		if strings.Contains(lowerName, "llama3") {
+			return []string{"tool-calling", "general", "research"}
+		}
+
+		// Other models get their single category
+		return []string{categorizeModel(provider, modelName)}
+
+	default:
+		// Non-Ollama providers use single category
+		return []string{categorizeModel(provider, modelName)}
+	}
 }
 
 // categorizeModel categorizes models into tool-calling, general, or research tiers
@@ -255,14 +292,34 @@ func categorizeModel(provider, modelName string) string {
 			return "research"
 		}
 	case "ollama":
-		// Categorize Ollama models - smaller models for tool-calling, larger for research
-		if modelName == "llama2" || modelName == "mistral" || modelName == "phi" {
+		// Categorize Ollama models - use pattern matching for flexibility
+		lowerName := strings.ToLower(modelName)
+
+		// Tool-calling tier - smaller/faster models (good for function calling)
+		if strings.Contains(lowerName, "llama3") ||
+		   strings.Contains(lowerName, "llama2") && !strings.Contains(lowerName, "70b") ||
+		   strings.Contains(lowerName, "mistral") ||
+		   strings.Contains(lowerName, "phi") ||
+		   strings.Contains(lowerName, "qwen") {
 			return "tool-calling"
-		} else if modelName == "codellama" || modelName == "llama2:13b" {
+		}
+
+		// General purpose tier - mid-size models
+		if strings.Contains(lowerName, "codellama") ||
+		   strings.Contains(lowerName, "13b") ||
+		   strings.Contains(lowerName, "mixtral") {
 			return "general"
-		} else {
+		}
+
+		// Research tier - large models
+		if strings.Contains(lowerName, "70b") ||
+		   strings.Contains(lowerName, "neural-chat") ||
+		   strings.Contains(lowerName, "starling") {
 			return "research"
 		}
+
+		// Default to tool-calling for unknown Ollama models (they're local, so cost is not a concern)
+		return "tool-calling"
 	}
 	return "general" // default
 }

@@ -31,19 +31,20 @@ const (
 
 // Workspace stores shared context between collaborating agents
 type Workspace struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	ParentAgent string                 `json:"parent_agent"`
-	Agents      []string               `json:"agents"`
-	SharedData  map[string]interface{} `json:"shared_data"`
-	Messages    []AgentMessage         `json:"messages"`
-	Tasks       []Task                 `json:"tasks"`
-	Workflows   map[string]Workflow    `json:"workflows,omitempty"`
-	Status      WorkspaceStatus        `json:"status"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	mu          sync.RWMutex           `json:"-"`
+	ID             string                 `json:"id"`
+	Name           string                 `json:"name"`
+	Description    string                 `json:"description,omitempty"`
+	ParentAgent    string                 `json:"parent_agent"`
+	Agents         []string               `json:"agents"`
+	SharedData     map[string]interface{} `json:"shared_data"`
+	Messages       []AgentMessage         `json:"messages"`
+	Tasks          []Task                 `json:"tasks"`
+	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
+	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
+	Status         WorkspaceStatus        `json:"status"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	mu             sync.RWMutex           `json:"-"`
 }
 
 // AgentMessage represents a message passed between agents
@@ -87,6 +88,82 @@ const (
 	TaskStatusCancelled  TaskStatus = "cancelled"
 	TaskStatusTimeout    TaskStatus = "timeout"
 )
+
+// ScheduleType represents the type of schedule
+type ScheduleType string
+
+const (
+	ScheduleOnce     ScheduleType = "once"     // Execute once at specific time
+	ScheduleInterval ScheduleType = "interval" // Every X duration
+	ScheduleDaily    ScheduleType = "daily"    // Every day at specific time
+	ScheduleWeekly   ScheduleType = "weekly"   // Every week on specific day/time
+	ScheduleCron     ScheduleType = "cron"     // Cron expression (advanced)
+)
+
+// ScheduleConfig defines how a scheduled task should be executed
+type ScheduleConfig struct {
+	Type ScheduleType `json:"type"` // Type of schedule
+
+	// For "once" type
+	ExecuteAt *time.Time `json:"execute_at,omitempty"`
+
+	// For "interval" type
+	Interval time.Duration `json:"interval,omitempty"` // e.g., 5m, 1h, 24h
+
+	// For "cron" type
+	CronExpr string `json:"cron_expr,omitempty"` // e.g., "0 9 * * *"
+
+	// For "daily" type
+	TimeOfDay string `json:"time_of_day,omitempty"` // e.g., "09:00", "14:30"
+
+	// For "weekly" type
+	DayOfWeek int `json:"day_of_week,omitempty"` // 0=Sunday, 1=Monday, ..., 6=Saturday
+
+	// Limits
+	MaxRuns int        `json:"max_runs,omitempty"` // 0 = infinite
+	EndDate *time.Time `json:"end_date,omitempty"` // nil = no end date
+}
+
+// TaskExecution represents a single execution of a scheduled task
+type TaskExecution struct {
+	TaskID      string    `json:"task_id"`       // ID of the created Task
+	ExecutedAt  time.Time `json:"executed_at"`   // When it was triggered
+	Status      string    `json:"status"`        // "success" or "failed"
+	Error       string    `json:"error,omitempty"` // Error message if failed
+	Duration    int64     `json:"duration,omitempty"` // Execution duration in milliseconds (future)
+}
+
+// ScheduledTask represents a recurring or one-time scheduled task template
+type ScheduledTask struct {
+	ID          string                 `json:"id"`
+	WorkspaceID string                 `json:"workspace_id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	From        string                 `json:"from"`  // Sender agent
+	To          string                 `json:"to"`    // Recipient agent
+	Prompt      string                 `json:"prompt"` // Task description/prompt
+	Priority    int                    `json:"priority"`
+	Context     map[string]interface{} `json:"context"`
+
+	// Scheduling configuration
+	Schedule ScheduleConfig `json:"schedule"`
+	NextRun  *time.Time     `json:"next_run"`
+	LastRun  *time.Time     `json:"last_run"`
+	Enabled  bool           `json:"enabled"`
+
+	// Execution tracking
+	ExecutionCount int    `json:"execution_count"`
+	FailureCount   int    `json:"failure_count"`
+	LastResult     string `json:"last_result,omitempty"`
+	LastError      string `json:"last_error,omitempty"`
+
+	// Execution history (last 20 executions)
+	ExecutionHistory []TaskExecution `json:"execution_history,omitempty"`
+
+	// Metadata
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 // CreateWorkspaceParams contains parameters for creating a new workspace
 type CreateWorkspaceParams struct {
@@ -423,4 +500,98 @@ func (w *Workspace) GetTaskStats() map[string]int {
 	}
 
 	return stats
+}
+
+// AddScheduledTask adds a scheduled task to the workspace
+func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Validate sender is part of workspace
+	if !w.hasAgent(st.From) && st.From != w.ParentAgent {
+		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
+	}
+
+	// Validate recipient
+	if st.To != "" && !w.hasAgent(st.To) && st.To != w.ParentAgent {
+		return fmt.Errorf("task recipient %s is not part of workspace", st.To)
+	}
+
+	// Set ID and timestamps if not set
+	if st.ID == "" {
+		st.ID = uuid.New().String()
+	}
+	if st.CreatedAt.IsZero() {
+		st.CreatedAt = time.Now()
+	}
+	st.UpdatedAt = time.Now()
+
+	// Ensure workspace ID matches
+	st.WorkspaceID = w.ID
+
+	w.ScheduledTasks = append(w.ScheduledTasks, st)
+	w.UpdatedAt = time.Now()
+
+	return nil
+}
+
+// GetScheduledTask retrieves a scheduled task by ID
+func (w *Workspace) GetScheduledTask(id string) (*ScheduledTask, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	for i := range w.ScheduledTasks {
+		if w.ScheduledTasks[i].ID == id {
+			return &w.ScheduledTasks[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("scheduled task %s not found in workspace", id)
+}
+
+// UpdateScheduledTask updates an existing scheduled task
+func (w *Workspace) UpdateScheduledTask(st ScheduledTask) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.ScheduledTasks {
+		if w.ScheduledTasks[i].ID == st.ID {
+			st.UpdatedAt = time.Now()
+			w.ScheduledTasks[i] = st
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("scheduled task %s not found in workspace", st.ID)
+}
+
+// DeleteScheduledTask removes a scheduled task from the workspace
+func (w *Workspace) DeleteScheduledTask(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.ScheduledTasks {
+		if w.ScheduledTasks[i].ID == id {
+			w.ScheduledTasks = append(w.ScheduledTasks[:i], w.ScheduledTasks[i+1:]...)
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("scheduled task %s not found in workspace", id)
+}
+
+// GetEnabledScheduledTasks returns all enabled scheduled tasks
+func (w *Workspace) GetEnabledScheduledTasks() []ScheduledTask {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	var enabled []ScheduledTask
+	for _, st := range w.ScheduledTasks {
+		if st.Enabled {
+			enabled = append(enabled, st)
+		}
+	}
+	return enabled
 }

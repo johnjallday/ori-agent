@@ -68,6 +68,7 @@ type Server struct {
 	workspaceStore        workspace.Store
 	taskExecutor          *workspace.TaskExecutor
 	stepExecutor          *workspace.StepExecutor
+	taskScheduler         *workspace.TaskScheduler
 	eventBus              *workspace.EventBus
 	notificationService   *workspace.NotificationService
 	orchestrationHandler  *orchestrationhttp.Handler
@@ -100,20 +101,25 @@ func New() (*Server, error) {
 	// Get API key from configuration (checks settings then env var)
 	apiKey := s.configManager.GetAPIKey()
 	if apiKey == "" {
-		return nil, log.New(os.Stderr, "", 0).Output(1, "OPENAI_API_KEY must be set either in settings.json or as environment variable").(error)
+		log.Printf("⚠️  OPENAI_API_KEY not set - OpenAI provider will be unavailable")
+		log.Printf("   You can configure it later in the Settings page")
 	}
 
 	// Initialize OpenAI client factory (deprecated - will be replaced by LLM factory)
+	// Create with empty key if not available - will be updated when user configures it
 	s.clientFactory = client.NewFactory(apiKey)
 
 	// Initialize LLM factory with available providers
 	s.llmFactory = llm.NewFactory()
 
-	// Register OpenAI provider
-	openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
-		APIKey: apiKey,
-	})
-	s.llmFactory.Register("openai", openaiProvider)
+	// Register OpenAI provider only if API key is available
+	if apiKey != "" {
+		openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
+			APIKey: apiKey,
+		})
+		s.llmFactory.Register("openai", openaiProvider)
+		log.Printf("✅ OpenAI provider registered")
+	}
 
 	// Register Claude provider if API key is available
 	claudeAPIKey := s.configManager.GetAnthropicAPIKey()
@@ -449,6 +455,12 @@ func New() (*Server, error) {
 		PollInterval: 5 * time.Second,
 	})
 
+	// initialize task scheduler for scheduled/recurring tasks
+	s.taskScheduler = workspace.NewTaskScheduler(s.workspaceStore, workspace.SchedulerConfig{
+		PollInterval: 1 * time.Minute, // Check every minute
+	})
+	s.taskScheduler.SetEventBus(s.eventBus) // Wire up event bus
+
 	// initialize orchestrator
 	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
 
@@ -633,6 +645,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Orchestration endpoints
 	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
+	mux.HandleFunc("/api/orchestration/workspace/agents", s.orchestrationHandler.WorkspaceAgentsHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.orchestrationHandler.MessagesHandler)
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
@@ -652,6 +665,10 @@ func (s *Server) Handler() http.Handler {
 	// Event history endpoint
 	mux.HandleFunc("/api/orchestration/events", s.orchestrationHandler.EventHistoryHandler)
 
+	// Scheduled task endpoints
+	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.orchestrationHandler.ScheduledTasksHandler)
+	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.orchestrationHandler.ScheduledTaskHandler)
+
 	// CORS middleware
 	return s.corsHandler(mux)
 }
@@ -664,6 +681,9 @@ func (s *Server) Start() {
 	if s.stepExecutor != nil {
 		s.stepExecutor.Start()
 	}
+	if s.taskScheduler != nil {
+		s.taskScheduler.Start()
+	}
 }
 
 // Shutdown gracefully shuts down background services
@@ -673,6 +693,9 @@ func (s *Server) Shutdown() {
 	}
 	if s.stepExecutor != nil {
 		s.stepExecutor.Stop()
+	}
+	if s.taskScheduler != nil {
+		s.taskScheduler.Stop()
 	}
 	if s.notificationService != nil {
 		s.notificationService.Shutdown()
@@ -813,7 +836,12 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 		if currentAgentName == "" {
 			currentAgentName = agents[0]
 		}
-		data.CurrentAgent = currentAgentName
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
 	}
 
 	html, err := s.templateRenderer.RenderTemplate("workflows", data)
@@ -840,7 +868,12 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 		if currentAgentName == "" {
 			currentAgentName = agents[0]
 		}
-		data.CurrentAgent = currentAgentName
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
 	}
 
 	html, err := s.templateRenderer.RenderTemplate("workspaces", data)
@@ -867,7 +900,12 @@ func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 		if currentAgentName == "" {
 			currentAgentName = agents[0]
 		}
-		data.CurrentAgent = currentAgentName
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
 	}
 
 	html, err := s.templateRenderer.RenderTemplate("usage", data)

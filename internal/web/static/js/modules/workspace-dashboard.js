@@ -16,7 +16,8 @@ class WorkspaceDashboard {
       tasks: [],
       agents: [],
       messages: [],
-      events: []
+      events: [],
+      scheduledTasks: []
     };
     this.unsubscribe = null;
     this.refreshInterval = null;
@@ -31,6 +32,7 @@ class WorkspaceDashboard {
     // Load initial data
     await this.loadWorkspaceData();
     await this.loadTasks();
+    await this.loadScheduledTasks();
 
     // Render dashboard
     this.render();
@@ -88,6 +90,28 @@ class WorkspaceDashboard {
       console.error('Error loading tasks:', error);
       // Don't re-throw here, tasks are optional
       this.data.tasks = [];
+    }
+  }
+
+  /**
+   * Load scheduled tasks from API
+   */
+  async loadScheduledTasks() {
+    try {
+      const response = await fetch(`/api/orchestration/scheduled-tasks?workspace_id=${this.workspaceId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      this.data.scheduledTasks = data.scheduled_tasks || [];
+    } catch (error) {
+      console.error('Error loading scheduled tasks:', error);
+      this.data.scheduledTasks = [];
     }
   }
 
@@ -226,6 +250,12 @@ class WorkspaceDashboard {
               Messages
             </button>
           </li>
+          <li class="nav-item">
+            <button class="nav-link ${this.activeTab === 'scheduled' ? 'active' : ''}" onclick="workspaceDashboard.switchTab('scheduled')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/></svg>
+              Scheduled Tasks
+            </button>
+          </li>
         </ul>
 
         <!-- Tab Content -->
@@ -300,12 +330,39 @@ class WorkspaceDashboard {
 
             <!-- Agent Activity -->
             <div class="modern-card p-4">
-              <h5 style="color: var(--text-primary);" class="mb-3">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
-                </svg>
-                Agents
-              </h5>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 style="color: var(--text-primary);" class="mb-0">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                    <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+                  </svg>
+                  Agents
+                </h5>
+                <button class="modern-btn modern-btn-primary modern-btn-sm" onclick="workspaceDashboard.showAddAgentForm()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Add Agent
+                </button>
+              </div>
+              <div id="add-agent-form" style="display: none; background: var(--surface-color); border-radius: var(--radius-md);" class="mb-3 p-3">
+                <form id="agent-form" onsubmit="event.preventDefault(); workspaceDashboard.addAgent();">
+                  <div class="mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Select Agent</label>
+                    <select id="agent-to-add" class="form-control form-control-sm" required>
+                      <option value="">-- Select an agent --</option>
+                    </select>
+                  </div>
+                  <div class="d-flex gap-2">
+                    <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+                      </svg>
+                      Add
+                    </button>
+                    <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" onclick="workspaceDashboard.hideAddAgentForm()">Cancel</button>
+                  </div>
+                </form>
+              </div>
               <div id="agent-list-container">
                 ${this.renderAgentList()}
               </div>
@@ -316,6 +373,10 @@ class WorkspaceDashboard {
             <div class="modern-card p-4">
               <div id="message-timeline-container"></div>
             </div>
+          </div>
+
+          <div id="scheduled-tab" style="display: ${this.activeTab === 'scheduled' ? 'block' : 'none'}">
+            ${this.renderScheduledTasksTab()}
           </div>
         </div>
       </div>
@@ -503,6 +564,11 @@ class WorkspaceDashboard {
                 Execute Now
               </button>
             ` : ''}
+            <button class="modern-btn modern-btn-danger modern-btn-sm" onclick="workspaceDashboard.deleteTask('${task.id}')" title="Delete task">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+            </button>
             <span class="modern-badge ${statusBadge}">
               ${this.escapeHtml(task.status)}
             </span>
@@ -517,20 +583,34 @@ class WorkspaceDashboard {
    */
   renderAgentList() {
     const agents = this.data.agents || [];
+    const ws = this.data.workspace;
+    const parentAgent = ws?.parent_agent || '';
 
     if (agents.length === 0) {
-      return '<p class="text-muted">No agents configured</p>';
+      return '<p class="text-muted">No participating agents configured</p>';
     }
 
     return `
       <div class="agent-list">
         ${agents.map(agent => `
-          <div class="agent-item d-flex align-items-center gap-3 p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--surface-color); border-radius: var(--radius-sm);">
-            <div class="status-indicator status-online"></div>
-            <div>
-              <div style="color: var(--text-primary); font-weight: 500;">${this.escapeHtml(agent)}</div>
-              <div class="text-muted small">Active</div>
+          <div class="agent-item d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--surface-color); border-radius: var(--radius-sm);">
+            <div class="d-flex align-items-center gap-3">
+              <div class="status-indicator status-online"></div>
+              <div>
+                <div style="color: var(--text-primary); font-weight: 500;">
+                  ${this.escapeHtml(agent)}
+                  ${agent === parentAgent ? '<span class="badge bg-secondary ms-2" style="font-size: 0.7rem;">Parent</span>' : ''}
+                </div>
+                <div class="text-muted small">Active</div>
+              </div>
             </div>
+            ${agent !== parentAgent ? `
+              <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,13H5V11H19V13Z"/>
+                </svg>
+              </button>
+            ` : ''}
           </div>
         `).join('')}
       </div>
@@ -809,6 +889,179 @@ class WorkspaceDashboard {
   }
 
   /**
+   * Delete a task
+   */
+  async deleteTask(taskId) {
+    if (!confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to delete task');
+      }
+
+      // Reload tasks to show updated list
+      await this.loadTasks();
+      this.renderTaskList();
+
+      // Show success notification
+      this.showToast('Task Deleted', '✅ Task deleted successfully', 'success');
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      this.showToast('Delete Failed', '❌ Failed to delete task: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Show add agent form
+   */
+  showAddAgentForm() {
+    const form = document.getElementById('add-agent-form');
+    if (form) {
+      form.style.display = 'block';
+      this.populateAvailableAgents();
+    }
+  }
+
+  /**
+   * Hide add agent form
+   */
+  hideAddAgentForm() {
+    const form = document.getElementById('add-agent-form');
+    if (form) {
+      form.style.display = 'none';
+      document.getElementById('agent-form').reset();
+    }
+  }
+
+  /**
+   * Populate available agents dropdown
+   */
+  async populateAvailableAgents() {
+    try {
+      // Get all agents from the system
+      const response = await fetch('/api/agents');
+      if (!response.ok) {
+        throw new Error('Failed to fetch agents');
+      }
+
+      const data = await response.json();
+      const agents = data.agents || [];
+      const select = document.getElementById('agent-to-add');
+      if (!select) return;
+
+      // Clear existing options except the first one
+      select.innerHTML = '<option value="">-- Select an agent --</option>';
+
+      // Get current workspace agents
+      const currentAgents = this.data.agents || [];
+      const parentAgent = this.data.workspace?.parent_agent || '';
+
+      // Add agents that are not already in the workspace
+      agents.forEach(agent => {
+        if (!currentAgents.includes(agent.name) && agent.name !== parentAgent) {
+          const option = document.createElement('option');
+          option.value = agent.name;
+          option.textContent = agent.name;
+          select.appendChild(option);
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching agents:', error);
+      this.showToast('Error', '❌ Failed to fetch available agents', 'error');
+    }
+  }
+
+  /**
+   * Add an agent to the workspace
+   */
+  async addAgent() {
+    const agentName = document.getElementById('agent-to-add').value;
+
+    if (!agentName) {
+      alert('Please select an agent');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/orchestration/workspace/agents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          agent_name: agentName,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to add agent');
+      }
+
+      const result = await response.json();
+
+      // Hide form and reload workspace data
+      this.hideAddAgentForm();
+      await this.loadWorkspaceData();
+
+      // Update agent list
+      const agentListContainer = document.getElementById('agent-list-container');
+      if (agentListContainer) {
+        agentListContainer.innerHTML = this.renderAgentList();
+      }
+
+      // Show success notification
+      this.showToast('Agent Added', `✅ ${agentName} added to workspace`, 'success');
+    } catch (error) {
+      console.error('Error adding agent:', error);
+      this.showToast('Add Failed', '❌ Failed to add agent: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Remove an agent from the workspace
+   */
+  async removeAgent(agentName) {
+    if (!confirm(`Remove ${agentName} from this workspace?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/workspace/agents?workspace_id=${this.workspaceId}&agent_name=${encodeURIComponent(agentName)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to remove agent');
+      }
+
+      // Reload workspace data
+      await this.loadWorkspaceData();
+
+      // Update agent list
+      const agentListContainer = document.getElementById('agent-list-container');
+      if (agentListContainer) {
+        agentListContainer.innerHTML = this.renderAgentList();
+      }
+
+      // Show success notification
+      this.showToast('Agent Removed', `✅ ${agentName} removed from workspace`, 'success');
+    } catch (error) {
+      console.error('Error removing agent:', error);
+      this.showToast('Remove Failed', '❌ Failed to remove agent: ' + error.message, 'error');
+    }
+  }
+
+  /**
    * Refresh dashboard data
    */
   async refresh() {
@@ -856,6 +1109,506 @@ class WorkspaceDashboard {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  /**
+   * ==========================================
+   * SCHEDULED TASKS METHODS
+   * ==========================================
+   */
+
+  /**
+   * Render scheduled tasks tab
+   */
+  renderScheduledTasksTab() {
+    const ws = this.data.workspace;
+    if (!ws) return '<p>Loading...</p>';
+
+    return `
+      <div class="modern-card p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 style="color: var(--text-primary);" class="mb-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+            </svg>
+            Scheduled Tasks
+          </h5>
+          <button class="modern-btn modern-btn-primary modern-btn-sm" onclick="workspaceDashboard.showCreateScheduledTaskForm()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Scheduled Task
+          </button>
+        </div>
+
+        <!-- Create Scheduled Task Form -->
+        <div id="create-scheduled-task-form" style="display: none; background: var(--surface-color); border-radius: var(--radius-md);" class="mb-3 p-3">
+          <form id="scheduled-task-form" onsubmit="event.preventDefault(); workspaceDashboard.createScheduledTask();">
+            <div class="row">
+              <div class="col-md-6 mb-2">
+                <label class="form-label small" style="color: var(--text-primary);">Name</label>
+                <input type="text" id="st-name" class="form-control form-control-sm" placeholder="e.g., Daily Status Report" required>
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label small" style="color: var(--text-primary);">Schedule Type</label>
+                <select id="st-schedule-type" class="form-control form-control-sm" onchange="workspaceDashboard.updateScheduleFields()" required>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="interval">Interval</option>
+                  <option value="once">Once</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label small" style="color: var(--text-primary);">Description</label>
+              <input type="text" id="st-description" class="form-control form-control-sm" placeholder="What does this scheduled task do?">
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-2">
+                <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
+                <select id="st-from" class="form-control form-control-sm" required>
+                  <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
+                  ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label small" style="color: var(--text-primary);">To (Recipient Agent)</label>
+                <select id="st-to" class="form-control form-control-sm" required>
+                  ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label small" style="color: var(--text-primary);">Task Prompt</label>
+              <textarea id="st-prompt" class="form-control form-control-sm" rows="2" placeholder="What should the agent do when this task runs?" required></textarea>
+            </div>
+
+            <!-- Schedule-specific fields -->
+            <div id="schedule-fields">
+              <div id="daily-fields" style="display: block;">
+                <div class="mb-2">
+                  <label class="form-label small" style="color: var(--text-primary);">Time of Day (24-hour format)</label>
+                  <input type="time" id="st-time-daily" class="form-control form-control-sm" value="09:00">
+                </div>
+              </div>
+
+              <div id="weekly-fields" style="display: none;">
+                <div class="row">
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Day of Week</label>
+                    <select id="st-day-of-week" class="form-control form-control-sm">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Time of Day</label>
+                    <input type="time" id="st-time-weekly" class="form-control form-control-sm" value="09:00">
+                  </div>
+                </div>
+              </div>
+
+              <div id="interval-fields" style="display: none;">
+                <div class="row">
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Interval Value</label>
+                    <input type="number" id="st-interval-value" class="form-control form-control-sm" value="1" min="1">
+                  </div>
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small" style="color: var(--text-primary);">Interval Unit</label>
+                    <select id="st-interval-unit" class="form-control form-control-sm">
+                      <option value="hours">Hours</option>
+                      <option value="minutes">Minutes</option>
+                      <option value="days">Days</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div id="once-fields" style="display: none;">
+                <div class="mb-2">
+                  <label class="form-label small" style="color: var(--text-primary);">Execute At</label>
+                  <input type="datetime-local" id="st-execute-at" class="form-control form-control-sm">
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label class="form-label small" style="color: var(--text-primary);">Priority</label>
+                <select id="st-priority" class="form-control form-control-sm">
+                  <option value="0">Low</option>
+                  <option value="1">Normal</option>
+                  <option value="2">High</option>
+                  <option value="3">Urgent</option>
+                </select>
+              </div>
+              <div class="col-md-6 mb-3">
+                <div class="form-check mt-4">
+                  <input class="form-check-input" type="checkbox" id="st-enabled" checked>
+                  <label class="form-check-label small" for="st-enabled" style="color: var(--text-primary);">
+                    Enabled (start immediately)
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="d-flex gap-2">
+              <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z"/>
+                </svg>
+                Create
+              </button>
+              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" onclick="workspaceDashboard.hideCreateScheduledTaskForm()">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Scheduled Tasks List -->
+        <div id="scheduled-tasks-list">
+          ${this.renderScheduledTasksList()}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Render scheduled tasks list
+   */
+  renderScheduledTasksList() {
+    if (!this.data.scheduledTasks || this.data.scheduledTasks.length === 0) {
+      return `
+        <div class="text-center py-4" style="color: var(--text-secondary);">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.3;">
+            <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+          </svg>
+          <p class="mt-2">No scheduled tasks yet</p>
+          <small>Create a scheduled task to automate recurring prompts</small>
+        </div>
+      `;
+    }
+
+    return this.data.scheduledTasks.map(st => this.renderScheduledTask(st)).join('');
+  }
+
+  /**
+   * Render a single scheduled task
+   */
+  renderScheduledTask(st) {
+    const scheduleDesc = this.getScheduleDescription(st.schedule);
+    const nextRun = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
+    const statusBadge = st.enabled
+      ? '<span class="badge bg-success">Enabled</span>'
+      : '<span class="badge bg-secondary">Disabled</span>';
+
+    const hasHistory = st.execution_history && st.execution_history.length > 0;
+    const successCount = hasHistory ? st.execution_history.filter(e => e.status === 'success').length : 0;
+    const failedCount = hasHistory ? st.execution_history.filter(e => e.status === 'failed').length : 0;
+
+    return `
+      <div class="modern-card p-3 mb-2" style="border-left: 3px solid ${st.enabled ? 'var(--primary-color)' : '#6c757d'};">
+        <div class="d-flex justify-content-between align-items-start">
+          <div class="flex-grow-1">
+            <h6 style="color: var(--text-primary);" class="mb-1">
+              ${this.escapeHtml(st.name)}
+              ${statusBadge}
+            </h6>
+            <p class="small mb-1" style="color: var(--text-secondary);">${this.escapeHtml(st.description || st.prompt)}</p>
+            <div class="small" style="color: var(--text-tertiary);">
+              <span class="me-3">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                </svg>
+                ${scheduleDesc}
+              </span>
+              <span class="me-3">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,1L8,5H11V14H13V5H16M18,23H6C4.89,23 4,22.1 4,21V9A2,2 0 0,1 6,7H9V9H6V21H18V9H15V7H18A2,2 0 0,1 20,9V21A2,2 0 0,1 18,23Z"/>
+                </svg>
+                ${this.escapeHtml(st.from)} → ${this.escapeHtml(st.to)}
+              </span>
+              ${st.next_run ? `
+              <span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,4H18V2H16V4H8V2H6V4H5A2,2 0 0,0 3,6V20A2,2 0 0,0 5,22H19A2,2 0 0,0 21,20V6A2,2 0 0,0 19,4M19,20H5V10H19V20Z"/>
+                </svg>
+                Next: ${nextRun}
+              </span>
+              ` : ''}
+            </div>
+            <div class="small mt-1" style="color: var(--text-tertiary);">
+              ${st.execution_count > 0 ? `Executed ${st.execution_count} times` : 'Not yet executed'}
+              ${hasHistory ? ` (<span class="text-success">${successCount} ✓</span> / <span class="text-danger">${failedCount} ✗</span>)` : ''}
+              ${hasHistory ? `
+                <button class="btn btn-link btn-sm p-0 ms-2" style="font-size: 0.75rem;" onclick="workspaceDashboard.toggleHistory('${st.id}')">
+                  <span id="history-toggle-${st.id}">Show history ▼</span>
+                </button>
+              ` : ''}
+            </div>
+            ${hasHistory ? `
+              <div id="history-${st.id}" style="display: none; margin-top: 0.5rem; padding: 0.5rem; background: var(--surface-color); border-radius: 4px;">
+                <div class="small fw-bold mb-1" style="color: var(--text-primary);">Execution History (last ${st.execution_history.length})</div>
+                ${st.execution_history.slice().reverse().slice(0, 10).map(exec => `
+                  <div class="d-flex justify-content-between align-items-center py-1 border-bottom" style="font-size: 0.7rem;">
+                    <span style="color: var(--text-secondary);">${new Date(exec.executed_at).toLocaleString()}</span>
+                    <span>
+                      ${exec.status === 'success'
+                        ? `<span class="badge bg-success">✓ Success</span> <a href="#" onclick="workspaceDashboard.switchTab('overview'); return false;" class="text-muted" title="Task ID: ${exec.task_id}">#${exec.task_id.substring(0,8)}</a>`
+                        : `<span class="badge bg-danger">✗ Failed</span> <span class="text-danger" style="font-size: 0.65rem;" title="${this.escapeHtml(exec.error || '')}">${this.escapeHtml((exec.error || '').substring(0, 30))}...</span>`
+                      }
+                    </span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+          <div class="d-flex gap-1">
+            ${st.enabled ? `
+              <button class="btn btn-sm btn-outline-success" onclick="workspaceDashboard.triggerScheduledTask('${st.id}')" title="Trigger Now">
+                ▶
+              </button>
+              <button class="btn btn-sm btn-outline-warning" onclick="workspaceDashboard.toggleScheduledTask('${st.id}', false)" title="Disable">
+                ⏸
+              </button>
+            ` : `
+              <button class="btn btn-sm btn-outline-success" onclick="workspaceDashboard.toggleScheduledTask('${st.id}', true)" title="Enable">
+                ▶
+              </button>
+            `}
+            <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.deleteScheduledTask('${st.id}')" title="Delete">
+              🗑
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Get human-readable schedule description
+   */
+  getScheduleDescription(schedule) {
+    switch (schedule.type) {
+      case 'daily':
+        return `Daily at ${schedule.time_of_day}`;
+      case 'weekly':
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        return `Weekly on ${days[schedule.day_of_week]} at ${schedule.time_of_day}`;
+      case 'interval':
+        const hours = Math.floor(schedule.interval / 3600000000000);
+        const minutes = Math.floor((schedule.interval % 3600000000000) / 60000000000);
+        if (hours > 0) return `Every ${hours} hour${hours > 1 ? 's' : ''}`;
+        return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      case 'once':
+        return `Once at ${new Date(schedule.execute_at).toLocaleString()}`;
+      default:
+        return 'Custom schedule';
+    }
+  }
+
+  /**
+   * Show create scheduled task form
+   */
+  showCreateScheduledTaskForm() {
+    document.getElementById('create-scheduled-task-form').style.display = 'block';
+  }
+
+  /**
+   * Hide create scheduled task form
+   */
+  hideCreateScheduledTaskForm() {
+    document.getElementById('create-scheduled-task-form').style.display = 'none';
+    document.getElementById('scheduled-task-form').reset();
+  }
+
+  /**
+   * Update schedule fields based on selected type
+   */
+  updateScheduleFields() {
+    const type = document.getElementById('st-schedule-type').value;
+    document.getElementById('daily-fields').style.display = type === 'daily' ? 'block' : 'none';
+    document.getElementById('weekly-fields').style.display = type === 'weekly' ? 'block' : 'none';
+    document.getElementById('interval-fields').style.display = type === 'interval' ? 'block' : 'none';
+    document.getElementById('once-fields').style.display = type === 'once' ? 'block' : 'none';
+  }
+
+  /**
+   * Create scheduled task
+   */
+  async createScheduledTask() {
+    const type = document.getElementById('st-schedule-type').value;
+    const name = document.getElementById('st-name').value;
+    const description = document.getElementById('st-description').value;
+    const from = document.getElementById('st-from').value;
+    const to = document.getElementById('st-to').value;
+    const prompt = document.getElementById('st-prompt').value;
+    const priority = parseInt(document.getElementById('st-priority').value);
+    const enabled = document.getElementById('st-enabled').checked;
+
+    // Build schedule config based on type
+    let schedule = { type };
+
+    switch (type) {
+      case 'daily':
+        schedule.time_of_day = document.getElementById('st-time-daily').value;
+        break;
+      case 'weekly':
+        schedule.time_of_day = document.getElementById('st-time-weekly').value;
+        schedule.day_of_week = parseInt(document.getElementById('st-day-of-week').value);
+        break;
+      case 'interval':
+        const value = parseInt(document.getElementById('st-interval-value').value);
+        const unit = document.getElementById('st-interval-unit').value;
+        let nanoseconds;
+        switch (unit) {
+          case 'minutes': nanoseconds = value * 60 * 1000000000; break;
+          case 'hours': nanoseconds = value * 3600 * 1000000000; break;
+          case 'days': nanoseconds = value * 86400 * 1000000000; break;
+        }
+        schedule.interval = nanoseconds;
+        break;
+      case 'once':
+        schedule.execute_at = document.getElementById('st-execute-at').value;
+        break;
+    }
+
+    try {
+      const response = await fetch('/api/orchestration/scheduled-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          name,
+          description,
+          from,
+          to,
+          prompt,
+          priority,
+          schedule,
+          enabled
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      await this.loadScheduledTasks();
+      this.render();
+      this.hideCreateScheduledTaskForm();
+      this.showToast('✅ Scheduled task created successfully!', 'success');
+    } catch (error) {
+      console.error('Error creating scheduled task:', error);
+      this.showToast('❌ Failed to create scheduled task: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Toggle scheduled task enable/disable
+   */
+  async toggleScheduledTask(id, enable) {
+    const action = enable ? 'enable' : 'disable';
+    try {
+      const response = await fetch(`/api/orchestration/scheduled-tasks/${id}/${action}`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      await this.loadScheduledTasks();
+      this.render();
+      this.showToast(`✅ Scheduled task ${enable ? 'enabled' : 'disabled'}!`, 'success');
+    } catch (error) {
+      console.error('Error toggling scheduled task:', error);
+      this.showToast('❌ Failed to toggle scheduled task', 'error');
+    }
+  }
+
+  /**
+   * Trigger scheduled task manually
+   */
+  async triggerScheduledTask(id) {
+    if (!confirm('Trigger this scheduled task now?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/scheduled-tasks/${id}/trigger`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      await this.loadTasks();
+      this.showToast(`✅ Task triggered! Task ID: ${data.task_id}`, 'success');
+
+      // Switch to overview tab to show the new task
+      if (confirm('Task created! Switch to Overview tab to see it?')) {
+        this.switchTab('overview');
+      }
+    } catch (error) {
+      console.error('Error triggering scheduled task:', error);
+      this.showToast('❌ Failed to trigger scheduled task', 'error');
+    }
+  }
+
+  /**
+   * Delete scheduled task
+   */
+  async deleteScheduledTask(id) {
+    if (!confirm('Are you sure you want to delete this scheduled task? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/scheduled-tasks/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      await this.loadScheduledTasks();
+      this.render();
+      this.showToast('✅ Scheduled task deleted!', 'success');
+    } catch (error) {
+      console.error('Error deleting scheduled task:', error);
+      this.showToast('❌ Failed to delete scheduled task', 'error');
+    }
+  }
+
+  /**
+   * Toggle visibility of execution history for a scheduled task
+   */
+  toggleHistory(id) {
+    const historyDiv = document.getElementById(`history-${id}`);
+    const toggleText = document.getElementById(`history-toggle-${id}`);
+
+    if (historyDiv && toggleText) {
+      if (historyDiv.style.display === 'none') {
+        historyDiv.style.display = 'block';
+        toggleText.textContent = 'Hide history ▲';
+      } else {
+        historyDiv.style.display = 'none';
+        toggleText.textContent = 'Show history ▼';
+      }
+    }
   }
 }
 

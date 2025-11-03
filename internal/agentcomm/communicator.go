@@ -419,3 +419,47 @@ func (c *Communicator) GetTaskStats(workspaceID string) map[string]int {
 
 	return ws.GetTaskStats()
 }
+
+// DeleteTask removes a task from its workspace
+func (c *Communicator) DeleteTask(taskID string) error {
+	// Find the workspace containing this task
+	workspaceIDs, err := c.workspaceStore.List()
+	if err != nil {
+		return fmt.Errorf("failed to list workspaces: %w", err)
+	}
+
+	for _, wsID := range workspaceIDs {
+		ws, err := c.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		// Check if this workspace contains the task
+		_, err = ws.GetTask(taskID)
+		if err != nil {
+			continue // Task not in this workspace
+		}
+
+		// Filter out the task to delete
+		newTasks := make([]workspace.Task, 0, len(ws.Tasks))
+		for _, task := range ws.Tasks {
+			if task.ID != taskID {
+				newTasks = append(newTasks, task)
+			}
+		}
+
+		// Update workspace
+		ws.Tasks = newTasks
+		ws.UpdatedAt = time.Now()
+
+		// Save workspace
+		if err := c.workspaceStore.Save(ws); err != nil {
+			return fmt.Errorf("failed to save workspace: %w", err)
+		}
+
+		log.Printf("🗑️  Task %s deleted from workspace %s", taskID, wsID)
+		return nil
+	}
+
+	return fmt.Errorf("task %s not found", taskID)
+}

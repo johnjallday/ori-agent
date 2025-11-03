@@ -234,7 +234,7 @@
     // Load workspaces and agents on page load
     document.addEventListener('DOMContentLoaded', function() {
       loadWorkspaces();
-      loadAgents();
+      loadWorkspaceAgents();
 
       // Enable auto-refresh
       workspaceRefreshInterval = setInterval(() => {
@@ -344,7 +344,7 @@
       }).join('');
     }
 
-    async function loadAgents() {
+    async function loadWorkspaceAgents() {
       try {
         const response = await fetch('/api/agents');
         const data = await response.json();
@@ -352,7 +352,7 @@
         availableAgents = data.agents || [];
         populateAgentDropdown();
       } catch (error) {
-        console.error('Error loading agents:', error);
+        console.error('Error loading workspace agents:', error);
       }
     }
 

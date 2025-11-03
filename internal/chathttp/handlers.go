@@ -351,6 +351,139 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
 
+// handleOllamaChat handles chat requests for Ollama models using the provider system
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
+	defer cancel()
+
+	// Get Ollama provider
+	provider, err := h.llmFactory.GetProvider("ollama")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: Ollama provider not available: %v", err),
+		})
+		return
+	}
+
+	// Build message list
+	var messages []llm.Message
+
+	// Add system message if present
+	if ag.Settings.SystemPrompt != "" {
+		messages = append(messages, llm.NewSystemMessage(ag.Settings.SystemPrompt))
+	}
+
+	// Add user message
+	messages = append(messages, llm.NewUserMessage(userMessage))
+
+	// Convert tools
+	var llmTools []llm.Tool
+	for _, tool := range tools {
+		if tool.OfFunction != nil {
+			fn := tool.OfFunction.Function
+			llmTools = append(llmTools, llm.Tool{
+				Name:        fn.Name,
+				Description: fn.Description.String(),
+				Parameters:  fn.Parameters,
+			})
+		}
+	}
+
+	// Call Ollama
+	start := time.Now()
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model:       ag.Settings.Model,
+		Messages:    messages,
+		Tools:       llmTools,
+		Temperature: ag.Settings.Temperature,
+		MaxTokens:   4000,
+	})
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: %v", err),
+		})
+		return
+	}
+
+	// Track usage (Ollama is free/local, so no cost tracking needed)
+	log.Printf("Ollama response received in %v", time.Since(start))
+
+	// Tool-call branch (similar to Claude handler)
+	if len(resp.ToolCalls) > 0 {
+		log.Printf("Ollama requested %d tool call(s)", len(resp.ToolCalls))
+
+		// Add assistant message to history
+		messages = append(messages, llm.NewAssistantMessage(resp.Content))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+
+		// Process tool calls
+		var toolResults []map[string]string
+		for _, tc := range resp.ToolCalls {
+			tool, found := h.findTool(ag, tc.Name)
+
+			var result string
+			if !found {
+				result = fmt.Sprintf("❌ Error: Tool %q not found", tc.Name)
+			} else {
+				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+				defer toolCancel()
+
+				startTime := time.Now()
+				result, err = tool.Call(toolCtx, tc.Arguments)
+				duration := time.Since(startTime)
+
+				if h.healthManager != nil {
+					if err != nil {
+						h.healthManager.RecordCallFailure(tc.Name, duration, err)
+					} else {
+						h.healthManager.RecordCallSuccess(tc.Name, duration)
+					}
+				}
+
+				if err != nil {
+					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
+				}
+			}
+
+			messages = append(messages, llm.NewToolMessage(tc.ID, result))
+			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
+
+			toolResults = append(toolResults, map[string]string{
+				"function": tc.Name,
+				"args":     tc.Arguments,
+				"result":   result,
+			})
+		}
+
+		// Get final response after tool execution
+		finalResp, err := provider.Chat(ctx, llm.ChatRequest{
+			Model:       ag.Settings.Model,
+			Messages:    messages,
+			Temperature: ag.Settings.Temperature,
+			MaxTokens:   4000,
+		})
+		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{
+				"response": fmt.Sprintf("❌ **Error**: %v", err),
+			})
+			return
+		}
+
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
+		h.store.SetAgent(agentName, ag)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": finalResp.Content,
+		})
+		return
+	}
+
+	// No tool calls - direct response
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	h.store.SetAgent(agentName, ag)
+	json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
+}
+
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
 func getPluginEmoji(pluginName string) string {
 	name := strings.ToLower(pluginName)
@@ -667,6 +800,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
 		// Use Claude provider
 		h.handleClaudeChat(w, r, ag, q, tools, current, base)
+		return
+	}
+
+	// Check if this is an Ollama model - route to Ollama provider
+	if (strings.Contains(ag.Settings.Model, "llama") ||
+		strings.Contains(ag.Settings.Model, "mistral") ||
+		strings.Contains(ag.Settings.Model, "mixtral") ||
+		strings.Contains(ag.Settings.Model, "phi") ||
+		strings.Contains(ag.Settings.Model, "qwen") ||
+		strings.Contains(ag.Settings.Model, "codellama") ||
+		strings.Contains(ag.Settings.Model, "orca") ||
+		strings.Contains(ag.Settings.Model, "vicuna") ||
+		strings.Contains(ag.Settings.Model, "neural-chat") ||
+		strings.Contains(ag.Settings.Model, "starling")) && h.llmFactory != nil {
+		// Use Ollama provider
+		h.handleOllamaChat(w, r, ag, q, tools, current, base)
 		return
 	}
 

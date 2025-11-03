@@ -79,21 +79,78 @@ func (p *OllamaProvider) ValidateConfig(config ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns the default models for Ollama
+// ollamaModel represents a model from Ollama's /api/tags endpoint
+type ollamaModel struct {
+	Name       string    `json:"name"`
+	ModifiedAt time.Time `json:"modified_at"`
+	Size       int64     `json:"size"`
+}
+
+// ollamaTagsResponse represents the response from /api/tags
+type ollamaTagsResponse struct {
+	Models []ollamaModel `json:"models"`
+}
+
+// DefaultModels returns the available models from the Ollama instance
 func (p *OllamaProvider) DefaultModels() []string {
-	return []string{
-		"llama2",
-		"llama2:13b",
-		"llama2:70b",
-		"mistral",
-		"mixtral",
-		"codellama",
-		"phi",
-		"neural-chat",
-		"starling-lm",
-		"orca-mini",
-		"vicuna",
+	// Try to fetch models from Ollama
+	models, err := p.fetchAvailableModels()
+	if err != nil {
+		// Fallback to hardcoded list if Ollama is not available
+		return []string{
+			"llama2",
+			"llama2:13b",
+			"llama2:70b",
+			"mistral",
+			"mixtral",
+			"codellama",
+			"phi",
+			"neural-chat",
+			"starling-lm",
+			"orca-mini",
+			"vicuna",
+		}
 	}
+	return models
+}
+
+// fetchAvailableModels queries Ollama for installed models
+func (p *OllamaProvider) fetchAvailableModels() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", p.baseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch models from Ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Ollama API returned status %d", resp.StatusCode)
+	}
+
+	var tagsResp ollamaTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Extract model names
+	models := make([]string, 0, len(tagsResp.Models))
+	for _, model := range tagsResp.Models {
+		models = append(models, model.Name)
+	}
+
+	// If no models found, return error to trigger fallback
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no models found in Ollama")
+	}
+
+	return models, nil
 }
 
 // ollamaMessage represents a message in Ollama format
