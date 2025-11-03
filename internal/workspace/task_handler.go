@@ -136,8 +136,23 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	modelLower := strings.ToLower(model)
 
+	// Check for Claude models
 	if strings.Contains(modelLower, "claude") {
 		return "claude"
+	}
+
+	// Check for Ollama models
+	if strings.Contains(modelLower, "llama") ||
+		strings.Contains(modelLower, "mistral") ||
+		strings.Contains(modelLower, "mixtral") ||
+		strings.Contains(modelLower, "phi") ||
+		strings.Contains(modelLower, "qwen") ||
+		strings.Contains(modelLower, "codellama") ||
+		strings.Contains(modelLower, "orca") ||
+		strings.Contains(modelLower, "vicuna") ||
+		strings.Contains(modelLower, "neural-chat") ||
+		strings.Contains(modelLower, "starling") {
+		return "ollama"
 	}
 
 	// Default to OpenAI

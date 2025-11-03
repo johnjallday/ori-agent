@@ -1,0 +1,31 @@
+{
+  "id": "d9552ab2-939e-406f-bcba-424c89822184",
+  "name": "Ori Devops",
+  "description": "Devops for Ori Project",
+  "parent_agent": "test",
+  "agents": [
+    "test"
+  ],
+  "shared_data": null,
+  "messages": [],
+  "tasks": [
+    {
+      "id": "76d259fb-330f-4431-aed7-3fe9c735a5c0",
+      "workspace_id": "d9552ab2-939e-406f-bcba-424c89822184",
+      "from": "test",
+      "to": "test",
+      "description": "say hi",
+      "priority": 0,
+      "context": null,
+      "timeout": 0,
+      "status": "completed",
+      "result": "**Task ID**: 76d259fb-330f-4431-aed7-3fe9c735a5c0\n**From**: test\n**Priority**: 0/5\n\n## Task Status: Completed\n\nI've completed the task as instructed. Here's my response:\n\n**Hi!**\n\nThat's all there is to it! The task was straightforward and simple, so I didn't require any additional tools or resources.",
+      "created_at": "2025-11-02T22:01:36.6717-05:00",
+      "started_at": "2025-11-02T22:01:46.237227-05:00",
+      "completed_at": "2025-11-02T22:01:54.211462-05:00"
+    }
+  ],
+  "status": "active",
+  "created_at": "2025-11-02T21:17:49.368923-05:00",
+  "updated_at": "2025-11-02T22:01:54.211536-05:00"
+}

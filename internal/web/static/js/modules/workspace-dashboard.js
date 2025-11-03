@@ -549,9 +549,24 @@ class WorkspaceDashboard {
               <span>To: ${this.escapeHtml(task.to)}</span>
               ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
             </div>
+            ${task.result ? `
+              <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
+                <strong>Result:</strong>
+                ${task.result.length > 300 ? `
+                  <br>
+                  <pre style="white-space: pre-wrap; margin-bottom: 0; font-size: 0.85rem; max-height: 150px; overflow: hidden;">${this.escapeHtml(task.result.substring(0, 300))}...</pre>
+                  <button class="btn btn-sm btn-outline-success mt-2" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
+                    View Full Result
+                  </button>
+                ` : `
+                  <br>
+                  <pre style="white-space: pre-wrap; margin-bottom: 0; font-size: 0.85rem;">${this.escapeHtml(task.result)}</pre>
+                `}
+              </div>
+            ` : ''}
             ${task.error ? `
               <div class="alert alert-danger mt-2 mb-0 py-2" style="font-size: 0.85rem;">
-                ${this.escapeHtml(task.error)}
+                <strong>Error:</strong> ${this.escapeHtml(task.error)}
               </div>
             ` : ''}
           </div>
@@ -916,6 +931,82 @@ class WorkspaceDashboard {
       console.error('Error deleting task:', error);
       this.showToast('Delete Failed', '❌ Failed to delete task: ' + error.message, 'error');
     }
+  }
+
+  /**
+   * Show task details in a modal
+   */
+  showTaskDetails(taskId) {
+    const task = this.data.tasks.find(t => t.id === taskId);
+    if (!task) {
+      console.error('Task not found:', taskId);
+      return;
+    }
+
+    // Create modal HTML
+    const modalHTML = `
+      <div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content" style="background-color: var(--surface-color); color: var(--text-primary);">
+            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+              <h5 class="modal-title" id="taskDetailsModalLabel">Task Details</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <h6>Description:</h6>
+              <p>${this.escapeHtml(task.description)}</p>
+
+              <h6>Status:</h6>
+              <p><span class="modern-badge ${this.getStatusBadgeClass(task.status)}">${this.escapeHtml(task.status)}</span></p>
+
+              <h6>Details:</h6>
+              <ul>
+                <li><strong>From:</strong> ${this.escapeHtml(task.from)}</li>
+                <li><strong>To:</strong> ${this.escapeHtml(task.to)}</li>
+                <li><strong>Priority:</strong> ${task.priority || 'N/A'}</li>
+                <li><strong>Created:</strong> ${new Date(task.created_at).toLocaleString()}</li>
+                ${task.completed_at ? `<li><strong>Completed:</strong> ${new Date(task.completed_at).toLocaleString()}</li>` : ''}
+              </ul>
+
+              ${task.result ? `
+                <h6>Result:</h6>
+                <div class="alert alert-success">
+                  <pre style="white-space: pre-wrap; margin-bottom: 0; max-height: 400px; overflow-y: auto;">${this.escapeHtml(task.result)}</pre>
+                </div>
+              ` : ''}
+
+              ${task.error ? `
+                <h6>Error:</h6>
+                <div class="alert alert-danger">
+                  <pre style="white-space: pre-wrap; margin-bottom: 0;">${this.escapeHtml(task.error)}</pre>
+                </div>
+              ` : ''}
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove any existing modal
+    const existingModal = document.getElementById('taskDetailsModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // Append modal to body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('taskDetailsModal'));
+    modal.show();
+
+    // Clean up modal after it's hidden
+    document.getElementById('taskDetailsModal').addEventListener('hidden.bs.modal', function () {
+      this.remove();
+    });
   }
 
   /**
