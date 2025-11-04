@@ -726,6 +726,13 @@
         max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
         width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
       }
+
+      /* Remove margin when sidebar is hidden */
+      .sidebar.d-none ~ .main-content {
+        margin-left: 0;
+        max-width: 100vw;
+        width: 100vw;
+      }
     }
 
     /* Resize handle */
