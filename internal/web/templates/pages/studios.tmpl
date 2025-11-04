@@ -385,6 +385,28 @@
       loadWorkspaces();
       loadWorkspaceAgents();
 
+      // Check URL parameters for view and workspace
+      const urlParams = new URLSearchParams(window.location.search);
+      const view = urlParams.get('view');
+      const workspaceId = urlParams.get('workspace');
+
+      if (view === 'canvas') {
+        // Switch to canvas view
+        switchView('canvas');
+
+        // If workspace ID is provided, select it after studios are loaded
+        if (workspaceId) {
+          // Wait a bit for the select to be populated
+          setTimeout(() => {
+            const select = document.getElementById('canvas-studio-select');
+            if (select) {
+              select.value = workspaceId;
+              loadCanvasStudio(workspaceId);
+            }
+          }, 500);
+        }
+      }
+
       // Enable auto-refresh
       workspaceRefreshInterval = setInterval(() => {
         loadWorkspaces();
