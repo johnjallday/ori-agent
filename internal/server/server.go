@@ -72,6 +72,8 @@ type Server struct {
 	eventBus              *agentstudio.EventBus
 	notificationService   *agentstudio.NotificationService
 	orchestrationHandler  *orchestrationhttp.Handler
+	studioOrchestrator    *agentstudio.Orchestrator
+	studioHandler         *agentstudio.HTTPHandler
 	costTracker           *llm.CostTracker
 	usageHandler          *usagehttp.Handler
 	mcpRegistry           *mcp.Registry
@@ -475,6 +477,16 @@ func New() (*Server, error) {
 	s.orchestrationHandler.SetEventBus(s.eventBus)
 	s.orchestrationHandler.SetNotificationService(s.notificationService)
 
+	// initialize autonomous agent studio orchestrator
+	// Create LLM adapter with default provider (openai or first available)
+	llmAdapter := agentstudio.NewLLMFactoryAdapter(s.llmFactory, "openai")
+	s.studioOrchestrator = agentstudio.NewOrchestrator(s.workspaceStore, llmAdapter, s.eventBus)
+	log.Println("✅ Agent Studio orchestrator initialized")
+
+	// initialize studio HTTP handler
+	s.studioHandler = agentstudio.NewHTTPHandler(s.workspaceStore, s.studioOrchestrator)
+	log.Println("✅ Agent Studio HTTP handler initialized")
+
 	// initialize template manager
 	templatesDir := "workflow_templates"
 	if p := os.Getenv("WORKFLOW_TEMPLATES_DIR"); p != "" {
@@ -668,6 +680,29 @@ func (s *Server) Handler() http.Handler {
 	// Scheduled task endpoints
 	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.orchestrationHandler.ScheduledTasksHandler)
 	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.orchestrationHandler.ScheduledTaskHandler)
+
+	// Agent Studio API endpoints
+	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.studioHandler.CreateStudio(w, r)
+		} else if r.Method == http.MethodGet {
+			s.studioHandler.ListStudios(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	// Handle routes with studio ID
+	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
+		// Parse the path to determine which handler to use
+		if strings.HasSuffix(r.URL.Path, "/mission") {
+			s.studioHandler.ExecuteMission(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/events") {
+			s.studioHandler.GetStudioEvents(w, r)
+		} else {
+			s.studioHandler.GetStudio(w, r)
+		}
+	})
 
 	// CORS middleware
 	return s.corsHandler(mux)
