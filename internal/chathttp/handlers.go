@@ -18,7 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -68,7 +68,7 @@ func (h *Handler) SetMCPRegistry(registry interface{ GetToolsForServer(string) (
 }
 
 // SetWorkspaceStore sets the workspace store for workspace commands
-func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
+func (h *Handler) SetWorkspaceStore(ws agentstudio.Store) {
 	h.commandHandler.SetWorkspaceStore(ws)
 }
 
@@ -368,10 +368,12 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Build message list
 	var messages []llm.Message
 
-	// Add system message if present
-	if ag.Settings.SystemPrompt != "" {
-		messages = append(messages, llm.NewSystemMessage(ag.Settings.SystemPrompt))
+	// Add system message - use custom if set, otherwise use default that emphasizes tool usage
+	systemPrompt := ag.Settings.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = "You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate."
 	}
+	messages = append(messages, llm.NewSystemMessage(systemPrompt))
 
 	// Add user message
 	messages = append(messages, llm.NewUserMessage(userMessage))
@@ -412,19 +414,24 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	if len(resp.ToolCalls) > 0 {
 		log.Printf("Ollama requested %d tool call(s)", len(resp.ToolCalls))
 
-		// Add assistant message to history
-		messages = append(messages, llm.NewAssistantMessage(resp.Content))
+		// Add assistant message to history WITH tool calls (important for Ollama protocol)
+		assistantMsg := llm.NewAssistantMessage(resp.Content)
+		assistantMsg.ToolCalls = resp.ToolCalls
+		messages = append(messages, assistantMsg)
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 
 		// Process tool calls
 		var toolResults []map[string]string
 		for _, tc := range resp.ToolCalls {
+			log.Printf("🔧 Looking for tool: %s with args: %s", tc.Name, tc.Arguments)
 			tool, found := h.findTool(ag, tc.Name)
 
 			var result string
 			if !found {
+				log.Printf("❌ Tool not found: %s", tc.Name)
 				result = fmt.Sprintf("❌ Error: Tool %q not found", tc.Name)
 			} else {
+				log.Printf("✅ Tool found: %s", tc.Name)
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
 				defer toolCancel()
 
@@ -441,7 +448,10 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 				}
 
 				if err != nil {
+					log.Printf("❌ Tool execution error for %s: %v", tc.Name, err)
 					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
+				} else {
+					log.Printf("✅ Tool executed successfully: %s -> %s", tc.Name, result)
 				}
 			}
 
@@ -455,19 +465,26 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 			})
 		}
 
+		log.Printf("📤 Sending tool results back to LLM (message count: %d)", len(messages))
+
 		// Get final response after tool execution
+		// IMPORTANT: Must include Tools array again for Ollama to understand the tool calling context
 		finalResp, err := provider.Chat(ctx, llm.ChatRequest{
 			Model:       ag.Settings.Model,
 			Messages:    messages,
+			Tools:       llmTools, // Include tools in follow-up request
 			Temperature: ag.Settings.Temperature,
 			MaxTokens:   4000,
 		})
 		if err != nil {
+			log.Printf("❌ Error getting final response from LLM: %v", err)
 			json.NewEncoder(w).Encode(map[string]any{
 				"response": fmt.Sprintf("❌ **Error**: %v", err),
 			})
 			return
 		}
+
+		log.Printf("📥 Final response from LLM: %s", finalResp.Content)
 
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
 		h.store.SetAgent(agentName, ag)
@@ -539,6 +556,13 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 		if !isInitialized {
 			// Get required config for this plugin
 			configVars := initProvider.GetRequiredConfig()
+
+			// Skip if plugin has no required configuration (e.g., simple plugins like math)
+			// This handles the case where RPC clients always implement InitializationProvider
+			// but the underlying plugin doesn't actually need configuration
+			if len(configVars) == 0 {
+				continue
+			}
 
 			// Get fresh definition for description
 			def := plugin.Definition
@@ -724,7 +748,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"response":     result.FinalOutput,
 				"orchestrated": true,
-				"workspace_id": result.WorkspaceID,
+				"studio_id": result.WorkspaceID,
 				"status":       result.Status,
 			})
 			return

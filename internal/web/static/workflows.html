@@ -601,7 +601,7 @@
             if (result.result && result.result.workspace_id) {
                 currentWorkspaceId = result.result.workspace_id;
                 workspaceLink.style.display = 'block';
-                workspaceLink.href = `/workspaces?id=${currentWorkspaceId}`;
+                workspaceLink.href = `/studios?id=${currentWorkspaceId}`;
 
                 // Start monitoring workflow
                 workspaceManager.startMonitoringSSE(currentWorkspaceId, (status) => {

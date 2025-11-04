@@ -8,13 +8,13 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // CommandHandler handles special chat commands
 type CommandHandler struct {
 	store          store.Store
-	workspaceStore workspace.Store
+	workspaceStore agentstudio.Store
 	enumExtractor  *pluginhttp.EnumExtractor
 }
 
@@ -27,7 +27,7 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 }
 
 // SetWorkspaceStore sets the workspace store for workspace commands
-func (ch *CommandHandler) SetWorkspaceStore(ws workspace.Store) {
+func (ch *CommandHandler) SetWorkspaceStore(ws agentstudio.Store) {
 	ch.workspaceStore = ws
 }
 
@@ -406,7 +406,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create agent context
-	agentCtx := workspace.NewAgentContext(current, ch.workspaceStore)
+	agentCtx := agentstudio.NewAgentContext(current, ch.workspaceStore)
 
 	// Parse subcommand
 	args = strings.TrimSpace(args)
@@ -487,7 +487,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 
 		if len(allTasks) == 0 {
 			response := map[string]any{
-				"response": "You have no tasks in any workspace.",
+				"response": "You have no tasks in any agentstudio.",
 			}
 			json.NewEncoder(w).Encode(response)
 			return
@@ -497,19 +497,19 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 		sb.WriteString(fmt.Sprintf("## All Your Tasks (%d)\n\n", len(allTasks)))
 
 		// Group by status
-		byStatus := make(map[workspace.TaskStatus][]workspace.Task)
+		byStatus := make(map[agentstudio.TaskStatus][]agentstudio.Task)
 		for _, task := range allTasks {
 			byStatus[task.Status] = append(byStatus[task.Status], task)
 		}
 
-		statuses := []workspace.TaskStatus{
-			workspace.TaskStatusPending,
-			workspace.TaskStatusAssigned,
-			workspace.TaskStatusInProgress,
-			workspace.TaskStatusCompleted,
-			workspace.TaskStatusFailed,
-			workspace.TaskStatusCancelled,
-			workspace.TaskStatusTimeout,
+		statuses := []agentstudio.TaskStatus{
+			agentstudio.TaskStatusPending,
+			agentstudio.TaskStatusAssigned,
+			agentstudio.TaskStatusInProgress,
+			agentstudio.TaskStatusCompleted,
+			agentstudio.TaskStatusFailed,
+			agentstudio.TaskStatusCancelled,
+			agentstudio.TaskStatusTimeout,
 		}
 
 		for _, status := range statuses {

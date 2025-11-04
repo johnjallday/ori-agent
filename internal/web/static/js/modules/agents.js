@@ -388,16 +388,14 @@ function createAgentElement(agentName, agentType, currentAgent) {
 
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
-      <div class="d-flex align-items-center justify-content-between p-2" style="background: ${isCurrentAgent ? 'var(--primary-color-light)' : 'var(--bg-secondary)'};">
+      <button class="d-flex align-items-center justify-content-between p-2 w-100 border-0 accordion-button collapsed"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#collapse-${accordionId}"
+              aria-expanded="false"
+              aria-controls="collapse-${accordionId}"
+              style="background: ${isCurrentAgent ? 'var(--primary-color-light)' : 'var(--bg-secondary)'}; color: var(--text-primary); text-align: left;">
         <div class="d-flex align-items-center gap-2 flex-grow-1">
-          <button class="accordion-button collapsed p-0 bg-transparent border-0 shadow-none"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target="#collapse-${accordionId}"
-                  aria-expanded="false"
-                  aria-controls="collapse-${accordionId}"
-                  style="color: var(--text-primary); width: 20px; height: 20px;">
-          </button>
           ${isCurrentAgent ? '<div class="status-indicator status-online"></div>' : ''}
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
@@ -405,16 +403,16 @@ function createAgentElement(agentName, agentType, currentAgent) {
           </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
-          ${!isCurrentAgent ? `<button class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem;">
+          ${!isCurrentAgent ? `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem; cursor: pointer;">
             Load
-          </button>` : ''}
-          <button class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${agentName}')" title="Delete agent">
+          </span>` : ''}
+          <span class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${agentName}')" title="Delete agent" style="cursor: pointer;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
             </svg>
-          </button>
+          </span>
         </div>
-      </div>
+      </button>
     </div>
     <div id="collapse-${accordionId}" class="accordion-collapse collapse" aria-labelledby="heading-${accordionId}">
       <div class="accordion-body p-3" style="background: var(--bg-tertiary);">
@@ -424,6 +422,28 @@ function createAgentElement(agentName, agentType, currentAgent) {
           </svg>
           Settings
         </h6>
+
+        <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Name</label>
+            <input type="text" id="agentNameInput-${accordionId}" class="form-control form-control-sm"
+                   value="${agentName}"
+                   style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;"
+                   placeholder="Enter agent name">
+          </div>
+        </div>
+
+        <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Type</label>
+            <select id="agentTypeSelect-${accordionId}" class="form-select form-select-sm"
+                    style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
+              <option value="tool-calling" ${agentType === 'tool-calling' ? 'selected' : ''}>Tool Calling</option>
+              <option value="general" ${agentType === 'general' ? 'selected' : ''}>General</option>
+              <option value="research" ${agentType === 'research' ? 'selected' : ''}>Research</option>
+            </select>
+          </div>
+        </div>
 
         <div class="setting-item mb-3">
           <div class="d-flex align-items-center justify-content-between">
@@ -594,6 +614,8 @@ function setupAgentManagement() {
 // Update agent settings from accordion
 async function updateAgentSettings(agentName, accordionId) {
   try {
+    const agentNameInput = document.getElementById(`agentNameInput-${accordionId}`);
+    const agentTypeSelect = document.getElementById(`agentTypeSelect-${accordionId}`);
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
     const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
     const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
@@ -603,9 +625,33 @@ async function updateAgentSettings(agentName, accordionId) {
       return;
     }
 
+    const newAgentName = agentNameInput ? agentNameInput.value.trim() : agentName;
+    const newAgentType = agentTypeSelect ? agentTypeSelect.value : 'tool-calling';
+
+    // If agent name changed, we need to rename the agent first
+    if (newAgentName !== agentName) {
+      const renameResponse = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_name: newAgentName,
+          type: newAgentType
+        })
+      });
+
+      if (!renameResponse.ok) {
+        console.error('Failed to rename agent:', renameResponse.status);
+        if (typeof showNotification === 'function') {
+          showNotification('Failed to rename agent', 'error');
+        }
+        return;
+      }
+    }
+
     const settingsData = {
       model: modelSelect.value,
-      temperature: parseFloat(temperatureSlider.value)
+      temperature: parseFloat(temperatureSlider.value),
+      type: newAgentType
     };
 
     // Add system prompt if it exists
@@ -613,18 +659,27 @@ async function updateAgentSettings(agentName, accordionId) {
       settingsData.system_prompt = systemPromptInput.value;
     }
 
-    const response = await fetch(`/api/settings?agent=${encodeURIComponent(agentName)}`, {
+    const response = await fetch(`/api/settings?agent=${encodeURIComponent(newAgentName)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settingsData)
     });
 
     if (response.ok) {
-      console.log('Settings updated for agent:', agentName, settingsData);
+      console.log('Settings updated for agent:', newAgentName, settingsData);
 
       // Show success notification
       if (typeof showNotification === 'function') {
-        showNotification(`Settings updated for ${agentName}!`, 'success');
+        showNotification(`Settings updated for ${newAgentName}!`, 'success');
+      }
+
+      // If name changed, reload agents list to reflect the change
+      if (newAgentName !== agentName) {
+        await loadAgents();
+        // If this was the current agent, switch to the new name
+        if (currentAgentName === agentName) {
+          switchToAgent(newAgentName);
+        }
       }
     } else {
       console.error('Failed to save settings:', response.status);

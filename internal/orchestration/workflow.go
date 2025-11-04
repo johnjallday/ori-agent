@@ -8,11 +8,11 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // executeResearchPipeline executes a full research, analysis, synthesis, validation pipeline
-func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	log.Printf("🔬 Executing full research pipeline")
 
 	subResults := make(map[string]interface{})
@@ -156,7 +156,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *workspac
 
 // WorkflowStatus represents the status of a workflow execution
 type WorkflowStatus struct {
-	WorkspaceID string                 `json:"workspace_id"`
+	WorkspaceID string                 `json:"studio_id"`
 	Phase       string                 `json:"phase"`
 	Progress    float64                `json:"progress"` // 0.0 to 1.0
 	Tasks       map[string]TaskSummary `json:"tasks"`
@@ -194,10 +194,10 @@ func (o *Orchestrator) GetWorkflowStatus(workspaceID string) (*WorkflowStatus, e
 			StartedAt:   task.CreatedAt,
 		}
 
-		if task.Status == workspace.TaskStatusCompleted ||
-		   task.Status == workspace.TaskStatusFailed ||
-		   task.Status == workspace.TaskStatusCancelled ||
-		   task.Status == workspace.TaskStatusTimeout {
+		if task.Status == agentstudio.TaskStatusCompleted ||
+		   task.Status == agentstudio.TaskStatusFailed ||
+		   task.Status == agentstudio.TaskStatusCancelled ||
+		   task.Status == agentstudio.TaskStatusTimeout {
 			completedCount++
 		}
 	}
@@ -239,7 +239,7 @@ func (o *Orchestrator) AggregateResults(workspaceID string, taskIDs []string) (s
 			continue
 		}
 
-		if task.Status == workspace.TaskStatusCompleted && task.Result != "" {
+		if task.Status == agentstudio.TaskStatusCompleted && task.Result != "" {
 			results = append(results, fmt.Sprintf("[%s]: %s", task.To, task.Result))
 		}
 	}

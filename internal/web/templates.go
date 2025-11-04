@@ -50,7 +50,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/settings.tmpl",
 		"templates/pages/marketplace.tmpl",
 		"templates/pages/workflows.tmpl",
-		"templates/pages/workspaces.tmpl",
+		"templates/pages/studios.tmpl",
 		"templates/pages/usage.tmpl",
 	}
 
@@ -75,7 +75,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["settings"] = tmpl
 	tr.templates["marketplace"] = tmpl
 	tr.templates["workflows"] = tmpl
-	tr.templates["workspaces"] = tmpl
+	tr.templates["studios"] = tmpl
 	tr.templates["usage"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
@@ -97,8 +97,8 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	if name == "index" {
 		templateName = "base.tmpl"
 	}
-	// Marketplace, settings, workflows, workspaces, and usage use their own template names
-	if name == "marketplace" || name == "settings" || name == "workflows" || name == "workspaces" || name == "usage" {
+	// Marketplace, settings, workflows, studios, and usage use their own template names
+	if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "usage" {
 		templateName = name
 	}
 

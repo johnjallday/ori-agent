@@ -38,7 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -65,12 +65,12 @@ type Server struct {
 	onboardingHandler     *onboardinghttp.Handler
 	deviceHandler         *devicehttp.Handler
 	webPageHandler        *pluginhttp.WebPageHandler
-	workspaceStore        workspace.Store
-	taskExecutor          *workspace.TaskExecutor
-	stepExecutor          *workspace.StepExecutor
-	taskScheduler         *workspace.TaskScheduler
-	eventBus              *workspace.EventBus
-	notificationService   *workspace.NotificationService
+	workspaceStore        agentstudio.Store
+	taskExecutor          *agentstudio.TaskExecutor
+	stepExecutor          *agentstudio.StepExecutor
+	taskScheduler         *agentstudio.TaskScheduler
+	eventBus              *agentstudio.EventBus
+	notificationService   *agentstudio.NotificationService
 	orchestrationHandler  *orchestrationhttp.Handler
 	costTracker           *llm.CostTracker
 	usageHandler          *usagehttp.Handler
@@ -426,37 +426,37 @@ func New() (*Server, error) {
 	}
 	log.Printf("Using workspace directory: %s", workspaceDir)
 
-	s.workspaceStore, err = workspace.NewFileStore(workspaceDir)
+	s.workspaceStore, err = agentstudio.NewFileStore(workspaceDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create workspace store: %w", err)
 	}
 
 	// initialize event bus for real-time updates
-	s.eventBus = workspace.DefaultEventBus()
+	s.eventBus = agentstudio.DefaultEventBus()
 	log.Println("✅ Event bus initialized")
 
 	// initialize notification service
-	s.notificationService = workspace.NewNotificationService(s.eventBus, 500) // Keep last 500 notifications
+	s.notificationService = agentstudio.NewNotificationService(s.eventBus, 500) // Keep last 500 notifications
 	log.Println("✅ Notification service initialized")
 
 	// initialize agent communicator
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
 
 	// initialize task handler and executor
-	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory)
-	s.taskExecutor = workspace.NewTaskExecutor(s.workspaceStore, taskHandler, workspace.ExecutorConfig{
+	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory)
+	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
 	s.taskExecutor.SetEventBus(s.eventBus) // Wire up event bus
 
 	// initialize step executor for workflow execution
-	s.stepExecutor = workspace.NewStepExecutor(s.workspaceStore, taskHandler, workspace.StepExecutorConfig{
+	s.stepExecutor = agentstudio.NewStepExecutor(s.workspaceStore, taskHandler, agentstudio.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
 	// initialize task scheduler for scheduled/recurring tasks
-	s.taskScheduler = workspace.NewTaskScheduler(s.workspaceStore, workspace.SchedulerConfig{
+	s.taskScheduler = agentstudio.NewTaskScheduler(s.workspaceStore, agentstudio.SchedulerConfig{
 		PollInterval: 1 * time.Minute, // Check every minute
 	})
 	s.taskScheduler.SetEventBus(s.eventBus) // Wire up event bus
@@ -505,7 +505,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
-	mux.HandleFunc("/workspaces", s.serveWorkspaces)
+	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
 
 	// Static file server for CSS, JS, icons, and other assets
@@ -876,9 +876,9 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	html, err := s.templateRenderer.RenderTemplate("workspaces", data)
+	html, err := s.templateRenderer.RenderTemplate("studios", data)
 	if err != nil {
-		log.Printf("Failed to render workspaces template: %v", err)
+		log.Printf("Failed to render studios template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

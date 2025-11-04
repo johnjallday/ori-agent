@@ -42,7 +42,7 @@ class PluginHealthManager {
         const plugins = this.healthData.plugins || [];
 
         if (plugins.length === 0) {
-            container.innerHTML = '<p class="text-muted small mb-0">No plugins loaded</p>';
+            container.innerHTML = '<p class="small mb-0" style="color: var(--text-muted);">No plugins loaded</p>';
             return;
         }
 
@@ -63,8 +63,8 @@ class PluginHealthManager {
         let html = `
             <div class="health-summary mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="small text-muted">Status Overview</span>
-                    <button class="btn btn-link btn-sm p-0 text-muted" onclick="pluginHealth.toggleExpanded()" id="healthToggleBtn">
+                    <span class="small" style="color: var(--text-muted);">Status Overview</span>
+                    <button class="btn btn-link btn-sm p-0" style="color: var(--text-muted);" onclick="pluginHealth.toggleExpanded()" id="healthToggleBtn">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
                         </svg>
@@ -136,7 +136,7 @@ class PluginHealthManager {
                                         </span>
                                     ` : ''}
                                 </div>
-                                <div class="text-muted" style="font-size: 0.7rem;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">
                                     ${plugin.version || 'unknown'}
                                     ${plugin.update_available && plugin.latest_version ? ` → v${plugin.latest_version}` : ''}
                                 </div>
@@ -149,20 +149,21 @@ class PluginHealthManager {
             if (plugin.total_calls > 0) {
                 html += `
                     <div class="health-stats mt-2 pt-2 border-top" style="font-size: 0.7rem;">
-                        <div class="d-flex justify-content-between text-muted">
+                        <div class="d-flex justify-content-between" style="color: var(--text-muted);">
                             <span>Success Rate</span>
                             <span class="fw-semibold">${successRate}%</span>
                         </div>
-                        <div class="d-flex justify-content-between text-muted">
+                        <div class="d-flex justify-content-between" style="color: var(--text-muted);">
                             <span>Avg Response</span>
                             <span class="fw-semibold">${avgResponseTime}</span>
                         </div>
-                        <div class="d-flex justify-content-between text-muted">
+                        <div class="d-flex justify-content-between" style="color: var(--text-muted);">
                             <span>Calls</span>
                             <span class="fw-semibold">${plugin.total_calls}</span>
                         </div>
                     </div>
                 `;
+            }
             }
 
             // Show errors/warnings if any

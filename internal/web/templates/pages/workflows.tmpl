@@ -354,7 +354,7 @@
         executionEventSource.close();
       }
 
-      executionEventSource = new EventSource(`/api/orchestration/workspaces/${workspaceId}/status/stream`);
+      executionEventSource = new EventSource(`/api/orchestration/studios/${workspaceId}/status/stream`);
 
       executionEventSource.onmessage = function(event) {
         try {
@@ -382,7 +382,7 @@
     async function pollExecutionStatus(workspaceId) {
       const interval = setInterval(async () => {
         try {
-          const response = await fetch(`/api/orchestration/workspaces/${workspaceId}/status`);
+          const response = await fetch(`/api/orchestration/studios/${workspaceId}/status`);
           const status = await response.json();
 
           renderExecutionStatus(status);

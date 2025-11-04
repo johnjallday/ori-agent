@@ -14,23 +14,23 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
 	agentStore          store.Store
-	workspaceStore      workspace.Store
+	workspaceStore      agentstudio.Store
 	communicator        *agentcomm.Communicator
 	orchestrator        *orchestration.Orchestrator
 	templateManager     *templates.TemplateManager
-	eventBus            *workspace.EventBus
-	notificationService *workspace.NotificationService
-	taskHandler         workspace.TaskHandler
+	eventBus            *agentstudio.EventBus
+	notificationService *agentstudio.NotificationService
+	taskHandler         agentstudio.TaskHandler
 }
 
 // NewHandler creates a new orchestration handler
-func NewHandler(agentStore store.Store, workspaceStore workspace.Store) *Handler {
+func NewHandler(agentStore store.Store, workspaceStore agentstudio.Store) *Handler {
 	return &Handler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -39,17 +39,17 @@ func NewHandler(agentStore store.Store, workspaceStore workspace.Store) *Handler
 }
 
 // SetEventBus sets the event bus instance
-func (h *Handler) SetEventBus(eb *workspace.EventBus) {
+func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	h.eventBus = eb
 }
 
 // SetNotificationService sets the notification service instance
-func (h *Handler) SetNotificationService(ns *workspace.NotificationService) {
+func (h *Handler) SetNotificationService(ns *agentstudio.NotificationService) {
 	h.notificationService = ns
 }
 
 // SetTaskHandler sets the task handler instance
-func (h *Handler) SetTaskHandler(th workspace.TaskHandler) {
+func (h *Handler) SetTaskHandler(th agentstudio.TaskHandler) {
 	h.taskHandler = th
 }
 
@@ -202,7 +202,7 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create workspace
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
+	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
 		Name:        req.Name,
 		Description: req.Description,
 		ParentAgent: req.ParentAgent,
@@ -221,8 +221,8 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	// Publish workspace created event
 	if h.eventBus != nil {
-		event := workspace.NewWorkspaceEvent(
-			workspace.EventWorkspaceCreated,
+		event := agentstudio.NewWorkspaceEvent(
+			agentstudio.EventWorkspaceCreated,
 			ws.ID,
 			"api",
 			map[string]interface{}{
@@ -237,7 +237,7 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"workspace_id": ws.ID,
+		"studio_id": ws.ID,
 		"status":       ws.Status,
 		"created_at":   ws.CreatedAt,
 	})
@@ -284,7 +284,7 @@ func (h *Handler) WorkspaceAgentsHandler(w http.ResponseWriter, r *http.Request)
 // handleAddAgentToWorkspace adds an agent to a workspace
 func (h *Handler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
+		WorkspaceID string `json:"studio_id"`
 		AgentName   string `json:"agent_name"`
 	}
 
@@ -335,8 +335,8 @@ func (h *Handler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Reque
 
 	// Publish event
 	if h.eventBus != nil {
-		event := workspace.NewWorkspaceEvent(
-			workspace.EventWorkspaceUpdated,
+		event := agentstudio.NewWorkspaceEvent(
+			agentstudio.EventWorkspaceUpdated,
 			req.WorkspaceID,
 			"api",
 			map[string]interface{}{
@@ -358,7 +358,7 @@ func (h *Handler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Reque
 
 // handleRemoveAgentFromWorkspace removes an agent from a workspace
 func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	agentName := r.URL.Query().Get("agent_name")
 
 	if workspaceID == "" {
@@ -402,8 +402,8 @@ func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.
 
 	// Publish event
 	if h.eventBus != nil {
-		event := workspace.NewWorkspaceEvent(
-			workspace.EventWorkspaceUpdated,
+		event := agentstudio.NewWorkspaceEvent(
+			agentstudio.EventWorkspaceUpdated,
 			workspaceID,
 			"api",
 			map[string]interface{}{
@@ -429,7 +429,7 @@ func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.
 func (h *Handler) MessagesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	wsID := r.URL.Query().Get("workspace_id")
+	wsID := r.URL.Query().Get("studio_id")
 	if wsID == "" {
 		http.Error(w, "workspace_id parameter required", http.StatusBadRequest)
 		return
@@ -454,11 +454,11 @@ func (h *Handler) MessagesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetMessages retrieves messages from workspace
-func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace) {
+func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
 	agentName := r.URL.Query().Get("agent")
 	sinceStr := r.URL.Query().Get("since")
 
-	var messages []workspace.AgentMessage
+	var messages []agentstudio.AgentMessage
 
 	if sinceStr != "" {
 		// Get messages since timestamp
@@ -483,8 +483,8 @@ func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *
 }
 
 // handleSendMessage sends a message to workspace
-func (h *Handler) handleSendMessage(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace) {
-	var msg workspace.AgentMessage
+func (h *Handler) handleSendMessage(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
+	var msg agentstudio.AgentMessage
 
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		log.Printf("❌ Error decoding message: %v", err)
@@ -601,7 +601,7 @@ func (h *Handler) DelegateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		WorkspaceID string                 `json:"workspace_id"`
+		WorkspaceID string                 `json:"studio_id"`
 		From        string                 `json:"from"`
 		To          string                 `json:"to"`
 		Description string                 `json:"description"`
@@ -692,7 +692,7 @@ func (h *Handler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 // handleGetTasks retrieves tasks
 func (h *Handler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	agentName := r.URL.Query().Get("agent")
 
 	if taskID != "" {
@@ -736,7 +736,7 @@ func (h *Handler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 // handleCreateTask creates a new task in a workspace
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
+		WorkspaceID string `json:"studio_id"`
 		From        string `json:"from"`
 		To          string `json:"to"`
 		Description string `json:"description"`
@@ -775,13 +775,13 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create task
-	task := workspace.Task{
+	task := agentstudio.Task{
 		WorkspaceID: req.WorkspaceID,
 		From:        req.From,
 		To:          req.To,
 		Description: req.Description,
 		Priority:    req.Priority,
-		Status:      workspace.TaskStatusPending,
+		Status:      agentstudio.TaskStatusPending,
 	}
 
 	// Add task to workspace
@@ -800,7 +800,7 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Get the task we just added (it now has an ID)
 	// Find the most recently added task with matching properties
-	var createdTask *workspace.Task
+	var createdTask *agentstudio.Task
 	for i := len(ws.Tasks) - 1; i >= 0; i-- {
 		if ws.Tasks[i].Description == req.Description && ws.Tasks[i].From == req.From && ws.Tasks[i].To == req.To {
 			createdTask = &ws.Tasks[i]
@@ -848,7 +848,7 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Update task status
 	err := h.communicator.UpdateTaskStatus(
 		req.TaskID,
-		workspace.TaskStatus(req.Status),
+		agentstudio.TaskStatus(req.Status),
 		req.Result,
 		req.Error,
 	)
@@ -907,7 +907,7 @@ func (h *Handler) WorkflowStatusHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
 		http.Error(w, "workspace_id is required", http.StatusBadRequest)
 		return
@@ -932,7 +932,7 @@ func (h *Handler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
 		http.Error(w, "workspace_id is required", http.StatusBadRequest)
 		return
@@ -968,10 +968,10 @@ func (h *Handler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Req
 // streamEventsFromBus streams events using the event bus (real-time)
 func (h *Handler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	// Create event channel
-	eventChan := make(chan workspace.Event, 50)
+	eventChan := make(chan agentstudio.Event, 50)
 
 	// Subscribe to workspace events
-	subID := h.eventBus.SubscribeToWorkspace(workspaceID, func(event workspace.Event) {
+	subID := h.eventBus.SubscribeToWorkspace(workspaceID, func(event agentstudio.Event) {
 		select {
 		case eventChan <- event:
 		default:
@@ -999,7 +999,7 @@ func (h *Handler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter
 			// Send event to client
 			eventData := map[string]interface{}{
 				"type":         event.Type,
-				"workspace_id": event.WorkspaceID,
+				"studio_id": event.WorkspaceID,
 				"timestamp":    event.Timestamp,
 				"source":       event.Source,
 				"data":         event.Data,
@@ -1020,7 +1020,7 @@ func (h *Handler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter
 			flusher.Flush()
 
 			// Check for completion events
-			if event.Type == workspace.EventWorkspaceCompleted || event.Type == workspace.EventWorkflowCompleted {
+			if event.Type == agentstudio.EventWorkspaceCompleted || event.Type == agentstudio.EventWorkflowCompleted {
 				log.Printf("✅ Workspace %s completed, closing SSE stream", workspaceID)
 				return
 			}
@@ -1104,7 +1104,7 @@ func (h *Handler) sendWorkspaceStatus(w http.ResponseWriter, flusher http.Flushe
 	}
 
 	statusData := map[string]interface{}{
-		"workspace_id": ws.ID,
+		"studio_id": ws.ID,
 		"status":       ws.Status,
 		"updated_at":   ws.UpdatedAt,
 	}
@@ -1458,11 +1458,11 @@ func (h *Handler) EventHistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	sinceStr := r.URL.Query().Get("since")
 	limit := 100 // Default limit
 
-	var events []workspace.Event
+	var events []agentstudio.Event
 
 	if sinceStr != "" {
 		// Get events since timestamp
@@ -1515,8 +1515,8 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var foundWorkspace *workspace.Workspace
-	var foundTask *workspace.Task
+	var foundWorkspace *agentstudio.Workspace
+	var foundTask *agentstudio.Task
 
 	for _, wsID := range workspaceIDs {
 		ws, err := h.workspaceStore.Get(wsID)
@@ -1538,12 +1538,12 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if task is in a state that can be executed
-	if foundTask.Status == workspace.TaskStatusCompleted {
+	if foundTask.Status == agentstudio.TaskStatusCompleted {
 		http.Error(w, "Task already completed", http.StatusBadRequest)
 		return
 	}
 
-	if foundTask.Status == workspace.TaskStatusInProgress {
+	if foundTask.Status == agentstudio.TaskStatusInProgress {
 		http.Error(w, "Task is already in progress", http.StatusBadRequest)
 		return
 	}
@@ -1560,7 +1560,7 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Update task status to in_progress
-		foundTask.Status = workspace.TaskStatusInProgress
+		foundTask.Status = agentstudio.TaskStatusInProgress
 		now := time.Now()
 		foundTask.StartedAt = &now
 
@@ -1575,7 +1575,7 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Publish task started event
 		if h.eventBus != nil {
-			event := workspace.NewTaskEvent(workspace.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
+			event := agentstudio.NewTaskEvent(agentstudio.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
 				"description": foundTask.Description,
 				"priority":    foundTask.Priority,
 				"manual":      true,
@@ -1608,12 +1608,12 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 		if execErr != nil {
 			log.Printf("❌ Task %s failed: %v", task.ID, execErr)
-			task.Status = workspace.TaskStatusFailed
+			task.Status = agentstudio.TaskStatusFailed
 			task.Error = execErr.Error()
 
 			// Publish task failed event
 			if h.eventBus != nil {
-				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+				event := agentstudio.NewTaskEvent(agentstudio.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
 					"description": task.Description,
 					"error":       execErr.Error(),
 					"manual":      true,
@@ -1622,12 +1622,12 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			log.Printf("✅ Task %s completed successfully", task.ID)
-			task.Status = workspace.TaskStatusCompleted
+			task.Status = agentstudio.TaskStatusCompleted
 			task.Result = result
 
 			// Publish task completed event
 			if h.eventBus != nil {
-				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
 					"description": task.Description,
 					"result":      result,
 					"manual":      true,
@@ -1647,7 +1647,7 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Publish workspace updated event
 		if h.eventBus != nil {
-			event := workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
+			event := agentstudio.NewWorkspaceEvent(agentstudio.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
 				"task_id": task.ID,
 				"status":  task.Status,
 			})
@@ -1679,7 +1679,7 @@ func (h *Handler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Request) 
 
 // handleListScheduledTasks lists all scheduled tasks for a workspace
 func (h *Handler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
 		http.Error(w, "workspace_id is required", http.StatusBadRequest)
 		return
@@ -1701,14 +1701,14 @@ func (h *Handler) handleListScheduledTasks(w http.ResponseWriter, r *http.Reques
 // handleCreateScheduledTask creates a new scheduled task
 func (h *Handler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string                 `json:"workspace_id"`
+		WorkspaceID string                 `json:"studio_id"`
 		Name        string                 `json:"name"`
 		Description string                 `json:"description"`
 		From        string                 `json:"from"`
 		To          string                 `json:"to"`
 		Prompt      string                 `json:"prompt"`
 		Priority    int                    `json:"priority"`
-		Schedule    workspace.ScheduleConfig `json:"schedule"`
+		Schedule    agentstudio.ScheduleConfig `json:"schedule"`
 		Enabled     bool                   `json:"enabled"`
 	}
 
@@ -1749,7 +1749,7 @@ func (h *Handler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Reque
 
 	// Create scheduled task
 	now := time.Now()
-	st := workspace.ScheduledTask{
+	st := agentstudio.ScheduledTask{
 		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Description: req.Description,
@@ -1784,7 +1784,7 @@ func (h *Handler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Get the created scheduled task (now has ID)
-	var createdTask *workspace.ScheduledTask
+	var createdTask *agentstudio.ScheduledTask
 	for i := len(ws.ScheduledTasks) - 1; i >= 0; i-- {
 		if ws.ScheduledTasks[i].Name == req.Name {
 			createdTask = &ws.ScheduledTasks[i]
@@ -1882,7 +1882,7 @@ func (h *Handler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Reque
 		Description *string                   `json:"description,omitempty"`
 		Prompt      *string                   `json:"prompt,omitempty"`
 		Priority    *int                      `json:"priority,omitempty"`
-		Schedule    *workspace.ScheduleConfig `json:"schedule,omitempty"`
+		Schedule    *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
 		Enabled     *bool                     `json:"enabled,omitempty"`
 	}
 
@@ -2098,14 +2098,14 @@ func (h *Handler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Requ
 		}
 
 		// Create a task from the scheduled task
-		task := workspace.Task{
+		task := agentstudio.Task{
 			WorkspaceID: ws.ID,
 			From:        st.From,
 			To:          st.To,
 			Description: st.Prompt,
 			Priority:    st.Priority,
 			Context:     st.Context,
-			Status:      workspace.TaskStatusPending,
+			Status:      agentstudio.TaskStatusPending,
 		}
 
 		if err := ws.AddTask(task); err != nil {
@@ -2139,22 +2139,22 @@ func (h *Handler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Requ
 }
 
 // calculateInitialNextRun calculates the initial next run time for a schedule
-func calculateInitialNextRun(config workspace.ScheduleConfig, now time.Time) *time.Time {
+func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *time.Time {
 	switch config.Type {
-	case workspace.ScheduleOnce:
+	case agentstudio.ScheduleOnce:
 		if config.ExecuteAt != nil {
 			return config.ExecuteAt
 		}
 		return nil
 
-	case workspace.ScheduleInterval:
+	case agentstudio.ScheduleInterval:
 		if config.Interval == 0 {
 			return nil
 		}
 		next := now.Add(config.Interval)
 		return &next
 
-	case workspace.ScheduleDaily:
+	case agentstudio.ScheduleDaily:
 		if config.TimeOfDay == "" {
 			return nil
 		}
@@ -2173,7 +2173,7 @@ func calculateInitialNextRun(config workspace.ScheduleConfig, now time.Time) *ti
 
 		return &next
 
-	case workspace.ScheduleWeekly:
+	case agentstudio.ScheduleWeekly:
 		if config.TimeOfDay == "" {
 			return nil
 		}

@@ -10,18 +10,18 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Orchestrator coordinates multi-agent workflows
 type Orchestrator struct {
 	agentStore     store.Store
-	workspaceStore workspace.Store
+	workspaceStore agentstudio.Store
 	communicator   *agentcomm.Communicator
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator) *Orchestrator {
+func NewOrchestrator(agentStore store.Store, workspaceStore agentstudio.Store, communicator *agentcomm.Communicator) *Orchestrator {
 	return &Orchestrator{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -39,7 +39,7 @@ type CollaborativeTask struct {
 
 // CollaborativeResult represents the result of a collaborative task
 type CollaborativeResult struct {
-	WorkspaceID string                 `json:"workspace_id"`
+	WorkspaceID string                 `json:"studio_id"`
 	FinalOutput string                 `json:"final_output"`
 	SubResults  map[string]interface{} `json:"sub_results"`
 	Duration    time.Duration          `json:"duration"`
@@ -55,7 +55,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 
 	// 1. Create workspace
 	workspaceName := fmt.Sprintf("collab-%s-%d", mainAgent, time.Now().Unix())
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
+	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
 		Name:        workspaceName,
 		ParentAgent: mainAgent,
 		Agents:      []string{}, // Will be populated as we find agents
@@ -89,7 +89,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	// 3. Execute workflow based on required roles
 	result, err := o.executeWorkflow(ctx, ws, task, agents)
 	if err != nil {
-		ws.SetStatus(workspace.StatusFailed)
+		ws.SetStatus(agentstudio.StatusFailed)
 		o.workspaceStore.Save(ws)
 		return &CollaborativeResult{
 			WorkspaceID: ws.ID,
@@ -102,7 +102,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	}
 
 	// 4. Mark workspace as completed
-	ws.SetStatus(workspace.StatusCompleted)
+	ws.SetStatus(agentstudio.StatusCompleted)
 	o.workspaceStore.Save(ws)
 
 	result.WorkspaceID = ws.ID
@@ -165,7 +165,7 @@ func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]str
 }
 
 // executeWorkflow executes the appropriate workflow based on required roles
-func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	// Determine workflow type based on roles
 	hasResearcher := o.hasRole(task.RequiredRoles, types.RoleResearcher)
 	hasAnalyzer := o.hasRole(task.RequiredRoles, types.RoleAnalyzer)
@@ -194,7 +194,7 @@ func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) 
 }
 
 // executeResearchWorkflow executes a simple research workflow
-func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	log.Printf("📚 Executing research workflow")
 
 	subResults := make(map[string]interface{})
@@ -242,7 +242,7 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *workspac
 }
 
 // executeParallelWorkflow executes tasks in parallel across agents
-func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	log.Printf("⚡ Executing parallel workflow with %d agents", len(agents))
 
 	subResults := make(map[string]interface{})
