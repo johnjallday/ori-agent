@@ -646,6 +646,12 @@
     let currentWorkspaceDashboard = null;
 
     async function viewWorkspace(workspaceId) {
+      // Navigate to the workspace dashboard page
+      window.location.href = `/studios/${workspaceId}`;
+    }
+
+    // Keep old modal function for backward compatibility (if needed elsewhere)
+    async function viewWorkspaceModal(workspaceId) {
       try {
         // Show modal immediately
         const modal = new bootstrap.Modal(document.getElementById('workspaceDetailsModal'));

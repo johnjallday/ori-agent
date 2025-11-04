@@ -517,6 +517,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
+	mux.HandleFunc("/studios/", s.serveWorkspaceDashboard) // Dynamic route for /studios/:id
 	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
 
@@ -962,6 +963,54 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("studios", data)
 	if err != nil {
 		log.Printf("Failed to render studios template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request) {
+	// Extract workspace ID from URL path
+	// URL format: /studios/:workspaceId
+	path := strings.TrimPrefix(r.URL.Path, "/studios/")
+	if path == "" || path == r.URL.Path {
+		// No ID provided, redirect to studios list
+		http.Redirect(w, r, "/studios", http.StatusSeeOther)
+		return
+	}
+
+	workspaceID := path
+
+	data := web.GetDefaultData()
+	data.Title = "Workspace Dashboard - Ori Agent"
+	data.CurrentPage = "workspaces"
+
+	// Add workspace ID to template data
+	data.Extra = map[string]interface{}{
+		"WorkspaceID": workspaceID,
+	}
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
+	if err != nil {
+		log.Printf("Failed to render workspace dashboard template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
