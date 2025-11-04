@@ -688,6 +688,7 @@ func (s *Server) Start() {
 
 // Shutdown gracefully shuts down background services
 func (s *Server) Shutdown() {
+	// Stop background services
 	if s.taskExecutor != nil {
 		s.taskExecutor.Stop()
 	}
@@ -703,6 +704,35 @@ func (s *Server) Shutdown() {
 	if s.eventBus != nil {
 		s.eventBus.Shutdown()
 	}
+
+	// Clean up all loaded plugins
+	s.cleanupPlugins()
+}
+
+// cleanupPlugins closes all RPC plugin connections for all agents
+func (s *Server) cleanupPlugins() {
+	log.Println("Cleaning up plugins...")
+
+	agentNames, _ := s.st.ListAgents()
+	cleanedCount := 0
+
+	for _, agentName := range agentNames {
+		ag, ok := s.st.GetAgent(agentName)
+		if !ok {
+			continue
+		}
+
+		// Clean up each loaded plugin
+		for pluginName, loadedPlugin := range ag.Plugins {
+			if loadedPlugin.Tool != nil {
+				pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
+				cleanedCount++
+				log.Printf("Closed plugin '%s' for agent '%s'", pluginName, agentName)
+			}
+		}
+	}
+
+	log.Printf("Plugin cleanup complete: closed %d plugin(s)", cleanedCount)
 }
 
 // HTTPServer returns a fully configured http.Server
@@ -722,7 +752,25 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 
 func (s *Server) corsHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Get allowed origins from configuration
+		allowedOrigins := s.configManager.GetAllowedOrigins()
+		origin := r.Header.Get("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				allowed = true
+				break
+			}
+		}
+
+		// Only set CORS headers if origin is allowed
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 

@@ -244,8 +244,12 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 		ct.records = ct.records[len(ct.records)-ct.maxRecords:]
 	}
 
-	// Save asynchronously
-	go ct.saveRecords()
+	// Make a copy of records for async save to avoid race condition
+	recordsCopy := make([]UsageRecord, len(ct.records))
+	copy(recordsCopy, ct.records)
+
+	// Save asynchronously with copied data
+	go ct.saveRecordsCopy(recordsCopy)
 
 	return nil
 }
@@ -386,11 +390,8 @@ func (ct *CostTracker) GetThisMonthStats() UsageStats {
 	return ct.GetStats(start, end)
 }
 
-// saveRecords saves records to disk
-func (ct *CostTracker) saveRecords() error {
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
-
+// saveRecordsCopy saves a copy of records to disk (thread-safe for async calls)
+func (ct *CostTracker) saveRecordsCopy(records []UsageRecord) error {
 	// Ensure directory exists
 	dir := filepath.Dir(ct.dataFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -398,7 +399,7 @@ func (ct *CostTracker) saveRecords() error {
 	}
 
 	// Marshal records
-	data, err := json.MarshalIndent(ct.records, "", "  ")
+	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal records: %w", err)
 	}
@@ -409,6 +410,14 @@ func (ct *CostTracker) saveRecords() error {
 	}
 
 	return nil
+}
+
+// saveRecords saves records to disk (synchronous, requires lock)
+func (ct *CostTracker) saveRecords() error {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+
+	return ct.saveRecordsCopy(ct.records)
 }
 
 // loadRecords loads records from disk
