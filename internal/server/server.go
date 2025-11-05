@@ -701,6 +701,13 @@ func (s *Server) Handler() http.Handler {
 			s.studioHandler.ExecuteMission(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/events") {
 			s.studioHandler.GetStudioEvents(w, r)
+		} else if strings.Contains(r.URL.Path, "/tasks") {
+			// Handle task operations
+			if r.Method == http.MethodPost {
+				s.studioHandler.CreateTask(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		} else if strings.Contains(r.URL.Path, "/agents") {
 			// Handle agent add/remove operations
 			if r.Method == http.MethodPost {

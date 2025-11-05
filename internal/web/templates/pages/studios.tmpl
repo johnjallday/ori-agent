@@ -195,6 +195,38 @@
                 </div>
               </div>
 
+              <!-- Create Task -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Create Task
+                </h6>
+                <div class="mb-2">
+                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">Description</label>
+                  <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="Task description..."></textarea>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">From Agent</label>
+                  <select id="task-from-agent" class="form-control form-control-sm">
+                    <option value="">Select agent...</option>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">To Agent</label>
+                  <select id="task-to-agent" class="form-control form-control-sm">
+                    <option value="">Select agent...</option>
+                  </select>
+                </div>
+                <button class="modern-btn modern-btn-success w-100" onclick="createTask()">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Add Task
+                </button>
+              </div>
+
               <!-- Agent Details -->
               <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
                 <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
@@ -880,6 +912,7 @@
       setTimeout(() => {
         loadAvailableAgents();
         updateCurrentAgentsList();
+        updateTaskAgentSelectors();
       }, 500);
     }
 
@@ -1045,6 +1078,80 @@
           </div>
         </div>
       `;
+    }
+
+    // Task management functions
+    function updateTaskAgentSelectors() {
+      const fromSelect = document.getElementById('task-from-agent');
+      const toSelect = document.getElementById('task-to-agent');
+
+      if (!window.agentCanvas || !window.agentCanvas.agents) {
+        fromSelect.innerHTML = '<option value="">Select agent...</option>';
+        toSelect.innerHTML = '<option value="">Select agent...</option>';
+        return;
+      }
+
+      const agents = window.agentCanvas.agents;
+      const options = '<option value="">Select agent...</option>' +
+        agents.map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`).join('');
+
+      fromSelect.innerHTML = options;
+      toSelect.innerHTML = options;
+    }
+
+    async function createTask() {
+      const description = document.getElementById('task-description').value.trim();
+      const fromAgent = document.getElementById('task-from-agent').value;
+      const toAgent = document.getElementById('task-to-agent').value;
+
+      if (!description) {
+        alert('Please enter a task description');
+        return;
+      }
+
+      if (!fromAgent) {
+        alert('Please select a "from" agent');
+        return;
+      }
+
+      if (!toAgent) {
+        alert('Please select a "to" agent');
+        return;
+      }
+
+      if (!currentStudioId) {
+        alert('Please select a studio first');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: description,
+            from: fromAgent,
+            to: toAgent,
+            priority: 1
+          })
+        });
+
+        if (response.ok) {
+          // Clear form
+          document.getElementById('task-description').value = '';
+          document.getElementById('task-from-agent').value = '';
+          document.getElementById('task-to-agent').value = '';
+
+          // Reload canvas to show new task
+          loadCanvasStudio(currentStudioId);
+        } else {
+          const error = await response.text();
+          alert('Failed to create task: ' + error);
+        }
+      } catch (error) {
+        console.error('Failed to create task:', error);
+        alert('Failed to create task');
+      }
     }
 
     // Agent details panel

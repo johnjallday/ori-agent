@@ -434,3 +434,92 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		"studio":  studioID,
 	})
 }
+
+// CreateTaskRequest represents the request to create a task
+type CreateTaskRequest struct {
+	Description string `json:"description"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Priority    int    `json:"priority"`
+}
+
+// CreateTask handles POST /api/studios/:id/tasks
+func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+
+	// Parse request body
+	var req CreateTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if req.Description == "" {
+		http.Error(w, "Task description is required", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" {
+		http.Error(w, "From agent is required", http.StatusBadRequest)
+		return
+	}
+	if req.To == "" {
+		http.Error(w, "To agent is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Create task
+	task := Task{
+		ID:          uuid.New().String(),
+		WorkspaceID: studioID,
+		From:        req.From,
+		To:          req.To,
+		Description: req.Description,
+		Priority:    req.Priority,
+		Context:     make(map[string]interface{}),
+		Status:      TaskStatusPending,
+		CreatedAt:   time.Now(),
+	}
+
+	// Add task to studio
+	if err := studio.AddTask(task); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to add task: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Created task %s in studio %s: %s", task.ID, studioID, req.Description)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Task created successfully",
+		"task_id": task.ID,
+		"studio":  studioID,
+	})
+}

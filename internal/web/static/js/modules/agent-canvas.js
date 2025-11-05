@@ -21,6 +21,8 @@ class AgentCanvas {
     this.isDragging = false;
     this.isDraggingAgent = false;
     this.draggedAgent = null;
+    this.isDraggingTask = false;
+    this.draggedTask = null;
     this.dragStartX = 0;
     this.dragStartY = 0;
 
@@ -69,7 +71,18 @@ class AgentCanvas {
       // Load mission from shared data if it exists
       if (this.studio.shared_data && this.studio.shared_data.mission) {
         this.mission = this.studio.shared_data.mission;
-        console.log('Loaded mission from workspace:', this.mission);
+      }
+
+      // Load tasks from studio
+      if (this.studio.tasks) {
+        this.tasks = this.studio.tasks.map(task => {
+          // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
+          return {
+            ...task,
+            x: task.x ?? null,
+            y: task.y ?? null
+          };
+        });
       }
 
       // Initialize agent positions
@@ -363,31 +376,106 @@ class AgentCanvas {
   }
 
   drawTaskFlows() {
-    this.tasks.forEach(task => {
+    if (!this.tasks || this.tasks.length === 0) return;
+
+    this.tasks.forEach((task, index) => {
       const fromAgent = this.agents.find(a => a.name === task.from);
       const toAgent = this.agents.find(a => a.name === task.to);
 
       if (!fromAgent || !toAgent) return;
 
-      const progress = task.progress / 100;
-      const x = fromAgent.x + (toAgent.x - fromAgent.x) * progress;
-      const y = fromAgent.y + (toAgent.y - fromAgent.y) * progress;
+      // Calculate default position if task doesn't have one
+      if (task.x == null || task.y == null) {  // Use == to catch both null and undefined
+        // Position task card between agents, but higher up to avoid overlap
+        const midX = (fromAgent.x + toAgent.x) / 2;
+        const midY = (fromAgent.y + toAgent.y) / 2;
 
-      // Draw task indicator
-      if (task.status === 'in_progress') {
-        this.ctx.fillStyle = fromAgent.color;
-        this.ctx.beginPath();
-        this.ctx.arc(x, y, 8, 0, Math.PI * 2);
-        this.ctx.fill();
+        // Move task cards up by 80 pixels to avoid overlapping with agent nodes
+        const cardOffsetY = -80;
 
-        // Draw progress line
-        this.ctx.strokeStyle = fromAgent.color;
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.moveTo(fromAgent.x, fromAgent.y);
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
+        // Offset multiple tasks slightly if they share the same from/to agents
+        const offsetY = (index % 3 - 1) * 70 + cardOffsetY;
+
+        task.x = midX;
+        task.y = midY + offsetY;
       }
+
+      // Draw connection line from sender to task
+      this.ctx.strokeStyle = fromAgent.color + '40';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(fromAgent.x, fromAgent.y);
+      this.ctx.lineTo(task.x, task.y);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+
+      // Draw connection line from task to receiver
+      this.ctx.strokeStyle = toAgent.color + '40';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(task.x, task.y);
+      this.ctx.lineTo(toAgent.x, toAgent.y);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+
+      // Draw task card
+      const cardWidth = 160;
+      const cardHeight = 60;
+      const cardX = task.x - cardWidth / 2;
+      const cardY = task.y - cardHeight / 2;
+
+      // Store card bounds for hit testing
+      task.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Card background
+      this.ctx.save();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.15)';
+      this.ctx.shadowBlur = 10;
+      this.ctx.shadowOffsetY = 2;
+      this.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Card border with status color
+      let borderColor = '#6c757d'; // default gray
+      if (task.status === 'pending') borderColor = '#ffc107'; // yellow
+      else if (task.status === 'in_progress') borderColor = '#0d6efd'; // blue
+      else if (task.status === 'completed') borderColor = '#198754'; // green
+      else if (task.status === 'failed') borderColor = '#dc3545'; // red
+
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
+      this.ctx.stroke();
+
+      // Task description (truncated)
+      this.ctx.fillStyle = '#212529';
+      this.ctx.font = 'bold 11px system-ui';
+      const maxWidth = cardWidth - 16;
+      let description = task.description || 'Task';
+      if (description.length > 25) {
+        description = description.substring(0, 22) + '...';
+      }
+      this.ctx.fillText(description, cardX + 8, cardY + 18);
+
+      // Task status
+      this.ctx.fillStyle = '#6c757d';
+      this.ctx.font = '9px system-ui';
+      const statusText = `${task.from} → ${task.to}`;
+      this.ctx.fillText(statusText, cardX + 8, cardY + 34);
+
+      // Status badge
+      this.ctx.fillStyle = borderColor;
+      this.ctx.font = 'bold 8px system-ui';
+      const badge = (task.status || 'pending').toUpperCase();
+      const badgeWidth = this.ctx.measureText(badge).width + 8;
+      this.ctx.fillRect(cardX + 8, cardY + 40, badgeWidth, 12);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillText(badge, cardX + 12, cardY + 49);
     });
   }
 
@@ -548,6 +636,33 @@ class AgentCanvas {
     const x = (e.clientX - rect.left - this.offsetX) / this.scale;
     const y = (e.clientY - rect.top - this.offsetY) / this.scale;
 
+    // Check if clicking on a task card first (tasks are drawn on top)
+    if (this.tasks && this.tasks.length > 0) {
+      for (let i = this.tasks.length - 1; i >= 0; i--) {  // Check in reverse order (top to bottom)
+        const task = this.tasks[i];
+        if (task && task.x != null && task.y != null) {  // Use != to catch both null and undefined
+          // Use a larger hit area around the task center
+          const cardWidth = 160;
+          const cardHeight = 60;
+          const cardX = task.x - cardWidth / 2;
+          const cardY = task.y - cardHeight / 2;
+
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            // Start dragging this task
+            e.stopPropagation();
+            e.preventDefault();
+            this.isDraggingTask = true;
+            this.draggedTask = task;
+            this.dragStartX = x;
+            this.dragStartY = y;
+            this.canvas.style.cursor = 'move';
+            return;
+          }
+        }
+      }
+    }
+
     // Check if clicking on an agent
     for (const agent of this.agents) {
       const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
@@ -572,6 +687,17 @@ class AgentCanvas {
   onMouseMove(e) {
     const rect = this.canvas.getBoundingClientRect();
 
+    if (this.isDraggingTask && this.draggedTask) {
+      // Drag the task
+      const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+      const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+      this.draggedTask.x = x;
+      this.draggedTask.y = y;
+      this.draw();
+      return;
+    }
+
     if (this.isDraggingAgent && this.draggedAgent) {
       // Drag the agent
       const x = (e.clientX - rect.left - this.offsetX) / this.scale;
@@ -595,6 +721,8 @@ class AgentCanvas {
     this.isDragging = false;
     this.isDraggingAgent = false;
     this.draggedAgent = null;
+    this.isDraggingTask = false;
+    this.draggedTask = null;
     this.canvas.style.cursor = 'grab';
   }
 
@@ -608,7 +736,7 @@ class AgentCanvas {
 
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.isDragging || this.isDraggingAgent) return;
+    if (this.isDragging || this.isDraggingAgent || this.isDraggingTask) return;
 
     const rect = this.canvas.getBoundingClientRect();
     // Convert screen coordinates to canvas coordinates
