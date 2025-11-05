@@ -102,6 +102,6 @@ uploaded_plugins/
 agents.json
 local_plugin_registry.json
 
-workspace/
+workspaces/
 
 ori-agent

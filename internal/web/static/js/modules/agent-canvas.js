@@ -382,33 +382,47 @@ class AgentCanvas {
       const fromAgent = this.agents.find(a => a.name === task.from);
       const toAgent = this.agents.find(a => a.name === task.to);
 
-      if (!fromAgent || !toAgent) return;
+      // Skip if target agent not found
+      if (!toAgent) return;
+
+      // Handle system/user-created tasks (no from agent)
+      const isSystemTask = !fromAgent || task.from === 'system' || task.from === 'user';
 
       // Calculate default position if task doesn't have one
       if (task.x == null || task.y == null) {  // Use == to catch both null and undefined
-        // Position task card between agents, but higher up to avoid overlap
-        const midX = (fromAgent.x + toAgent.x) / 2;
-        const midY = (fromAgent.y + toAgent.y) / 2;
+        if (isSystemTask) {
+          // Position near the target agent
+          const offsetX = 100 + (index % 3) * 50;
+          const offsetY = -100 + (Math.floor(index / 3) % 3) * 70;
+          task.x = toAgent.x + offsetX;
+          task.y = toAgent.y + offsetY;
+        } else {
+          // Position task card between agents, but higher up to avoid overlap
+          const midX = (fromAgent.x + toAgent.x) / 2;
+          const midY = (fromAgent.y + toAgent.y) / 2;
 
-        // Move task cards up by 80 pixels to avoid overlapping with agent nodes
-        const cardOffsetY = -80;
+          // Move task cards up by 80 pixels to avoid overlapping with agent nodes
+          const cardOffsetY = -80;
 
-        // Offset multiple tasks slightly if they share the same from/to agents
-        const offsetY = (index % 3 - 1) * 70 + cardOffsetY;
+          // Offset multiple tasks slightly if they share the same from/to agents
+          const offsetY = (index % 3 - 1) * 70 + cardOffsetY;
 
-        task.x = midX;
-        task.y = midY + offsetY;
+          task.x = midX;
+          task.y = midY + offsetY;
+        }
       }
 
-      // Draw connection line from sender to task
-      this.ctx.strokeStyle = fromAgent.color + '40';
-      this.ctx.lineWidth = 2;
-      this.ctx.setLineDash([5, 5]);
-      this.ctx.beginPath();
-      this.ctx.moveTo(fromAgent.x, fromAgent.y);
-      this.ctx.lineTo(task.x, task.y);
-      this.ctx.stroke();
-      this.ctx.setLineDash([]);
+      // Draw connection line from sender to task (if not a system task)
+      if (!isSystemTask) {
+        this.ctx.strokeStyle = fromAgent.color + '40';
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([5, 5]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(fromAgent.x, fromAgent.y);
+        this.ctx.lineTo(task.x, task.y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+      }
 
       // Draw connection line from task to receiver
       this.ctx.strokeStyle = toAgent.color + '40';
@@ -742,6 +756,26 @@ class AgentCanvas {
     // Convert screen coordinates to canvas coordinates
     const x = (e.clientX - rect.left - this.offsetX) / this.scale;
     const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+    // Check if click is on any task first (tasks are on top)
+    for (let i = this.tasks.length - 1; i >= 0; i--) {
+      const task = this.tasks[i];
+      if (task && task.x != null && task.y != null) {
+        const cardWidth = 160;
+        const cardHeight = 60;
+        const cardX = task.x - cardWidth / 2;
+        const cardY = task.y - cardHeight / 2;
+
+        if (x >= cardX && x <= cardX + cardWidth &&
+            y >= cardY && y <= cardY + cardHeight) {
+          // Task clicked
+          if (this.onTaskClick) {
+            this.onTaskClick(task);
+          }
+          return;
+        }
+      }
+    }
 
     // Check if click is on any agent
     for (const agent of this.agents) {

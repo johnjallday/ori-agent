@@ -207,14 +207,8 @@
                   <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">Description</label>
                   <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="Task description..."></textarea>
                 </div>
-                <div class="mb-2">
-                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">From Agent</label>
-                  <select id="task-from-agent" class="form-control form-control-sm">
-                    <option value="">Select agent...</option>
-                  </select>
-                </div>
                 <div class="mb-3">
-                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">To Agent</label>
+                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">Assign To</label>
                   <select id="task-to-agent" class="form-control form-control-sm">
                     <option value="">Select agent...</option>
                   </select>
@@ -232,6 +226,35 @@
                 <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
                 <div id="agent-details-content" style="font-size: 0.875rem;">
                   Click an agent to see details
+                </div>
+              </div>
+
+              <!-- Task Details -->
+              <div class="modern-card p-3 mb-3" id="task-details-panel" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Task Details</h6>
+                  <button class="btn btn-sm btn-link p-0" onclick="hideTaskDetails()" style="color: var(--text-secondary);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div id="task-details-content" style="font-size: 0.875rem;">
+                  Click a task to see details
+                </div>
+                <div id="task-actions" class="mt-3" style="display: none;">
+                  <button id="execute-task-btn" class="btn btn-sm btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                    </svg>
+                    Execute Task
+                  </button>
+                  <button class="btn btn-sm btn-danger w-100" onclick="deleteCurrentTask()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                    </svg>
+                    Delete Task
+                  </button>
                 </div>
               </div>
 
@@ -905,6 +928,7 @@
 
       // Set up event listeners for canvas clicks
       window.agentCanvas.onAgentClick = showAgentDetails;
+      window.agentCanvas.onTaskClick = showTaskDetails;
       window.agentCanvas.onMetricsUpdate = updateMetrics;
       window.agentCanvas.onTimelineEvent = addTimelineEvent;
 
@@ -1082,11 +1106,9 @@
 
     // Task management functions
     function updateTaskAgentSelectors() {
-      const fromSelect = document.getElementById('task-from-agent');
       const toSelect = document.getElementById('task-to-agent');
 
       if (!window.agentCanvas || !window.agentCanvas.agents) {
-        fromSelect.innerHTML = '<option value="">Select agent...</option>';
         toSelect.innerHTML = '<option value="">Select agent...</option>';
         return;
       }
@@ -1095,13 +1117,11 @@
       const options = '<option value="">Select agent...</option>' +
         agents.map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`).join('');
 
-      fromSelect.innerHTML = options;
       toSelect.innerHTML = options;
     }
 
     async function createTask() {
       const description = document.getElementById('task-description').value.trim();
-      const fromAgent = document.getElementById('task-from-agent').value;
       const toAgent = document.getElementById('task-to-agent').value;
 
       if (!description) {
@@ -1109,13 +1129,8 @@
         return;
       }
 
-      if (!fromAgent) {
-        alert('Please select a "from" agent');
-        return;
-      }
-
       if (!toAgent) {
-        alert('Please select a "to" agent');
+        alert('Please select an agent to assign the task to');
         return;
       }
 
@@ -1130,7 +1145,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             description: description,
-            from: fromAgent,
+            from: 'system',
             to: toAgent,
             priority: 1
           })
@@ -1139,7 +1154,6 @@
         if (response.ok) {
           // Clear form
           document.getElementById('task-description').value = '';
-          document.getElementById('task-from-agent').value = '';
           document.getElementById('task-to-agent').value = '';
 
           // Reload canvas to show new task
@@ -1266,6 +1280,179 @@
             <p class="small" style="color: #b0b0b0;">Could not load detailed information</p>
           </div>
         `;
+      }
+    }
+
+    // Task details panel
+    let currentTask = null;
+
+    async function showTaskDetails(task) {
+      currentTask = task;
+      const panel = document.getElementById('task-details-panel');
+      const content = document.getElementById('task-details-content');
+      const actions = document.getElementById('task-actions');
+      const executeBtn = document.getElementById('execute-task-btn');
+
+      panel.style.display = 'block';
+      actions.style.display = 'block';
+
+      // Show loading state
+      content.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-2 small" style="color: var(--text-muted);">Loading task details...</p>
+        </div>
+      `;
+
+      // Fetch fresh task data from API
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}`);
+        if (response.ok) {
+          const studio = await response.json();
+          // Find the specific task by ID
+          const freshTask = studio.tasks ? studio.tasks.find(t => t.id === task.id) : null;
+
+          if (freshTask) {
+            // Use the fresh task data
+            task = freshTask;
+            currentTask = freshTask;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch fresh task data:', error);
+        // Continue with the stale data
+      }
+
+      // Show execute button only for pending or failed tasks
+      if (task.status === 'pending' || task.status === 'failed') {
+        executeBtn.style.display = 'block';
+      } else {
+        executeBtn.style.display = 'none';
+      }
+
+      const statusColors = {
+        'pending': 'var(--warning-color)',
+        'in_progress': 'var(--info-color)',
+        'completed': 'var(--success-color)',
+        'failed': 'var(--danger-color)'
+      };
+
+      const statusColor = statusColors[task.status] || 'var(--text-secondary)';
+      const statusText = task.status ? task.status.replace('_', ' ').toUpperCase() : 'UNKNOWN';
+
+      content.innerHTML = `
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong style="color: #f0f0f0; font-size: 0.9rem;">Task ${task.id ? task.id.substring(0, 8) : ''}</strong>
+            <span class="modern-badge" style="background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor};">${statusText}</span>
+          </div>
+        </div>
+
+        <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Description</h6>
+          <p style="color: #d0d0d0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.description || 'No description')}</p>
+        </div>
+
+        <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <div class="d-flex justify-content-between mb-2">
+            <span style="color: #b0b0b0;">From:</span>
+            <strong style="color: #f0f0f0;">${escapeHtml(task.from || 'N/A')}</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span style="color: #b0b0b0;">To:</span>
+            <strong style="color: #f0f0f0;">${escapeHtml(task.to || 'N/A')}</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span style="color: #b0b0b0;">Priority:</span>
+            <strong style="color: #f0f0f0;">${task.priority || 1}/5</strong>
+          </div>
+        </div>
+
+        ${task.result ? `
+          <div class="mb-2" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Result</h6>
+            <p style="color: #a0d0a0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.result)}</p>
+          </div>
+        ` : ''}
+
+        ${task.error ? `
+          <div class="mb-2" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Error</h6>
+            <p style="color: #d0a0a0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.error)}</p>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    function hideTaskDetails() {
+      const panel = document.getElementById('task-details-panel');
+      panel.style.display = 'none';
+      currentTask = null;
+    }
+
+    async function deleteCurrentTask() {
+      if (!currentTask || !currentStudioId) return;
+
+      if (!confirm(`Are you sure you want to delete this task?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks/${currentTask.id}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          hideTaskDetails();
+          loadCanvasStudio(currentStudioId);
+        } else {
+          alert('Failed to delete task: ' + await response.text());
+        }
+      } catch (error) {
+        console.error('Failed to delete task:', error);
+        alert('Failed to delete task');
+      }
+    }
+
+    async function executeCurrentTask() {
+      if (!currentTask || !currentStudioId) return;
+
+      const executeBtn = document.getElementById('execute-task-btn');
+      const originalText = executeBtn.innerHTML;
+
+      // Show loading state
+      executeBtn.disabled = true;
+      executeBtn.innerHTML = `
+        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+        Executing...
+      `;
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks/${currentTask.id}/execute`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Close details and reload canvas to see updated status
+          hideTaskDetails();
+          loadCanvasStudio(currentStudioId);
+
+          // Show success message
+          alert('Task execution started! Check the canvas for status updates.');
+        } else {
+          const error = await response.text();
+          alert('Failed to execute task: ' + error);
+          executeBtn.disabled = false;
+          executeBtn.innerHTML = originalText;
+        }
+      } catch (error) {
+        console.error('Failed to execute task:', error);
+        alert('Failed to execute task');
+        executeBtn.disabled = false;
+        executeBtn.innerHTML = originalText;
       }
     }
 

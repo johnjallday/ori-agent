@@ -71,7 +71,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, studioID string, miss
 	}
 
 	// Step 3: Start task execution in background
-	go o.executeTasksSequentially(ctx, studioID, tasks)
+	go o.ExecuteTasksSequentially(ctx, studioID, tasks)
 
 	return nil
 }
@@ -167,7 +167,7 @@ Return your response as a JSON array of tasks in this format:
 }
 
 // executeTasksSequentially executes tasks in priority order
-func (o *Orchestrator) executeTasksSequentially(ctx context.Context, studioID string, tasks []Task) {
+func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, studioID string, tasks []Task) {
 	log.Printf("[Orchestrator] Starting sequential task execution for studio %s", studioID)
 
 	for _, task := range tasks {
@@ -177,7 +177,7 @@ func (o *Orchestrator) executeTasksSequentially(ctx context.Context, studioID st
 			return
 		default:
 			// Execute the task
-			if err := o.executeTask(ctx, studioID, task); err != nil {
+			if err := o.ExecuteTask(ctx, studioID, task); err != nil {
 				log.Printf("[Orchestrator] Task %s failed: %v", task.ID, err)
 				o.publishEvent("task_failed", studioID, map[string]interface{}{
 					"task_id": task.ID,
@@ -193,8 +193,8 @@ func (o *Orchestrator) executeTasksSequentially(ctx context.Context, studioID st
 	})
 }
 
-// executeTask executes a single task by delegating to an agent
-func (o *Orchestrator) executeTask(ctx context.Context, studioID string, task Task) error {
+// ExecuteTask executes a single task by delegating to an agent
+func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Task) error {
 	log.Printf("[Orchestrator] Executing task %s: %s (assigned to: %s)", task.ID, task.Description, task.To)
 
 	studio, err := o.studioStore.Get(studioID)
@@ -241,15 +241,37 @@ func (o *Orchestrator) executeTask(ctx context.Context, studioID string, task Ta
 		"content": message.Content,
 	})
 
-	// For now, simulate task execution
-	// TODO: Integrate with actual agent execution system
-	time.Sleep(2 * time.Second)
+	// Execute task using LLM provider
+	result, err := o.executeTaskWithLLM(ctx, task)
+
+	completed := time.Now()
+	if err != nil {
+		// Task failed
+		log.Printf("[Orchestrator] Task %s failed: %v", task.ID, err)
+		task.Status = TaskStatusFailed
+		task.CompletedAt = &completed
+		task.Error = err.Error()
+
+		if updateErr := studio.UpdateTask(task); updateErr != nil {
+			log.Printf("[Orchestrator] Warning: failed to update task: %v", updateErr)
+		}
+
+		if saveErr := o.studioStore.Save(studio); saveErr != nil {
+			log.Printf("[Orchestrator] Warning: failed to save studio: %v", saveErr)
+		}
+
+		o.publishEvent("task_failed", studioID, map[string]interface{}{
+			"task_id": task.ID,
+			"error":   err.Error(),
+		})
+
+		return err
+	}
 
 	// Mark task as completed
-	completed := time.Now()
 	task.Status = TaskStatusCompleted
 	task.CompletedAt = &completed
-	task.Result = fmt.Sprintf("Task completed by %s", task.To)
+	task.Result = result
 	if err := studio.UpdateTask(task); err != nil {
 		log.Printf("[Orchestrator] Warning: failed to update task: %v", err)
 	}
@@ -265,6 +287,60 @@ func (o *Orchestrator) executeTask(ctx context.Context, studioID string, task Ta
 	})
 
 	return nil
+}
+
+// executeTaskWithLLM executes a task using the LLM provider
+func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (string, error) {
+	if o.llmProvider == nil {
+		return "", fmt.Errorf("LLM provider not configured")
+	}
+
+	log.Printf("[Orchestrator] Executing task %s with LLM: %s", task.ID, task.Description)
+
+	// Create system message with agent role
+	systemMsg := openai.SystemMessage(fmt.Sprintf(
+		"You are %s, an AI agent in a multi-agent workspace. You have been assigned a task. "+
+			"Please complete the task to the best of your ability and provide a clear result.",
+		task.To,
+	))
+
+	// Create user message with task description
+	userMsg := openai.UserMessage(task.Description)
+
+	// Include context if available
+	contextStr := ""
+	if len(task.Context) > 0 {
+		contextJSON, _ := json.Marshal(task.Context)
+		contextStr = fmt.Sprintf("\n\nContext: %s", string(contextJSON))
+	}
+
+	if contextStr != "" {
+		userMsg = openai.UserMessage(task.Description + contextStr)
+	}
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		systemMsg,
+		userMsg,
+	}
+
+	// Call LLM with timeout
+	llmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := o.llmProvider.ChatCompletion(llmCtx, messages, nil)
+	if err != nil {
+		return "", fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	// Extract response content
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from LLM")
+	}
+
+	result := resp.Choices[0].Message.Content
+	log.Printf("[Orchestrator] Task %s completed with result: %s", task.ID, result)
+
+	return result, nil
 }
 
 // formatAgentCapabilities formats agent list with capabilities

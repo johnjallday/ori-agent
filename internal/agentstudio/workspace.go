@@ -3,6 +3,7 @@ package agentstudio
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -378,13 +379,20 @@ func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	log.Printf("[DEBUG] AddTask - Workspace: %s, ParentAgent: %s, Agents: %v", w.ID, w.ParentAgent, w.Agents)
+	log.Printf("[DEBUG] AddTask - Task: From=%s, To=%s", task.From, task.To)
+	log.Printf("[DEBUG] AddTask - hasAgent(From): %v, From==ParentAgent: %v", w.hasAgent(task.From), task.From == w.ParentAgent)
+
 	// Validate sender is part of workspace
-	if !w.hasAgent(task.From) && task.From != w.ParentAgent {
+	// Allow "user" and "system" as special senders for UI-created tasks
+	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) && task.From != w.ParentAgent {
+		log.Printf("[DEBUG] AddTask - Validation FAILED: From agent not valid")
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
 
 	// Validate recipient if specified
 	if task.To != "" && !w.hasAgent(task.To) && task.To != w.ParentAgent {
+		log.Printf("[DEBUG] AddTask - Validation FAILED: To agent not valid")
 		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
 	}
 

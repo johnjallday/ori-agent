@@ -487,6 +487,9 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[DEBUG] CreateTask - Studio: %s, ParentAgent: %s, Agents: %v", studioID, studio.ParentAgent, studio.Agents)
+	log.Printf("[DEBUG] CreateTask - Request: From=%s, To=%s", req.From, req.To)
+
 	// Create task
 	task := Task{
 		ID:          uuid.New().String(),
@@ -502,6 +505,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Add task to studio
 	if err := studio.AddTask(task); err != nil {
+		log.Printf("[DEBUG] CreateTask - AddTask failed: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to add task: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -520,6 +524,125 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task created successfully",
 		"task_id": task.ID,
+		"task":    task,
+		"studio":  studioID,
+	})
+}
+
+// DeleteTask handles DELETE /api/studios/:id/tasks/:task_id
+func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	taskID := parts[2]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find and remove task
+	found := false
+	newTasks := make([]Task, 0)
+	for _, task := range studio.Tasks {
+		if task.ID != taskID {
+			newTasks = append(newTasks, task)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	studio.Tasks = newTasks
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Deleted task %s from studio %s", taskID, studioID)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Task deleted successfully",
+		"task_id": taskID,
+		"studio":  studioID,
+	})
+}
+
+// ExecuteTaskManually handles POST /api/studios/:id/tasks/:task_id/execute
+func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	taskID := parts[2]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find the task
+	var targetTask *Task
+	for i := range studio.Tasks {
+		if studio.Tasks[i].ID == taskID {
+			targetTask = &studio.Tasks[i]
+			break
+		}
+	}
+
+	if targetTask == nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	log.Printf("Manually executing task %s in studio %s", taskID, studioID)
+
+	// Execute task asynchronously
+	go func() {
+		ctx := r.Context()
+		if err := h.orchestrator.ExecuteTask(ctx, studioID, *targetTask); err != nil {
+			log.Printf("Failed to execute task %s: %v", taskID, err)
+		}
+	}()
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Task execution started",
+		"task_id": taskID,
 		"studio":  studioID,
 	})
 }
