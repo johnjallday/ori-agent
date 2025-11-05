@@ -23,17 +23,22 @@ class PluginMarketplace {
 
     async loadMarketplaceData() {
         try {
-            // Load all plugins (includes installed status from uploaded_plugins)
-            const pluginsResp = await fetch('/api/plugins');
-            const pluginsData = await pluginsResp.json();
-            this.plugins = pluginsData.plugins || [];
+            // Load all plugins from registry (includes GitHub plugins + local plugins)
+            const registryResp = await fetch('/api/plugin-registry');
+            const registryData = await registryResp.json();
+            this.plugins = registryData.plugins || [];
 
-            // Build set of installed plugins (from uploaded_plugins directory)
-            this.installedPlugins = new Set();
+            // Load locally installed plugins to mark them as installed
+            const installedResp = await fetch('/api/plugins');
+            const installedData = await installedResp.json();
+            const installedPluginNames = new Set(
+                (installedData.plugins || []).map(p => p.name)
+            );
+
+            // Mark plugins as installed if they exist locally
+            this.installedPlugins = installedPluginNames;
             this.plugins.forEach(plugin => {
-                if (plugin.installed) {
-                    this.installedPlugins.add(plugin.name);
-                }
+                plugin.installed = installedPluginNames.has(plugin.name);
             });
 
             // Load available updates
@@ -325,8 +330,34 @@ class PluginMarketplace {
 
     async installPlugin(pluginName) {
         console.log('Installing plugin:', pluginName);
-        alert(`Plugin installation for ${pluginName} will be available soon!`);
-        // TODO: Implement plugin installation via download API
+
+        // Show confirmation dialog
+        if (!confirm(`Download and install ${pluginName}?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plugins/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: pluginName })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                alert(`Successfully installed ${pluginName}!\n\nThe plugin has been downloaded to: ${result.path}\n\nRefreshing marketplace...`);
+
+                // Reload marketplace data to show the plugin as installed
+                await this.loadMarketplaceData();
+                this.render();
+            } else {
+                alert(`Failed to install ${pluginName}: ${result.message}`);
+            }
+        } catch (error) {
+            console.error('Error installing plugin:', error);
+            alert(`Error installing ${pluginName}: ${error.message}`);
+        }
     }
 
     async updatePlugin(pluginName) {
