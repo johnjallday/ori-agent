@@ -527,6 +527,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/js/", s.serveStaticFile)
 	mux.HandleFunc("/icons/", s.serveStaticFile)
 	mux.HandleFunc("/chat-area.html", s.serveStaticFile)
+	mux.HandleFunc("/agents/", s.serveAgentFiles)
 
 	// Handlers: agents moved to separate package
 	mux.Handle("/api/agents", agenthttp.New(s.st))
@@ -1076,6 +1077,37 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
+	w.Write(content)
+}
+
+func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
+	// Serve files from the agents directory
+	// URL format: /agents/<agent-name>/agent_settings.json
+	path := strings.TrimPrefix(r.URL.Path, "/")
+
+	// Security: prevent directory traversal
+	if strings.Contains(path, "..") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Set content type based on file extension
+	if strings.HasSuffix(path, ".json") {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 
