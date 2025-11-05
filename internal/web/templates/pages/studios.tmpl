@@ -171,6 +171,30 @@
                 </button>
               </div>
 
+              <!-- Manage Agents -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
+                  </svg>
+                  Manage Agents
+                </h6>
+                <div class="mb-2">
+                  <select id="available-agents" class="form-control form-control-sm" style="font-size: 0.875rem;">
+                    <option value="">Select agent to add...</option>
+                  </select>
+                </div>
+                <button class="modern-btn modern-btn-success w-100 mb-2" onclick="addAgentToCanvas()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Add Agent
+                </button>
+                <div id="current-agents-list" style="font-size: 0.875rem;">
+                  <!-- Agents will be listed here -->
+                </div>
+              </div>
+
               <!-- Agent Details -->
               <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
                 <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
@@ -851,6 +875,12 @@
       window.agentCanvas.onAgentClick = showAgentDetails;
       window.agentCanvas.onMetricsUpdate = updateMetrics;
       window.agentCanvas.onTimelineEvent = addTimelineEvent;
+
+      // Load available agents and update current list
+      setTimeout(() => {
+        loadAvailableAgents();
+        updateCurrentAgentsList();
+      }, 500);
     }
 
     // Mission execution
@@ -900,6 +930,121 @@
         btn.disabled = false;
         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
       }
+    }
+
+    // Manage Agents functions
+    async function loadAvailableAgents() {
+      try {
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+        const select = document.getElementById('available-agents');
+
+        // Get current workspace agents
+        const currentAgents = window.agentCanvas ? window.agentCanvas.agents.map(a => a.name) : [];
+
+        // Filter out already added agents
+        const availableAgents = (data.agents || []).filter(agent => !currentAgents.includes(agent.name));
+
+        select.innerHTML = '<option value="">Select agent to add...</option>' +
+          availableAgents.map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
+      } catch (error) {
+        console.error('Failed to load agents:', error);
+      }
+    }
+
+    async function addAgentToCanvas() {
+      const select = document.getElementById('available-agents');
+      const agentName = select.value;
+
+      if (!agentName) {
+        alert('Please select an agent to add');
+        return;
+      }
+
+      if (!currentStudioId) {
+        alert('Please select a studio first');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (response.ok) {
+          // Reload the canvas to show new agent
+          loadCanvasStudio(currentStudioId);
+          select.value = '';
+        } else {
+          alert('Failed to add agent');
+        }
+      } catch (error) {
+        console.error('Failed to add agent:', error);
+        alert('Failed to add agent');
+      }
+    }
+
+    async function removeAgentFromCanvas(agentName) {
+      if (!confirm(`Remove agent "${agentName}" from this workspace?`)) {
+        return;
+      }
+
+      if (!currentStudioId) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/agents/${agentName}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          // Reload the canvas to update
+          loadCanvasStudio(currentStudioId);
+        } else {
+          alert('Failed to remove agent');
+        }
+      } catch (error) {
+        console.error('Failed to remove agent:', error);
+        alert('Failed to remove agent');
+      }
+    }
+
+    function updateCurrentAgentsList() {
+      const listDiv = document.getElementById('current-agents-list');
+      if (!window.agentCanvas || !window.agentCanvas.agents) {
+        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+        return;
+      }
+
+      const agents = window.agentCanvas.agents;
+      if (agents.length === 0) {
+        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+        return;
+      }
+
+      listDiv.innerHTML = `
+        <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.5rem;">
+          <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Current Agents:</small>
+          <div class="mt-2">
+            ${agents.map(agent => `
+              <div class="d-flex justify-content-between align-items-center mb-1 p-2" style="background: rgba(255,255,255,0.03); border-radius: 4px;">
+                <div class="d-flex align-items-center">
+                  <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${agent.color}; margin-right: 8px;"></span>
+                  <span style="color: var(--text-primary);">${escapeHtml(agent.name)}</span>
+                </div>
+                <button class="btn btn-sm" onclick="removeAgentFromCanvas('${escapeHtml(agent.name)}')" style="padding: 2px 6px; font-size: 0.75rem; color: var(--danger-color);" title="Remove agent">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                  </svg>
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
     }
 
     // Agent details panel

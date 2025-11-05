@@ -307,3 +307,130 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// AddAgentRequest represents the request to add an agent to a workspace
+type AddAgentRequest struct {
+	AgentName string `json:"agent_name"`
+}
+
+// AddAgent handles POST /api/studios/:id/agents
+func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+
+	// Parse request body
+	var req AddAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentName == "" {
+		http.Error(w, "Agent name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Check if agent already exists
+	for _, agent := range studio.Agents {
+		if agent == req.AgentName {
+			http.Error(w, "Agent already in workspace", http.StatusConflict)
+			return
+		}
+	}
+
+	// Add agent to workspace
+	studio.Agents = append(studio.Agents, req.AgentName)
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Added agent %s to studio %s", req.AgentName, studioID)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Agent added successfully",
+		"agent":   req.AgentName,
+		"studio":  studioID,
+	})
+}
+
+// RemoveAgent handles DELETE /api/studios/:id/agents/:agent_name
+func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and agent name from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	agentName := parts[2]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find and remove agent
+	found := false
+	newAgents := make([]string, 0)
+	for _, agent := range studio.Agents {
+		if agent != agentName {
+			newAgents = append(newAgents, agent)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		http.Error(w, "Agent not found in workspace", http.StatusNotFound)
+		return
+	}
+
+	studio.Agents = newAgents
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Removed agent %s from studio %s", agentName, studioID)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Agent removed successfully",
+		"agent":   agentName,
+		"studio":  studioID,
+	})
+}

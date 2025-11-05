@@ -4,8 +4,8 @@
   "description": "Manage and Maintain Devops for Ori Project",
   "parent_agent": "ase",
   "agents": [
-    "ase",
-    "letsgo"
+    "letsgo",
+    "ase"
   ],
   "shared_data": {
     "mission": "sef"
