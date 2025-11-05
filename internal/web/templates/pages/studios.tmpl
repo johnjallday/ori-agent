@@ -152,22 +152,28 @@
 
             <!-- Sidebar (hidden by default) -->
             <div id="canvas-sidebar" class="col-lg-3" style="display: none;">
-              <!-- Mission Control -->
+              <!-- Set Mission -->
               <div class="modern-card p-3 mb-3">
                 <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
                     <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
                   </svg>
-                  Mission Control
+                  Set Mission
                 </h6>
                 <div class="mb-2">
                   <textarea id="mission-input" class="form-control form-control-sm" rows="3" placeholder="Enter mission description..." style="font-size: 0.875rem;"></textarea>
+                  <style>
+                    #mission-input::placeholder {
+                      color: #9ca3af;
+                      opacity: 1;
+                    }
+                  </style>
                 </div>
                 <button class="modern-btn modern-btn-primary w-100" onclick="executeMission()" id="execute-mission-btn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
                   </svg>
-                  Execute Mission
+                  Set Mission
                 </button>
               </div>
 
@@ -880,10 +886,17 @@
         const result = await response.json();
 
         if (result.message) {
+          // Add to timeline
           addTimelineEvent({
             type: 'mission_started',
             data: { mission }
           });
+
+          // Set mission on canvas directly
+          if (window.agentCanvas) {
+            window.agentCanvas.setMission(mission);
+          }
+
           document.getElementById('mission-input').value = '';
         }
       } catch (error) {
@@ -891,7 +904,7 @@
         alert('Failed to execute mission');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Execute Mission';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
       }
     }
 
@@ -1073,7 +1086,7 @@
         'task_completed': 'Task Completed',
         'task_failed': 'Task Failed',
         'message_sent': 'Message Sent',
-        'mission_started': 'Mission Started'
+        'mission_started': 'Mission Set'
       };
       return labels[type] || type;
     }

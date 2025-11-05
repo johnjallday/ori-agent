@@ -11,6 +11,7 @@ class AgentCanvas {
     this.agents = [];
     this.tasks = [];
     this.messages = [];
+    this.mission = null; // Current mission
     this.eventSource = null;
 
     // Canvas state
@@ -18,6 +19,8 @@ class AgentCanvas {
     this.offsetY = 0;
     this.scale = 1;
     this.isDragging = false;
+    this.isDraggingAgent = false;
+    this.draggedAgent = null;
     this.dragStartX = 0;
     this.dragStartY = 0;
 
@@ -63,6 +66,12 @@ class AgentCanvas {
       const response = await fetch(`/api/studios/${this.studioId}`);
       this.studio = await response.json();
 
+      // Load mission from shared data if it exists
+      if (this.studio.shared_data && this.studio.shared_data.mission) {
+        this.mission = this.studio.shared_data.mission;
+        console.log('Loaded mission from workspace:', this.mission);
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 
@@ -89,16 +98,16 @@ class AgentCanvas {
     if (!this.studio || !this.studio.agents) return;
 
     const agentCount = this.studio.agents.length;
-    const radius = Math.min(this.width, this.height) / 3;
-    const centerX = this.width / 2;
-    const centerY = this.height / 2;
+    const centerY = this.height * 0.6; // Position lower to avoid mission box
+    const spacing = Math.min(150, (this.width * 0.8) / Math.max(agentCount - 1, 1));
+    const totalWidth = spacing * (agentCount - 1);
+    const startX = (this.width - totalWidth) / 2;
 
     this.agents = this.studio.agents.map((agentName, index) => {
-      const angle = (index / agentCount) * Math.PI * 2 - Math.PI / 2;
       return {
         name: agentName,
-        x: centerX + radius * Math.cos(angle),
-        y: centerY + radius * Math.sin(angle),
+        x: startX + (index * spacing),
+        y: centerY,
         radius: 40,
         color: this.getAgentColor(index),
         status: 'idle', // idle, active, busy
@@ -182,6 +191,9 @@ class AgentCanvas {
       case 'message_sent':
         this.addMessage(event.data);
         break;
+      case 'mission_started':
+        this.setMission(event.data.mission);
+        break;
     }
 
     // Forward event to timeline callback
@@ -246,6 +258,11 @@ class AgentCanvas {
     if (this.messages.length > 50) {
       this.messages.shift();
     }
+  }
+
+  setMission(missionText) {
+    this.mission = missionText;
+    console.log('Mission set on canvas:', missionText);
   }
 
   createTaskParticles(task) {
@@ -313,8 +330,8 @@ class AgentCanvas {
     this.ctx.translate(this.offsetX, this.offsetY);
     this.ctx.scale(this.scale, this.scale);
 
-    // Draw connections between agents
-    this.drawConnections();
+    // Draw connections between agents (disabled)
+    // this.drawConnections();
 
     // Draw task flows
     this.drawTaskFlows();
@@ -326,6 +343,9 @@ class AgentCanvas {
     this.drawAgents();
 
     this.ctx.restore();
+
+    // Draw mission OUTSIDE the transform context (so it stays fixed at top)
+    this.drawMission();
   }
 
   drawConnections() {
@@ -424,9 +444,125 @@ class AgentCanvas {
     });
   }
 
+  drawMission() {
+    if (!this.mission) return;
+
+    // Calculate center of canvas in world coordinates
+    const centerX = this.width / 2;
+    const centerY = this.height / 2;
+
+    // Draw mission background box
+    this.ctx.save();
+
+    // Measure text to size the box appropriately
+    this.ctx.font = 'bold 18px system-ui';
+    const maxWidth = this.width * 0.6; // Max 60% of canvas width
+    const lines = this.wrapText(this.mission, maxWidth);
+    const lineHeight = 26;
+    const totalHeight = lines.length * lineHeight + 30;
+    const boxWidth = Math.min(maxWidth + 40, this.width * 0.7);
+    const boxHeight = totalHeight;
+
+    // Position at top center
+    const boxX = centerX - boxWidth / 2;
+    const boxY = 40;
+
+    // Draw semi-transparent background with border
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    this.ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)'; // Primary blue
+    this.ctx.lineWidth = 3;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 10;
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 2;
+
+    // Rounded rectangle
+    this.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    this.ctx.shadowColor = 'transparent';
+
+    // Draw "MISSION" label
+    this.ctx.fillStyle = '#3b82f6';
+    this.ctx.font = 'bold 12px system-ui';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+    this.ctx.fillText('🎯 MISSION', boxX + 20, boxY + 12);
+
+    // Draw mission text
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = '16px system-ui';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+
+    lines.forEach((line, i) => {
+      this.ctx.fillText(line, boxX + 20, boxY + 40 + i * lineHeight);
+    });
+
+    this.ctx.restore();
+  }
+
+  // Helper function to wrap text
+  wrapText(text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    this.ctx.font = '16px system-ui';
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      const metrics = this.ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth - 40) {
+        lines.push(currentLine);
+        currentLine = words[i];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  // Helper function to draw rounded rectangle
+  roundRect(x, y, width, height, radius) {
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + radius, y);
+    this.ctx.lineTo(x + width - radius, y);
+    this.ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    this.ctx.lineTo(x + width, y + height - radius);
+    this.ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    this.ctx.lineTo(x + radius, y + height);
+    this.ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    this.ctx.lineTo(x, y + radius);
+    this.ctx.quadraticCurveTo(x, y, x + radius, y);
+    this.ctx.closePath();
+  }
+
   // Mouse interaction handlers
   onMouseDown(e) {
     const rect = this.canvas.getBoundingClientRect();
+    // Convert screen coordinates to canvas coordinates
+    const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+    const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+    // Check if clicking on an agent
+    for (const agent of this.agents) {
+      const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
+      if (dist <= agent.radius) {
+        // Start dragging this agent
+        this.isDraggingAgent = true;
+        this.draggedAgent = agent;
+        this.dragStartX = x;
+        this.dragStartY = y;
+        this.canvas.style.cursor = 'move';
+        return;
+      }
+    }
+
+    // Otherwise, start canvas panning
     this.isDragging = true;
     this.dragStartX = e.clientX - rect.left - this.offsetX;
     this.dragStartY = e.clientY - rect.top - this.offsetY;
@@ -434,16 +570,31 @@ class AgentCanvas {
   }
 
   onMouseMove(e) {
-    if (!this.isDragging) return;
-
     const rect = this.canvas.getBoundingClientRect();
-    this.offsetX = (e.clientX - rect.left) - this.dragStartX;
-    this.offsetY = (e.clientY - rect.top) - this.dragStartY;
-    this.draw();
+
+    if (this.isDraggingAgent && this.draggedAgent) {
+      // Drag the agent
+      const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+      const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+      this.draggedAgent.x = x;
+      this.draggedAgent.y = y;
+      this.draw();
+      return;
+    }
+
+    if (this.isDragging) {
+      // Pan the canvas
+      this.offsetX = (e.clientX - rect.left) - this.dragStartX;
+      this.offsetY = (e.clientY - rect.top) - this.dragStartY;
+      this.draw();
+    }
   }
 
   onMouseUp() {
     this.isDragging = false;
+    this.isDraggingAgent = false;
+    this.draggedAgent = null;
     this.canvas.style.cursor = 'grab';
   }
 
@@ -457,7 +608,7 @@ class AgentCanvas {
 
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.isDragging) return;
+    if (this.isDragging || this.isDraggingAgent) return;
 
     const rect = this.canvas.getBoundingClientRect();
     // Convert screen coordinates to canvas coordinates
