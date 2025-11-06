@@ -406,6 +406,13 @@ func New() (*Server, error) {
 	s.chatHandler.SetCostTracker(s.costTracker)       // Inject cost tracker
 	s.chatHandler.SetMCPRegistry(s.mcpRegistry)       // Inject MCP registry
 	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Inject workspace store for /workspace commands
+	s.chatHandler.SetShutdownFunc(func() {
+		// Gracefully shut down server and exit
+		log.Println("🛑 Shutting down ori-agent server...")
+		s.Shutdown()
+		log.Println("✅ Server shut down complete. Exiting...")
+		os.Exit(0)
+	})
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 
 	// Create plugin main handler first so we can pass it to init handler

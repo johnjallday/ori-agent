@@ -78,6 +78,11 @@ func (h *Handler) SetWorkspaceStore(ws agentstudio.Store) {
 	h.commandHandler.SetWorkspaceStore(ws)
 }
 
+// SetShutdownFunc sets the shutdown function for the /exit command
+func (h *Handler) SetShutdownFunc(fn func()) {
+	h.commandHandler.SetShutdownFunc(fn)
+}
+
 // findTool searches for a tool by name in both plugins and MCP servers
 func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.Tool, bool) {
 	// First check native plugins
@@ -679,6 +684,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if q == "/tools" {
 		h.commandHandler.HandleToolsList(w, r)
+		return
+	}
+	if q == "/exit" {
+		h.commandHandler.HandleExit(w, r)
 		return
 	}
 	if strings.HasPrefix(q, "/switch") {
