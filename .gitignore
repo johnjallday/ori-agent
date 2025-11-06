@@ -59,6 +59,7 @@ plugins/*/*.so
 dist/
 build/
 release/
+releases/
 
 # Log files
 *.log
