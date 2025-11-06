@@ -72,9 +72,11 @@ type Task struct {
 	Status      TaskStatus             `json:"status"`
 	Result      string                 `json:"result,omitempty"`
 	Error       string                 `json:"error,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	// InputTaskIDs specifies task IDs whose results should be included as input context
+	InputTaskIDs []string   `json:"input_task_ids,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -602,4 +604,44 @@ func (w *Workspace) GetEnabledScheduledTasks() []ScheduledTask {
 		}
 	}
 	return enabled
+}
+
+// GetTaskResults retrieves results from multiple tasks by their IDs
+// Returns a map of task ID to task result, skipping tasks that don't exist or have no result
+func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	results := make(map[string]string)
+	for _, taskID := range taskIDs {
+		for _, task := range w.Tasks {
+			if task.ID == taskID {
+				if task.Result != "" {
+					results[taskID] = task.Result
+				}
+				break
+			}
+		}
+	}
+	return results
+}
+
+// GetInputContext builds a context map that includes results from input tasks
+func (w *Workspace) GetInputContext(task *Task) map[string]interface{} {
+	context := make(map[string]interface{})
+
+	// Copy existing context
+	for k, v := range task.Context {
+		context[k] = v
+	}
+
+	// Add input task results if any
+	if len(task.InputTaskIDs) > 0 {
+		inputResults := w.GetTaskResults(task.InputTaskIDs)
+		if len(inputResults) > 0 {
+			context["input_task_results"] = inputResults
+		}
+	}
+
+	return context
 }

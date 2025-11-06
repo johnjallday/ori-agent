@@ -34,6 +34,23 @@ class AgentCanvas {
     // Canvas appearance
     this.backgroundColor = '#e8e8e8'; // Default background color
 
+    // Expanded task panel state
+    this.expandedTask = null;
+    this.expandedPanelWidth = 0;
+    this.expandedPanelTargetWidth = 400;
+    this.expandedPanelAnimating = false;
+
+    // Expanded agent panel state
+    this.expandedAgent = null;
+    this.expandedAgentPanelWidth = 0;
+    this.expandedAgentPanelTargetWidth = 400;
+    this.expandedAgentPanelAnimating = false;
+
+    // Connection mode state
+    this.connectionMode = false;
+    this.connectionSourceTask = null;
+    this.highlightedAgent = null;
+
     // Callback functions (set by parent)
     this.onAgentClick = null;
     this.onMetricsUpdate = null;
@@ -359,6 +376,21 @@ class AgentCanvas {
 
     // Draw mission OUTSIDE the transform context (so it stays fixed at top)
     this.drawMission();
+
+    // Draw expanded task panel OUTSIDE the transform context (fixed position)
+    if (this.expandedPanelWidth > 0) {
+      this.drawExpandedTaskPanel();
+    }
+
+    // Draw expanded agent panel OUTSIDE the transform context (fixed position)
+    if (this.expandedAgentPanelWidth > 0) {
+      this.drawExpandedAgentPanel();
+    }
+
+    // Draw connection mode indicator
+    if (this.connectionMode) {
+      this.drawConnectionModeIndicator();
+    }
   }
 
   drawConnections() {
@@ -491,6 +523,56 @@ class AgentCanvas {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillText(badge, cardX + 12, cardY + 49);
     });
+
+    // Draw result-to-task connections for tasks with input_task_ids
+    this.drawResultConnections();
+  }
+
+  /**
+   * Draw connections from completed tasks to tasks that use their results
+   */
+  drawResultConnections() {
+    if (!this.tasks || this.tasks.length === 0) return;
+
+    this.tasks.forEach(task => {
+      // Check if this task has input tasks
+      if (!task.input_task_ids || task.input_task_ids.length === 0) return;
+
+      // Draw connection from each input task to this task
+      task.input_task_ids.forEach(inputTaskId => {
+        const inputTask = this.tasks.find(t => t.id === inputTaskId);
+        if (!inputTask || !inputTask.x || !inputTask.y) return;
+
+        // Draw a dashed line with a different color to indicate result flow
+        this.ctx.strokeStyle = '#9b59b6'; // Purple for result connections
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([8, 4]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(inputTask.x, inputTask.y);
+        this.ctx.lineTo(task.x, task.y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Draw an arrow at the midpoint
+        const midX = (inputTask.x + task.x) / 2;
+        const midY = (inputTask.y + task.y) / 2;
+        const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
+
+        // Draw arrow head
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.beginPath();
+        this.ctx.moveTo(midX, midY);
+        this.ctx.lineTo(midX - 10 * Math.cos(angle - Math.PI / 6), midY - 10 * Math.sin(angle - Math.PI / 6));
+        this.ctx.lineTo(midX - 10 * Math.cos(angle + Math.PI / 6), midY - 10 * Math.sin(angle + Math.PI / 6));
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // Draw a small label "RESULT"
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.font = 'bold 9px system-ui';
+        this.ctx.fillText('RESULT', midX + 5, midY - 5);
+      });
+    });
   }
 
   drawParticles() {
@@ -504,6 +586,18 @@ class AgentCanvas {
 
   drawAgents() {
     this.agents.forEach(agent => {
+      // Draw connection mode highlight
+      if (this.connectionMode) {
+        this.ctx.strokeStyle = '#3b82f6';
+        this.ctx.lineWidth = 4;
+        this.ctx.shadowColor = '#3b82f6';
+        this.ctx.shadowBlur = 15;
+        this.ctx.beginPath();
+        this.ctx.arc(agent.x, agent.y, agent.radius + 8, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.shadowColor = 'transparent';
+      }
+
       // Draw pulse effect for active agents
       if (agent.status === 'active') {
         const pulseSize = agent.radius + 10 * Math.sin(agent.pulsePhase);
@@ -626,6 +720,440 @@ class AgentCanvas {
     }
     lines.push(currentLine);
     return lines;
+  }
+
+  drawExpandedTaskPanel() {
+    if (!this.expandedTask) return;
+
+    const panelX = this.width - this.expandedPanelWidth;
+    const panelY = 0;
+    const panelHeight = this.height;
+
+    // Draw panel background with shadow
+    this.ctx.save();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 20;
+    this.ctx.shadowOffsetX = -5;
+    this.ctx.fillRect(panelX, panelY, this.expandedPanelWidth, panelHeight);
+    this.ctx.shadowColor = 'transparent';
+
+    // Only draw content if panel is mostly visible
+    if (this.expandedPanelWidth < 100) {
+      this.ctx.restore();
+      return;
+    }
+
+    const padding = 20;
+    const contentX = panelX + padding;
+    let currentY = padding + 10;
+
+    // Close button
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = 'bold 24px system-ui';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText('×', panelX + this.expandedPanelWidth - padding, currentY + 20);
+    currentY += 40;
+
+    // Task title
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('Task Details', contentX, currentY);
+    currentY += 30;
+
+    // Status badge
+    let statusColor = '#6b7280';
+    if (this.expandedTask.status === 'completed') statusColor = '#10b981';
+    else if (this.expandedTask.status === 'in_progress') statusColor = '#3b82f6';
+    else if (this.expandedTask.status === 'failed') statusColor = '#ef4444';
+    else if (this.expandedTask.status === 'pending') statusColor = '#f59e0b';
+
+    this.ctx.fillStyle = statusColor;
+    this.ctx.font = 'bold 10px system-ui';
+    const statusText = (this.expandedTask.status || 'pending').toUpperCase();
+    const statusWidth = this.ctx.measureText(statusText).width + 12;
+    this.roundRect(contentX, currentY, statusWidth, 18, 9);
+    this.ctx.fill();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(statusText, contentX + 6, currentY + 13);
+    currentY += 30;
+
+    // Description
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Description:', contentX, currentY);
+    currentY += 20;
+
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = '13px system-ui';
+    const descLines = this.wrapText(this.expandedTask.description || '', this.expandedPanelWidth - padding * 2);
+    descLines.forEach(line => {
+      this.ctx.fillText(line, contentX, currentY);
+      currentY += 18;
+    });
+    currentY += 15;
+
+    // Agents
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText(`From: ${this.expandedTask.from}  →  To: ${this.expandedTask.to}`, contentX, currentY);
+    currentY += 25;
+
+    // Separator line
+    this.ctx.strokeStyle = '#e5e7eb';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(contentX, currentY);
+    this.ctx.lineTo(panelX + this.expandedPanelWidth - padding, currentY);
+    this.ctx.stroke();
+    currentY += 20;
+
+    // Result section
+    if (this.expandedTask.result) {
+      this.ctx.fillStyle = '#059669';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('📊 Result', contentX, currentY);
+      currentY += 25;
+
+      // Result background box
+      const resultBoxY = currentY;
+      const resultBoxHeight = Math.min(300, panelHeight - currentY - padding);
+      this.ctx.fillStyle = '#f0fdf4';
+      this.ctx.strokeStyle = '#10b981';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, resultBoxY, this.expandedPanelWidth - padding * 2, resultBoxHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Result text
+      this.ctx.fillStyle = '#065f46';
+      this.ctx.font = '11px monospace';
+      const resultLines = this.wrapText(this.expandedTask.result, this.expandedPanelWidth - padding * 2 - 20);
+      const maxLines = Math.floor((resultBoxHeight - 20) / 14);
+
+      resultLines.slice(0, maxLines).forEach((line, i) => {
+        this.ctx.fillText(line, contentX + 10, resultBoxY + 15 + i * 14);
+      });
+
+      if (resultLines.length > maxLines) {
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = 'italic 10px system-ui';
+        this.ctx.fillText('... (scroll in task list for full result)', contentX + 10, resultBoxY + resultBoxHeight - 10);
+      }
+    } else if (this.expandedTask.error) {
+      this.ctx.fillStyle = '#dc2626';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('❌ Error', contentX, currentY);
+      currentY += 25;
+
+      this.ctx.fillStyle = '#7f1d1d';
+      this.ctx.font = '11px monospace';
+      const errorLines = this.wrapText(this.expandedTask.error, this.expandedPanelWidth - padding * 2);
+      errorLines.slice(0, 10).forEach(line => {
+        this.ctx.fillText(line, contentX, currentY);
+        currentY += 14;
+      });
+    } else {
+      this.ctx.fillStyle = '#9ca3af';
+      this.ctx.font = 'italic 12px system-ui';
+      this.ctx.fillText('No result yet', contentX, currentY);
+    }
+
+    // "Connect Result to Agent" button (only if task has result and is completed)
+    if (this.expandedTask.result && this.expandedTask.status === 'completed') {
+      const buttonY = panelHeight - 80;
+      const buttonWidth = this.expandedPanelWidth - padding * 2;
+      const buttonHeight = 40;
+
+      // Store button bounds for click detection
+      this.connectButtonBounds = {
+        x: panelX + padding,
+        y: buttonY,
+        width: buttonWidth,
+        height: buttonHeight
+      };
+
+      // Draw button
+      this.ctx.fillStyle = this.connectionMode ? '#dc2626' : '#3b82f6';
+      this.ctx.strokeStyle = this.connectionMode ? '#991b1b' : '#1e40af';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, buttonY, buttonWidth, buttonHeight, 8);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Button text
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.textAlign = 'center';
+      const buttonText = this.connectionMode ? '✕ Cancel Connection' : '🔗 Connect Result to Agent';
+      this.ctx.fillText(buttonText, panelX + this.expandedPanelWidth / 2, buttonY + 25);
+      this.ctx.textAlign = 'left';
+    } else {
+      this.connectButtonBounds = null;
+    }
+
+    this.ctx.restore();
+  }
+
+  drawConnectionModeIndicator() {
+    const centerX = this.width / 2;
+    const centerY = 50;
+    const boxWidth = 350;
+    const boxHeight = 60;
+
+    // Draw semi-transparent background
+    this.ctx.fillStyle = 'rgba(59, 130, 246, 0.95)';
+    this.ctx.strokeStyle = '#1e40af';
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 15;
+    this.roundRect(centerX - boxWidth / 2, centerY, boxWidth, boxHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.shadowColor = 'transparent';
+
+    // Draw text
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('🔗 Connection Mode Active', centerX, centerY + 20);
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Click an agent to create a linked task', centerX, centerY + 40);
+  }
+
+  drawExpandedAgentPanel() {
+    if (!this.expandedAgent) return;
+
+    const panelX = this.width - this.expandedAgentPanelWidth;
+    const panelY = 0;
+    const panelHeight = this.height;
+
+    // Draw panel background with shadow
+    this.ctx.save();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 20;
+    this.ctx.shadowOffsetX = -5;
+    this.ctx.fillRect(panelX, panelY, this.expandedAgentPanelWidth, panelHeight);
+    this.ctx.shadowColor = 'transparent';
+
+    // Only draw content if panel is mostly visible
+    if (this.expandedAgentPanelWidth < 100) {
+      this.ctx.restore();
+      return;
+    }
+
+    const padding = 20;
+    const contentX = panelX + padding;
+    let currentY = padding + 10;
+
+    // Close button
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = 'bold 24px system-ui';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText('×', panelX + this.expandedAgentPanelWidth - padding, currentY + 20);
+    currentY += 40;
+
+    // Agent title
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('Agent Details', contentX, currentY);
+    currentY += 30;
+
+    // Status badge
+    let statusColor = '#6b7280';
+    if (this.expandedAgent.status === 'active') statusColor = '#10b981';
+    else if (this.expandedAgent.status === 'busy') statusColor = '#f59e0b';
+
+    this.ctx.fillStyle = statusColor;
+    this.ctx.font = 'bold 10px system-ui';
+    const statusText = (this.expandedAgent.status || 'idle').toUpperCase();
+    const statusWidth = this.ctx.measureText(statusText).width + 12;
+    this.roundRect(contentX, currentY, statusWidth, 18, 9);
+    this.ctx.fill();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(statusText, contentX + 6, currentY + 13);
+    currentY += 30;
+
+    // Agent name
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Name:', contentX, currentY);
+    currentY += 18;
+
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = 'bold 14px system-ui';
+    this.ctx.fillText(this.expandedAgent.name, contentX, currentY);
+    currentY += 25;
+
+    // Agent color indicator
+    this.ctx.fillStyle = this.expandedAgent.color;
+    this.roundRect(contentX, currentY, 30, 30, 15);
+    this.ctx.fill();
+    currentY += 40;
+
+    // Separator line
+    this.ctx.strokeStyle = '#e5e7eb';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(contentX, currentY);
+    this.ctx.lineTo(panelX + this.expandedAgentPanelWidth - padding, currentY);
+    this.ctx.stroke();
+    currentY += 20;
+
+    // Enabled Tools section
+    if (this.expandedAgent.config && this.expandedAgent.config.enabled_plugins) {
+      this.ctx.fillStyle = '#7c3aed';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('🔧 Enabled Tools', contentX, currentY);
+      currentY += 20;
+
+      const plugins = this.expandedAgent.config.enabled_plugins;
+      if (plugins.length > 0) {
+        plugins.forEach(plugin => {
+          // Plugin badge
+          this.ctx.fillStyle = '#ede9fe';
+          this.ctx.strokeStyle = '#7c3aed';
+          this.ctx.lineWidth = 1;
+          const pluginText = plugin.length > 20 ? plugin.substring(0, 17) + '...' : plugin;
+          const badgeWidth = this.ctx.measureText(pluginText).width + 16;
+          this.roundRect(contentX, currentY, badgeWidth, 22, 11);
+          this.ctx.fill();
+          this.ctx.stroke();
+
+          this.ctx.fillStyle = '#5b21b6';
+          this.ctx.font = '11px system-ui';
+          this.ctx.fillText(pluginText, contentX + 8, currentY + 15);
+
+          currentY += 28;
+        });
+        currentY += 10;
+      } else {
+        this.ctx.fillStyle = '#9ca3af';
+        this.ctx.font = 'italic 11px system-ui';
+        this.ctx.fillText('No tools enabled', contentX, currentY);
+        currentY += 25;
+      }
+
+      // Separator
+      this.ctx.strokeStyle = '#e5e7eb';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(contentX, currentY);
+      this.ctx.lineTo(panelX + this.expandedAgentPanelWidth - padding, currentY);
+      this.ctx.stroke();
+      currentY += 20;
+    }
+
+    // System Prompt section
+    if (this.expandedAgent.config && this.expandedAgent.config.system_prompt) {
+      this.ctx.fillStyle = '#ea580c';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('💬 System Prompt', contentX, currentY);
+      currentY += 20;
+
+      // System prompt box
+      const promptBoxY = currentY;
+      const promptBoxHeight = 120;
+      this.ctx.fillStyle = '#fff7ed';
+      this.ctx.strokeStyle = '#ea580c';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, promptBoxY, this.expandedAgentPanelWidth - padding * 2, promptBoxHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // System prompt text
+      this.ctx.fillStyle = '#7c2d12';
+      this.ctx.font = '10px system-ui';
+      const promptLines = this.wrapText(this.expandedAgent.config.system_prompt, this.expandedAgentPanelWidth - padding * 2 - 20);
+      const maxPromptLines = 8;
+
+      promptLines.slice(0, maxPromptLines).forEach((line, i) => {
+        this.ctx.fillText(line, contentX + 10, promptBoxY + 15 + i * 13);
+      });
+
+      if (promptLines.length > maxPromptLines) {
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = 'italic 9px system-ui';
+        this.ctx.fillText('... (view agent settings for full prompt)', contentX + 10, promptBoxY + promptBoxHeight - 10);
+      }
+
+      currentY += promptBoxHeight + 15;
+
+      // Separator
+      this.ctx.strokeStyle = '#e5e7eb';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(contentX, currentY);
+      this.ctx.lineTo(panelX + this.expandedAgentPanelWidth - padding, currentY);
+      this.ctx.stroke();
+      currentY += 20;
+    }
+
+    // Task count
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Active Tasks:', contentX, currentY);
+    currentY += 18;
+
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = 'bold 14px system-ui';
+    const taskCount = this.expandedAgent.tasks ? this.expandedAgent.tasks.length : 0;
+    this.ctx.fillText(`${taskCount} task${taskCount !== 1 ? 's' : ''}`, contentX, currentY);
+    currentY += 25;
+
+    // Tasks list
+    if (taskCount > 0) {
+      currentY += 10;
+      this.ctx.fillStyle = '#059669';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('📋 Tasks', contentX, currentY);
+      currentY += 20;
+
+      // List tasks
+      const maxTasksToShow = 5;
+      const tasksToShow = this.expandedAgent.tasks.slice(0, maxTasksToShow);
+
+      tasksToShow.forEach((taskId, index) => {
+        // Find the task details
+        const task = this.tasks.find(t => t.id === taskId);
+        if (task) {
+          // Task background
+          const taskBoxY = currentY;
+          const taskBoxHeight = 45;
+          this.ctx.fillStyle = '#f0fdf4';
+          this.ctx.strokeStyle = '#10b981';
+          this.ctx.lineWidth = 1;
+          this.roundRect(contentX, taskBoxY, this.expandedAgentPanelWidth - padding * 2, taskBoxHeight, 6);
+          this.ctx.fill();
+          this.ctx.stroke();
+
+          // Task description (truncated)
+          this.ctx.fillStyle = '#065f46';
+          this.ctx.font = '11px system-ui';
+          const desc = task.description.length > 35 ? task.description.substring(0, 32) + '...' : task.description;
+          this.ctx.fillText(desc, contentX + 8, taskBoxY + 15);
+
+          // Task status
+          this.ctx.fillStyle = '#6b7280';
+          this.ctx.font = '9px system-ui';
+          this.ctx.fillText(`Status: ${task.status}`, contentX + 8, taskBoxY + 32);
+
+          currentY += taskBoxHeight + 8;
+        }
+      });
+
+      if (this.expandedAgent.tasks.length > maxTasksToShow) {
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = 'italic 10px system-ui';
+        this.ctx.fillText(`... and ${this.expandedAgent.tasks.length - maxTasksToShow} more`, contentX, currentY + 5);
+      }
+    }
+
+    this.ctx.restore();
   }
 
   // Helper function to draw rounded rectangle
@@ -753,6 +1281,58 @@ class AgentCanvas {
     if (this.isDragging || this.isDraggingAgent || this.isDraggingTask) return;
 
     const rect = this.canvas.getBoundingClientRect();
+    // Screen coordinates (for UI elements like the panel)
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // Check if click is on close button of expanded agent panel
+    if (this.expandedAgentPanelWidth > 0) {
+      const panelX = this.width - this.expandedAgentPanelWidth;
+      const closeButtonX = panelX + this.expandedAgentPanelWidth - 40;
+      const closeButtonY = 30;
+      const closeButtonSize = 40;
+
+      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
+          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+        this.closeAgentPanel();
+        return;
+      }
+
+      // If clicking anywhere on the agent panel, don't process other clicks
+      if (screenX >= panelX) {
+        return;
+      }
+    }
+
+    // Check if click is on close button of expanded task panel
+    if (this.expandedPanelWidth > 0) {
+      const panelX = this.width - this.expandedPanelWidth;
+      const closeButtonX = panelX + this.expandedPanelWidth - 40;
+      const closeButtonY = 30;
+      const closeButtonSize = 40;
+
+      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
+          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+        this.closeTaskPanel();
+        return;
+      }
+
+      // Check if click is on "Connect Result to Agent" button
+      if (this.connectButtonBounds) {
+        const btn = this.connectButtonBounds;
+        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+            screenY >= btn.y && screenY <= btn.y + btn.height) {
+          this.toggleConnectionMode();
+          return;
+        }
+      }
+
+      // If clicking anywhere on the panel, don't process other clicks
+      if (screenX >= panelX) {
+        return;
+      }
+    }
+
     // Convert screen coordinates to canvas coordinates
     const x = (e.clientX - rect.left - this.offsetX) / this.scale;
     const y = (e.clientY - rect.top - this.offsetY) / this.scale;
@@ -768,10 +1348,8 @@ class AgentCanvas {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
-          // Task clicked
-          if (this.onTaskClick) {
-            this.onTaskClick(task);
-          }
+          // Task clicked - expand/collapse panel
+          this.toggleTaskPanel(task);
           return;
         }
       }
@@ -782,11 +1360,215 @@ class AgentCanvas {
       const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
       if (dist <= agent.radius) {
         // Agent clicked
-        if (this.onAgentClick) {
-          this.onAgentClick(agent);
+        if (this.connectionMode && this.connectionSourceTask) {
+          // In connection mode - create task with result linked
+          this.createConnectedTask(agent);
+          return;
+        } else {
+          // Toggle agent panel
+          this.toggleAgentPanel(agent);
         }
         return;
       }
+    }
+
+    // Click on empty space - close expanded panels
+    if (this.expandedTask) {
+      this.closeTaskPanel();
+    }
+    if (this.expandedAgent) {
+      this.closeAgentPanel();
+    }
+  }
+
+  toggleTaskPanel(task) {
+    if (this.expandedTask && this.expandedTask.id === task.id) {
+      // Clicking the same task - close panel
+      this.closeTaskPanel();
+    } else {
+      // Expand panel for this task
+      this.expandedTask = task;
+      this.expandedPanelAnimating = true;
+      this.animatePanel(true);
+    }
+  }
+
+  closeTaskPanel() {
+    this.expandedPanelAnimating = true;
+    this.animatePanel(false);
+  }
+
+  animatePanel(expanding) {
+    const animate = () => {
+      const speed = 30; // pixels per frame
+
+      if (expanding) {
+        this.expandedPanelWidth = Math.min(
+          this.expandedPanelWidth + speed,
+          this.expandedPanelTargetWidth
+        );
+
+        if (this.expandedPanelWidth >= this.expandedPanelTargetWidth) {
+          this.expandedPanelAnimating = false;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      } else {
+        this.expandedPanelWidth = Math.max(this.expandedPanelWidth - speed, 0);
+
+        if (this.expandedPanelWidth <= 0) {
+          this.expandedPanelAnimating = false;
+          this.expandedTask = null;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      }
+    };
+
+    animate();
+  }
+
+  async toggleAgentPanel(agent) {
+    // Close task panel if open
+    if (this.expandedTask) {
+      this.closeTaskPanel();
+    }
+
+    if (this.expandedAgent && this.expandedAgent.name === agent.name) {
+      // Clicking the same agent - close panel
+      this.closeAgentPanel();
+    } else {
+      // Fetch agent configuration before expanding
+      try {
+        const configResponse = await fetch(`/api/agents/${agent.name}`);
+        if (configResponse.ok) {
+          const agentConfig = await configResponse.json();
+          // Merge config data with agent
+          this.expandedAgent = {
+            ...agent,
+            config: agentConfig
+          };
+        } else {
+          // Use agent without config if fetch fails
+          this.expandedAgent = agent;
+        }
+      } catch (error) {
+        console.warn('Failed to fetch agent config:', error);
+        this.expandedAgent = agent;
+      }
+
+      this.expandedAgentPanelAnimating = true;
+      this.animateAgentPanel(true);
+    }
+  }
+
+  closeAgentPanel() {
+    this.expandedAgentPanelAnimating = true;
+    this.animateAgentPanel(false);
+  }
+
+  animateAgentPanel(expanding) {
+    const animate = () => {
+      const speed = 30; // pixels per frame
+
+      if (expanding) {
+        this.expandedAgentPanelWidth = Math.min(
+          this.expandedAgentPanelWidth + speed,
+          this.expandedAgentPanelTargetWidth
+        );
+
+        if (this.expandedAgentPanelWidth >= this.expandedAgentPanelTargetWidth) {
+          this.expandedAgentPanelAnimating = false;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      } else {
+        this.expandedAgentPanelWidth = Math.max(this.expandedAgentPanelWidth - speed, 0);
+
+        if (this.expandedAgentPanelWidth <= 0) {
+          this.expandedAgentPanelAnimating = false;
+          this.expandedAgent = null;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      }
+    };
+
+    animate();
+  }
+
+  toggleConnectionMode() {
+    if (this.connectionMode) {
+      // Cancel connection mode
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+    } else {
+      // Enter connection mode
+      this.connectionMode = true;
+      this.connectionSourceTask = this.expandedTask;
+      this.canvas.style.cursor = 'crosshair';
+    }
+    this.draw();
+  }
+
+  async createConnectedTask(agent) {
+    // Prompt for task description
+    const description = prompt(
+      `Create task for ${agent.name}\n\nThe result from "${this.connectionSourceTask.description}" will be provided as input.\n\nEnter task description:`,
+      `Process the result from the previous task`
+    );
+
+    if (!description) {
+      // User cancelled
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+      return;
+    }
+
+    // Create task via API
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: this.studioId,
+          from: this.connectionSourceTask.to, // From the agent that completed the source task
+          to: agent.name,
+          description: description,
+          input_task_ids: [this.connectionSourceTask.id],
+          priority: 0,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create task');
+      }
+
+      const result = await response.json();
+      console.log('✅ Connected task created:', result);
+
+      // Exit connection mode
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+
+      // Reload studio data to show new task
+      await this.init();
+
+      // Show success message
+      alert(`✅ Task created!\n\n${agent.name} will process the result from the previous task.`);
+    } catch (error) {
+      console.error('❌ Error creating connected task:', error);
+      alert('Failed to create task: ' + error.message);
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
     }
   }
 

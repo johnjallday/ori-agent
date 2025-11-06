@@ -674,6 +674,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
+	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
 	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
