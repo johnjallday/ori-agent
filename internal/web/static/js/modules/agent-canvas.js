@@ -34,6 +34,12 @@ class AgentCanvas {
     // Canvas appearance
     this.backgroundColor = '#e8e8e8'; // Default background color
 
+    // Expanded task panel state
+    this.expandedTask = null;
+    this.expandedPanelWidth = 0;
+    this.expandedPanelTargetWidth = 400;
+    this.expandedPanelAnimating = false;
+
     // Callback functions (set by parent)
     this.onAgentClick = null;
     this.onMetricsUpdate = null;
@@ -359,6 +365,11 @@ class AgentCanvas {
 
     // Draw mission OUTSIDE the transform context (so it stays fixed at top)
     this.drawMission();
+
+    // Draw expanded task panel OUTSIDE the transform context (fixed position)
+    if (this.expandedPanelWidth > 0) {
+      this.drawExpandedTaskPanel();
+    }
   }
 
   drawConnections() {
@@ -678,6 +689,147 @@ class AgentCanvas {
     return lines;
   }
 
+  drawExpandedTaskPanel() {
+    if (!this.expandedTask) return;
+
+    const panelX = this.width - this.expandedPanelWidth;
+    const panelY = 0;
+    const panelHeight = this.height;
+
+    // Draw panel background with shadow
+    this.ctx.save();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 20;
+    this.ctx.shadowOffsetX = -5;
+    this.ctx.fillRect(panelX, panelY, this.expandedPanelWidth, panelHeight);
+    this.ctx.shadowColor = 'transparent';
+
+    // Only draw content if panel is mostly visible
+    if (this.expandedPanelWidth < 100) {
+      this.ctx.restore();
+      return;
+    }
+
+    const padding = 20;
+    const contentX = panelX + padding;
+    let currentY = padding + 10;
+
+    // Close button
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = 'bold 24px system-ui';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText('×', panelX + this.expandedPanelWidth - padding, currentY + 20);
+    currentY += 40;
+
+    // Task title
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('Task Details', contentX, currentY);
+    currentY += 30;
+
+    // Status badge
+    let statusColor = '#6b7280';
+    if (this.expandedTask.status === 'completed') statusColor = '#10b981';
+    else if (this.expandedTask.status === 'in_progress') statusColor = '#3b82f6';
+    else if (this.expandedTask.status === 'failed') statusColor = '#ef4444';
+    else if (this.expandedTask.status === 'pending') statusColor = '#f59e0b';
+
+    this.ctx.fillStyle = statusColor;
+    this.ctx.font = 'bold 10px system-ui';
+    const statusText = (this.expandedTask.status || 'pending').toUpperCase();
+    const statusWidth = this.ctx.measureText(statusText).width + 12;
+    this.roundRect(contentX, currentY, statusWidth, 18, 9);
+    this.ctx.fill();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(statusText, contentX + 6, currentY + 13);
+    currentY += 30;
+
+    // Description
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Description:', contentX, currentY);
+    currentY += 20;
+
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.font = '13px system-ui';
+    const descLines = this.wrapText(this.expandedTask.description || '', this.expandedPanelWidth - padding * 2);
+    descLines.forEach(line => {
+      this.ctx.fillText(line, contentX, currentY);
+      currentY += 18;
+    });
+    currentY += 15;
+
+    // Agents
+    this.ctx.fillStyle = '#4b5563';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText(`From: ${this.expandedTask.from}  →  To: ${this.expandedTask.to}`, contentX, currentY);
+    currentY += 25;
+
+    // Separator line
+    this.ctx.strokeStyle = '#e5e7eb';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(contentX, currentY);
+    this.ctx.lineTo(panelX + this.expandedPanelWidth - padding, currentY);
+    this.ctx.stroke();
+    currentY += 20;
+
+    // Result section
+    if (this.expandedTask.result) {
+      this.ctx.fillStyle = '#059669';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('📊 Result', contentX, currentY);
+      currentY += 25;
+
+      // Result background box
+      const resultBoxY = currentY;
+      const resultBoxHeight = Math.min(300, panelHeight - currentY - padding);
+      this.ctx.fillStyle = '#f0fdf4';
+      this.ctx.strokeStyle = '#10b981';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, resultBoxY, this.expandedPanelWidth - padding * 2, resultBoxHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Result text
+      this.ctx.fillStyle = '#065f46';
+      this.ctx.font = '11px monospace';
+      const resultLines = this.wrapText(this.expandedTask.result, this.expandedPanelWidth - padding * 2 - 20);
+      const maxLines = Math.floor((resultBoxHeight - 20) / 14);
+
+      resultLines.slice(0, maxLines).forEach((line, i) => {
+        this.ctx.fillText(line, contentX + 10, resultBoxY + 15 + i * 14);
+      });
+
+      if (resultLines.length > maxLines) {
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = 'italic 10px system-ui';
+        this.ctx.fillText('... (scroll in task list for full result)', contentX + 10, resultBoxY + resultBoxHeight - 10);
+      }
+    } else if (this.expandedTask.error) {
+      this.ctx.fillStyle = '#dc2626';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('❌ Error', contentX, currentY);
+      currentY += 25;
+
+      this.ctx.fillStyle = '#7f1d1d';
+      this.ctx.font = '11px monospace';
+      const errorLines = this.wrapText(this.expandedTask.error, this.expandedPanelWidth - padding * 2);
+      errorLines.slice(0, 10).forEach(line => {
+        this.ctx.fillText(line, contentX, currentY);
+        currentY += 14;
+      });
+    } else {
+      this.ctx.fillStyle = '#9ca3af';
+      this.ctx.font = 'italic 12px system-ui';
+      this.ctx.fillText('No result yet', contentX, currentY);
+    }
+
+    this.ctx.restore();
+  }
+
   // Helper function to draw rounded rectangle
   roundRect(x, y, width, height, radius) {
     this.ctx.beginPath();
@@ -803,6 +955,29 @@ class AgentCanvas {
     if (this.isDragging || this.isDraggingAgent || this.isDraggingTask) return;
 
     const rect = this.canvas.getBoundingClientRect();
+    // Screen coordinates (for UI elements like the panel)
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // Check if click is on close button of expanded panel
+    if (this.expandedPanelWidth > 0) {
+      const panelX = this.width - this.expandedPanelWidth;
+      const closeButtonX = panelX + this.expandedPanelWidth - 40;
+      const closeButtonY = 30;
+      const closeButtonSize = 40;
+
+      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
+          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+        this.closeTaskPanel();
+        return;
+      }
+
+      // If clicking anywhere on the panel, don't process other clicks
+      if (screenX >= panelX) {
+        return;
+      }
+    }
+
     // Convert screen coordinates to canvas coordinates
     const x = (e.clientX - rect.left - this.offsetX) / this.scale;
     const y = (e.clientY - rect.top - this.offsetY) / this.scale;
@@ -818,10 +993,8 @@ class AgentCanvas {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
-          // Task clicked
-          if (this.onTaskClick) {
-            this.onTaskClick(task);
-          }
+          // Task clicked - expand/collapse panel
+          this.toggleTaskPanel(task);
           return;
         }
       }
@@ -838,6 +1011,58 @@ class AgentCanvas {
         return;
       }
     }
+
+    // Click on empty space - close expanded panel
+    if (this.expandedTask) {
+      this.closeTaskPanel();
+    }
+  }
+
+  toggleTaskPanel(task) {
+    if (this.expandedTask && this.expandedTask.id === task.id) {
+      // Clicking the same task - close panel
+      this.closeTaskPanel();
+    } else {
+      // Expand panel for this task
+      this.expandedTask = task;
+      this.expandedPanelAnimating = true;
+      this.animatePanel(true);
+    }
+  }
+
+  closeTaskPanel() {
+    this.expandedPanelAnimating = true;
+    this.animatePanel(false);
+  }
+
+  animatePanel(expanding) {
+    const animate = () => {
+      const speed = 30; // pixels per frame
+
+      if (expanding) {
+        this.expandedPanelWidth = Math.min(
+          this.expandedPanelWidth + speed,
+          this.expandedPanelTargetWidth
+        );
+
+        if (this.expandedPanelWidth >= this.expandedPanelTargetWidth) {
+          this.expandedPanelAnimating = false;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      } else {
+        this.expandedPanelWidth = Math.max(this.expandedPanelWidth - speed, 0);
+
+        if (this.expandedPanelWidth <= 0) {
+          this.expandedPanelAnimating = false;
+          this.expandedTask = null;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      }
+    };
+
+    animate();
   }
 
   updateMetrics() {
