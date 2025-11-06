@@ -1,11 +1,11 @@
-# Release Notes - v0.0.9
+# Release Notes - v0.0.10
 
 **Release Date:** 2025-11-06
-**Previous Version:** v0.0.8
+**Previous Version:** v0.0.9
 
 ## Changes
 
-- 0.0.8 (409b1ff)
+- No changes since last release
 
 ## Installation
 
