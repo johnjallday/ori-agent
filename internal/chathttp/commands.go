@@ -373,8 +373,8 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 
 **Direct Tool Execution:**
 The **/tool** command allows you to call tools directly without LLM decision-making:
-- Format: `/tool <tool_name> {"key": "value"}`
-- Example: `/tool math {"operation": "add", "a": 5, "b": 3}`
+- Format: /tool <tool_name> {"key": "value"}
+- Example: /tool math {"operation": "add", "a": 5, "b": 3}
 - Benefits: Faster execution, no API costs, deterministic results
 
 **Tips:**
