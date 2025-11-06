@@ -545,10 +545,17 @@ class WorkspaceDashboard {
     const statusBadge = this.getStatusBadgeClass(task.status);
     const statusIcon = this.getStatusIcon(task.status);
     const canExecute = task.status === 'pending' || task.status === 'assigned';
+    const hasResult = task.result && task.status === 'completed';
+    const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
 
     return `
-      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}">
-        <div class="d-flex justify-content-between align-items-start">
+      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer;" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
+        ${hasResult ? `
+          <span class="position-absolute top-0 end-0 m-2" title="This task has a result that can be used in other tasks" style="cursor: help;">
+            📊
+          </span>
+        ` : ''}
+        <div class="d-flex justify-content-between align-items-start" onclick="event.stopPropagation();">
           <div class="flex-grow-1">
             <div class="d-flex align-items-center gap-2 mb-2">
               ${statusIcon}
@@ -558,6 +565,7 @@ class WorkspaceDashboard {
               <span>From: ${this.escapeHtml(task.from)}</span>
               <span>To: ${this.escapeHtml(task.to)}</span>
               ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
+              ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
             </div>
             ${task.result ? `
               <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
@@ -984,6 +992,41 @@ class WorkspaceDashboard {
       return;
     }
 
+    // Get input tasks if any
+    let inputTasksHTML = '';
+    if (task.input_task_ids && task.input_task_ids.length > 0) {
+      const inputTasks = task.input_task_ids.map(id => this.data.tasks.find(t => t.id === id)).filter(Boolean);
+      if (inputTasks.length > 0) {
+        inputTasksHTML = `
+          <h6>Input Tasks:</h6>
+          <div class="mb-3">
+            ${inputTasks.map(it => `
+              <div class="card mb-2" style="background-color: var(--bg-secondary);">
+                <div class="card-body py-2">
+                  <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                      <strong>${this.escapeHtml(it.description.substring(0, 60))}${it.description.length > 60 ? '...' : ''}</strong>
+                      <br>
+                      <small class="text-muted">${it.from} → ${it.to}</small>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" onclick="workspaceDashboard.showTaskDetails('${it.id}')">
+                      View
+                    </button>
+                  </div>
+                  ${it.result ? `
+                    <div class="mt-2">
+                      <small class="text-muted">Result:</small>
+                      <pre style="font-size: 0.75rem; max-height: 100px; overflow-y: auto; background: var(--surface-color); padding: 8px; border-radius: 4px;">${this.escapeHtml(it.result.substring(0, 200))}${it.result.length > 200 ? '...' : ''}</pre>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    }
+
     // Create modal HTML
     const modalHTML = `
       <div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true">
@@ -1009,9 +1052,17 @@ class WorkspaceDashboard {
                 ${task.completed_at ? `<li><strong>Completed:</strong> ${new Date(task.completed_at).toLocaleString()}</li>` : ''}
               </ul>
 
+              ${inputTasksHTML}
+
               ${task.result ? `
                 <h6>Result:</h6>
                 <div class="alert alert-success">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>Task Output:</strong>
+                    <button class="btn btn-sm btn-outline-success" onclick="navigator.clipboard.writeText(\`${this.escapeHtml(task.result).replace(/`/g, '\\`')}\`).then(() => alert('Result copied to clipboard!'))">
+                      📋 Copy
+                    </button>
+                  </div>
                   <pre style="white-space: pre-wrap; margin-bottom: 0; max-height: 400px; overflow-y: auto;">${this.escapeHtml(task.result)}</pre>
                 </div>
               ` : ''}
@@ -1024,6 +1075,11 @@ class WorkspaceDashboard {
               ` : ''}
             </div>
             <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              ${task.result && task.status === 'completed' ? `
+                <button type="button" class="btn btn-primary" onclick="workspaceDashboard.useTaskResultInNewTask('${task.id}')" data-bs-dismiss="modal">
+                  ✨ Use Result in New Task
+                </button>
+              ` : ''}
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
           </div>
@@ -1048,6 +1104,35 @@ class WorkspaceDashboard {
     document.getElementById('taskDetailsModal').addEventListener('hidden.bs.modal', function () {
       this.remove();
     });
+  }
+
+  /**
+   * Pre-fill task creation form with selected task result as input
+   */
+  useTaskResultInNewTask(taskId) {
+    // Show the create task form
+    this.showCreateTaskForm();
+
+    // Pre-select the task in the input tasks dropdown
+    setTimeout(() => {
+      const inputTasksSelect = document.getElementById('task-input-tasks');
+      if (inputTasksSelect) {
+        // Find and select the option with matching task ID
+        for (let option of inputTasksSelect.options) {
+          if (option.value === taskId) {
+            option.selected = true;
+            break;
+          }
+        }
+
+        // Add a helpful placeholder text
+        const descriptionField = document.getElementById('task-description');
+        if (descriptionField && !descriptionField.value) {
+          descriptionField.placeholder = 'Describe how to process the result from the selected task...';
+          descriptionField.focus();
+        }
+      }
+    }, 100);
   }
 
   /**
