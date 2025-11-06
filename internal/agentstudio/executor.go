@@ -186,6 +186,13 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 	log.Printf("▶️  Executing task %s for agent %s: %s", task.ID, task.To, task.Description)
 
+	// Inject input task results into task context if InputTaskIDs are specified
+	if len(task.InputTaskIDs) > 0 {
+		enrichedContext := ws.GetInputContext(&task)
+		task.Context = enrichedContext
+		log.Printf("📥 Injected %d input task results into task %s context", len(task.InputTaskIDs), task.ID)
+	}
+
 	// Update task status to in_progress
 	task.Status = TaskStatusInProgress
 	now := time.Now()

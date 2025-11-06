@@ -304,13 +304,23 @@ class WorkspaceDashboard {
                     <label class="form-label small" style="color: var(--text-primary);">Task Description</label>
                     <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="What should this agent do?" required></textarea>
                   </div>
-                  <div class="mb-3">
+                  <div class="mb-2">
                     <label class="form-label small" style="color: var(--text-primary);">Priority</label>
                     <select id="task-priority" class="form-control form-control-sm">
                       <option value="0">Normal</option>
                       <option value="1">High</option>
                       <option value="2">Urgent</option>
                     </select>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label small" style="color: var(--text-primary);">
+                      Use Results From Previous Tasks (Optional)
+                      <span class="text-muted ms-1" title="Select completed tasks whose results will be provided as input to this task">ℹ️</span>
+                    </label>
+                    <select id="task-input-tasks" class="form-control form-control-sm" multiple size="3">
+                      ${this.renderCompletedTaskOptions()}
+                    </select>
+                    <small class="text-muted">Hold Ctrl/Cmd to select multiple tasks</small>
                   </div>
                   <div class="d-flex gap-2">
                     <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
@@ -594,6 +604,25 @@ class WorkspaceDashboard {
   }
 
   /**
+   * Render options for completed tasks that can be used as inputs
+   */
+  renderCompletedTaskOptions() {
+    const tasks = this.data.tasks || [];
+    const completedTasks = tasks.filter(task => task.status === 'completed' && task.result);
+
+    if (completedTasks.length === 0) {
+      return '<option disabled>No completed tasks with results available</option>';
+    }
+
+    return completedTasks.map(task => {
+      const truncatedDesc = task.description.length > 50
+        ? task.description.substring(0, 47) + '...'
+        : task.description;
+      return `<option value="${task.id}">${this.escapeHtml(truncatedDesc)} (${task.from} → ${task.to})</option>`;
+    }).join('');
+  }
+
+  /**
    * Render agent list
    */
   renderAgentList() {
@@ -825,9 +854,27 @@ class WorkspaceDashboard {
     const description = document.getElementById('task-description').value;
     const priority = parseInt(document.getElementById('task-priority').value) || 0;
 
+    // Get selected input task IDs
+    const inputTasksSelect = document.getElementById('task-input-tasks');
+    const inputTaskIds = Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value);
+
     if (!from || !to || !description) {
       alert('Please fill in all required fields');
       return;
+    }
+
+    // Build request body
+    const requestBody = {
+      workspace_id: this.workspaceId,
+      from: from,
+      to: to,
+      description: description,
+      priority: priority,
+    };
+
+    // Add input_task_ids if any are selected
+    if (inputTaskIds.length > 0) {
+      requestBody.input_task_ids = inputTaskIds;
     }
 
     try {
@@ -836,13 +883,7 @@ class WorkspaceDashboard {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          workspace_id: this.workspaceId,
-          from: from,
-          to: to,
-          description: description,
-          priority: priority,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {

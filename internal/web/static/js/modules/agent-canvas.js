@@ -491,6 +491,56 @@ class AgentCanvas {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillText(badge, cardX + 12, cardY + 49);
     });
+
+    // Draw result-to-task connections for tasks with input_task_ids
+    this.drawResultConnections();
+  }
+
+  /**
+   * Draw connections from completed tasks to tasks that use their results
+   */
+  drawResultConnections() {
+    if (!this.tasks || this.tasks.length === 0) return;
+
+    this.tasks.forEach(task => {
+      // Check if this task has input tasks
+      if (!task.input_task_ids || task.input_task_ids.length === 0) return;
+
+      // Draw connection from each input task to this task
+      task.input_task_ids.forEach(inputTaskId => {
+        const inputTask = this.tasks.find(t => t.id === inputTaskId);
+        if (!inputTask || !inputTask.x || !inputTask.y) return;
+
+        // Draw a dashed line with a different color to indicate result flow
+        this.ctx.strokeStyle = '#9b59b6'; // Purple for result connections
+        this.ctx.lineWidth = 2;
+        this.ctx.setLineDash([8, 4]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(inputTask.x, inputTask.y);
+        this.ctx.lineTo(task.x, task.y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Draw an arrow at the midpoint
+        const midX = (inputTask.x + task.x) / 2;
+        const midY = (inputTask.y + task.y) / 2;
+        const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
+
+        // Draw arrow head
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.beginPath();
+        this.ctx.moveTo(midX, midY);
+        this.ctx.lineTo(midX - 10 * Math.cos(angle - Math.PI / 6), midY - 10 * Math.sin(angle - Math.PI / 6));
+        this.ctx.lineTo(midX - 10 * Math.cos(angle + Math.PI / 6), midY - 10 * Math.sin(angle + Math.PI / 6));
+        this.ctx.closePath();
+        this.ctx.fill();
+
+        // Draw a small label "RESULT"
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.font = 'bold 9px system-ui';
+        this.ctx.fillText('RESULT', midX + 5, midY - 5);
+      });
+    });
   }
 
   drawParticles() {

@@ -113,12 +113,36 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 
 	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", task.Description))
 
-	if len(task.Context) > 0 {
-		prompt.WriteString("## Context\n\n")
-		for key, value := range task.Context {
-			prompt.WriteString(fmt.Sprintf("- **%s**: %v\n", key, value))
+	// Handle input task results specially for better formatting
+	inputTaskResults, hasInputResults := task.Context["input_task_results"]
+	if hasInputResults {
+		prompt.WriteString("## Input from Previous Tasks\n\n")
+		if resultsMap, ok := inputTaskResults.(map[string]string); ok {
+			for taskID, result := range resultsMap {
+				prompt.WriteString(fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result))
+			}
 		}
-		prompt.WriteString("\n")
+	}
+
+	// Include other context fields
+	if len(task.Context) > 0 {
+		hasOtherContext := false
+		for key := range task.Context {
+			if key != "input_task_results" {
+				hasOtherContext = true
+				break
+			}
+		}
+
+		if hasOtherContext {
+			prompt.WriteString("## Additional Context\n\n")
+			for key, value := range task.Context {
+				if key != "input_task_results" {
+					prompt.WriteString(fmt.Sprintf("- **%s**: %v\n", key, value))
+				}
+			}
+			prompt.WriteString("\n")
+		}
 	}
 
 	if task.Timeout > 0 {

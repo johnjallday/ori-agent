@@ -892,6 +892,71 @@ func (h *Handler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// TaskResultsHandler retrieves results from one or more tasks
+// GET /api/orchestration/task-results?task_ids=id1,id2,id3
+func (h *Handler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get task IDs from query parameter
+	taskIDsStr := r.URL.Query().Get("task_ids")
+	if taskIDsStr == "" {
+		http.Error(w, "task_ids parameter required (comma-separated)", http.StatusBadRequest)
+		return
+	}
+
+	// Split comma-separated task IDs
+	taskIDs := strings.Split(taskIDsStr, ",")
+	for i := range taskIDs {
+		taskIDs[i] = strings.TrimSpace(taskIDs[i])
+	}
+
+	// We need to find the workspace that contains these tasks
+	// For simplicity, we'll search through all workspaces
+	workspaces, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to retrieve workspaces", http.StatusInternalServerError)
+		return
+	}
+
+	// Collect results from all workspaces
+	allResults := make(map[string]interface{})
+	for _, ws := range workspaces {
+		results := ws.GetTaskResults(taskIDs)
+		for taskID, result := range results {
+			// Get full task info
+			task, err := ws.GetTask(taskID)
+			if err == nil {
+				allResults[taskID] = map[string]interface{}{
+					"task_id":     task.ID,
+					"description": task.Description,
+					"status":      task.Status,
+					"result":      result,
+					"from":        task.From,
+					"to":          task.To,
+					"completed_at": task.CompletedAt,
+				}
+			} else {
+				allResults[taskID] = map[string]interface{}{
+					"task_id": taskID,
+					"result":  result,
+				}
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"results": allResults,
+	})
+}
+
 // WorkflowStatusHandler returns the status of a workspace workflow
 // GET /api/orchestration/workflow/status?workspace_id=<id>
 func (h *Handler) WorkflowStatusHandler(w http.ResponseWriter, r *http.Request) {
