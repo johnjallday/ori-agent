@@ -51,9 +51,9 @@ type Event struct {
 	Type        EventType              `json:"type"`
 	WorkspaceID string                 `json:"studio_id"`
 	Timestamp   time.Time              `json:"timestamp"`
-	Source      string                 `json:"source"`      // Agent or system component that generated event
-	Data        map[string]interface{} `json:"data"`        // Event-specific payload
-	Metadata    map[string]string      `json:"metadata"`    // Additional context
+	Source      string                 `json:"source"`   // Agent or system component that generated event
+	Data        map[string]interface{} `json:"data"`     // Event-specific payload
+	Metadata    map[string]string      `json:"metadata"` // Additional context
 }
 
 // EventSubscriber is a function that receives events
@@ -72,9 +72,9 @@ type subscription struct {
 // EventBus manages event publishing and subscription
 type EventBus struct {
 	mu            sync.RWMutex
-	subscriptions map[string]*subscription  // ID -> subscription
+	subscriptions map[string]*subscription // ID -> subscription
 	bufferSize    int
-	eventHistory  []Event                    // Ring buffer of recent events
+	eventHistory  []Event // Ring buffer of recent events
 	historySize   int
 	historyIndex  int
 	ctx           context.Context

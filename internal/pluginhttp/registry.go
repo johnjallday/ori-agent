@@ -563,6 +563,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		"path":     filePath,
 	})
 }
+
 // PluginUpdatesCheckHandler checks for available updates for all installed plugins
 func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -604,13 +605,13 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 				// Compare versions
 				if installedPlugin.Version != registryEntry.Version {
 					updates = append(updates, map[string]any{
-						"name":             name,
-						"currentVersion":   installedPlugin.Version,
-						"latestVersion":    registryEntry.Version,
-						"updateAvailable":  true,
-						"description":      registryEntry.Description,
-						"githubRepo":       registryEntry.GitHubRepo,
-						"downloadURL":      registryEntry.DownloadURL,
+						"name":            name,
+						"currentVersion":  installedPlugin.Version,
+						"latestVersion":   registryEntry.Version,
+						"updateAvailable": true,
+						"description":     registryEntry.Description,
+						"githubRepo":      registryEntry.GitHubRepo,
+						"downloadURL":     registryEntry.DownloadURL,
 					})
 				}
 			}
@@ -619,8 +620,8 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"success":        true,
-		"updatesCount":   len(updates),
-		"updates":        updates,
+		"success":      true,
+		"updatesCount": len(updates),
+		"updates":      updates,
 	})
 }

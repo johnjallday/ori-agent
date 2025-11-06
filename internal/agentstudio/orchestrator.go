@@ -13,9 +13,9 @@ import (
 
 // Orchestrator manages autonomous task delegation and agent coordination
 type Orchestrator struct {
-	studioStore  Store
-	llmProvider  LLMProvider // For intelligent task breakdown
-	eventBus     *EventBus   // For real-time updates
+	studioStore Store
+	llmProvider LLMProvider // For intelligent task breakdown
+	eventBus    *EventBus   // For real-time updates
 }
 
 // LLMProvider interface for calling AI models

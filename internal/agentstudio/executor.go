@@ -16,10 +16,10 @@ type TaskExecutor struct {
 	maxConcurrent  int
 	eventBus       *EventBus // Optional event bus for publishing events
 
-	mu              sync.RWMutex
-	runningTasks    map[string]*taskExecution
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
+	mu           sync.RWMutex
+	runningTasks map[string]*taskExecution
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
 }
 
 // TaskHandler defines the interface for executing tasks

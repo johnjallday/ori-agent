@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Orchestrator coordinates multi-agent workflows
@@ -31,10 +31,10 @@ func NewOrchestrator(agentStore store.Store, workspaceStore agentstudio.Store, c
 
 // CollaborativeTask represents a task requiring multiple agents
 type CollaborativeTask struct {
-	Goal          string              `json:"goal"`
-	RequiredRoles []types.AgentRole   `json:"required_roles"`
+	Goal          string                 `json:"goal"`
+	RequiredRoles []types.AgentRole      `json:"required_roles"`
 	Context       map[string]interface{} `json:"context"`
-	MaxDuration   time.Duration       `json:"max_duration"`
+	MaxDuration   time.Duration          `json:"max_duration"`
 }
 
 // CollaborativeResult represents the result of a collaborative task
@@ -311,27 +311,27 @@ func (o *Orchestrator) IdentifyRequiredRoles(message string) []types.AgentRole {
 	messageLower := strings.ToLower(message)
 
 	if strings.Contains(messageLower, "research") ||
-	   strings.Contains(messageLower, "find information") ||
-	   strings.Contains(messageLower, "gather") {
+		strings.Contains(messageLower, "find information") ||
+		strings.Contains(messageLower, "gather") {
 		roles = append(roles, types.RoleResearcher)
 	}
 
 	if strings.Contains(messageLower, "analyze") ||
-	   strings.Contains(messageLower, "process") ||
-	   strings.Contains(messageLower, "examine") {
+		strings.Contains(messageLower, "process") ||
+		strings.Contains(messageLower, "examine") {
 		roles = append(roles, types.RoleAnalyzer)
 	}
 
 	if strings.Contains(messageLower, "comprehensive") ||
-	   strings.Contains(messageLower, "report") ||
-	   strings.Contains(messageLower, "synthesize") ||
-	   strings.Contains(messageLower, "combine") {
+		strings.Contains(messageLower, "report") ||
+		strings.Contains(messageLower, "synthesize") ||
+		strings.Contains(messageLower, "combine") {
 		roles = append(roles, types.RoleSynthesizer)
 	}
 
 	if strings.Contains(messageLower, "verify") ||
-	   strings.Contains(messageLower, "validate") ||
-	   strings.Contains(messageLower, "check") {
+		strings.Contains(messageLower, "validate") ||
+		strings.Contains(messageLower, "check") {
 		roles = append(roles, types.RoleValidator)
 	}
 

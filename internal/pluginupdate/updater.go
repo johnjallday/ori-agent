@@ -17,29 +17,29 @@ import (
 
 // UpdateResult represents the result of a plugin update
 type UpdateResult struct {
-	PluginName    string    `json:"plugin_name"`
-	OldVersion    string    `json:"old_version"`
-	NewVersion    string    `json:"new_version"`
-	Success       bool      `json:"success"`
-	Error         string    `json:"error,omitempty"`
-	BackupPath    string    `json:"backup_path,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	RolledBack    bool      `json:"rolled_back"`
+	PluginName string    `json:"plugin_name"`
+	OldVersion string    `json:"old_version"`
+	NewVersion string    `json:"new_version"`
+	Success    bool      `json:"success"`
+	Error      string    `json:"error,omitempty"`
+	BackupPath string    `json:"backup_path,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	RolledBack bool      `json:"rolled_back"`
 }
 
 // Updater handles plugin updates
 type Updater struct {
-	backupDir     string
+	backupDir          string
 	uploadedPluginsDir string
-	healthChecker *health.Checker
+	healthChecker      *health.Checker
 }
 
 // NewUpdater creates a new plugin updater
 func NewUpdater(healthChecker *health.Checker) *Updater {
 	return &Updater{
-		backupDir:     "plugin_backups",
+		backupDir:          "plugin_backups",
 		uploadedPluginsDir: "uploaded_plugins",
-		healthChecker: healthChecker,
+		healthChecker:      healthChecker,
 	}
 }
 

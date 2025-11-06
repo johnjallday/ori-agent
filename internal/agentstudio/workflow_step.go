@@ -7,34 +7,34 @@ import (
 
 // WorkflowStep represents a single step in a multi-step workflow
 type WorkflowStep struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	Type         StepType               `json:"type"`
-	Status       StepStatus             `json:"status"`
-	Order        int                    `json:"order"`         // Execution order
-	DependsOn    []string               `json:"depends_on"`    // Step IDs this step depends on
-	AssignedTo   string                 `json:"assigned_to"`   // Agent name
-	TaskID       string                 `json:"task_id"`       // Created task ID
-	Result       string                 `json:"result"`
-	Error        string                 `json:"error,omitempty"`
-	Condition    *StepCondition         `json:"condition,omitempty"` // Conditional execution
-	Context      map[string]interface{} `json:"context"`
-	Timeout      time.Duration          `json:"timeout"`
-	CreatedAt    time.Time              `json:"created_at"`
-	StartedAt    *time.Time             `json:"started_at,omitempty"`
-	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Type        StepType               `json:"type"`
+	Status      StepStatus             `json:"status"`
+	Order       int                    `json:"order"`       // Execution order
+	DependsOn   []string               `json:"depends_on"`  // Step IDs this step depends on
+	AssignedTo  string                 `json:"assigned_to"` // Agent name
+	TaskID      string                 `json:"task_id"`     // Created task ID
+	Result      string                 `json:"result"`
+	Error       string                 `json:"error,omitempty"`
+	Condition   *StepCondition         `json:"condition,omitempty"` // Conditional execution
+	Context     map[string]interface{} `json:"context"`
+	Timeout     time.Duration          `json:"timeout"`
+	CreatedAt   time.Time              `json:"created_at"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
 }
 
 // StepType represents the type of workflow step
 type StepType string
 
 const (
-	StepTypeTask       StepType = "task"        // Delegate to agent
-	StepTypeAggregate  StepType = "aggregate"   // Aggregate results from previous steps
-	StepTypeCondition  StepType = "condition"   // Conditional branching
-	StepTypeParallel   StepType = "parallel"    // Parallel execution group
-	StepTypeSequential StepType = "sequential"  // Sequential execution group
+	StepTypeTask       StepType = "task"       // Delegate to agent
+	StepTypeAggregate  StepType = "aggregate"  // Aggregate results from previous steps
+	StepTypeCondition  StepType = "condition"  // Conditional branching
+	StepTypeParallel   StepType = "parallel"   // Parallel execution group
+	StepTypeSequential StepType = "sequential" // Sequential execution group
 )
 
 // StepStatus represents the status of a workflow step
@@ -42,23 +42,23 @@ type StepStatus string
 
 const (
 	StepStatusPending    StepStatus = "pending"
-	StepStatusWaiting    StepStatus = "waiting"     // Waiting for dependencies
-	StepStatusReady      StepStatus = "ready"       // Dependencies met, ready to execute
+	StepStatusWaiting    StepStatus = "waiting" // Waiting for dependencies
+	StepStatusReady      StepStatus = "ready"   // Dependencies met, ready to execute
 	StepStatusInProgress StepStatus = "in_progress"
 	StepStatusCompleted  StepStatus = "completed"
 	StepStatusFailed     StepStatus = "failed"
-	StepStatusSkipped    StepStatus = "skipped"     // Skipped due to condition
+	StepStatusSkipped    StepStatus = "skipped" // Skipped due to condition
 	StepStatusCancelled  StepStatus = "cancelled"
 )
 
 // StepCondition defines a condition for step execution
 type StepCondition struct {
-	Type       ConditionType `json:"type"`
-	StepID     string        `json:"step_id"`      // Step to evaluate
-	Operator   string        `json:"operator"`     // eq, ne, contains, exists
-	Value      interface{}   `json:"value"`
-	OnTrue     string        `json:"on_true"`      // Action if true: "execute", "skip"
-	OnFalse    string        `json:"on_false"`     // Action if false: "execute", "skip"
+	Type     ConditionType `json:"type"`
+	StepID   string        `json:"step_id"`  // Step to evaluate
+	Operator string        `json:"operator"` // eq, ne, contains, exists
+	Value    interface{}   `json:"value"`
+	OnTrue   string        `json:"on_true"`  // Action if true: "execute", "skip"
+	OnFalse  string        `json:"on_false"` // Action if false: "execute", "skip"
 }
 
 // ConditionType defines types of conditions
@@ -174,8 +174,8 @@ func (w *Workspace) GetReadySteps() []WorkflowStep {
 	for _, workflow := range w.Workflows {
 		// Skip completed/failed workflows
 		if workflow.Status == WorkflowStatusCompleted ||
-		   workflow.Status == WorkflowStatusFailed ||
-		   workflow.Status == WorkflowStatusCancelled {
+			workflow.Status == WorkflowStatusFailed ||
+			workflow.Status == WorkflowStatusCancelled {
 			continue
 		}
 

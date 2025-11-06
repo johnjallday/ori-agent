@@ -130,8 +130,8 @@ func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 
 	// Skip completed/failed workflows
 	if workflow.Status == WorkflowStatusCompleted ||
-	   workflow.Status == WorkflowStatusFailed ||
-	   workflow.Status == WorkflowStatusCancelled {
+		workflow.Status == WorkflowStatusFailed ||
+		workflow.Status == WorkflowStatusCancelled {
 		return
 	}
 
@@ -512,8 +512,8 @@ func (se *StepExecutor) checkWorkflowCompletion(ws *Workspace, workflow *Workflo
 		}
 
 		if step.Status != StepStatusCompleted &&
-		   step.Status != StepStatusSkipped &&
-		   step.Status != StepStatusFailed {
+			step.Status != StepStatusSkipped &&
+			step.Status != StepStatusFailed {
 			allComplete = false
 		}
 	}

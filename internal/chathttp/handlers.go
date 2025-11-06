@@ -13,12 +13,12 @@ import (
 	"github.com/openai/openai-go/v2"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -30,7 +30,10 @@ type Handler struct {
 	commandHandler *CommandHandler
 	orchestrator   *orchestration.Orchestrator
 	costTracker    *llm.CostTracker
-	mcpRegistry    interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }
+	mcpRegistry    interface {
+		GetToolsForServer(string) ([]pluginapi.Tool, error)
+		GetAllTools() []pluginapi.Tool
+	}
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
@@ -63,7 +66,10 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 }
 
 // SetMCPRegistry sets the MCP registry
-func (h *Handler) SetMCPRegistry(registry interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }) {
+func (h *Handler) SetMCPRegistry(registry interface {
+	GetToolsForServer(string) ([]pluginapi.Tool, error)
+	GetAllTools() []pluginapi.Tool
+}) {
 	h.mcpRegistry = registry
 }
 
@@ -534,7 +540,6 @@ func getPluginEmoji(pluginName string) string {
 	return "🔌"
 }
 
-
 // checkUninitializedPlugins checks which plugins need initialization
 func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 	var uninitializedPlugins []map[string]any
@@ -748,7 +753,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(map[string]any{
 				"response":     result.FinalOutput,
 				"orchestrated": true,
-				"studio_id": result.WorkspaceID,
+				"studio_id":    result.WorkspaceID,
 				"status":       result.Status,
 			})
 			return

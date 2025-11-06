@@ -17,49 +17,49 @@ import (
 
 // PluginStats tracks runtime statistics for a plugin
 type PluginStats struct {
-	TotalCalls      int64
-	FailedCalls     int64
-	TotalDuration   time.Duration
-	LastCallTime    time.Time
-	LastError       string
-	LastErrorTime   time.Time
+	TotalCalls    int64
+	FailedCalls   int64
+	TotalDuration time.Duration
+	LastCallTime  time.Time
+	LastError     string
+	LastErrorTime time.Time
 }
 
 // HealthEvent represents a health status change event
 type HealthEvent struct {
-	Timestamp   time.Time                `json:"timestamp"`
-	PluginName  string                   `json:"plugin_name"`
-	Status      string                   `json:"status"` // "healthy", "degraded", "unhealthy"
-	OldStatus   string                   `json:"old_status,omitempty"`
-	Details     string                   `json:"details"`
-	CallCount   int64                    `json:"call_count"`
-	FailedCalls int64                    `json:"failed_calls"`
-	SuccessRate float64                  `json:"success_rate"`
+	Timestamp   time.Time `json:"timestamp"`
+	PluginName  string    `json:"plugin_name"`
+	Status      string    `json:"status"` // "healthy", "degraded", "unhealthy"
+	OldStatus   string    `json:"old_status,omitempty"`
+	Details     string    `json:"details"`
+	CallCount   int64     `json:"call_count"`
+	FailedCalls int64     `json:"failed_calls"`
+	SuccessRate float64   `json:"success_rate"`
 }
 
 // Manager tracks plugin health information
 type Manager struct {
-	mu               sync.RWMutex
-	healthCache      map[string]health.CheckResult // key: plugin name
-	statsCache       map[string]*PluginStats       // key: plugin name
-	healthHistory    []HealthEvent                 // circular buffer of health events
-	maxHistorySize   int
-	checker          *health.Checker
-	notifier         *notifications.Notifier
-	stopChan         chan struct{}
+	mu                    sync.RWMutex
+	healthCache           map[string]health.CheckResult // key: plugin name
+	statsCache            map[string]*PluginStats       // key: plugin name
+	healthHistory         []HealthEvent                 // circular buffer of health events
+	maxHistorySize        int
+	checker               *health.Checker
+	notifier              *notifications.Notifier
+	stopChan              chan struct{}
 	periodicCheckInterval time.Duration
 }
 
 // NewManager creates a new health manager
 func NewManager() *Manager {
 	return &Manager{
-		healthCache: make(map[string]health.CheckResult),
-		statsCache:  make(map[string]*PluginStats),
-		healthHistory: make([]HealthEvent, 0, 1000), // Pre-allocate for 1000 events
-		maxHistorySize: 1000, // Keep last 1000 health events
-		checker:     health.NewChecker(),
-		notifier:    notifications.NewNotifier(),
-		stopChan:    make(chan struct{}),
+		healthCache:           make(map[string]health.CheckResult),
+		statsCache:            make(map[string]*PluginStats),
+		healthHistory:         make([]HealthEvent, 0, 1000), // Pre-allocate for 1000 events
+		maxHistorySize:        1000,                         // Keep last 1000 health events
+		checker:               health.NewChecker(),
+		notifier:              notifications.NewNotifier(),
+		stopChan:              make(chan struct{}),
 		periodicCheckInterval: 5 * time.Minute, // Run health checks every 5 minutes
 	}
 }
@@ -448,10 +448,10 @@ func NewHandler(manager *Manager, store store.Store) *Handler {
 
 // AllPluginsHealthResponse is the response format for GET /api/plugins/health
 type AllPluginsHealthResponse struct {
-	AgentVersion    string                   `json:"agent_version"`
-	AgentAPIVersion string                   `json:"agent_api_version"`
-	Timestamp       time.Time                `json:"timestamp"`
-	Plugins         []health.PluginHealth    `json:"plugins"`
+	AgentVersion    string                `json:"agent_version"`
+	AgentAPIVersion string                `json:"agent_api_version"`
+	Timestamp       time.Time             `json:"timestamp"`
+	Plugins         []health.PluginHealth `json:"plugins"`
 }
 
 // HandleAllPluginsHealth returns health info for all loaded plugins

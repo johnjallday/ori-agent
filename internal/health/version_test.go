@@ -118,10 +118,10 @@ func TestIsCompatible(t *testing.T) {
 
 func TestIsAPICompatible(t *testing.T) {
 	tests := []struct {
-		name              string
-		agentAPIVersion   string
-		pluginAPIVersion  string
-		wantCompat        bool
+		name             string
+		agentAPIVersion  string
+		pluginAPIVersion string
+		wantCompat       bool
 	}{
 		{"matching versions", "v1", "v1", true},
 		{"mismatching versions", "v1", "v2", false},

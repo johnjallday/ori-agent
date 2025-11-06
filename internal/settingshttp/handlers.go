@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/client"
 )
 
 type Handler struct {
@@ -90,12 +90,12 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		// Return API key status including environment variables
 		cfg := h.configManager.Get()
 		response := struct {
-			OpenAIKey          string `json:"openai_api_key"`
-			AnthropicKey       string `json:"anthropic_api_key"`
-			OpenAIMasked       string `json:"openai_masked"`
-			AnthropicMasked    string `json:"anthropic_masked"`
-			HasOpenAI          bool   `json:"has_openai"`
-			HasAnthropic       bool   `json:"has_anthropic"`
+			OpenAIKey       string `json:"openai_api_key"`
+			AnthropicKey    string `json:"anthropic_api_key"`
+			OpenAIMasked    string `json:"openai_masked"`
+			AnthropicMasked string `json:"anthropic_masked"`
+			HasOpenAI       bool   `json:"has_openai"`
+			HasAnthropic    bool   `json:"has_anthropic"`
 		}{
 			OpenAIKey:       cfg.OpenAIAPIKey,
 			AnthropicKey:    cfg.AnthropicAPIKey,
@@ -185,12 +185,12 @@ type ProviderModel struct {
 
 // ProviderInfo represents information about an LLM provider
 type ProviderInfo struct {
-	Name         string          `json:"name"`
-	DisplayName  string          `json:"display_name"`
-	Type         string          `json:"type"` // cloud, local, hybrid
-	Available    bool            `json:"available"`
-	RequiresKey  bool            `json:"requires_key"`
-	Models       []ProviderModel `json:"models"`
+	Name        string          `json:"name"`
+	DisplayName string          `json:"display_name"`
+	Type        string          `json:"type"` // cloud, local, hybrid
+	Available   bool            `json:"available"`
+	RequiresKey bool            `json:"requires_key"`
+	Models      []ProviderModel `json:"models"`
 }
 
 // ProvidersHandler returns information about available LLM providers and their models
@@ -233,12 +233,12 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		providers = append(providers, ProviderInfo{
-			Name:         provider.Name(),
-			DisplayName:  getProviderDisplayName(name),
-			Type:         string(provider.Type()),
-			Available:    true,
-			RequiresKey:  caps.RequiresAPIKey,
-			Models:       providerModels,
+			Name:        provider.Name(),
+			DisplayName: getProviderDisplayName(name),
+			Type:        string(provider.Type()),
+			Available:   true,
+			RequiresKey: caps.RequiresAPIKey,
+			Models:      providerModels,
 		})
 	}
 
@@ -297,24 +297,24 @@ func categorizeModel(provider, modelName string) string {
 
 		// Tool-calling tier - smaller/faster models (good for function calling)
 		if strings.Contains(lowerName, "llama3") ||
-		   strings.Contains(lowerName, "llama2") && !strings.Contains(lowerName, "70b") ||
-		   strings.Contains(lowerName, "mistral") ||
-		   strings.Contains(lowerName, "phi") ||
-		   strings.Contains(lowerName, "qwen") {
+			strings.Contains(lowerName, "llama2") && !strings.Contains(lowerName, "70b") ||
+			strings.Contains(lowerName, "mistral") ||
+			strings.Contains(lowerName, "phi") ||
+			strings.Contains(lowerName, "qwen") {
 			return "tool-calling"
 		}
 
 		// General purpose tier - mid-size models
 		if strings.Contains(lowerName, "codellama") ||
-		   strings.Contains(lowerName, "13b") ||
-		   strings.Contains(lowerName, "mixtral") {
+			strings.Contains(lowerName, "13b") ||
+			strings.Contains(lowerName, "mixtral") {
 			return "general"
 		}
 
 		// Research tier - large models
 		if strings.Contains(lowerName, "70b") ||
-		   strings.Contains(lowerName, "neural-chat") ||
-		   strings.Contains(lowerName, "starling") {
+			strings.Contains(lowerName, "neural-chat") ||
+			strings.Contains(lowerName, "starling") {
 			return "research"
 		}
 

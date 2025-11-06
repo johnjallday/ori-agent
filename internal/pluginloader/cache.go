@@ -54,7 +54,6 @@ func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 		configPath := filepath.Join(agentDir, "config.json")
 		settingsPath := filepath.Join(agentDir, "agent_settings.json")
 
-
 		agentAwareTool.SetAgentContext(pluginapi.AgentContext{
 			Name:         agentName,
 			ConfigPath:   configPath,

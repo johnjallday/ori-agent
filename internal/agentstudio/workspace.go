@@ -127,11 +127,11 @@ type ScheduleConfig struct {
 
 // TaskExecution represents a single execution of a scheduled task
 type TaskExecution struct {
-	TaskID      string    `json:"task_id"`       // ID of the created Task
-	ExecutedAt  time.Time `json:"executed_at"`   // When it was triggered
-	Status      string    `json:"status"`        // "success" or "failed"
-	Error       string    `json:"error,omitempty"` // Error message if failed
-	Duration    int64     `json:"duration,omitempty"` // Execution duration in milliseconds (future)
+	TaskID     string    `json:"task_id"`            // ID of the created Task
+	ExecutedAt time.Time `json:"executed_at"`        // When it was triggered
+	Status     string    `json:"status"`             // "success" or "failed"
+	Error      string    `json:"error,omitempty"`    // Error message if failed
+	Duration   int64     `json:"duration,omitempty"` // Execution duration in milliseconds (future)
 }
 
 // ScheduledTask represents a recurring or one-time scheduled task template
@@ -140,8 +140,8 @@ type ScheduledTask struct {
 	WorkspaceID string                 `json:"studio_id"`
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	From        string                 `json:"from"`  // Sender agent
-	To          string                 `json:"to"`    // Recipient agent
+	From        string                 `json:"from"`   // Sender agent
+	To          string                 `json:"to"`     // Recipient agent
 	Prompt      string                 `json:"prompt"` // Task description/prompt
 	Priority    int                    `json:"priority"`
 	Context     map[string]interface{} `json:"context"`
@@ -465,7 +465,7 @@ func (w *Workspace) GetPendingTasksForAgent(agentName string) []Task {
 	var tasks []Task
 	for _, task := range w.Tasks {
 		if task.To == agentName &&
-		   (task.Status == TaskStatusPending || task.Status == TaskStatusAssigned) {
+			(task.Status == TaskStatusPending || task.Status == TaskStatusAssigned) {
 			tasks = append(tasks, task)
 		}
 	}

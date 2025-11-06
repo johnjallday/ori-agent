@@ -104,7 +104,7 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*agentstudio.Task, e
 	// Create task using agentstudio.Task
 	now := time.Now()
 	task := agentstudio.Task{
-		ID:          "",  // Will be set by agentstudio.AddTask
+		ID:          "", // Will be set by agentstudio.AddTask
 		WorkspaceID: req.WorkspaceID,
 		From:        req.From,
 		To:          req.To,

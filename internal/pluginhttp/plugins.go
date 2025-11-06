@@ -276,7 +276,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	def := tool.Definition()
-	
+
 	// Extract version information if available
 	version := pluginloader.GetPluginVersion(tool)
 
@@ -301,7 +301,6 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	// Try to parse multipart form first, then regular form
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
@@ -310,25 +309,25 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	name := r.FormValue("name")
 	path := r.FormValue("path")
-	
+
 	if name == "" || path == "" {
 		http.Error(w, "name and path required", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Load plugin from the specified path
 	tool, err := h.Loader.Load(path)
 	if err != nil {
 		http.Error(w, "Failed to load plugin: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	def := tool.Definition()
 	version := pluginloader.GetPluginVersion(tool)
-	
+
 	// Get current agent
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
@@ -336,7 +335,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "current agent not found", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Add plugin to current agent
 	if ag.Plugins == nil {
 		ag.Plugins = make(map[string]types.LoadedPlugin)

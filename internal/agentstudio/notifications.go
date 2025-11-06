@@ -40,7 +40,7 @@ type NotificationService struct {
 	eventBus     *EventBus
 	mu           sync.RWMutex
 	channels     map[string]NotificationChannel // agent_name -> channel
-	history      []Notification                  // Recent notifications
+	history      []Notification                 // Recent notifications
 	historySize  int
 	historyIndex int
 	subID        string // Event bus subscription ID

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Handler manages orchestration-related HTTP endpoints
@@ -237,9 +237,9 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"studio_id": ws.ID,
-		"status":       ws.Status,
-		"created_at":   ws.CreatedAt,
+		"studio_id":  ws.ID,
+		"status":     ws.Status,
+		"created_at": ws.CreatedAt,
 	})
 }
 
@@ -349,10 +349,10 @@ func (h *Handler) handleAddAgentToWorkspace(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":  true,
-		"message":  "Agent added successfully",
-		"agent":    req.AgentName,
-		"agents":   ws.Agents,
+		"success": true,
+		"message": "Agent added successfully",
+		"agent":   req.AgentName,
+		"agents":  ws.Agents,
 	})
 }
 
@@ -998,11 +998,11 @@ func (h *Handler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter
 		case event := <-eventChan:
 			// Send event to client
 			eventData := map[string]interface{}{
-				"type":         event.Type,
+				"type":      event.Type,
 				"studio_id": event.WorkspaceID,
-				"timestamp":    event.Timestamp,
-				"source":       event.Source,
-				"data":         event.Data,
+				"timestamp": event.Timestamp,
+				"source":    event.Source,
+				"data":      event.Data,
 			}
 
 			data, err := json.Marshal(eventData)
@@ -1104,9 +1104,9 @@ func (h *Handler) sendWorkspaceStatus(w http.ResponseWriter, flusher http.Flushe
 	}
 
 	statusData := map[string]interface{}{
-		"studio_id": ws.ID,
-		"status":       ws.Status,
-		"updated_at":   ws.UpdatedAt,
+		"studio_id":  ws.ID,
+		"status":     ws.Status,
+		"updated_at": ws.UpdatedAt,
 	}
 
 	// Add workflow status if orchestrator is available
@@ -1701,15 +1701,15 @@ func (h *Handler) handleListScheduledTasks(w http.ResponseWriter, r *http.Reques
 // handleCreateScheduledTask creates a new scheduled task
 func (h *Handler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string                 `json:"studio_id"`
-		Name        string                 `json:"name"`
-		Description string                 `json:"description"`
-		From        string                 `json:"from"`
-		To          string                 `json:"to"`
-		Prompt      string                 `json:"prompt"`
-		Priority    int                    `json:"priority"`
+		WorkspaceID string                     `json:"studio_id"`
+		Name        string                     `json:"name"`
+		Description string                     `json:"description"`
+		From        string                     `json:"from"`
+		To          string                     `json:"to"`
+		Prompt      string                     `json:"prompt"`
+		Priority    int                        `json:"priority"`
 		Schedule    agentstudio.ScheduleConfig `json:"schedule"`
-		Enabled     bool                   `json:"enabled"`
+		Enabled     bool                       `json:"enabled"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1878,12 +1878,12 @@ func (h *Handler) handleGetScheduledTask(w http.ResponseWriter, r *http.Request,
 // handleUpdateScheduledTask updates a scheduled task
 func (h *Handler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
-		Name        *string                   `json:"name,omitempty"`
-		Description *string                   `json:"description,omitempty"`
-		Prompt      *string                   `json:"prompt,omitempty"`
-		Priority    *int                      `json:"priority,omitempty"`
+		Name        *string                     `json:"name,omitempty"`
+		Description *string                     `json:"description,omitempty"`
+		Prompt      *string                     `json:"prompt,omitempty"`
+		Priority    *int                        `json:"priority,omitempty"`
 		Schedule    *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
-		Enabled     *bool                     `json:"enabled,omitempty"`
+		Enabled     *bool                       `json:"enabled,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

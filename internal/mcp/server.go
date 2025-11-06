@@ -35,11 +35,11 @@ type Server struct {
 type ServerStatus string
 
 const (
-	StatusStopped     ServerStatus = "stopped"
-	StatusStarting    ServerStatus = "starting"
-	StatusRunning     ServerStatus = "running"
-	StatusError       ServerStatus = "error"
-	StatusRestarting  ServerStatus = "restarting"
+	StatusStopped    ServerStatus = "stopped"
+	StatusStarting   ServerStatus = "starting"
+	StatusRunning    ServerStatus = "running"
+	StatusError      ServerStatus = "error"
+	StatusRestarting ServerStatus = "restarting"
 )
 
 // NewServer creates a new MCP server instance

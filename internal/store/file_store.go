@@ -131,10 +131,10 @@ func (s *fileStore) SwitchAgent(name string) error {
 func (s *fileStore) DeleteAgent(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Remove agent from memory
 	delete(s.agents, name)
-	
+
 	// Update current agent if it was deleted
 	if s.current == name {
 		s.current = ""
@@ -143,7 +143,7 @@ func (s *fileStore) DeleteAgent(name string) error {
 			break
 		}
 	}
-	
+
 	// Delete the agent folder from filesystem
 	baseDir := filepath.Dir(s.path)
 	var agentsDir string
@@ -169,7 +169,7 @@ func (s *fileStore) DeleteAgent(name string) error {
 		// In a production app, you might want to handle this differently
 		_ = err
 	}
-	
+
 	return s.saveUnlocked()
 }
 
@@ -216,7 +216,7 @@ func (s *fileStore) saveUnlocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	
+
 	// Create agents directory - handle case where path already includes agents/
 	baseDir := filepath.Dir(s.path)
 	var agentsDir string
@@ -239,10 +239,10 @@ func (s *fileStore) saveUnlocked() error {
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
-	
+
 	// Save individual agent files in nested structure
 	type persistSettings struct {
-		Type     string                         `json:"type"`     // Agent type
+		Type     string                        `json:"type"` // Agent type
 		Settings types.Settings                `json:"Settings"`
 		Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 	}
@@ -272,19 +272,19 @@ func (s *fileStore) saveUnlocked() error {
 			return err
 		}
 	}
-	
+
 	// Save main index file with just current agent pointer
 	indexConfig := struct {
 		Current string `json:"current"`
 	}{
 		Current: s.current,
 	}
-	
+
 	data, err := json.MarshalIndent(indexConfig, "", "  ")
 	if err != nil {
 		return err
 	}
-	
+
 	return os.WriteFile(s.path, data, 0o644)
 }
 
@@ -293,10 +293,10 @@ func (s *fileStore) load() error {
 	if err != nil {
 		return err
 	}
-	
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Initialize agents map if nil
 	if s.agents == nil {
 		s.agents = make(map[string]*agent.Agent)
@@ -330,7 +330,7 @@ func (s *fileStore) load() error {
 		}
 		return nil
 	}
-	
+
 	// New format: just {"current": "..."}
 	var indexConfig struct {
 		Current string `json:"current"`
@@ -338,9 +338,9 @@ func (s *fileStore) load() error {
 	if err := json.Unmarshal(b, &indexConfig); err != nil {
 		return err
 	}
-	
+
 	s.current = indexConfig.Current
-	
+
 	// Load individual agent files from agents/ directory (nested structure)
 	baseDir := filepath.Dir(s.path)
 	var agentsDir string
@@ -375,7 +375,7 @@ func (s *fileStore) load() error {
 					// Load agent_settings.json (Type + Settings + Plugins)
 					if settingsData, err := os.ReadFile(settingsPath); err == nil {
 						var settings struct {
-							Type     string                         `json:"type"`
+							Type     string                        `json:"type"`
 							Settings types.Settings                `json:"Settings"`
 							Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
 						}

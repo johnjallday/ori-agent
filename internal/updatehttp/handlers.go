@@ -56,7 +56,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Parse query parameters
 	includePrerelease := r.URL.Query().Get("prerelease") == "true"
-	
+
 	limitStr := r.URL.Query().Get("limit")
 	limit := 10 // default limit
 	if limitStr != "" {
@@ -93,8 +93,8 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var request struct {
-		Version       string `json:"version"`
-		AutoRestart   bool   `json:"autoRestart"`
+		Version     string `json:"version"`
+		AutoRestart bool   `json:"autoRestart"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {

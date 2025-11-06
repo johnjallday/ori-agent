@@ -73,12 +73,12 @@ func (p *ClaudeProvider) ValidateConfig(config ProviderConfig) error {
 // DefaultModels returns available Claude models
 func (p *ClaudeProvider) DefaultModels() []string {
 	return []string{
-		"claude-sonnet-4-5",           // Claude Sonnet 4.5 (latest, best for coding)
-		"claude-sonnet-4",             // Claude Sonnet 4
-		"claude-opus-4-1",             // Claude Opus 4.1 (most capable)
-		"claude-3-opus-20240229",      // Claude 3 Opus
-		"claude-3-sonnet-20240229",    // Claude 3 Sonnet
-		"claude-3-haiku-20240307",     // Claude 3 Haiku
+		"claude-sonnet-4-5",        // Claude Sonnet 4.5 (latest, best for coding)
+		"claude-sonnet-4",          // Claude Sonnet 4
+		"claude-opus-4-1",          // Claude Opus 4.1 (most capable)
+		"claude-3-opus-20240229",   // Claude 3 Opus
+		"claude-3-sonnet-20240229", // Claude 3 Sonnet
+		"claude-3-haiku-20240307",  // Claude 3 Haiku
 	}
 }
 

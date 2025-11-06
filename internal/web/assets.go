@@ -36,12 +36,12 @@ func (cr *ComponentRenderer) LoadComponent(name string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	tmpl, err := template.New(name).Parse(string(content))
 	if err != nil {
 		return err
 	}
-	
+
 	cr.templates[name] = tmpl
 	return nil
 }
@@ -49,18 +49,18 @@ func (cr *ComponentRenderer) LoadComponent(name string) error {
 // LoadAllComponents loads all component templates from the components directory
 func (cr *ComponentRenderer) LoadAllComponents() error {
 	componentsDir := "static/components"
-	
+
 	return fs.WalkDir(Static, componentsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		if !d.IsDir() && strings.HasSuffix(path, ".html") {
 			// Extract component name from path
 			name := strings.TrimSuffix(strings.TrimPrefix(path, componentsDir+"/"), ".html")
 			return cr.LoadComponent(name)
 		}
-		
+
 		return nil
 	})
 }
@@ -75,13 +75,13 @@ func (cr *ComponentRenderer) RenderComponent(name string, data interface{}) (str
 		}
 		tmpl = cr.templates[name]
 	}
-	
+
 	var buf strings.Builder
 	err := tmpl.Execute(&buf, data)
 	if err != nil {
 		return "", err
 	}
-	
+
 	return buf.String(), nil
 }
 
