@@ -40,6 +40,11 @@ class AgentCanvas {
     this.expandedPanelTargetWidth = 400;
     this.expandedPanelAnimating = false;
 
+    // Connection mode state
+    this.connectionMode = false;
+    this.connectionSourceTask = null;
+    this.highlightedAgent = null;
+
     // Callback functions (set by parent)
     this.onAgentClick = null;
     this.onMetricsUpdate = null;
@@ -370,6 +375,11 @@ class AgentCanvas {
     if (this.expandedPanelWidth > 0) {
       this.drawExpandedTaskPanel();
     }
+
+    // Draw connection mode indicator
+    if (this.connectionMode) {
+      this.drawConnectionModeIndicator();
+    }
   }
 
   drawConnections() {
@@ -565,6 +575,18 @@ class AgentCanvas {
 
   drawAgents() {
     this.agents.forEach(agent => {
+      // Draw connection mode highlight
+      if (this.connectionMode) {
+        this.ctx.strokeStyle = '#3b82f6';
+        this.ctx.lineWidth = 4;
+        this.ctx.shadowColor = '#3b82f6';
+        this.ctx.shadowBlur = 15;
+        this.ctx.beginPath();
+        this.ctx.arc(agent.x, agent.y, agent.radius + 8, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.shadowColor = 'transparent';
+      }
+
       // Draw pulse effect for active agents
       if (agent.status === 'active') {
         const pulseSize = agent.radius + 10 * Math.sin(agent.pulsePhase);
@@ -827,7 +849,67 @@ class AgentCanvas {
       this.ctx.fillText('No result yet', contentX, currentY);
     }
 
+    // "Connect Result to Agent" button (only if task has result and is completed)
+    if (this.expandedTask.result && this.expandedTask.status === 'completed') {
+      const buttonY = panelHeight - 80;
+      const buttonWidth = this.expandedPanelWidth - padding * 2;
+      const buttonHeight = 40;
+
+      // Store button bounds for click detection
+      this.connectButtonBounds = {
+        x: panelX + padding,
+        y: buttonY,
+        width: buttonWidth,
+        height: buttonHeight
+      };
+
+      // Draw button
+      this.ctx.fillStyle = this.connectionMode ? '#dc2626' : '#3b82f6';
+      this.ctx.strokeStyle = this.connectionMode ? '#991b1b' : '#1e40af';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, buttonY, buttonWidth, buttonHeight, 8);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Button text
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.textAlign = 'center';
+      const buttonText = this.connectionMode ? '✕ Cancel Connection' : '🔗 Connect Result to Agent';
+      this.ctx.fillText(buttonText, panelX + this.expandedPanelWidth / 2, buttonY + 25);
+      this.ctx.textAlign = 'left';
+    } else {
+      this.connectButtonBounds = null;
+    }
+
     this.ctx.restore();
+  }
+
+  drawConnectionModeIndicator() {
+    const centerX = this.width / 2;
+    const centerY = 50;
+    const boxWidth = 350;
+    const boxHeight = 60;
+
+    // Draw semi-transparent background
+    this.ctx.fillStyle = 'rgba(59, 130, 246, 0.95)';
+    this.ctx.strokeStyle = '#1e40af';
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 15;
+    this.roundRect(centerX - boxWidth / 2, centerY, boxWidth, boxHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.shadowColor = 'transparent';
+
+    // Draw text
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('🔗 Connection Mode Active', centerX, centerY + 20);
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText('Click an agent to create a linked task', centerX, centerY + 40);
   }
 
   // Helper function to draw rounded rectangle
@@ -972,6 +1054,16 @@ class AgentCanvas {
         return;
       }
 
+      // Check if click is on "Connect Result to Agent" button
+      if (this.connectButtonBounds) {
+        const btn = this.connectButtonBounds;
+        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+            screenY >= btn.y && screenY <= btn.y + btn.height) {
+          this.toggleConnectionMode();
+          return;
+        }
+      }
+
       // If clicking anywhere on the panel, don't process other clicks
       if (screenX >= panelX) {
         return;
@@ -1005,7 +1097,11 @@ class AgentCanvas {
       const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
       if (dist <= agent.radius) {
         // Agent clicked
-        if (this.onAgentClick) {
+        if (this.connectionMode && this.connectionSourceTask) {
+          // In connection mode - create task with result linked
+          this.createConnectedTask(agent);
+          return;
+        } else if (this.onAgentClick) {
           this.onAgentClick(agent);
         }
         return;
@@ -1063,6 +1159,81 @@ class AgentCanvas {
     };
 
     animate();
+  }
+
+  toggleConnectionMode() {
+    if (this.connectionMode) {
+      // Cancel connection mode
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+    } else {
+      // Enter connection mode
+      this.connectionMode = true;
+      this.connectionSourceTask = this.expandedTask;
+      this.canvas.style.cursor = 'crosshair';
+    }
+    this.draw();
+  }
+
+  async createConnectedTask(agent) {
+    // Prompt for task description
+    const description = prompt(
+      `Create task for ${agent.name}\n\nThe result from "${this.connectionSourceTask.description}" will be provided as input.\n\nEnter task description:`,
+      `Process the result from the previous task`
+    );
+
+    if (!description) {
+      // User cancelled
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+      return;
+    }
+
+    // Create task via API
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: this.studioId,
+          from: this.connectionSourceTask.to, // From the agent that completed the source task
+          to: agent.name,
+          description: description,
+          input_task_ids: [this.connectionSourceTask.id],
+          priority: 0,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create task');
+      }
+
+      const result = await response.json();
+      console.log('✅ Connected task created:', result);
+
+      // Exit connection mode
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+
+      // Reload studio data to show new task
+      await this.init();
+
+      // Show success message
+      alert(`✅ Task created!\n\n${agent.name} will process the result from the previous task.`);
+    } catch (error) {
+      console.error('❌ Error creating connected task:', error);
+      alert('Failed to create task: ' + error.message);
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+    }
   }
 
   updateMetrics() {
