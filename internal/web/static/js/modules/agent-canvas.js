@@ -1004,6 +1004,95 @@ class AgentCanvas {
     this.ctx.stroke();
     currentY += 20;
 
+    // Enabled Tools section
+    if (this.expandedAgent.config && this.expandedAgent.config.enabled_plugins) {
+      this.ctx.fillStyle = '#7c3aed';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('🔧 Enabled Tools', contentX, currentY);
+      currentY += 20;
+
+      const plugins = this.expandedAgent.config.enabled_plugins;
+      if (plugins.length > 0) {
+        plugins.forEach(plugin => {
+          // Plugin badge
+          this.ctx.fillStyle = '#ede9fe';
+          this.ctx.strokeStyle = '#7c3aed';
+          this.ctx.lineWidth = 1;
+          const pluginText = plugin.length > 20 ? plugin.substring(0, 17) + '...' : plugin;
+          const badgeWidth = this.ctx.measureText(pluginText).width + 16;
+          this.roundRect(contentX, currentY, badgeWidth, 22, 11);
+          this.ctx.fill();
+          this.ctx.stroke();
+
+          this.ctx.fillStyle = '#5b21b6';
+          this.ctx.font = '11px system-ui';
+          this.ctx.fillText(pluginText, contentX + 8, currentY + 15);
+
+          currentY += 28;
+        });
+        currentY += 10;
+      } else {
+        this.ctx.fillStyle = '#9ca3af';
+        this.ctx.font = 'italic 11px system-ui';
+        this.ctx.fillText('No tools enabled', contentX, currentY);
+        currentY += 25;
+      }
+
+      // Separator
+      this.ctx.strokeStyle = '#e5e7eb';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(contentX, currentY);
+      this.ctx.lineTo(panelX + this.expandedAgentPanelWidth - padding, currentY);
+      this.ctx.stroke();
+      currentY += 20;
+    }
+
+    // System Prompt section
+    if (this.expandedAgent.config && this.expandedAgent.config.system_prompt) {
+      this.ctx.fillStyle = '#ea580c';
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('💬 System Prompt', contentX, currentY);
+      currentY += 20;
+
+      // System prompt box
+      const promptBoxY = currentY;
+      const promptBoxHeight = 120;
+      this.ctx.fillStyle = '#fff7ed';
+      this.ctx.strokeStyle = '#ea580c';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, promptBoxY, this.expandedAgentPanelWidth - padding * 2, promptBoxHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // System prompt text
+      this.ctx.fillStyle = '#7c2d12';
+      this.ctx.font = '10px system-ui';
+      const promptLines = this.wrapText(this.expandedAgent.config.system_prompt, this.expandedAgentPanelWidth - padding * 2 - 20);
+      const maxPromptLines = 8;
+
+      promptLines.slice(0, maxPromptLines).forEach((line, i) => {
+        this.ctx.fillText(line, contentX + 10, promptBoxY + 15 + i * 13);
+      });
+
+      if (promptLines.length > maxPromptLines) {
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = 'italic 9px system-ui';
+        this.ctx.fillText('... (view agent settings for full prompt)', contentX + 10, promptBoxY + promptBoxHeight - 10);
+      }
+
+      currentY += promptBoxHeight + 15;
+
+      // Separator
+      this.ctx.strokeStyle = '#e5e7eb';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(contentX, currentY);
+      this.ctx.lineTo(panelX + this.expandedAgentPanelWidth - padding, currentY);
+      this.ctx.stroke();
+      currentY += 20;
+    }
+
     // Task count
     this.ctx.fillStyle = '#4b5563';
     this.ctx.font = '12px system-ui';
@@ -1339,7 +1428,7 @@ class AgentCanvas {
     animate();
   }
 
-  toggleAgentPanel(agent) {
+  async toggleAgentPanel(agent) {
     // Close task panel if open
     if (this.expandedTask) {
       this.closeTaskPanel();
@@ -1349,8 +1438,25 @@ class AgentCanvas {
       // Clicking the same agent - close panel
       this.closeAgentPanel();
     } else {
-      // Expand panel for this agent
-      this.expandedAgent = agent;
+      // Fetch agent configuration before expanding
+      try {
+        const configResponse = await fetch(`/api/agents/${agent.name}`);
+        if (configResponse.ok) {
+          const agentConfig = await configResponse.json();
+          // Merge config data with agent
+          this.expandedAgent = {
+            ...agent,
+            config: agentConfig
+          };
+        } else {
+          // Use agent without config if fetch fails
+          this.expandedAgent = agent;
+        }
+      } catch (error) {
+        console.warn('Failed to fetch agent config:', error);
+        this.expandedAgent = agent;
+      }
+
       this.expandedAgentPanelAnimating = true;
       this.animateAgentPanel(true);
     }
