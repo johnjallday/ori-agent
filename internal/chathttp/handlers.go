@@ -697,6 +697,43 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleWorkspace(w, r, args)
 		return
 	}
+	if strings.HasPrefix(q, "/tool ") {
+		// Direct tool execution - bypass LLM decision-making
+		cmd, err := parseDirectToolCommand(q)
+		if err != nil {
+			// Return parsing error as response
+			json.NewEncoder(w).Encode(map[string]any{
+				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
+				"direct_tool_call": true,
+				"success":          false,
+			})
+			return
+		}
+
+		// Load agent
+		names, current := h.store.ListAgents()
+		if current == "" && len(names) > 0 {
+			current = names[0]
+		}
+		ag, ok := h.store.GetAgent(current)
+		if !ok {
+			http.Error(w, "current agent not found", http.StatusInternalServerError)
+			return
+		}
+
+		// Execute the tool directly
+		result := h.executeDirectTool(r.Context(), ag, cmd)
+
+		// Add to conversation history for context
+		ag.Messages = append(ag.Messages, openai.UserMessage(q))
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(result.Result))
+		_ = h.store.SetAgent(current, ag)
+
+		// Return formatted response
+		response := formatDirectToolResponse(result)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
 
 	log.Printf("Chat question received: %q", q)
 	// Context with timeout per request (prevents indefinite hang)
