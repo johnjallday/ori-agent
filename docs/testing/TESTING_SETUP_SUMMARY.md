@@ -262,9 +262,13 @@ The `manual_tests/` directory contains test programs with `main()` functions:
 - `test_rpc_plugin.go`
 - `test_rpc_system.go`
 
-These are excluded from automated test runs but can be run manually:
+These files have `//go:build ignore` tags to exclude them from automated test runs.
+They must be run manually using `go run`:
 ```bash
+# Run individual test scripts
 go run manual_tests/test_rpc_system.go
+go run manual_tests/test_rpc_plugin.go
+go run manual_tests/test_converted_plugins.go
 ```
 
 ## Next Steps
