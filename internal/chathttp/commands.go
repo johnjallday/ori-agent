@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+	"log"
+	"os"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
@@ -16,6 +19,7 @@ type CommandHandler struct {
 	store          store.Store
 	workspaceStore agentstudio.Store
 	enumExtractor  *pluginhttp.EnumExtractor
+	shutdownFunc   func()
 }
 
 // NewCommandHandler creates a new command handler
@@ -29,6 +33,11 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 // SetWorkspaceStore sets the workspace store for workspace commands
 func (ch *CommandHandler) SetWorkspaceStore(ws agentstudio.Store) {
 	ch.workspaceStore = ws
+}
+
+// SetShutdownFunc sets the shutdown function to be called on exit
+func (ch *CommandHandler) SetShutdownFunc(fn func()) {
+	ch.shutdownFunc = fn
 }
 
 // HandleAgentStatus handles the /agent command to show agent status dashboard
@@ -548,4 +557,34 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 		}
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// HandleExit handles the /exit command to shut down the server
+func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Send acknowledgment response first
+	response := map[string]any{
+		"response": "👋 **Shutting down ori-agent server...**\n\nGoodbye!",
+	}
+	json.NewEncoder(w).Encode(response)
+
+	// Flush the response to ensure client receives it
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Trigger shutdown in a goroutine to allow response to be sent
+	go func() {
+		// Small delay to ensure response is sent
+		time.Sleep(100 * time.Millisecond)
+
+		if ch.shutdownFunc != nil {
+			log.Println("Executing shutdown via /exit command...")
+			ch.shutdownFunc()
+		} else {
+			log.Println("Shutdown function not set, exiting immediately...")
+			os.Exit(0)
+		}
+	}()
 }
