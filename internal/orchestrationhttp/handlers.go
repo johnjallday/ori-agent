@@ -917,7 +917,7 @@ func (h *Handler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// We need to find the workspace that contains these tasks
 	// For simplicity, we'll search through all workspaces
-	workspaces, err := h.workspaceStore.List()
+	workspaceIDs, err := h.workspaceStore.List()
 	if err != nil {
 		log.Printf("❌ Error listing workspaces: %v", err)
 		http.Error(w, "Failed to retrieve workspaces", http.StatusInternalServerError)
@@ -926,19 +926,25 @@ func (h *Handler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Collect results from all workspaces
 	allResults := make(map[string]interface{})
-	for _, ws := range workspaces {
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			log.Printf("⚠️ Error getting workspace %s: %v", wsID, err)
+			continue
+		}
+
 		results := ws.GetTaskResults(taskIDs)
 		for taskID, result := range results {
 			// Get full task info
 			task, err := ws.GetTask(taskID)
 			if err == nil {
 				allResults[taskID] = map[string]interface{}{
-					"task_id":     task.ID,
-					"description": task.Description,
-					"status":      task.Status,
-					"result":      result,
-					"from":        task.From,
-					"to":          task.To,
+					"task_id":      task.ID,
+					"description":  task.Description,
+					"status":       task.Status,
+					"result":       result,
+					"from":         task.From,
+					"to":           task.To,
 					"completed_at": task.CompletedAt,
 				}
 			} else {
