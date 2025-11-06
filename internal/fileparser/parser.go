@@ -44,8 +44,8 @@ func ParsePDF(data []byte) (string, error) {
 
 // WordDocument represents a simple DOCX document structure
 type WordDocument struct {
-	XMLName xml.Name    `xml:"document"`
-	Body    WordBody    `xml:"body"`
+	XMLName xml.Name `xml:"document"`
+	Body    WordBody `xml:"body"`
 }
 
 type WordBody struct {

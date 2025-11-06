@@ -21,10 +21,10 @@ func NewHandler(onboardingMgr *onboarding.Manager) *Handler {
 
 // StatusResponse represents the onboarding status response
 type StatusResponse struct {
-	NeedsOnboarding bool   `json:"needs_onboarding"`
-	CurrentStep     int    `json:"current_step"`
-	Completed       bool   `json:"completed"`
-	Skipped         bool   `json:"skipped"`
+	NeedsOnboarding bool     `json:"needs_onboarding"`
+	CurrentStep     int      `json:"current_step"`
+	Completed       bool     `json:"completed"`
+	Skipped         bool     `json:"skipped"`
 	StepsCompleted  []string `json:"steps_completed"`
 }
 

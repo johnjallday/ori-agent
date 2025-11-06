@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -38,7 +39,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -401,10 +401,10 @@ func New() (*Server, error) {
 	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
 	s.chatHandler = chathttp.NewHandler(s.st, s.clientFactory)
-	s.chatHandler.SetLLMFactory(s.llmFactory)       // Inject LLM factory
-	s.chatHandler.SetHealthManager(s.healthManager) // Inject health manager
-	s.chatHandler.SetCostTracker(s.costTracker)     // Inject cost tracker
-	s.chatHandler.SetMCPRegistry(s.mcpRegistry)     // Inject MCP registry
+	s.chatHandler.SetLLMFactory(s.llmFactory)         // Inject LLM factory
+	s.chatHandler.SetHealthManager(s.healthManager)   // Inject health manager
+	s.chatHandler.SetCostTracker(s.costTracker)       // Inject cost tracker
+	s.chatHandler.SetMCPRegistry(s.mcpRegistry)       // Inject MCP registry
 	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Inject workspace store for /workspace commands
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 

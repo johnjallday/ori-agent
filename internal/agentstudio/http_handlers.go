@@ -289,7 +289,7 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 			Data: map[string]interface{}{
 				"message": "Connected to event stream",
 			},
-			Metadata:    make(map[string]string),
+			Metadata: make(map[string]string),
 		}
 	}()
 

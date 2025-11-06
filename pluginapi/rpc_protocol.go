@@ -107,15 +107,15 @@ func (s *grpcServer) GetRequiredConfig(ctx context.Context, _ *Empty) (*ConfigVa
 		for i, cv := range configVars {
 			defaultValJSON, _ := json.Marshal(cv.DefaultValue)
 			protoVars[i] = &ProtoConfigVariable{
-				Key:             cv.Key,
-				Name:            cv.Name,
-				Description:     cv.Description,
-				Type:            string(cv.Type),
-				Required:        cv.Required,
+				Key:              cv.Key,
+				Name:             cv.Name,
+				Description:      cv.Description,
+				Type:             string(cv.Type),
+				Required:         cv.Required,
 				DefaultValueJson: string(defaultValJSON),
-				Validation:      cv.Validation,
-				Options:         cv.Options,
-				Placeholder:     cv.Placeholder,
+				Validation:       cv.Validation,
+				Options:          cv.Options,
+				Placeholder:      cv.Placeholder,
 			}
 		}
 

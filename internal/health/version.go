@@ -8,10 +8,11 @@ import (
 
 // CompareVersions compares two semantic version strings
 // Returns:
-//   1 if v1 > v2
-//   0 if v1 == v2
-//  -1 if v1 < v2
-//  error if versions are invalid
+//
+//	 1 if v1 > v2
+//	 0 if v1 == v2
+//	-1 if v1 < v2
+//	error if versions are invalid
 func CompareVersions(v1, v2 string) (int, error) {
 	// Remove 'v' prefix if present
 	v1 = strings.TrimPrefix(v1, "v")

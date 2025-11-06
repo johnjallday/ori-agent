@@ -54,7 +54,6 @@ type DefaultSettingsProvider interface {
 	GetDefaultSettings() (string, error)
 }
 
-
 // AgentContext provides information about the current agent to plugins.
 type AgentContext struct {
 	// Name is the name of the current agent (e.g., "reaper-project-manager", "default")

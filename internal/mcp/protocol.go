@@ -68,7 +68,7 @@ type ToolCallResult struct {
 
 // ContentItem represents different types of content
 type ContentItem struct {
-	Type     string `json:"type"`     // "text", "image", "resource"
+	Type     string `json:"type"` // "text", "image", "resource"
 	Text     string `json:"text,omitempty"`
 	Data     string `json:"data,omitempty"`     // base64 for images
 	MimeType string `json:"mimeType,omitempty"` // for images
@@ -114,8 +114,8 @@ type ResourceContents struct {
 
 // Prompt represents an MCP prompt template
 type Prompt struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
 	Arguments   []PromptArgument `json:"arguments,omitempty"`
 }
 
@@ -145,28 +145,28 @@ type PromptGetParams struct {
 
 // PromptGetResult response
 type PromptGetResult struct {
-	Description string        `json:"description,omitempty"`
+	Description string          `json:"description,omitempty"`
 	Messages    []PromptMessage `json:"messages"`
 }
 
 // PromptMessage represents a message in a prompt
 type PromptMessage struct {
-	Role    string        `json:"role"` // "user" or "assistant"
-	Content ContentItem   `json:"content"`
+	Role    string      `json:"role"` // "user" or "assistant"
+	Content ContentItem `json:"content"`
 }
 
 // InitializeParams for initialize request
 type InitializeParams struct {
-	ProtocolVersion string            `json:"protocolVersion"`
+	ProtocolVersion string             `json:"protocolVersion"`
 	Capabilities    ClientCapabilities `json:"capabilities"`
-	ClientInfo      Implementation    `json:"clientInfo"`
+	ClientInfo      Implementation     `json:"clientInfo"`
 }
 
 // InitializeResult response
 type InitializeResult struct {
-	ProtocolVersion string            `json:"protocolVersion"`
+	ProtocolVersion string             `json:"protocolVersion"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
-	ServerInfo      Implementation    `json:"serverInfo"`
+	ServerInfo      Implementation     `json:"serverInfo"`
 }
 
 // ClientCapabilities describes client capabilities
@@ -208,15 +208,15 @@ type Implementation struct {
 
 // Standard MCP methods
 const (
-	MethodInitialize      = "initialize"
-	MethodInitialized     = "notifications/initialized"
-	MethodToolsList       = "tools/list"
-	MethodToolsCall       = "tools/call"
-	MethodResourcesList   = "resources/list"
-	MethodResourcesRead   = "resources/read"
-	MethodPromptsList     = "prompts/list"
-	MethodPromptsGet      = "prompts/get"
-	MethodPing            = "ping"
+	MethodInitialize    = "initialize"
+	MethodInitialized   = "notifications/initialized"
+	MethodToolsList     = "tools/list"
+	MethodToolsCall     = "tools/call"
+	MethodResourcesList = "resources/list"
+	MethodResourcesRead = "resources/read"
+	MethodPromptsList   = "prompts/list"
+	MethodPromptsGet    = "prompts/get"
+	MethodPing          = "ping"
 )
 
 // Standard JSON-RPC error codes

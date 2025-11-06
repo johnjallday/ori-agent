@@ -35,13 +35,13 @@ type TemplateParameter struct {
 
 // WorkflowStep defines a single step in a workflow
 type WorkflowStep struct {
-	ID           string                 `json:"id"`
-	Role         types.AgentRole        `json:"role"`
-	Description  string                 `json:"description"`
-	DependsOn    []string               `json:"depends_on,omitempty"`
-	Priority     int                    `json:"priority"`
-	Timeout      time.Duration          `json:"timeout"`
-	Context      map[string]interface{} `json:"context,omitempty"`
+	ID          string                 `json:"id"`
+	Role        types.AgentRole        `json:"role"`
+	Description string                 `json:"description"`
+	DependsOn   []string               `json:"depends_on,omitempty"`
+	Priority    int                    `json:"priority"`
+	Timeout     time.Duration          `json:"timeout"`
+	Context     map[string]interface{} `json:"context,omitempty"`
 }
 
 // TemplateManager manages workflow templates
@@ -117,17 +117,17 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 				Required:    true,
 			},
 			{
-				Name:        "depth",
-				Type:        "string",
-				Description: "Research depth (shallow, medium, deep)",
-				Required:    false,
+				Name:         "depth",
+				Type:         "string",
+				Description:  "Research depth (shallow, medium, deep)",
+				Required:     false,
 				DefaultValue: "medium",
 			},
 			{
-				Name:        "include_validation",
-				Type:        "boolean",
-				Description: "Include validation step",
-				Required:    false,
+				Name:         "include_validation",
+				Type:         "boolean",
+				Description:  "Include validation step",
+				Required:     false,
 				DefaultValue: true,
 			},
 		},
@@ -179,10 +179,10 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 				Required:    true,
 			},
 			{
-				Name:        "analysis_types",
-				Type:        "array",
-				Description: "Types of analysis to perform",
-				Required:    false,
+				Name:         "analysis_types",
+				Type:         "array",
+				Description:  "Types of analysis to perform",
+				Required:     false,
 				DefaultValue: []string{"statistical", "qualitative"},
 			},
 		},
@@ -226,10 +226,10 @@ func (tm *TemplateManager) loadBuiltInTemplates() {
 				Required:    true,
 			},
 			{
-				Name:        "criteria",
-				Type:        "array",
-				Description: "Validation criteria",
-				Required:    false,
+				Name:         "criteria",
+				Type:         "array",
+				Description:  "Validation criteria",
+				Required:     false,
 				DefaultValue: []string{"accuracy", "completeness", "consistency"},
 			},
 		},

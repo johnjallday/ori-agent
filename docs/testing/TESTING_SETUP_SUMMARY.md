@@ -149,14 +149,17 @@ ori-agent/
 │       ├── *_test.go                 # Unit tests
 │       └── integration_test.go       # LLM integration tests
 │
-└── tests/
-    ├── integration/
-    │   └── api_test.go               # HTTP API tests
-    ├── e2e/
-    │   ├── server_test.go            # Server E2E tests
-    │   └── plugin_test.go            # Plugin E2E tests
-    │
-    └── test_*.go                     # Manual test programs (excluded from test runs)
+├── tests/
+│   ├── integration/
+│   │   └── api_test.go               # HTTP API tests
+│   └── e2e/
+│       ├── server_test.go            # Server E2E tests
+│       └── plugin_test.go            # Plugin E2E tests
+│
+└── manual_tests/
+    ├── test_rpc_plugin.go            # Manual RPC plugin test
+    ├── test_rpc_system.go            # Manual RPC system test
+    └── test_converted_plugins.go     # Manual converted plugins test
 ```
 
 ## Quick Start
@@ -254,14 +257,18 @@ These tests were failing before the testing system was added. They should be fix
 
 **Manual Test Programs**:
 
-The `tests/` directory contains test programs with `main()` functions:
+The `manual_tests/` directory contains test programs with `main()` functions:
 - `test_converted_plugins.go`
 - `test_rpc_plugin.go`
 - `test_rpc_system.go`
 
-These are excluded from automated test runs but can be run manually:
+These files have `//go:build ignore` tags to exclude them from automated test runs.
+They must be run manually using `go run`:
 ```bash
-go run tests/test_rpc_system.go
+# Run individual test scripts
+go run manual_tests/test_rpc_system.go
+go run manual_tests/test_rpc_plugin.go
+go run manual_tests/test_converted_plugins.go
 ```
 
 ## Next Steps
@@ -279,9 +286,10 @@ go run tests/test_rpc_system.go
    - Current coverage: ~15% (estimated)
    - Target: 60%+
 
-3. **Move Manual Test Programs**
-   - Move `tests/test_*.go` to `tests/manual/` or similar
+3. **Manual Test Programs** ✅
+   - Moved `test_*.go` to `manual_tests/` directory
    - Prevents confusion with automated tests
+   - Fixed "main redeclared" error in CI
 
 4. **Add More Integration Tests**
    - Test actual server endpoints (not just mocks)

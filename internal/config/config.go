@@ -184,7 +184,7 @@ func (m *Manager) validate() error {
 	if m.settings.CurrentAgent == "" {
 		m.settings.CurrentAgent = "default"
 	}
-	
+
 	return m.validateAPIKey(m.settings.OpenAIAPIKey)
 }
 
@@ -208,7 +208,7 @@ func (m *Manager) validateAPIKey(apiKey string) error {
 	// Check that it only contains valid characters (alphanumeric, dash, underscore)
 	for _, char := range apiKey {
 		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			 (char >= '0' && char <= '9') || char == '-' || char == '_') {
+			(char >= '0' && char <= '9') || char == '-' || char == '_') {
 			return fmt.Errorf("invalid API key: contains invalid characters (only alphanumeric, dash, and underscore allowed)")
 		}
 	}

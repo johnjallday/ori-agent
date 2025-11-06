@@ -74,6 +74,8 @@ logs/
 *.bak
 *.backup
 *~
+.backup-*/
+backup-*/
 
 # Local development files
 .local/

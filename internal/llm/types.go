@@ -109,9 +109,9 @@ const (
 
 // FinishReason constants
 const (
-	FinishReasonStop       = "stop"        // Natural stop
-	FinishReasonLength     = "length"      // Hit max tokens
-	FinishReasonToolCalls  = "tool_calls"  // Model wants to call tools
-	FinishReasonError      = "error"       // Error occurred
+	FinishReasonStop          = "stop"           // Natural stop
+	FinishReasonLength        = "length"         // Hit max tokens
+	FinishReasonToolCalls     = "tool_calls"     // Model wants to call tools
+	FinishReasonError         = "error"          // Error occurred
 	FinishReasonContentFilter = "content_filter" // Content filtered
 )

@@ -15,11 +15,11 @@ import (
 
 // TestServer represents a test HTTP server instance
 type TestServer struct {
-	Server     *httptest.Server
-	Client     *http.Client
-	TempDir    string
-	Cleanup    func()
-	t          *testing.T
+	Server  *httptest.Server
+	Client  *http.Client
+	TempDir string
+	Cleanup func()
+	t       *testing.T
 }
 
 // NewTestServer creates a new test server instance
@@ -297,8 +297,8 @@ func main() {
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) &&
 		(haystack == needle ||
-		 len(haystack) > len(needle) &&
-		 indexOf(haystack, needle) >= 0)
+			len(haystack) > len(needle) &&
+				indexOf(haystack, needle) >= 0)
 }
 
 func indexOf(s, substr string) int {

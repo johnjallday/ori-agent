@@ -26,11 +26,11 @@ type OnboardingState struct {
 
 // DeviceInfo tracks information about the user's device
 type DeviceInfo struct {
-	Type     string `json:"type"`      // "desktop", "server", "laptop", "unknown"
-	OS       string `json:"os"`        // Operating system (darwin, linux, windows)
-	Arch     string `json:"arch"`      // Architecture (amd64, arm64, etc.)
-	Detected bool   `json:"detected"`  // Whether device detection has been completed
-	UserSet  bool   `json:"user_set"`  // Whether user manually set device type
+	Type     string `json:"type"`     // "desktop", "server", "laptop", "unknown"
+	OS       string `json:"os"`       // Operating system (darwin, linux, windows)
+	Arch     string `json:"arch"`     // Architecture (amd64, arm64, etc.)
+	Detected bool   `json:"detected"` // Whether device detection has been completed
+	UserSet  bool   `json:"user_set"` // Whether user manually set device type
 }
 
 // AppState tracks application-level state (persisted separately from agent data)
@@ -129,12 +129,12 @@ const (
 
 // Capability constants for agent capabilities
 const (
-	CapabilityWebSearch      = "web_search"       // Can search the web
-	CapabilityCodeAnalysis   = "code_analysis"    // Can analyze code
-	CapabilityDataProcessing = "data_processing"  // Can process and analyze data
-	CapabilityFileOperations = "file_operations"  // Can perform file operations
-	CapabilityAPIIntegration = "api_integration"  // Can integrate with external APIs
-	CapabilityResearch       = "research"         // Research and information gathering
-	CapabilitySynthesis      = "synthesis"        // Can synthesize information
-	CapabilityValidation     = "validation"       // Can validate and fact-check
+	CapabilityWebSearch      = "web_search"      // Can search the web
+	CapabilityCodeAnalysis   = "code_analysis"   // Can analyze code
+	CapabilityDataProcessing = "data_processing" // Can process and analyze data
+	CapabilityFileOperations = "file_operations" // Can perform file operations
+	CapabilityAPIIntegration = "api_integration" // Can integrate with external APIs
+	CapabilityResearch       = "research"        // Research and information gathering
+	CapabilitySynthesis      = "synthesis"       // Can synthesize information
+	CapabilityValidation     = "validation"      // Can validate and fact-check
 )

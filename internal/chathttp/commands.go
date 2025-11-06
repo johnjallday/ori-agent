@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // CommandHandler handles special chat commands
@@ -164,8 +164,8 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 						// Define operation-specific parameter mappings
 						operationParamMap := map[string][]string{
-							"create_project":  {"name", "bpm"},
-							"open_project":    {"path"},
+							"create_project": {"name", "bpm"},
+							"open_project":   {"path"},
 							"filter_project": {"name"},
 							"get_settings":   {},
 							"scan":           {},
@@ -382,6 +382,7 @@ Type any command above to get started!`
 	}
 	json.NewEncoder(w).Encode(response)
 }
+
 // HandleWorkspace handles the /workspace command and subcommands
 func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request, args string) {
 	w.Header().Set("Content-Type", "application/json")

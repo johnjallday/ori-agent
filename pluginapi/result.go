@@ -11,21 +11,21 @@ import (
 type DisplayType string
 
 const (
-	DisplayTypeText   DisplayType = "text"   // Plain text response
-	DisplayTypeTable  DisplayType = "table"  // Tabular data
-	DisplayTypeModal  DisplayType = "modal"  // Modal/popup with interactive elements
-	DisplayTypeCard   DisplayType = "card"   // Card-based layout
-	DisplayTypeList   DisplayType = "list"   // Simple list
-	DisplayTypeJSON   DisplayType = "json"   // Raw JSON viewer
+	DisplayTypeText  DisplayType = "text"  // Plain text response
+	DisplayTypeTable DisplayType = "table" // Tabular data
+	DisplayTypeModal DisplayType = "modal" // Modal/popup with interactive elements
+	DisplayTypeCard  DisplayType = "card"  // Card-based layout
+	DisplayTypeList  DisplayType = "list"  // Simple list
+	DisplayTypeJSON  DisplayType = "json"  // Raw JSON viewer
 )
 
 // StructuredResult represents a plugin result with metadata about how to display it
 type StructuredResult struct {
-	DisplayType DisplayType     `json:"displayType" yaml:"displayType"`
-	Title       string          `json:"title,omitempty" yaml:"title,omitempty"`
-	Description string          `json:"description,omitempty" yaml:"description,omitempty"`
-	Data        interface{}     `json:"data" yaml:"data"`
-	Metadata    map[string]any  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	DisplayType DisplayType    `json:"displayType" yaml:"displayType"`
+	Title       string         `json:"title,omitempty" yaml:"title,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Data        interface{}    `json:"data" yaml:"data"`
+	Metadata    map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // ToJSON converts the StructuredResult to a JSON string

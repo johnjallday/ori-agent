@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/internal/pluginloader"
 )
 
 // Manager handles plugin registry operations
@@ -33,7 +33,7 @@ func NewManager() *Manager {
 // fetchGitHubPluginRegistry fetches the plugin registry from GitHub
 func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
-	
+
 	resp, err := http.Get("https://raw.githubusercontent.com/johnjallday/ori-plugin-registry/main/plugin_registry.json")
 	if err != nil {
 		return reg, fmt.Errorf("failed to fetch from GitHub: %w", err)

@@ -212,4 +212,3 @@ func (d *PluginDownloader) CheckForUpdates(registry types.PluginRegistry) ([]typ
 
 	return needsUpdate, nil
 }
-

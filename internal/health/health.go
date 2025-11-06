@@ -11,35 +11,35 @@ import (
 
 // PluginHealth represents the health status of a plugin
 type PluginHealth struct {
-	Name               string        `json:"name"`
-	Version            string        `json:"version"`
-	Status             string        `json:"status"` // "healthy", "degraded", "unhealthy"
-	Compatible         bool          `json:"compatible"`
-	APIVersion         string        `json:"api_version"`
-	LastCheck          time.Time     `json:"last_check"`
-	Errors             []string      `json:"errors,omitempty"`
-	Warnings           []string      `json:"warnings,omitempty"`
-	Recommendation     string        `json:"recommendation,omitempty"`
-	CallSuccessRate    float64       `json:"call_success_rate"`
-	AvgResponseTime    time.Duration `json:"avg_response_time"`
-	TotalCalls         int64         `json:"total_calls"`
-	FailedCalls        int64         `json:"failed_calls"`
-	UpdateAvailable    bool          `json:"update_available"`
-	LatestVersion      string        `json:"latest_version,omitempty"`
-	UpdateRecommendation string      `json:"update_recommendation,omitempty"`
+	Name                 string        `json:"name"`
+	Version              string        `json:"version"`
+	Status               string        `json:"status"` // "healthy", "degraded", "unhealthy"
+	Compatible           bool          `json:"compatible"`
+	APIVersion           string        `json:"api_version"`
+	LastCheck            time.Time     `json:"last_check"`
+	Errors               []string      `json:"errors,omitempty"`
+	Warnings             []string      `json:"warnings,omitempty"`
+	Recommendation       string        `json:"recommendation,omitempty"`
+	CallSuccessRate      float64       `json:"call_success_rate"`
+	AvgResponseTime      time.Duration `json:"avg_response_time"`
+	TotalCalls           int64         `json:"total_calls"`
+	FailedCalls          int64         `json:"failed_calls"`
+	UpdateAvailable      bool          `json:"update_available"`
+	LatestVersion        string        `json:"latest_version,omitempty"`
+	UpdateRecommendation string        `json:"update_recommendation,omitempty"`
 }
 
 // CompatibilityCheck represents a compatibility check result
 type CompatibilityCheck struct {
-	Type    string `json:"type"`    // "version", "api", "functional", "dependencies"
+	Type    string `json:"type"` // "version", "api", "functional", "dependencies"
 	Passed  bool   `json:"passed"`
 	Details string `json:"details"`
 }
 
 // CheckResult contains all health check results for a plugin
 type CheckResult struct {
-	Health PluginHealth          `json:"health"`
-	Checks []CompatibilityCheck  `json:"checks"`
+	Health PluginHealth         `json:"health"`
+	Checks []CompatibilityCheck `json:"checks"`
 }
 
 // PluginRegistryProvider is an interface for getting plugin registry data

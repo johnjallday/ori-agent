@@ -11,8 +11,8 @@ import (
 
 // PricingModel defines the cost structure for a model
 type PricingModel struct {
-	ModelName string  `json:"model_name"`
-	Provider  string  `json:"provider"`
+	ModelName string `json:"model_name"`
+	Provider  string `json:"provider"`
 	// Cost per million tokens
 	InputCostPerMillion  float64 `json:"input_cost_per_million"`
 	OutputCostPerMillion float64 `json:"output_cost_per_million"`
@@ -35,41 +35,41 @@ type UsageRecord struct {
 
 // UsageStats provides aggregated usage statistics
 type UsageStats struct {
-	TotalRequests     int                    `json:"total_requests"`
-	TotalTokens       int                    `json:"total_tokens"`
-	TotalCost         float64                `json:"total_cost"`
-	Currency          string                 `json:"currency"`
-	ByProvider        map[string]ProviderStats `json:"by_provider"`
-	ByAgent           map[string]AgentStats    `json:"by_agent"`
-	ByModel           map[string]ModelStats    `json:"by_model"`
-	RecentRecords     []UsageRecord            `json:"recent_records,omitempty"`
-	TimeRange         TimeRange                `json:"time_range"`
+	TotalRequests int                      `json:"total_requests"`
+	TotalTokens   int                      `json:"total_tokens"`
+	TotalCost     float64                  `json:"total_cost"`
+	Currency      string                   `json:"currency"`
+	ByProvider    map[string]ProviderStats `json:"by_provider"`
+	ByAgent       map[string]AgentStats    `json:"by_agent"`
+	ByModel       map[string]ModelStats    `json:"by_model"`
+	RecentRecords []UsageRecord            `json:"recent_records,omitempty"`
+	TimeRange     TimeRange                `json:"time_range"`
 }
 
 // ProviderStats tracks stats per provider
 type ProviderStats struct {
-	Provider      string  `json:"provider"`
-	Requests      int     `json:"requests"`
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCost     float64 `json:"total_cost"`
-	AvgTokensPerRequest int  `json:"avg_tokens_per_request"`
+	Provider            string  `json:"provider"`
+	Requests            int     `json:"requests"`
+	TotalTokens         int     `json:"total_tokens"`
+	TotalCost           float64 `json:"total_cost"`
+	AvgTokensPerRequest int     `json:"avg_tokens_per_request"`
 }
 
 // AgentStats tracks stats per agent
 type AgentStats struct {
-	AgentName     string  `json:"agent_name"`
-	Requests      int     `json:"requests"`
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCost     float64 `json:"total_cost"`
+	AgentName   string  `json:"agent_name"`
+	Requests    int     `json:"requests"`
+	TotalTokens int     `json:"total_tokens"`
+	TotalCost   float64 `json:"total_cost"`
 }
 
 // ModelStats tracks stats per model
 type ModelStats struct {
-	Model         string  `json:"model"`
-	Provider      string  `json:"provider"`
-	Requests      int     `json:"requests"`
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCost     float64 `json:"total_cost"`
+	Model       string  `json:"model"`
+	Provider    string  `json:"provider"`
+	Requests    int     `json:"requests"`
+	TotalTokens int     `json:"total_tokens"`
+	TotalCost   float64 `json:"total_cost"`
 }
 
 // TimeRange represents a time period for stats
@@ -119,8 +119,8 @@ func (ct *CostTracker) initializePricingModels() {
 	ct.addPricingModel(PricingModel{
 		ModelName:            "gpt-4o-mini",
 		Provider:             "openai",
-		InputCostPerMillion:  0.15,  // $0.15 per 1M input tokens
-		OutputCostPerMillion: 0.60,  // $0.60 per 1M output tokens
+		InputCostPerMillion:  0.15, // $0.15 per 1M input tokens
+		OutputCostPerMillion: 0.60, // $0.60 per 1M output tokens
 		Currency:             "USD",
 	})
 
@@ -143,8 +143,8 @@ func (ct *CostTracker) initializePricingModels() {
 	ct.addPricingModel(PricingModel{
 		ModelName:            "gpt-3.5-turbo",
 		Provider:             "openai",
-		InputCostPerMillion:  0.50,  // $0.50 per 1M input tokens
-		OutputCostPerMillion: 1.50,  // $1.50 per 1M output tokens
+		InputCostPerMillion:  0.50, // $0.50 per 1M input tokens
+		OutputCostPerMillion: 1.50, // $1.50 per 1M output tokens
 		Currency:             "USD",
 	})
 
@@ -176,8 +176,8 @@ func (ct *CostTracker) initializePricingModels() {
 	ct.addPricingModel(PricingModel{
 		ModelName:            "claude-3-haiku-20240307",
 		Provider:             "claude",
-		InputCostPerMillion:  0.25,  // $0.25 per 1M input tokens
-		OutputCostPerMillion: 1.25,  // $1.25 per 1M output tokens
+		InputCostPerMillion:  0.25, // $0.25 per 1M input tokens
+		OutputCostPerMillion: 1.25, // $1.25 per 1M output tokens
 		Currency:             "USD",
 	})
 
@@ -285,11 +285,11 @@ func (ct *CostTracker) GetStats(start, end time.Time) UsageStats {
 	defer ct.mu.RUnlock()
 
 	stats := UsageStats{
-		ByProvider:  make(map[string]ProviderStats),
-		ByAgent:     make(map[string]AgentStats),
-		ByModel:     make(map[string]ModelStats),
-		Currency:    "USD",
-		TimeRange:   TimeRange{Start: start, End: end},
+		ByProvider:    make(map[string]ProviderStats),
+		ByAgent:       make(map[string]AgentStats),
+		ByModel:       make(map[string]ModelStats),
+		Currency:      "USD",
+		TimeRange:     TimeRange{Start: start, End: end},
 		RecentRecords: make([]UsageRecord, 0),
 	}
 
@@ -361,10 +361,10 @@ func (ct *CostTracker) GetAllTimeStats() UsageStats {
 
 	if len(ct.records) == 0 {
 		return UsageStats{
-			ByProvider:  make(map[string]ProviderStats),
-			ByAgent:     make(map[string]AgentStats),
-			ByModel:     make(map[string]ModelStats),
-			Currency:    "USD",
+			ByProvider: make(map[string]ProviderStats),
+			ByAgent:    make(map[string]AgentStats),
+			ByModel:    make(map[string]ModelStats),
+			Currency:   "USD",
 		}
 	}
 

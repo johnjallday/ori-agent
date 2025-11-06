@@ -141,7 +141,7 @@ func hasMacOSBattery() bool {
 
 	// Check for battery indicators
 	if strings.Contains(outputStr, "InternalBattery") ||
-	   strings.Contains(outputStr, "Battery") && !strings.Contains(outputStr, "No batteries") {
+		strings.Contains(outputStr, "Battery") && !strings.Contains(outputStr, "No batteries") {
 		return true
 	}
 

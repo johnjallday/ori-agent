@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // executeResearchPipeline executes a full research, analysis, synthesis, validation pipeline
@@ -94,9 +94,9 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 		Description: fmt.Sprintf("Create comprehensive report combining research and analysis on: %s", task.Goal),
 		Priority:    4,
 		Context: map[string]interface{}{
-			"research_task_id":  researchTask.ID,
-			"analysis_task_id":  analysisTask.ID,
-			"original_goal":     task.Goal,
+			"research_task_id": researchTask.ID,
+			"analysis_task_id": analysisTask.ID,
+			"original_goal":    task.Goal,
 		},
 		Timeout: task.MaxDuration / 4,
 	})
@@ -195,9 +195,9 @@ func (o *Orchestrator) GetWorkflowStatus(workspaceID string) (*WorkflowStatus, e
 		}
 
 		if task.Status == agentstudio.TaskStatusCompleted ||
-		   task.Status == agentstudio.TaskStatusFailed ||
-		   task.Status == agentstudio.TaskStatusCancelled ||
-		   task.Status == agentstudio.TaskStatusTimeout {
+			task.Status == agentstudio.TaskStatusFailed ||
+			task.Status == agentstudio.TaskStatusCancelled ||
+			task.Status == agentstudio.TaskStatusTimeout {
 			completedCount++
 		}
 	}

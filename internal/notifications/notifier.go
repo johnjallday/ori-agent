@@ -25,7 +25,7 @@ const (
 	NotifyUpdateFailed    NotificationType = "update_failed"
 
 	// Call notifications
-	NotifyPluginError NotificationType = "plugin_error"
+	NotifyPluginError     NotificationType = "plugin_error"
 	NotifyHighFailureRate NotificationType = "high_failure_rate"
 )
 

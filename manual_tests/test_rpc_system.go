@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -10,25 +12,37 @@ import (
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║   Testing Converted Plugins (RPC)                         ║")
+	fmt.Println("║   Ori Agent RPC Plugin System Test                        ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
 	// Test cases
 	tests := []struct {
-		name       string
-		pluginPath string
-		testArgs   string
+		name        string
+		pluginPath  string
+		testArgs    string
+		expectError bool
 	}{
 		{
-			name:       "Ori Reaper - Get Settings",
-			pluginPath: "../ori-reaper/ori-reaper",
-			testArgs:   `{"operation": "get_settings"}`,
+			name:       "Weather Plugin",
+			pluginPath: "plugins/weather/weather",
+			testArgs:   `{"location": "Tokyo"}`,
 		},
 		{
-			name:       "Music Project Manager - Get Settings",
-			pluginPath: "../music-project-manager/music-project-manager",
-			testArgs:   `{"operation": "get_settings"}`,
+			name:       "Math Plugin - Addition",
+			pluginPath: "plugins/math/math",
+			testArgs:   `{"operation": "add", "a": 15, "b": 27}`,
+		},
+		{
+			name:       "Math Plugin - Division",
+			pluginPath: "plugins/math/math",
+			testArgs:   `{"operation": "divide", "a": 100, "b": 4}`,
+		},
+		{
+			name:        "Math Plugin - Division by Zero",
+			pluginPath:  "plugins/math/math",
+			testArgs:    `{"operation": "divide", "a": 10, "b": 0}`,
+			expectError: true,
 		},
 	}
 
@@ -66,13 +80,23 @@ func main() {
 		fmt.Printf("  Calling with: %s\n", test.testArgs)
 		result, err := tool.Call(context.Background(), test.testArgs)
 
-		if err != nil {
-			fmt.Printf("  ❌ FAILED: %v\n", err)
-			failedTests++
+		if test.expectError {
+			if err != nil {
+				fmt.Printf("  ✅ PASSED: Got expected error: %v\n", err)
+				passedTests++
+			} else {
+				fmt.Printf("  ❌ FAILED: Expected error but got result: %s\n", result)
+				failedTests++
+			}
 		} else {
-			fmt.Printf("  Result: %s\n", result)
-			fmt.Printf("  ✅ PASSED\n")
-			passedTests++
+			if err != nil {
+				fmt.Printf("  ❌ FAILED: %v\n", err)
+				failedTests++
+			} else {
+				fmt.Printf("  Result: %s\n", result)
+				fmt.Printf("  ✅ PASSED\n")
+				passedTests++
+			}
 		}
 
 		// Cleanup

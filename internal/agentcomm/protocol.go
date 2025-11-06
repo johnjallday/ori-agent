@@ -11,15 +11,15 @@ import (
 type Task struct {
 	ID          string                 `json:"id"`
 	WorkspaceID string                 `json:"studio_id"`
-	From        string                 `json:"from"`         // Agent delegating the task
-	To          string                 `json:"to"`           // Agent receiving the task
-	Description string                 `json:"description"`  // What needs to be done
-	Priority    int                    `json:"priority"`     // 1 (low) to 5 (high)
-	Context     map[string]interface{} `json:"context"`      // Additional context
-	Timeout     time.Duration          `json:"timeout"`      // Max time to complete
-	Status      TaskStatus             `json:"status"`       // Current status
-	Result      string                 `json:"result"`       // Result when completed
-	Error       string                 `json:"error"`        // Error message if failed
+	From        string                 `json:"from"`        // Agent delegating the task
+	To          string                 `json:"to"`          // Agent receiving the task
+	Description string                 `json:"description"` // What needs to be done
+	Priority    int                    `json:"priority"`    // 1 (low) to 5 (high)
+	Context     map[string]interface{} `json:"context"`     // Additional context
+	Timeout     time.Duration          `json:"timeout"`     // Max time to complete
+	Status      TaskStatus             `json:"status"`      // Current status
+	Result      string                 `json:"result"`      // Result when completed
+	Error       string                 `json:"error"`       // Error message if failed
 	CreatedAt   time.Time              `json:"created_at"`
 	StartedAt   *time.Time             `json:"started_at,omitempty"`
 	CompletedAt *time.Time             `json:"completed_at,omitempty"`
@@ -29,13 +29,13 @@ type Task struct {
 type TaskStatus string
 
 const (
-	TaskStatusPending   TaskStatus = "pending"    // Task created but not started
-	TaskStatusAssigned  TaskStatus = "assigned"   // Task assigned to agent
+	TaskStatusPending    TaskStatus = "pending"     // Task created but not started
+	TaskStatusAssigned   TaskStatus = "assigned"    // Task assigned to agent
 	TaskStatusInProgress TaskStatus = "in_progress" // Agent is working on task
-	TaskStatusCompleted TaskStatus = "completed"  // Task completed successfully
-	TaskStatusFailed    TaskStatus = "failed"     // Task failed
-	TaskStatusCancelled TaskStatus = "cancelled"  // Task was cancelled
-	TaskStatusTimeout   TaskStatus = "timeout"    // Task exceeded timeout
+	TaskStatusCompleted  TaskStatus = "completed"   // Task completed successfully
+	TaskStatusFailed     TaskStatus = "failed"      // Task failed
+	TaskStatusCancelled  TaskStatus = "cancelled"   // Task was cancelled
+	TaskStatusTimeout    TaskStatus = "timeout"     // Task exceeded timeout
 )
 
 // DelegationRequest represents a request to delegate a task
@@ -58,12 +58,12 @@ type DelegationResponse struct {
 
 // MessageRequest is a convenient wrapper for sending messages
 type MessageRequest struct {
-	WorkspaceID string                 `json:"studio_id"`
-	From        string                 `json:"from"`
-	To          string                 `json:"to"`          // Empty for broadcast
-	Type        agentstudio.MessageType  `json:"type"`
-	Content     string                 `json:"content"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID string                  `json:"studio_id"`
+	From        string                  `json:"from"`
+	To          string                  `json:"to"` // Empty for broadcast
+	Type        agentstudio.MessageType `json:"type"`
+	Content     string                  `json:"content"`
+	Metadata    map[string]interface{}  `json:"metadata,omitempty"`
 }
 
 // NewTask creates a new task with generated ID and timestamps

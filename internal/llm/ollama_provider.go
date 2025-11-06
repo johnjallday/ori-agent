@@ -155,10 +155,10 @@ func (p *OllamaProvider) fetchAvailableModels() ([]string, error) {
 
 // ollamaMessage represents a message in Ollama format
 type ollamaMessage struct {
-	Role    string                   `json:"role"`
-	Content string                   `json:"content"`
-	Images  []string                 `json:"images,omitempty"`
-	ToolCalls []ollamaToolCall       `json:"tool_calls,omitempty"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	Images    []string         `json:"images,omitempty"`
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 }
 
 // ollamaToolCall represents a tool call in Ollama format
@@ -174,8 +174,8 @@ type ollamaFunction struct {
 
 // ollamaTool represents a tool definition in Ollama format
 type ollamaTool struct {
-	Type     string                 `json:"type"`
-	Function ollamaFunctionDef      `json:"function"`
+	Type     string            `json:"type"`
+	Function ollamaFunctionDef `json:"function"`
 }
 
 // ollamaFunctionDef represents a function definition

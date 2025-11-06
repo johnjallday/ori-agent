@@ -13,11 +13,11 @@ import (
 
 // Client implements a JSON-RPC 2.0 client for MCP
 type Client struct {
-	transport   *transport.StdioTransport
-	requestID   atomic.Int64
-	pending     map[interface{}]chan *Response
-	pendingMu   sync.RWMutex
-	initialized bool
+	transport    *transport.StdioTransport
+	requestID    atomic.Int64
+	pending      map[interface{}]chan *Response
+	pendingMu    sync.RWMutex
+	initialized  bool
 	capabilities ServerCapabilities
 }
 
