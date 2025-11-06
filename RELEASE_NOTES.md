@@ -5,6 +5,7 @@
 
 ## Changes
 
+- Release v0.0.8 (012dac0)
 - .gitignore added (258df45)
 - release 0.0.8 (dbf536a)
 - Release v0.0.8 (22b058e)
