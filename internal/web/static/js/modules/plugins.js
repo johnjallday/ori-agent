@@ -420,20 +420,19 @@ function handleFileInputChange(e) {
 
 function handlePluginFile(file) {
   console.log('File selected:', file.name);
-  
-  // Validate file type
-  if (!file.name.endsWith('.so')) {
-    showUploadResult('error', 'Please select a valid plugin file (.so)');
-    return;
-  }
-  
+
   // Validate file size (e.g., max 50MB)
   const maxSize = 50 * 1024 * 1024; // 50MB
   if (file.size > maxSize) {
     showUploadResult('error', 'File size too large. Maximum size is 50MB.');
     return;
   }
-  
+
+  // Note: We accept all file types here since plugins can be:
+  // - RPC executables (no extension or platform-specific)
+  // - Shared libraries (.so, .dll, .dylib)
+  // The backend will validate if it's actually a valid plugin
+
   uploadPluginFile(file);
 }
 

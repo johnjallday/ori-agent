@@ -260,6 +260,13 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Close()
 
+	// Make the plugin executable (required for RPC plugins)
+	if err := os.Chmod(pluginFile, 0755); err != nil {
+		os.Remove(pluginFile)
+		http.Error(w, "Failed to set plugin permissions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	// Load plugin to get its definition and validate it
 	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {

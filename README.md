@@ -171,7 +171,7 @@ This bypasses OpenAI API calls for faster, free plugin execution.
 
 ## 🔌 Plugin Development
 
-For detailed information on creating custom plugins, see the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md).
+For detailed information on creating custom plugins, see the Plugin Development section in [CLAUDE.md](CLAUDE.md#plugin-development).
 
 **Quick Overview:**
 - Plugins are Go shared libraries (`.so` files) that implement the `pluginapi.Tool` interface
@@ -211,11 +211,11 @@ return result.ToJSON()
 - `json` - Formatted JSON display
 - `text` - Plain text (default)
 
-See the [Plugin Development Guide](PLUGIN_DEVELOPMENT.md) for complete examples.
+See the Plugin Development section in [CLAUDE.md](CLAUDE.md#plugin-development) for complete examples.
 
 ## 🌐 API Reference
 
-For detailed API documentation including request/response formats, authentication, and examples, see the [API Reference Guide](API_REFERENCE.md).
+For detailed API documentation including request/response formats, authentication, and examples, see the [API Reference Guide](docs/api/API_REFERENCE.md).
 
 **Available Endpoints:**
 - **Agents**: `/api/agents` - Create, list, switch, and delete agents

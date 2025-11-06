@@ -348,8 +348,15 @@ PORT=9000 go run ./cmd/server
 
 ## Additional Resources
 
+### Documentation
 - `README.md` - Main project documentation
-- `API_REFERENCE.md` - API endpoint documentation
-- `PLUGIN_DEVELOPMENT.md` - Plugin development guide
+- `TESTING.md` - Complete testing guide
+- `docs/` - Organized documentation directory
+  - `docs/api/API_REFERENCE.md` - HTTP API endpoint reference
+  - `docs/testing/TEST_CHEATSHEET.md` - Quick testing commands
+  - `docs/testing/TESTING_SETUP_SUMMARY.md` - Testing infrastructure overview
 - `internal/llm/README.md` - LLM provider abstraction guide
-- `SCHEDULED_TASKS_PROGRESS.md` - Current development progress (workspace scheduled tasks)
+
+### Development
+- See `docs/README.md` for complete documentation index
+- Run `make help` for available development commands

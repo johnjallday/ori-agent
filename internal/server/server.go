@@ -545,6 +545,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/plugins/check-updates", s.pluginUpdateHandler.HandleCheckUpdates)
 	mux.HandleFunc("/api/plugins/backups", s.pluginUpdateHandler.HandleListBackups)
 	mux.HandleFunc("/api/plugins/backups/clean", s.pluginUpdateHandler.HandleCleanBackups)
+
+	// Plugin upload endpoint (must be before catch-all /api/plugins/ pattern)
+	mux.HandleFunc("/api/plugins/upload", s.pluginHandler.ServeHTTP)
 	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a web page request
 		if strings.Contains(r.URL.Path, "/pages/") {
