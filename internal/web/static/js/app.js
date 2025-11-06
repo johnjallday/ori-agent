@@ -1,4 +1,4 @@
-// Dolphin Agent Application JavaScript
+// Ori Agent Application JavaScript
 
 let currentAgent = '';
 let isComposing = false; // IME safety
@@ -252,7 +252,7 @@ function renderModal(data, metadata) {
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  plugin_name: "dolphin-reaper",
+                  plugin_name: "ori-reaper",
                   operation: "download_script",
                   args: {
                     filename: filename
@@ -735,8 +735,13 @@ function setupSidebarToggle() {
       // Toggle sidebar position for mobile overlay
       if (sidebar.classList.contains('d-none')) {
         sidebar.classList.remove('sidebar-mobile-show');
+        // Set sidebar width to 0 to remove the empty space
+        document.documentElement.style.setProperty('--sidebar-width', '0px');
       } else {
         sidebar.classList.add('sidebar-mobile-show');
+        // Restore sidebar width (get from resizer or use default)
+        const savedWidth = localStorage.getItem('sidebarWidth') || '300';
+        document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
       }
     });
 
@@ -751,6 +756,8 @@ function setupSidebarToggle() {
           window.innerWidth < 992) { // lg breakpoint
         sidebar.classList.add('d-none');
         sidebar.classList.remove('sidebar-mobile-show');
+        // Set sidebar width to 0 to remove the empty space
+        document.documentElement.style.setProperty('--sidebar-width', '0px');
       }
     });
 
@@ -761,11 +768,16 @@ function setupSidebarToggle() {
         sidebar.classList.remove('d-none');
         sidebar.classList.remove('sidebar-mobile-show');
         sidebar.classList.add('d-lg-block');
+        // Restore sidebar width
+        const savedWidth = localStorage.getItem('sidebarWidth') || '300';
+        document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
       } else {
         // Hide sidebar on small screens by default
         sidebar.classList.add('d-none');
         sidebar.classList.remove('d-lg-block');
         sidebar.classList.remove('sidebar-mobile-show');
+        // Set sidebar width to 0
+        document.documentElement.style.setProperty('--sidebar-width', '0px');
       }
     });
   }

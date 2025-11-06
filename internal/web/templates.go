@@ -16,6 +16,8 @@ type TemplateData struct {
 	CurrentAgent string
 	Model        string
 	Version      string
+	CurrentPage  string
+	Extra        map[string]interface{} // Additional custom data
 }
 
 // TemplateRenderer handles template rendering
@@ -47,6 +49,11 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/navbar.tmpl",
 		"templates/pages/index.tmpl",
 		"templates/pages/settings.tmpl",
+		"templates/pages/marketplace.tmpl",
+		"templates/pages/workflows.tmpl",
+		"templates/pages/studios.tmpl",
+		"templates/pages/workspace-dashboard.tmpl",
+		"templates/pages/usage.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -68,6 +75,11 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 
 	tr.templates["index"] = tmpl
 	tr.templates["settings"] = tmpl
+	tr.templates["marketplace"] = tmpl
+	tr.templates["workflows"] = tmpl
+	tr.templates["studios"] = tmpl
+	tr.templates["workspace-dashboard"] = tmpl
+	tr.templates["usage"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
@@ -87,6 +99,10 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
+	}
+	// Marketplace, settings, workflows, studios, workspace-dashboard, and usage use their own template names
+	if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" {
+		templateName = name
 	}
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
@@ -108,6 +124,7 @@ func GetDefaultData() TemplateData {
 		CurrentAgent: "Default Agent",
 		Model:        "gpt-5-nano",
 		Version:      version.GetVersion(),
+		Extra:        make(map[string]interface{}), // Initialize Extra map
 		//Version: "test",
 	}
 }

@@ -1,130 +1,176 @@
-# ---- Config ----
-GO            ?= go
-BINDIR        ?= bin
-SERVER_BIN    ?= $(BINDIR)/dolphin-agent
-STATIC_DIR    ?= internal/web/static      # adjust if your embedded static dir is elsewhere
-REGISTRY_FILE ?= $(STATIC_DIR)/plugin_registry.json
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins server deps docker-build docker-run check-env
 
-PLUGIN_DIRS   := plugins/math plugins/weather plugins/music_project_manager
-PLUGINS       := $(PLUGIN_DIRS:%=%/$(notdir %).so)
+# Default target
+.DEFAULT_GOAL := help
 
-# ---- Default ----
-.PHONY: all
-all: build plugins
+# Variables
+BINARY_NAME=ori-agent
+BUILD_DIR=bin
+PLUGINS_DIR=plugins
+COVERAGE_DIR=coverage
+GO=go
+GOTEST=$(GO) test
+GOBUILD=$(GO) build
+GORUN=$(GO) run
+GOVET=$(GO) vet
+GOFMT=$(GO) fmt
+PORT?=8080
 
-# ---- Server ----
-$(SERVER_BIN):
-	@mkdir -p $(BINDIR)
-	$(GO) build -o $(SERVER_BIN) ./cmd/server
-	@chmod +x $(SERVER_BIN)
+# Colors for output
+RED=\033[0;31m
+GREEN=\033[0;32m
+YELLOW=\033[1;33m
+BLUE=\033[0;34m
+NC=\033[0m # No Color
 
-.PHONY: build
-build: $(SERVER_BIN) ## Build the server binary
-
-.PHONY: build-all
-build-all: ## Build for multiple architectures
-	@echo "Building for multiple architectures..."
-	@mkdir -p $(BINDIR)
-	GOOS=darwin GOARCH=amd64 $(GO) build -o $(BINDIR)/dolphin-agent-darwin-amd64 ./cmd/server
-	GOOS=darwin GOARCH=arm64 $(GO) build -o $(BINDIR)/dolphin-agent-darwin-arm64 ./cmd/server
-	GOOS=linux GOARCH=amd64 $(GO) build -o $(BINDIR)/dolphin-agent-linux-amd64 ./cmd/server
-	GOOS=linux GOARCH=arm64 $(GO) build -o $(BINDIR)/dolphin-agent-linux-arm64 ./cmd/server
-	GOOS=windows GOARCH=amd64 $(GO) build -o $(BINDIR)/dolphin-agent-windows-amd64.exe ./cmd/server
-	@echo "Cross-compilation complete! Binaries in $(BINDIR)/"
-
-.PHONY: install
-install: $(SERVER_BIN) ## Install the binary to /usr/local/bin
-	@echo "Installing $(SERVER_BIN) to /usr/local/bin/dolphin-agent"
-	@sudo cp $(SERVER_BIN) /usr/local/bin/dolphin-agent
-	@sudo chmod +x /usr/local/bin/dolphin-agent
-	@echo "dolphin-agent installed successfully!"
-
-.PHONY: uninstall
-uninstall: ## Remove the installed binary from /usr/local/bin
-	@echo "Removing /usr/local/bin/dolphin-agent"
-	@sudo rm -f /usr/local/bin/dolphin-agent
-	@echo "dolphin-agent uninstalled successfully!"
-
-.PHONY: run
-run: $(SERVER_BIN) ## Run the built server (requires OPENAI_API_KEY)
-	@if [ -z "$$OPENAI_API_KEY" ]; then echo "ERROR: OPENAI_API_KEY not set"; exit 1; fi
-	$(SERVER_BIN)
-
-.PHONY: run-dev
-run-dev: ## Run the server directly with go run (requires OPENAI_API_KEY)
-	@if [ -z "$$OPENAI_API_KEY" ]; then echo "ERROR: OPENAI_API_KEY not set"; exit 1; fi
-	$(GO) run ./cmd/server
-
-# ---- Plugins (RPC Executables) ----
-.PHONY: plugins
-plugins: ## Build all RPC plugin executables
-	@echo "Building RPC plugin executables..."
-	@./scripts/build-plugins.sh
-
-.PHONY: plugins-cross
-plugins-cross: ## Build plugins for all platforms
-	@echo "Building plugins for multiple platforms..."
-	@GOOS=darwin GOARCH=amd64 ./scripts/build-plugins.sh
-	@GOOS=darwin GOARCH=arm64 ./scripts/build-plugins.sh
-	@GOOS=linux GOARCH=amd64 ./scripts/build-plugins.sh
-	@GOOS=linux GOARCH=arm64 ./scripts/build-plugins.sh
-	@GOOS=windows GOARCH=amd64 ./scripts/build-plugins.sh
-	@echo "Cross-platform plugin build complete!"
-
-# ---- Plugin Registry (embedded JSON) ----
-# Writes absolute paths for the built .so files into the embedded registry file
-.PHONY: registry
-registry: plugins ## Regenerate embedded plugin registry JSON with absolute paths
-	@mkdir -p "$(STATIC_DIR)"
-	@echo "Writing $(REGISTRY_FILE)"
-	@echo '{'                                                     >  "$(REGISTRY_FILE)"
-	@echo '  "plugins": ['                                        >> "$(REGISTRY_FILE)"
-	@echo '    {"name":"math","description":"Perform basic math operations: add, subtract, multiply, divide","path":"'"$(PWD)"'/plugins/math/math.so"},'  >> "$(REGISTRY_FILE)"
-	@echo '    {"name":"get_weather","description":"Get weather for a given location","path":"'"$(PWD)"'/plugins/weather/weather.so"}'                    >> "$(REGISTRY_FILE)"
-	@echo '  ]'                                                   >> "$(REGISTRY_FILE)"
-	@echo '}'                                                     >> "$(REGISTRY_FILE)"
-	@echo "OK -> $(REGISTRY_FILE)"
-
-# ---- Housekeeping ----
-.PHONY: test
-test: ## Run all tests
-	$(GO) test ./...
-
-.PHONY: tidy
-tidy: ## go mod tidy in root and plugin modules
-	$(GO) mod tidy
-	@if [ -d plugins/math ]; then (cd plugins/math && $(GO) mod tidy); fi
-	@if [ -d plugins/weather ]; then (cd plugins/weather && $(GO) mod tidy); fi
-
-.PHONY: lint
-lint: ## Run golangci-lint if available
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed; skipping"; exit 0; }
-	golangci-lint run ./...
-
-.PHONY: clean
-clean: ## Remove build artifacts
-	rm -rf $(BINDIR)
-	@find plugins -type f -name '*.so' -delete
-
-.PHONY: FORCE
-FORCE:
-
-# ---- Help ----
-.PHONY: version
-version: ## Show version information
-	@if [ -f VERSION ]; then echo "Version: $$(cat VERSION)"; else echo "Version: development"; fi
-	@echo "Go version: $$($(GO) version)"
-	@echo "Binary: $(SERVER_BIN)"
-
-.PHONY: help
-help: ## Show this help
-	@echo "\n\033[1mDolphin Agent Build System\033[0m\n"
-	@echo "\033[1mUsage:\033[0m make <target>"
-	@echo "\n\033[1mTargets:\033[0m\n"
-	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_.-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
-	@echo "\n\033[1mExamples:\033[0m"
-	@echo "  make build                 # Build the dolphin-agent binary"
-	@echo "  make all                   # Build binary and plugins"
-	@echo "  make run OPENAI_API_KEY=xxx# Run the built server"
-	@echo "  make install               # Install to /usr/local/bin"
+help: ## Show this help message
+	@echo "$(BLUE)Ori Agent - Development Commands$(NC)"
 	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+
+## Build targets
+
+deps: ## Install dependencies
+	@echo "$(BLUE)Installing dependencies...$(NC)"
+	$(GO) mod download
+	$(GO) mod tidy
+
+build: ## Build the server binary
+	@echo "$(BLUE)Building server...$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/server
+	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
+
+plugins: ## Build all plugins
+	@echo "$(BLUE)Building plugins...$(NC)"
+	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Plugins built$(NC)"
+
+all: deps build plugins ## Build everything (server + plugins)
+	@echo "$(GREEN)✓ Build complete$(NC)"
+
+clean: ## Clean build artifacts
+	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
+	rm -rf $(BUILD_DIR)
+	rm -rf $(COVERAGE_DIR)
+	rm -rf build-dmg
+	rm -rf $(PLUGINS_DIR)/*/$(shell basename $(PLUGINS_DIR))
+	@echo "$(GREEN)✓ Clean complete$(NC)"
+
+## Run targets
+
+check-env: ## Check required environment variables
+	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "$(RED)ERROR: No API key set. Set OPENAI_API_KEY or ANTHROPIC_API_KEY$(NC)"; \
+		exit 1; \
+	fi
+
+run: check-env build ## Build and run the server
+	@echo "$(BLUE)Starting server on port $(PORT)...$(NC)"
+	PORT=$(PORT) ./$(BUILD_DIR)/$(BINARY_NAME)
+
+run-dev: check-env ## Run server in development mode (no build)
+	@echo "$(BLUE)Starting server in dev mode on port $(PORT)...$(NC)"
+	PORT=$(PORT) $(GORUN) ./cmd/server
+
+## Test targets
+
+test: ## Run all tests (unit + integration)
+	@echo "$(BLUE)Running all tests...$(NC)"
+	$(GOTEST) -v $$(go list ./... | grep -v '/tests$$')
+	@echo "$(GREEN)✓ All tests passed$(NC)"
+
+test-unit: ## Run unit tests only
+	@echo "$(BLUE)Running unit tests...$(NC)"
+	$(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
+	@echo "$(GREEN)✓ Unit tests passed$(NC)"
+
+test-integration: ## Run integration tests
+	@echo "$(BLUE)Running integration tests...$(NC)"
+	@if [ -z "$$OPENAI_API_KEY" ]; then \
+		echo "$(YELLOW)Skipping integration tests (OPENAI_API_KEY not set)$(NC)"; \
+	else \
+		$(GOTEST) -v -run Integration ./...; \
+		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
+	fi
+
+test-e2e: build plugins ## Run end-to-end tests
+	@echo "$(BLUE)Running E2E tests...$(NC)"
+	@if [ -z "$$OPENAI_API_KEY" ]; then \
+		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
+	else \
+		$(GOTEST) -v ./tests/e2e/...; \
+		echo "$(GREEN)✓ E2E tests passed$(NC)"; \
+	fi
+
+test-coverage: ## Run tests with coverage report
+	@echo "$(BLUE)Running tests with coverage...$(NC)"
+	@mkdir -p $(COVERAGE_DIR)
+	$(GOTEST) -v -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out | grep total:
+	@echo "$(GREEN)✓ Coverage report generated: $(COVERAGE_DIR)/coverage.html$(NC)"
+
+test-watch: ## Run tests in watch mode (requires entr)
+	@echo "$(BLUE)Watching for changes...$(NC)"
+	@if ! command -v entr > /dev/null; then \
+		echo "$(RED)entr not found. Install with: brew install entr$(NC)"; \
+		exit 1; \
+	fi
+	@find . -name '*.go' | entr -c make test-unit
+
+test-all: test test-e2e ## Run all tests including E2E
+	@echo "$(GREEN)✓ All tests completed$(NC)"
+
+## Code quality targets
+
+fmt: ## Format code
+	@echo "$(BLUE)Formatting code...$(NC)"
+	$(GOFMT) ./...
+	@echo "$(GREEN)✓ Code formatted$(NC)"
+
+vet: ## Run go vet
+	@echo "$(BLUE)Running go vet...$(NC)"
+	$(GOVET) ./...
+	@echo "$(GREEN)✓ Vet passed$(NC)"
+
+lint: ## Run linter (requires golangci-lint)
+	@echo "$(BLUE)Running linter...$(NC)"
+	@if ! command -v golangci-lint > /dev/null; then \
+		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
+		exit 1; \
+	fi
+	golangci-lint run ./...
+	@echo "$(GREEN)✓ Lint passed$(NC)"
+
+check: fmt vet test ## Run all checks (fmt, vet, test)
+	@echo "$(GREEN)✓ All checks passed$(NC)"
+
+## Docker targets
+
+docker-build: ## Build Docker image
+	@echo "$(BLUE)Building Docker image...$(NC)"
+	docker build -t ori-agent:latest .
+	@echo "$(GREEN)✓ Docker image built$(NC)"
+
+docker-run: ## Run Docker container
+	@echo "$(BLUE)Running Docker container...$(NC)"
+	docker run -p $(PORT):$(PORT) \
+		-e OPENAI_API_KEY=$$OPENAI_API_KEY \
+		-e ANTHROPIC_API_KEY=$$ANTHROPIC_API_KEY \
+		ori-agent:latest
+
+## Development targets
+
+dev-setup: deps build plugins ## Initial development setup
+	@echo "$(GREEN)✓ Development environment ready$(NC)"
+	@echo ""
+	@echo "$(BLUE)Next steps:$(NC)"
+	@echo "  1. Set your API key: export OPENAI_API_KEY=your-key"
+	@echo "  2. Run the server: make run"
+	@echo "  3. Visit: http://localhost:8080"
+
+install-tools: ## Install development tools
+	@echo "$(BLUE)Installing development tools...$(NC)"
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@echo "$(GREEN)✓ Tools installed$(NC)"

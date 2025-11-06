@@ -1,0 +1,381 @@
+{{define "usage"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg glassmorphism position-fixed w-100 top-0" style="z-index: 1030; backdrop-filter: blur(10px);">
+    <div class="container-fluid px-4">
+      <div class="d-flex align-items-center w-100">
+        <button id="sidebarToggle" class="modern-btn modern-btn-secondary d-lg-none me-3" title="Toggle Sidebar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+          </svg>
+        </button>
+
+        <a class="navbar-brand fw-bold d-flex align-items-center" href="/" style="color: var(--primary-color);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+          {{.Title}}
+        </a>
+
+        <div class="d-flex align-items-center gap-3 ms-auto">
+          <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="cursor:pointer; padding: 0.5rem 1rem; border-radius: var(--radius-lg);">
+            <span class="status-indicator status-online"></span>
+            <span class="fw-medium">{{.CurrentAgent}}</span>
+          </span>
+          <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
+            </svg>
+            <span>Dark</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/>
+                </svg>
+                Usage & Cost Tracking
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">Monitor API usage and track costs across all providers</p>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="modern-btn modern-btn-secondary" onclick="refreshUsageData()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                </svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row g-4 mb-4">
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-primary me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">Today</h5>
+              </div>
+              <div id="todayStats">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-success me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9,10V12H7V10H9M13,10V12H11V10H13M17,10V12H15V10H17M19,3A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5C3.89,21 3,20.1 3,19V5A2,2 0 0,1 5,3H6V1H8V3H16V1H18V3H19M19,19V8H5V19H19M9,14V16H7V14H9M13,14V16H11V14H13M17,14V16H15V14H17Z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">This Month</h5>
+              </div>
+              <div id="monthStats">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-success" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-info me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2Z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">All Time</h5>
+              </div>
+              <div id="allTimeStats">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-info" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed Stats -->
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="modern-card p-4 h-100">
+              <h5 class="mb-3" style="color: var(--text-primary);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M12,4A6,6 0 0,0 6,10C6,13.31 8.69,16 12.1,16L11.22,13.77C10.95,13.29 11.11,12.68 11.59,12.4L12.45,11.9C12.93,11.63 13.54,11.79 13.82,12.27L15.74,14.69C17.12,13.59 18,11.9 18,10A6,6 0 0,0 12,4M12,9A1,1 0 0,1 13,10A1,1 0 0,1 12,11A1,1 0 0,1 11,10A1,1 0 0,1 12,9M7,18A1,1 0 0,0 6,19A1,1 0 0,0 7,20A1,1 0 0,0 8,19A1,1 0 0,0 7,18M12.09,13.27L14.58,19.58L17.17,18.08L12.95,12.77L12.09,13.27Z"/>
+                </svg>
+                By Provider
+              </h5>
+              <div id="providerStats">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="modern-card p-4 h-100">
+              <h5 class="mb-3" style="color: var(--text-primary);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                </svg>
+                By Agent
+              </h5>
+              <div id="agentStats">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Stats -->
+        <div class="modern-card p-4 mb-4">
+          <h5 class="mb-3" style="color: var(--text-primary);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+              <path d="M20,18H4V8H20M20,6H12L10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6Z"/>
+            </svg>
+            By Model
+          </h5>
+          <div id="modelStats">
+            <div class="text-center py-3">
+              <div class="spinner-border spinner-border-sm text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load sidebar script to populate agents -->
+  <script src="js/modules/sidebar.js"></script>
+
+  <script>
+    let usageData = null;
+
+    // Load usage data
+    async function loadUsageData() {
+      try {
+        const response = await fetch('/api/usage/summary');
+        if (!response.ok) throw new Error('Failed to load usage data');
+        usageData = await response.json();
+        renderUsageData();
+      } catch (error) {
+        console.error('Error loading usage data:', error);
+        showError('Failed to load usage data');
+      }
+    }
+
+    // Render all usage data
+    function renderUsageData() {
+      if (!usageData) return;
+
+      renderSummaryCard('todayStats', usageData.today);
+      renderSummaryCard('monthStats', usageData.this_month);
+      renderSummaryCard('allTimeStats', usageData.all_time);
+    }
+
+    // Render summary card
+    function renderSummaryCard(elementId, data) {
+      const element = document.getElementById(elementId);
+      if (!element || !data) return;
+
+      element.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Requests</span>
+          <span class="fw-bold" style="color: var(--text-primary); font-size: 1.25rem;">${(data.requests || 0).toLocaleString()}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Tokens</span>
+          <span class="fw-bold" style="color: var(--text-primary); font-size: 1.25rem;">${(data.tokens || 0).toLocaleString()}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Cost</span>
+          <span class="fw-bold text-success" style="font-size: 1.5rem;">$${(data.cost || 0).toFixed(4)}</span>
+        </div>
+      `;
+    }
+
+    // Load detailed stats
+    async function loadDetailedStats() {
+      try {
+        const response = await fetch('/api/usage/stats/all');
+        if (!response.ok) throw new Error('Failed to load detailed stats');
+        const data = await response.json();
+
+        renderProviderStats(data.by_provider || {});
+        renderAgentStats(data.by_agent || {});
+        renderModelStats(data.by_model || {});
+      } catch (error) {
+        console.error('Error loading detailed stats:', error);
+      }
+    }
+
+    // Render provider stats
+    function renderProviderStats(providers) {
+      const element = document.getElementById('providerStats');
+      if (!element) return;
+
+      if (Object.keys(providers).length === 0) {
+        element.innerHTML = '<p class="text-muted mb-0">No usage data available</p>';
+        return;
+      }
+
+      const providerColors = {
+        'openai': '#10a37f',
+        'claude': '#cc785c',
+        'ollama': '#6366f1'
+      };
+
+      element.innerHTML = Object.entries(providers).map(([key, stats]) => `
+        <div class="d-flex align-items-center justify-content-between py-3 border-bottom">
+          <div class="d-flex align-items-center">
+            <div class="modern-icon me-3" style="background-color: ${providerColors[stats.provider] || '#6c757d'}20;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="${providerColors[stats.provider] || '#6c757d'}">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+              </svg>
+            </div>
+            <div>
+              <div class="fw-medium" style="color: var(--text-primary); text-transform: capitalize;">${stats.provider}</div>
+              <small style="color: var(--text-muted);">${stats.requests} requests</small>
+            </div>
+          </div>
+          <div class="text-end">
+            <div class="fw-bold" style="color: var(--text-primary);">${stats.total_tokens.toLocaleString()}</div>
+            <small class="text-success">$${stats.total_cost.toFixed(4)}</small>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Render agent stats
+    function renderAgentStats(agents) {
+      const element = document.getElementById('agentStats');
+      if (!element) return;
+
+      if (Object.keys(agents).length === 0) {
+        element.innerHTML = '<p class="text-muted mb-0">No usage data available</p>';
+        return;
+      }
+
+      element.innerHTML = Object.entries(agents).map(([key, stats]) => `
+        <div class="d-flex align-items-center justify-content-between py-3 border-bottom">
+          <div class="d-flex align-items-center">
+            <div class="modern-icon modern-icon-secondary me-3">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+              </svg>
+            </div>
+            <div>
+              <div class="fw-medium" style="color: var(--text-primary);">${stats.agent_name || 'Unknown'}</div>
+              <small style="color: var(--text-muted);">${stats.requests} requests</small>
+            </div>
+          </div>
+          <div class="text-end">
+            <div class="fw-bold" style="color: var(--text-primary);">${stats.total_tokens.toLocaleString()}</div>
+            <small class="text-success">$${stats.total_cost.toFixed(4)}</small>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Render model stats
+    function renderModelStats(models) {
+      const element = document.getElementById('modelStats');
+      if (!element) return;
+
+      if (Object.keys(models).length === 0) {
+        element.innerHTML = '<p class="text-muted mb-0">No usage data available</p>';
+        return;
+      }
+
+      const sortedModels = Object.entries(models).sort((a, b) => b[1].total_cost - a[1].total_cost);
+
+      element.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="color: var(--text-secondary); font-weight: 500;">Model</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Provider</th>
+                <th class="text-end" style="color: var(--text-secondary); font-weight: 500;">Requests</th>
+                <th class="text-end" style="color: var(--text-secondary); font-weight: 500;">Tokens</th>
+                <th class="text-end" style="color: var(--text-secondary); font-weight: 500;">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sortedModels.map(([key, stats]) => `
+                <tr>
+                  <td style="color: var(--text-primary); font-weight: 500;">${stats.model}</td>
+                  <td><span class="modern-badge badge-secondary" style="text-transform: capitalize;">${stats.provider}</span></td>
+                  <td class="text-end" style="color: var(--text-primary);">${stats.requests.toLocaleString()}</td>
+                  <td class="text-end" style="color: var(--text-primary);">${stats.total_tokens.toLocaleString()}</td>
+                  <td class="text-end"><span class="text-success fw-medium">$${stats.total_cost.toFixed(4)}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // Refresh usage data
+    function refreshUsageData() {
+      loadUsageData();
+      loadDetailedStats();
+    }
+
+    // Show error message
+    function showError(message) {
+      console.error(message);
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      loadUsageData();
+      loadDetailedStats();
+    });
+  </script>
+</body>
+</html>
+{{end}}

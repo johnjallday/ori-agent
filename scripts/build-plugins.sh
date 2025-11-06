@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Build all plugins script for ori-agent
-# This script rebuilds all plugins in the plugins/ directory as RPC executables
+# This script rebuilds all plugins in the example_plugins/ directory as RPC executables
 
 set -e # Exit on any error
 
@@ -32,12 +32,15 @@ build_plugin() {
 
   echo -e "${YELLOW}Building RPC plugin: $plugin_dir${NC}"
 
-  if [ ! -f "plugins/$plugin_dir/$source_file" ]; then
-    echo -e "${RED}Error: Source file plugins/$plugin_dir/$source_file not found${NC}"
+  if [ ! -f "example_plugins/$plugin_dir/$source_file" ]; then
+    echo -e "${RED}Error: Source file example_plugins/$plugin_dir/$source_file not found${NC}"
     return 1
   fi
 
-  local output_path="plugins/$plugin_dir/$output_name"
+  # Create uploaded_plugins directory if it doesn't exist
+  mkdir -p uploaded_plugins
+
+  local output_path="uploaded_plugins/$output_name"
 
   # Add .exe extension for Windows
   if [ "$TARGET_OS" = "windows" ]; then
@@ -45,7 +48,7 @@ build_plugin() {
   fi
 
   # Build as regular executable (not -buildmode=plugin)
-  if GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -o "$output_path" "plugins/$plugin_dir/$source_file"; then
+  if GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -o "$output_path" "example_plugins/$plugin_dir/$source_file"; then
     echo -e "${GREEN}✓ Successfully built $output_name -> $output_path${NC}"
   else
     echo -e "${RED}✗ Failed to build $plugin_dir${NC}"
@@ -60,6 +63,6 @@ build_plugin "result-handler" "main.go" "result-handler"
 
 echo ""
 echo -e "${GREEN}All plugins built successfully!${NC}"
-echo -e "${BLUE}Plugin executables:${NC}"
-ls -lh plugins/*/weather plugins/*/math plugins/*/result-handler 2>/dev/null | grep -v "^d" || true
+echo -e "${BLUE}Plugin executables in uploaded_plugins/:${NC}"
+ls -lh uploaded_plugins/weather uploaded_plugins/math uploaded_plugins/result-handler 2>/dev/null || true
 echo ""

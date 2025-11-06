@@ -125,8 +125,8 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
               ${isUploaded ? '<span class="badge badge-success ms-2" style="font-size: 0.7em;">Local</span>' : ''}
               ${needsConfig ? '<span class="badge badge-warning ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
             </div>
-            <div class="text-muted small">${plugin.description || 'No description available'}</div>
-            ${plugin.version ? `<div class="text-muted" style="font-size: 0.7em;">v${plugin.version}</div>` : ''}
+            <div class="small" style="color: var(--text-muted);">${plugin.description || 'No description available'}</div>
+            ${plugin.version ? `<div style="font-size: 0.7em; color: var(--text-muted);">v${plugin.version}</div>` : ''}
           </div>
           <div class="d-flex align-items-center">
             ${hasConfig ? `
@@ -420,20 +420,19 @@ function handleFileInputChange(e) {
 
 function handlePluginFile(file) {
   console.log('File selected:', file.name);
-  
-  // Validate file type
-  if (!file.name.endsWith('.so')) {
-    showUploadResult('error', 'Please select a valid plugin file (.so)');
-    return;
-  }
-  
+
   // Validate file size (e.g., max 50MB)
   const maxSize = 50 * 1024 * 1024; // 50MB
   if (file.size > maxSize) {
     showUploadResult('error', 'File size too large. Maximum size is 50MB.');
     return;
   }
-  
+
+  // Note: We accept all file types here since plugins can be:
+  // - RPC executables (no extension or platform-specific)
+  // - Shared libraries (.so, .dll, .dylib)
+  // The backend will validate if it's actually a valid plugin
+
   uploadPluginFile(file);
 }
 

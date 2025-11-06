@@ -5,6 +5,78 @@
 let allAgents = [];
 let currentAgentName = '';
 let visibleAgentCount = 3;
+let availableProviders = []; // Cache for available providers and models
+
+// Fetch available providers and models from API
+async function loadAvailableProviders() {
+  try {
+    const response = await fetch('/api/providers');
+    const data = await response.json();
+    availableProviders = data.providers || [];
+    return availableProviders;
+  } catch (error) {
+    console.error('Failed to load providers:', error);
+    return [];
+  }
+}
+
+// Populate model select with options from available providers
+function populateModelSelect(modelSelect, selectedType = 'tool-calling') {
+  if (!modelSelect || availableProviders.length === 0) return;
+
+  // Clear existing options
+  modelSelect.innerHTML = '';
+
+  // Group models by provider
+  availableProviders.forEach(provider => {
+    const providerGroup = document.createElement('optgroup');
+    providerGroup.label = provider.display_name;
+
+    provider.models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model.value;
+      option.textContent = model.label;
+      option.setAttribute('data-type', model.type);
+      option.setAttribute('data-provider', model.provider);
+
+      // Only show models matching the selected type
+      if (model.type !== selectedType) {
+        option.style.display = 'none';
+        option.disabled = true;
+      }
+
+      providerGroup.appendChild(option);
+    });
+
+    modelSelect.appendChild(providerGroup);
+  });
+
+  // Select first available option
+  for (let i = 0; i < modelSelect.options.length; i++) {
+    if (!modelSelect.options[i].disabled) {
+      modelSelect.selectedIndex = i;
+      break;
+    }
+  }
+}
+
+// Initialize models on page load
+async function initializeModels() {
+  await loadAvailableProviders();
+
+  // Populate the model select in the create agent modal
+  const agentModelSelect = document.getElementById('agentModel');
+  if (agentModelSelect) {
+    populateModelSelect(agentModelSelect, 'tool-calling');
+  }
+}
+
+// Call initialization when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeModels);
+} else {
+  initializeModels();
+}
 
 // Agent Management Functions
 function selectAgent(agentName) {
@@ -38,9 +110,8 @@ function showAddAgentModal() {
     agentSystemPromptInput.value = '';
   }
   if (agentModelInput) {
-    agentModelInput.value = 'gpt-5-nano';
-    // Filter models based on default type
-    filterModelsByType('tool-calling', agentModelInput);
+    // Re-filter models based on default type (models already loaded on page init)
+    populateModelSelect(agentModelInput, 'tool-calling');
   }
   if (agentTemperatureInput) {
     agentTemperatureInput.value = '1.0';
@@ -63,29 +134,8 @@ function showAddAgentModal() {
 function filterModelsByType(agentType, modelSelect) {
   if (!modelSelect) return;
 
-  const allOptions = modelSelect.querySelectorAll('option');
-  allOptions.forEach(option => {
-    const optionType = option.getAttribute('data-type');
-    if (optionType === agentType || !optionType) {
-      option.style.display = '';
-      option.disabled = false;
-    } else {
-      option.style.display = 'none';
-      option.disabled = true;
-    }
-  });
-
-  // Ensure a valid option is selected
-  const selectedOption = modelSelect.options[modelSelect.selectedIndex];
-  if (selectedOption && selectedOption.disabled) {
-    // Find first enabled option for this type
-    for (let i = 0; i < modelSelect.options.length; i++) {
-      if (!modelSelect.options[i].disabled) {
-        modelSelect.selectedIndex = i;
-        break;
-      }
-    }
-  }
+  // Repopulate the select with filtered models
+  populateModelSelect(modelSelect, agentType);
 }
 
 // Create new agent
@@ -158,7 +208,11 @@ async function createNewAgent() {
       agentSystemPromptInput.value = '';
     }
     if (agentModelInput) {
-      agentModelInput.value = 'gpt-5-nano';
+      // Select first available tool-calling model
+      const firstToolCallingOption = agentModelInput.querySelector('option[data-type="tool-calling"]:not([disabled])');
+      if (firstToolCallingOption) {
+        agentModelInput.value = firstToolCallingOption.value;
+      }
     }
     if (agentTemperatureInput) {
       agentTemperatureInput.value = '1.0';
@@ -245,9 +299,12 @@ function renderAgents() {
   console.log(`📋 Rendering ${agentsToShow.length} agents:`, agentsToShow);
 
   // Add each visible agent
-  agentsToShow.forEach(agentName => {
-    console.log(`➕ Adding agent: ${agentName}`);
-    const agentItem = createAgentElement(agentName, currentAgentName);
+  agentsToShow.forEach(agent => {
+    // Handle both old format (string) and new format (object with name and type)
+    const agentName = typeof agent === 'string' ? agent : agent.name;
+    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
+    console.log(`➕ Adding agent: ${agentName} (type: ${agentType})`);
+    const agentItem = createAgentElement(agentName, agentType, currentAgentName);
     agentsList.appendChild(agentItem);
   });
 
@@ -285,13 +342,15 @@ function renderAgents() {
   setupAccordionListeners();
 
   // Load settings for the current agent accordion when it's expanded
-  agentsToShow.forEach(agentName => {
+  agentsToShow.forEach(agent => {
+    const agentName = typeof agent === 'string' ? agent : agent.name;
+    const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
     const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
     const collapseElement = document.getElementById(`collapse-${accordionId}`);
 
     if (collapseElement) {
       collapseElement.addEventListener('shown.bs.collapse', async function () {
-        await loadAgentSettings(agentName, accordionId);
+        await loadAgentSettings(agentName, agentType, accordionId);
       });
     }
   });
@@ -308,9 +367,17 @@ function hideAgents() {
 }
 
 // Create agent element with accordion
-function createAgentElement(agentName, currentAgent) {
+function createAgentElement(agentName, agentType, currentAgent) {
   const isCurrentAgent = agentName === currentAgent;
   const accordionId = `agent-${agentName.replace(/\s+/g, '-')}`;
+
+  // Format type label
+  const typeLabels = {
+    'tool-calling': 'Tool Calling',
+    'general': 'General',
+    'research': 'Research'
+  };
+  const typeLabel = typeLabels[agentType] || agentType;
 
   const agentDiv = document.createElement('div');
   agentDiv.className = 'accordion-item mb-2';
@@ -321,30 +388,31 @@ function createAgentElement(agentName, currentAgent) {
 
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
-      <div class="d-flex align-items-center justify-content-between p-2" style="background: ${isCurrentAgent ? 'var(--primary-color-light)' : 'var(--bg-secondary)'};">
+      <button class="d-flex align-items-center justify-content-between p-2 w-100 border-0 accordion-button collapsed"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#collapse-${accordionId}"
+              aria-expanded="false"
+              aria-controls="collapse-${accordionId}"
+              style="background: ${isCurrentAgent ? 'var(--primary-color-light)' : 'var(--bg-secondary)'}; color: var(--text-primary); text-align: left;">
         <div class="d-flex align-items-center gap-2 flex-grow-1">
-          <button class="accordion-button collapsed p-0 bg-transparent border-0 shadow-none"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target="#collapse-${accordionId}"
-                  aria-expanded="false"
-                  aria-controls="collapse-${accordionId}"
-                  style="color: var(--text-primary); width: 20px; height: 20px;">
-          </button>
           ${isCurrentAgent ? '<div class="status-indicator status-online"></div>' : ''}
-          <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
+          <div class="d-flex flex-column">
+            <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
+            <span style="color: var(--text-secondary); font-size: 0.7rem;">${typeLabel}</span>
+          </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
-          ${!isCurrentAgent ? `<button class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem;">
+          ${!isCurrentAgent ? `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem; cursor: pointer;">
             Load
-          </button>` : ''}
-          <button class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${agentName}')" title="Delete agent">
+          </span>` : ''}
+          <span class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${agentName}')" title="Delete agent" style="cursor: pointer;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
             </svg>
-          </button>
+          </span>
         </div>
-      </div>
+      </button>
     </div>
     <div id="collapse-${accordionId}" class="accordion-collapse collapse" aria-labelledby="heading-${accordionId}">
       <div class="accordion-body p-3" style="background: var(--bg-tertiary);">
@@ -356,14 +424,33 @@ function createAgentElement(agentName, currentAgent) {
         </h6>
 
         <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Name</label>
+            <input type="text" id="agentNameInput-${accordionId}" class="form-control form-control-sm"
+                   value="${agentName}"
+                   style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;"
+                   placeholder="Enter agent name">
+          </div>
+        </div>
+
+        <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Type</label>
+            <select id="agentTypeSelect-${accordionId}" class="form-select form-select-sm"
+                    style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
+              <option value="tool-calling" ${agentType === 'tool-calling' ? 'selected' : ''}>Tool Calling</option>
+              <option value="general" ${agentType === 'general' ? 'selected' : ''}>General</option>
+              <option value="research" ${agentType === 'research' ? 'selected' : ''}>Research</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="setting-item mb-3">
           <div class="d-flex align-items-center justify-content-between">
             <span style="color: var(--text-primary); font-size: 0.85rem;">Model</span>
             <select id="gptModelSelect-${accordionId}" class="form-select form-select-sm" style="width: auto; min-width: 180px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;">
-              <optgroup label="Cheap Models (Recommended for Agents)">
-                <option value="gpt-5-nano">GPT-5 Nano</option>
-                <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
-                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-              </optgroup>
+              <!-- Models will be loaded dynamically from /api/providers -->
+              <option value="">Loading models...</option>
             </select>
           </div>
         </div>
@@ -527,6 +614,8 @@ function setupAgentManagement() {
 // Update agent settings from accordion
 async function updateAgentSettings(agentName, accordionId) {
   try {
+    const agentNameInput = document.getElementById(`agentNameInput-${accordionId}`);
+    const agentTypeSelect = document.getElementById(`agentTypeSelect-${accordionId}`);
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
     const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
     const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
@@ -536,9 +625,33 @@ async function updateAgentSettings(agentName, accordionId) {
       return;
     }
 
+    const newAgentName = agentNameInput ? agentNameInput.value.trim() : agentName;
+    const newAgentType = agentTypeSelect ? agentTypeSelect.value : 'tool-calling';
+
+    // If agent name changed, we need to rename the agent first
+    if (newAgentName !== agentName) {
+      const renameResponse = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_name: newAgentName,
+          type: newAgentType
+        })
+      });
+
+      if (!renameResponse.ok) {
+        console.error('Failed to rename agent:', renameResponse.status);
+        if (typeof showNotification === 'function') {
+          showNotification('Failed to rename agent', 'error');
+        }
+        return;
+      }
+    }
+
     const settingsData = {
       model: modelSelect.value,
-      temperature: parseFloat(temperatureSlider.value)
+      temperature: parseFloat(temperatureSlider.value),
+      type: newAgentType
     };
 
     // Add system prompt if it exists
@@ -546,18 +659,27 @@ async function updateAgentSettings(agentName, accordionId) {
       settingsData.system_prompt = systemPromptInput.value;
     }
 
-    const response = await fetch(`/api/settings?agent=${encodeURIComponent(agentName)}`, {
+    const response = await fetch(`/api/settings?agent=${encodeURIComponent(newAgentName)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settingsData)
     });
 
     if (response.ok) {
-      console.log('Settings updated for agent:', agentName, settingsData);
+      console.log('Settings updated for agent:', newAgentName, settingsData);
 
       // Show success notification
       if (typeof showNotification === 'function') {
-        showNotification(`Settings updated for ${agentName}!`, 'success');
+        showNotification(`Settings updated for ${newAgentName}!`, 'success');
+      }
+
+      // If name changed, reload agents list to reflect the change
+      if (newAgentName !== agentName) {
+        await loadAgents();
+        // If this was the current agent, switch to the new name
+        if (currentAgentName === agentName) {
+          switchToAgent(newAgentName);
+        }
       }
     } else {
       console.error('Failed to save settings:', response.status);
@@ -579,9 +701,16 @@ function setupAccordionListeners() {
   document.querySelectorAll('[id^="temperatureSlider-"]').forEach(slider => {
     const accordionId = slider.id.replace('temperatureSlider-', '');
     const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
+    const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
 
     if (temperatureValue) {
       slider.addEventListener('input', function(e) {
+        // Enforce GPT-5 temperature restriction
+        if (modelSelect && modelSelect.value.includes('gpt-5')) {
+          e.target.value = 1.0;
+          temperatureValue.textContent = '1.0';
+          return;
+        }
         temperatureValue.textContent = parseFloat(e.target.value).toFixed(1);
       });
     }
@@ -612,14 +741,50 @@ function setupAccordionListeners() {
 }
 
 // Load settings for a specific agent accordion
-async function loadAgentSettings(agentName, accordionId) {
+async function loadAgentSettings(agentName, agentType, accordionId) {
   try {
+    // Ensure providers are loaded
+    if (availableProviders.length === 0) {
+      await loadAvailableProviders();
+    }
+
+    // Populate model dropdown from API, filtering by agent type
+    const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
+    if (modelSelect) {
+      // Clear existing options
+      modelSelect.innerHTML = '';
+
+      // Add models matching the agent's type from all providers
+      availableProviders.forEach(provider => {
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+        let hasMatchingModels = false;
+
+        provider.models.forEach(model => {
+          // Only add models matching the agent type
+          if (model.type === agentType) {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-type', model.type);
+            option.setAttribute('data-provider', model.provider);
+            providerGroup.appendChild(option);
+            hasMatchingModels = true;
+          }
+        });
+
+        // Only add the provider group if it has matching models
+        if (hasMatchingModels) {
+          modelSelect.appendChild(providerGroup);
+        }
+      });
+    }
+
     const response = await fetch(`/api/settings?agent=${encodeURIComponent(agentName)}`);
     if (response.ok) {
       const settings = await response.json();
 
-      // Update model dropdown
-      const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
+      // Update model dropdown with current value
       const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
       if (modelSelect && modelValue) {
         modelSelect.value = modelValue;

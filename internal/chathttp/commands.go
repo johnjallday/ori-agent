@@ -8,12 +8,14 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 )
 
 // CommandHandler handles special chat commands
 type CommandHandler struct {
-	store         store.Store
-	enumExtractor *pluginhttp.EnumExtractor
+	store          store.Store
+	workspaceStore agentstudio.Store
+	enumExtractor  *pluginhttp.EnumExtractor
 }
 
 // NewCommandHandler creates a new command handler
@@ -22,6 +24,11 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 		store:         store,
 		enumExtractor: pluginhttp.NewEnumExtractor(),
 	}
+}
+
+// SetWorkspaceStore sets the workspace store for workspace commands
+func (ch *CommandHandler) SetWorkspaceStore(ws agentstudio.Store) {
+	ch.workspaceStore = ws
 }
 
 // HandleAgentStatus handles the /agent command to show agent status dashboard
@@ -345,6 +352,12 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
 
+**Workspace Commands:**
+- **/workspace** - Show active workspaces
+- **/workspace tasks** - List your pending tasks
+- **/workspace task <task-id>** - Show details for a specific task
+- **/workspace all** - Show all tasks (any status)
+
 **Agent Management:**
 - Use **/agent** to see current agent status and available agents
 - Use **/agents** to see a list of all configured agents
@@ -360,6 +373,7 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - Commands must start with **/** (forward slash)
 - Agent names are case-sensitive when switching
 - Use the web interface to configure plugins and agents
+- Workspaces allow multiple agents to collaborate on complex tasks
 
 Type any command above to get started!`
 
@@ -367,4 +381,161 @@ Type any command above to get started!`
 		"response": helpResponse,
 	}
 	json.NewEncoder(w).Encode(response)
+}
+// HandleWorkspace handles the /workspace command and subcommands
+func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request, args string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Check if workspace store is available
+	if ch.workspaceStore == nil {
+		response := map[string]any{
+			"response": "❌ Workspace functionality is not available.",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get current agent
+	_, current := ch.store.ListAgents()
+	if current == "" {
+		response := map[string]any{
+			"response": "❌ No active agent found.",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Create agent context
+	agentCtx := agentstudio.NewAgentContext(current, ch.workspaceStore)
+
+	// Parse subcommand
+	args = strings.TrimSpace(args)
+	parts := strings.Fields(args)
+
+	// If no args, show workspace summary
+	if len(parts) == 0 {
+		summary, err := agentCtx.GetWorkspaceSummary()
+		if err != nil {
+			response := map[string]any{
+				"response": fmt.Sprintf("❌ Failed to get workspace summary: %v", err),
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]any{
+			"response": summary,
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	subcommand := parts[0]
+
+	switch subcommand {
+	case "tasks":
+		// Show pending tasks
+		tasksSummary, err := agentCtx.GetTasksSummary()
+		if err != nil {
+			response := map[string]any{
+				"response": fmt.Sprintf("❌ Failed to get tasks: %v", err),
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]any{
+			"response": tasksSummary,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "task":
+		// Show specific task details
+		if len(parts) < 2 {
+			response := map[string]any{
+				"response": "❌ Please provide a task ID. Usage: `/workspace task <task-id>`",
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		taskID := parts[1]
+		details, err := agentCtx.GetTaskDetails(taskID)
+		if err != nil {
+			response := map[string]any{
+				"response": fmt.Sprintf("❌ Failed to get task details: %v", err),
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]any{
+			"response": details,
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case "all":
+		// Show all tasks (any status)
+		allTasks, err := agentCtx.GetAllTasks()
+		if err != nil {
+			response := map[string]any{
+				"response": fmt.Sprintf("❌ Failed to get tasks: %v", err),
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if len(allTasks) == 0 {
+			response := map[string]any{
+				"response": "You have no tasks in any agentstudio.",
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("## All Your Tasks (%d)\n\n", len(allTasks)))
+
+		// Group by status
+		byStatus := make(map[agentstudio.TaskStatus][]agentstudio.Task)
+		for _, task := range allTasks {
+			byStatus[task.Status] = append(byStatus[task.Status], task)
+		}
+
+		statuses := []agentstudio.TaskStatus{
+			agentstudio.TaskStatusPending,
+			agentstudio.TaskStatusAssigned,
+			agentstudio.TaskStatusInProgress,
+			agentstudio.TaskStatusCompleted,
+			agentstudio.TaskStatusFailed,
+			agentstudio.TaskStatusCancelled,
+			agentstudio.TaskStatusTimeout,
+		}
+
+		for _, status := range statuses {
+			tasks := byStatus[status]
+			if len(tasks) == 0 {
+				continue
+			}
+
+			sb.WriteString(fmt.Sprintf("### %s (%d)\n\n", strings.Title(string(status)), len(tasks)))
+			for i, task := range tasks {
+				sb.WriteString(fmt.Sprintf("%d. **%s** (`%s`)\n", i+1, task.Description, task.ID))
+				sb.WriteString(fmt.Sprintf("   - From: %s | Priority: %d/5\n", task.From, task.Priority))
+			}
+			sb.WriteString("\n")
+		}
+
+		response := map[string]any{
+			"response": sb.String(),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		// Unknown subcommand
+		response := map[string]any{
+			"response": fmt.Sprintf("❌ Unknown workspace command: `%s`\n\nAvailable commands:\n- `/workspace` - Show active workspaces\n- `/workspace tasks` - List pending tasks\n- `/workspace task <id>` - Show task details\n- `/workspace all` - Show all tasks", subcommand),
+		}
+		json.NewEncoder(w).Encode(response)
+	}
 }

@@ -2,14 +2,24 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{.Title}}</title>
+  <script>
+    // Apply server-side theme immediately to prevent flash
+    (function() {
+      {{if eq .Theme "dark"}}
+        document.documentElement.classList.add('dark-mode');
+      {{else}}
+        document.documentElement.classList.remove('dark-mode');
+      {{end}}
+    })();
+  </script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
     :root {
-      --primary-color: #6366f1;
-      --primary-light: #818cf8;
-      --primary-dark: #4338ca;
+      --primary-color: #1d4ed8;
+      --primary-light: #2563eb;
+      --primary-dark: #1e40af;
       --secondary-color: #64748b;
       --success-color: #10b981;
       --danger-color: #ef4444;
@@ -42,7 +52,7 @@
       --bg-tertiary: #334155;
       --text-primary: #f8fafc;
       --text-secondary: #cbd5e1;
-      --text-muted: #64748b;
+      --text-muted: #94a3b8;
       --border-color: #334155;
       --border-light: #475569;
     }
@@ -61,7 +71,12 @@
       position: relative;
     }
 
-    .dark-mode body {
+    /* Dark mode body backgrounds - handle all cases */
+    .dark-mode body,
+    body.dark-mode,
+    .dark-mode .bg-light,
+    .dark-mode body.bg-light,
+    body.dark-mode.bg-light {
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%) !important;
     }
 
@@ -711,6 +726,13 @@
         max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
         width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
       }
+
+      /* Remove margin when sidebar is hidden */
+      .sidebar.d-none ~ .main-content {
+        margin-left: 0;
+        max-width: 100vw;
+        width: 100vw;
+      }
     }
 
     /* Resize handle */
@@ -1262,5 +1284,129 @@
     .dark-mode ::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.3);
     }
+
+    /* Enhanced Bootstrap outline buttons for better readability */
+    .btn-outline-primary {
+      color: white !important;
+      background-color: rgba(255, 255, 255, 0.15) !important;
+      border: 2px solid rgba(255, 255, 255, 0.4) !important;
+      font-weight: 600 !important;
+      backdrop-filter: blur(10px);
+      transition: all 0.2s ease;
+    }
+
+    .btn-outline-primary:hover {
+      background-color: rgba(29, 78, 216, 0.6) !important;
+      border-color: #1d4ed8 !important;
+      color: white !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 15px rgba(29, 78, 216, 0.3);
+    }
+
+    .btn-check:checked + .btn-outline-primary {
+      background-color: #1d4ed8 !important;
+      border-color: #1d4ed8 !important;
+      color: white !important;
+      box-shadow: 0 6px 20px rgba(29, 78, 216, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .dark-mode .btn-outline-primary {
+      color: white !important;
+      background-color: rgba(255, 255, 255, 0.1) !important;
+      border: 2px solid rgba(255, 255, 255, 0.3) !important;
+    }
+
+    .dark-mode .btn-outline-primary:hover {
+      background-color: rgba(37, 99, 235, 0.5) !important;
+      border-color: #2563eb !important;
+      color: white !important;
+    }
+
+    .dark-mode .btn-check:checked + .btn-outline-primary {
+      background-color: #2563eb !important;
+      border-color: #2563eb !important;
+      color: white !important;
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+      transform: translateY(-2px);
+    }
   </style>
+  <script>
+    // Global dark mode handler - uses server-side theme management
+    (function() {
+      // Get theme from server template
+      const serverTheme = '{{.Theme}}';
+      const isDarkMode = serverTheme === 'dark';
+
+      // Helper function to apply dark mode
+      function applyDarkMode(isDark) {
+        if (isDark) {
+          document.body.classList.add('dark-mode');
+          document.documentElement.classList.add('dark-mode');
+        } else {
+          document.body.classList.remove('dark-mode');
+          document.documentElement.classList.remove('dark-mode');
+        }
+        return isDark;
+      }
+
+      // Helper function to update dark mode button icon and text
+      function updateDarkModeButton(isDark) {
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        if (!darkModeToggle) return;
+
+        const icon = darkModeToggle.querySelector('svg');
+        const text = darkModeToggle.querySelector('span');
+
+        if (icon && text) {
+          if (isDark) {
+            // Show sun icon for switching to light mode
+            icon.innerHTML = '<path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/>';
+            text.textContent = 'Light';
+          } else {
+            // Show moon icon for switching to dark mode
+            icon.innerHTML = '<path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>';
+            text.textContent = 'Dark';
+          }
+        }
+      }
+
+      // Setup dark mode when DOM is ready
+      document.addEventListener('DOMContentLoaded', function() {
+        // Apply dark mode based on server theme
+        applyDarkMode(isDarkMode);
+
+        // Update button to match current theme
+        updateDarkModeButton(isDarkMode);
+
+        // Add event listener to dark mode toggle button
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        if (darkModeToggle) {
+          darkModeToggle.addEventListener('click', async function() {
+            // Toggle theme and save to server
+            const newTheme = isDarkMode ? 'light' : 'dark';
+
+            try {
+              const response = await fetch('/api/theme', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ theme: newTheme })
+              });
+
+              if (response.ok) {
+                // Reload page to apply new theme
+                window.location.reload();
+              } else {
+                console.error('Failed to set theme');
+              }
+            } catch (error) {
+              console.error('Error setting theme:', error);
+            }
+          });
+        }
+      });
+    })();
+  </script>
 </head>

@@ -67,7 +67,7 @@ build_external_plugin() {
 # List of external plugins to build
 # Format: "relative_path:plugin_name"
 EXTERNAL_PLUGINS=(
-    "../dolphin-reaper:dolphin-reaper"
+    "../ori-reaper:ori-reaper"
 )
 
 # Build each external plugin
@@ -83,7 +83,7 @@ echo ""
 if [ $built_count -gt 0 ]; then
     echo -e "${GREEN}✓ Built $built_count external plugin(s) successfully!${NC}"
     echo -e "${BLUE}External plugin binaries are in: uploaded_plugins/${NC}"
-    ls -la uploaded_plugins/*.so 2>/dev/null | grep -E "(reascript_launcher|dolphin-)" || true
+    ls -la uploaded_plugins/*.so 2>/dev/null | grep -E "(reascript_launcher|ori-)" || true
 else
     echo -e "${YELLOW}No external plugins were built${NC}"
 fi

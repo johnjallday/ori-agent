@@ -1,0 +1,16 @@
+{
+  "id": "9a11d85d-212f-4401-a314-f4f3e022ad5a",
+  "name": "test",
+  "description": "asef",
+  "parent_agent": "ase",
+  "agents": [
+    "letsgo",
+    "ase"
+  ],
+  "shared_data": null,
+  "messages": [],
+  "tasks": [],
+  "status": "active",
+  "created_at": "2025-11-04T19:29:50.913706-05:00",
+  "updated_at": "2025-11-04T19:29:50.913706-05:00"
+}

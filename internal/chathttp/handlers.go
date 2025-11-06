@@ -14,9 +14,11 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -24,7 +26,11 @@ type Handler struct {
 	store          store.Store
 	clientFactory  *client.Factory
 	llmFactory     *llm.Factory
+	healthManager  *healthhttp.Manager
 	commandHandler *CommandHandler
+	orchestrator   *orchestration.Orchestrator
+	costTracker    *llm.CostTracker
+	mcpRegistry    interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }
 }
 
 func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
@@ -39,6 +45,58 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 // SetLLMFactory sets the LLM factory
 func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 	h.llmFactory = factory
+}
+
+// SetHealthManager sets the health manager
+func (h *Handler) SetHealthManager(manager *healthhttp.Manager) {
+	h.healthManager = manager
+}
+
+// SetOrchestrator sets the orchestrator
+func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
+	h.orchestrator = orch
+}
+
+// SetCostTracker sets the cost tracker
+func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
+	h.costTracker = tracker
+}
+
+// SetMCPRegistry sets the MCP registry
+func (h *Handler) SetMCPRegistry(registry interface{ GetToolsForServer(string) ([]pluginapi.Tool, error); GetAllTools() []pluginapi.Tool }) {
+	h.mcpRegistry = registry
+}
+
+// SetWorkspaceStore sets the workspace store for workspace commands
+func (h *Handler) SetWorkspaceStore(ws agentstudio.Store) {
+	h.commandHandler.SetWorkspaceStore(ws)
+}
+
+// findTool searches for a tool by name in both plugins and MCP servers
+func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.Tool, bool) {
+	// First check native plugins
+	for _, plugin := range ag.Plugins {
+		if plugin.Definition.Name == toolName && plugin.Tool != nil {
+			return plugin.Tool, true
+		}
+	}
+
+	// Then check MCP tools
+	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		for _, serverName := range ag.MCPServers {
+			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			if err != nil {
+				continue
+			}
+			for _, mcpTool := range mcpTools {
+				if mcpTool.Definition().Name == toolName {
+					return mcpTool, true
+				}
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -108,6 +166,13 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		return
 	}
 
+	// Track usage and cost
+	if h.costTracker != nil {
+		if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp.Usage, ""); err != nil {
+			log.Printf("Warning: failed to track usage: %v", err)
+		}
+	}
+
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
 		log.Printf("Claude requested %d tool call(s)", len(resp.ToolCalls))
@@ -127,30 +192,34 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 			log.Printf("Executing tool: %s with args: %s", name, args)
 
-			// Find plugin by function definition name
-			var pl types.LoadedPlugin
-			var found bool
-			for _, plugin := range ag.Plugins {
-				if plugin.Definition.Name == name {
-					pl = plugin
-					found = true
-					break
-				}
-			}
+			// Find tool by name (searches both plugins and MCP tools)
+			tool, found := h.findTool(ag, name)
 
 			var result string
 			var err error
 
-			if !found || pl.Tool == nil {
-				result = fmt.Sprintf("❌ Error: Plugin %q not found or not loaded", name)
-				err = fmt.Errorf("plugin not found")
-				log.Printf("Plugin %s not found", name)
+			if !found {
+				result = fmt.Sprintf("❌ Error: Tool %q not found", name)
+				err = fmt.Errorf("tool not found")
+				log.Printf("Tool %s not found", name)
 			} else {
 				// Execute tool with timeout (30s for operations like API calls)
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
 				defer toolCancel()
 
-				result, err = pl.Tool.Call(toolCtx, args)
+				// Track tool call stats
+				startTime := time.Now()
+				result, err = tool.Call(toolCtx, args)
+				duration := time.Since(startTime)
+
+				// Record call stats in health manager
+				if h.healthManager != nil {
+					if err != nil {
+						h.healthManager.RecordCallFailure(name, duration, err)
+					} else {
+						h.healthManager.RecordCallSuccess(name, duration)
+					}
+				}
 
 				// IMPORTANT: Convert error to string result instead of returning HTTP error
 				// This prevents conversation history corruption
@@ -249,6 +318,13 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 			return
 		}
 
+		// Track usage and cost for second call
+		if h.costTracker != nil && resp2 != nil {
+			if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp2.Usage, ""); err != nil {
+				log.Printf("Warning: failed to track usage: %v", err)
+			}
+		}
+
 		// Store final response
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp2.Content))
 
@@ -273,6 +349,156 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	log.Printf("Claude chat response in %s", time.Since(start))
 	h.store.SetAgent(agentName, ag)
 	json.NewEncoder(w).Encode(map[string]any{"response": text})
+}
+
+// handleOllamaChat handles chat requests for Ollama models using the provider system
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
+	defer cancel()
+
+	// Get Ollama provider
+	provider, err := h.llmFactory.GetProvider("ollama")
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: Ollama provider not available: %v", err),
+		})
+		return
+	}
+
+	// Build message list
+	var messages []llm.Message
+
+	// Add system message - use custom if set, otherwise use default that emphasizes tool usage
+	systemPrompt := ag.Settings.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = "You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate."
+	}
+	messages = append(messages, llm.NewSystemMessage(systemPrompt))
+
+	// Add user message
+	messages = append(messages, llm.NewUserMessage(userMessage))
+
+	// Convert tools
+	var llmTools []llm.Tool
+	for _, tool := range tools {
+		if tool.OfFunction != nil {
+			fn := tool.OfFunction.Function
+			llmTools = append(llmTools, llm.Tool{
+				Name:        fn.Name,
+				Description: fn.Description.String(),
+				Parameters:  fn.Parameters,
+			})
+		}
+	}
+
+	// Call Ollama
+	start := time.Now()
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model:       ag.Settings.Model,
+		Messages:    messages,
+		Tools:       llmTools,
+		Temperature: ag.Settings.Temperature,
+		MaxTokens:   4000,
+	})
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": fmt.Sprintf("❌ **Error**: %v", err),
+		})
+		return
+	}
+
+	// Track usage (Ollama is free/local, so no cost tracking needed)
+	log.Printf("Ollama response received in %v", time.Since(start))
+
+	// Tool-call branch (similar to Claude handler)
+	if len(resp.ToolCalls) > 0 {
+		log.Printf("Ollama requested %d tool call(s)", len(resp.ToolCalls))
+
+		// Add assistant message to history WITH tool calls (important for Ollama protocol)
+		assistantMsg := llm.NewAssistantMessage(resp.Content)
+		assistantMsg.ToolCalls = resp.ToolCalls
+		messages = append(messages, assistantMsg)
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+
+		// Process tool calls
+		var toolResults []map[string]string
+		for _, tc := range resp.ToolCalls {
+			log.Printf("🔧 Looking for tool: %s with args: %s", tc.Name, tc.Arguments)
+			tool, found := h.findTool(ag, tc.Name)
+
+			var result string
+			if !found {
+				log.Printf("❌ Tool not found: %s", tc.Name)
+				result = fmt.Sprintf("❌ Error: Tool %q not found", tc.Name)
+			} else {
+				log.Printf("✅ Tool found: %s", tc.Name)
+				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+				defer toolCancel()
+
+				startTime := time.Now()
+				result, err = tool.Call(toolCtx, tc.Arguments)
+				duration := time.Since(startTime)
+
+				if h.healthManager != nil {
+					if err != nil {
+						h.healthManager.RecordCallFailure(tc.Name, duration, err)
+					} else {
+						h.healthManager.RecordCallSuccess(tc.Name, duration)
+					}
+				}
+
+				if err != nil {
+					log.Printf("❌ Tool execution error for %s: %v", tc.Name, err)
+					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
+				} else {
+					log.Printf("✅ Tool executed successfully: %s -> %s", tc.Name, result)
+				}
+			}
+
+			messages = append(messages, llm.NewToolMessage(tc.ID, result))
+			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
+
+			toolResults = append(toolResults, map[string]string{
+				"function": tc.Name,
+				"args":     tc.Arguments,
+				"result":   result,
+			})
+		}
+
+		log.Printf("📤 Sending tool results back to LLM (message count: %d)", len(messages))
+
+		// Get final response after tool execution
+		// IMPORTANT: Must include Tools array again for Ollama to understand the tool calling context
+		finalResp, err := provider.Chat(ctx, llm.ChatRequest{
+			Model:       ag.Settings.Model,
+			Messages:    messages,
+			Tools:       llmTools, // Include tools in follow-up request
+			Temperature: ag.Settings.Temperature,
+			MaxTokens:   4000,
+		})
+		if err != nil {
+			log.Printf("❌ Error getting final response from LLM: %v", err)
+			json.NewEncoder(w).Encode(map[string]any{
+				"response": fmt.Sprintf("❌ **Error**: %v", err),
+			})
+			return
+		}
+
+		log.Printf("📥 Final response from LLM: %s", finalResp.Content)
+
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
+		h.store.SetAgent(agentName, ag)
+
+		json.NewEncoder(w).Encode(map[string]any{
+			"response": finalResp.Content,
+		})
+		return
+	}
+
+	// No tool calls - direct response
+	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
+	h.store.SetAgent(agentName, ag)
+	json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
 }
 
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
@@ -330,6 +556,13 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 		if !isInitialized {
 			// Get required config for this plugin
 			configVars := initProvider.GetRequiredConfig()
+
+			// Skip if plugin has no required configuration (e.g., simple plugins like math)
+			// This handles the case where RPC clients always implement InitializationProvider
+			// but the underlying plugin doesn't actually need configuration
+			if len(configVars) == 0 {
+				continue
+			}
 
 			// Get fresh definition for description
 			def := plugin.Definition
@@ -453,6 +686,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleSwitch(w, r, agentName)
 		return
 	}
+	if strings.HasPrefix(q, "/workspace") {
+		// Parse args after "/workspace"
+		args := strings.TrimPrefix(q, "/workspace")
+		h.commandHandler.HandleWorkspace(w, r, args)
+		return
+	}
 
 	log.Printf("Chat question received: %q", q)
 	// Context with timeout per request (prevents indefinite hang)
@@ -483,8 +722,43 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if orchestration is needed for this message
+	if h.orchestrator != nil && h.orchestrator.DetectOrchestrationNeed(q) {
+		log.Printf("🎯 Orchestration detected for message: %q", q)
+
+		// Identify required roles
+		roles := h.orchestrator.IdentifyRequiredRoles(q)
+
+		// Create collaborative task
+		task := orchestration.CollaborativeTask{
+			Goal:          q,
+			RequiredRoles: roles,
+			MaxDuration:   10 * time.Minute,
+			Context:       map[string]interface{}{},
+		}
+
+		// Execute collaborative task
+		result, err := h.orchestrator.ExecuteCollaborativeTask(ctx, current, task)
+		if err != nil {
+			log.Printf("❌ Orchestration failed: %v", err)
+			// Fall through to normal chat handling
+		} else {
+			// Return orchestration result
+			log.Printf("✅ Orchestration completed successfully")
+			json.NewEncoder(w).Encode(map[string]any{
+				"response":     result.FinalOutput,
+				"orchestrated": true,
+				"studio_id": result.WorkspaceID,
+				"status":       result.Status,
+			})
+			return
+		}
+	}
+
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
 	tools := []openai.ChatCompletionToolUnionParam{}
+
+	// Add native plugin tools
 	for _, pl := range ag.Plugins {
 		// Call Tool.Definition() to get fresh definition with dynamic enums
 		if pl.Tool != nil {
@@ -493,6 +767,21 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Fallback to cached definition if tool is not available
 			tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
+		}
+	}
+
+	// Add MCP tools for enabled servers
+	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		for _, serverName := range ag.MCPServers {
+			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
+			if err != nil {
+				log.Printf("Warning: failed to get MCP tools for server %s: %v", serverName, err)
+				continue
+			}
+			for _, mcpTool := range mcpTools {
+				tools = append(tools, openai.ChatCompletionFunctionTool(mcpTool.Definition()))
+			}
+			log.Printf("Added %d MCP tools from server %s", len(mcpTools), serverName)
 		}
 	}
 
@@ -538,6 +827,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if this is an Ollama model - route to Ollama provider
+	if (strings.Contains(ag.Settings.Model, "llama") ||
+		strings.Contains(ag.Settings.Model, "mistral") ||
+		strings.Contains(ag.Settings.Model, "mixtral") ||
+		strings.Contains(ag.Settings.Model, "phi") ||
+		strings.Contains(ag.Settings.Model, "qwen") ||
+		strings.Contains(ag.Settings.Model, "codellama") ||
+		strings.Contains(ag.Settings.Model, "orca") ||
+		strings.Contains(ag.Settings.Model, "vicuna") ||
+		strings.Contains(ag.Settings.Model, "neural-chat") ||
+		strings.Contains(ag.Settings.Model, "starling")) && h.llmFactory != nil {
+		// Use Ollama provider
+		h.handleOllamaChat(w, r, ag, q, tools, current, base)
+		return
+	}
+
 	params := openai.ChatCompletionNewParams{
 		Model:       ag.Settings.Model,
 		Temperature: openai.Float(ag.Settings.Temperature),
@@ -561,6 +866,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Track usage and cost for OpenAI
+	if h.costTracker != nil && resp.Usage.TotalTokens > 0 {
+		usage := llm.Usage{
+			PromptTokens:     int(resp.Usage.PromptTokens),
+			CompletionTokens: int(resp.Usage.CompletionTokens),
+			TotalTokens:      int(resp.Usage.TotalTokens),
+		}
+		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+			log.Printf("Warning: failed to track usage: %v", err)
+		}
+	}
+
 	choice := resp.Choices[0].Message
 
 	// Fallback if model answered with an empty assistant message and no tool calls
@@ -578,6 +896,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		if errFB == nil && respFB != nil && len(respFB.Choices) > 0 {
 			choice = respFB.Choices[0].Message
+
+			// Track usage for fallback call
+			if h.costTracker != nil && respFB.Usage.TotalTokens > 0 {
+				usage := llm.Usage{
+					PromptTokens:     int(respFB.Usage.PromptTokens),
+					CompletionTokens: int(respFB.Usage.CompletionTokens),
+					TotalTokens:      int(respFB.Usage.TotalTokens),
+				}
+				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+					log.Printf("Warning: failed to track fallback usage: %v", err)
+				}
+			}
 		}
 	}
 
@@ -592,19 +922,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			name := tc.Function.Name
 			args := tc.Function.Arguments
 
-			// Find plugin by function definition name
-			var pl types.LoadedPlugin
-			var found bool
-			for _, plugin := range ag.Plugins {
-				if plugin.Definition.Name == name {
-					pl = plugin
-					found = true
-					break
-				}
-			}
+			// Find tool by name (searches both plugins and MCP tools)
+			tool, found := h.findTool(ag, name)
 
-			if !found || pl.Tool == nil {
-				http.Error(w, fmt.Sprintf("plugin %q not loaded", name), http.StatusInternalServerError)
+			if !found {
+				http.Error(w, fmt.Sprintf("tool %q not found", name), http.StatusInternalServerError)
 				return
 			}
 
@@ -612,7 +934,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			toolCtx, toolCancel := context.WithTimeout(base, 30*time.Second)
 			defer toolCancel()
 
-			result, err := pl.Tool.Call(toolCtx, args)
+			// Track tool call stats
+			startTime := time.Now()
+			result, err := tool.Call(toolCtx, args)
+			duration := time.Since(startTime)
+
+			// Record call stats in health manager
+			if h.healthManager != nil {
+				if err != nil {
+					h.healthManager.RecordCallFailure(name, duration, err)
+				} else {
+					h.healthManager.RecordCallSuccess(name, duration)
+				}
+			}
 
 			// IMPORTANT: Always add a tool response message, even on error
 			// This prevents conversation history corruption when tool calls fail
@@ -706,6 +1040,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
+		// Track usage for second OpenAI call (after tool execution)
+		if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
+			usage := llm.Usage{
+				PromptTokens:     int(resp2.Usage.PromptTokens),
+				CompletionTokens: int(resp2.Usage.CompletionTokens),
+				TotalTokens:      int(resp2.Usage.TotalTokens),
+			}
+			if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
+				log.Printf("Warning: failed to track usage for tool response: %v", err)
+			}
+		}
+
 		final := resp2.Choices[0].Message
 		ag.Messages = append(ag.Messages, final.ToParam())
 
