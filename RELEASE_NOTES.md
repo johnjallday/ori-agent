@@ -1,7 +1,7 @@
-# Release Notes - v0.0.10
+# Release Notes - v0.0.8
 
 **Release Date:** 2025-11-06
-**Previous Version:** v0.0.9
+**Previous Version:** v0.0.10
 
 ## Changes
 
