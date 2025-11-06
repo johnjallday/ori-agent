@@ -56,12 +56,12 @@ func TestClaudeProviderDefaultModels(t *testing.T) {
 
 	models := provider.DefaultModels()
 	expectedModels := []string{
-		"claude-3-5-sonnet-20241022",
-		"claude-3-5-sonnet-20240620",
-		"claude-3-5-haiku-20241022",
-		"claude-3-opus-20240229",
-		"claude-3-sonnet-20240229",
-		"claude-3-haiku-20240307",
+		"claude-sonnet-4-5",        // Claude Sonnet 4.5
+		"claude-sonnet-4",          // Claude Sonnet 4
+		"claude-opus-4-1",          // Claude Opus 4.1
+		"claude-3-opus-20240229",   // Claude 3 Opus
+		"claude-3-sonnet-20240229", // Claude 3 Sonnet
+		"claude-3-haiku-20240307",  // Claude 3 Haiku
 	}
 
 	if len(models) != len(expectedModels) {
