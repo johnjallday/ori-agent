@@ -290,7 +290,6 @@ class WorkspaceDashboard {
                   <div class="mb-2">
                     <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
                     <select id="task-from" class="form-control form-control-sm" required>
-                      <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
                       ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
                     </select>
                   </div>
@@ -635,8 +634,6 @@ class WorkspaceDashboard {
    */
   renderAgentList() {
     const agents = this.data.agents || [];
-    const ws = this.data.workspace;
-    const parentAgent = ws?.parent_agent || '';
 
     if (agents.length === 0) {
       return '<p class="text-muted">No participating agents configured</p>';
@@ -651,18 +648,15 @@ class WorkspaceDashboard {
               <div>
                 <div style="color: var(--text-primary); font-weight: 500;">
                   ${this.escapeHtml(agent)}
-                  ${agent === parentAgent ? '<span class="badge bg-secondary ms-2" style="font-size: 0.7rem;">Parent</span>' : ''}
                 </div>
                 <div class="text-muted small">Active</div>
               </div>
             </div>
-            ${agent !== parentAgent ? `
-              <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19,13H5V11H19V13Z"/>
-                </svg>
-              </button>
-            ` : ''}
+            <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,13H5V11H19V13Z"/>
+              </svg>
+            </button>
           </div>
         `).join('')}
       </div>
@@ -1178,11 +1172,10 @@ class WorkspaceDashboard {
 
       // Get current workspace agents
       const currentAgents = this.data.agents || [];
-      const parentAgent = this.data.workspace?.parent_agent || '';
 
       // Add agents that are not already in the workspace
       agents.forEach(agent => {
-        if (!currentAgents.includes(agent.name) && agent.name !== parentAgent) {
+        if (!currentAgents.includes(agent.name)) {
           const option = document.createElement('option');
           option.value = agent.name;
           option.textContent = agent.name;
@@ -1386,7 +1379,6 @@ class WorkspaceDashboard {
               <div class="col-md-6 mb-2">
                 <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
                 <select id="st-from" class="form-control form-control-sm" required>
-                  <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
                   ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
                 </select>
               </div>

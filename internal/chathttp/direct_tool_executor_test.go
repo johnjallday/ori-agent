@@ -7,7 +7,6 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/johnjallday/ori-agent/pluginapi"
 	"github.com/openai/openai-go/v2"
 )
 
@@ -21,7 +20,7 @@ type mockTool struct {
 func (m *mockTool) Definition() openai.FunctionDefinitionParam {
 	return openai.FunctionDefinitionParam{
 		Name:        m.name,
-		Description: openai.Stringable(m.description),
+		Description: openai.String(m.description),
 	}
 }
 
@@ -35,32 +34,32 @@ func (m *mockTool) Call(ctx context.Context, args string) (string, error) {
 // TestParseDirectToolCommand tests the parsing of direct tool commands
 func TestParseDirectToolCommand(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
+		name         string
+		input        string
 		wantToolName string
-		wantArgs    string
-		wantErr     bool
+		wantArgs     string
+		wantErr      bool
 	}{
 		{
-			name:        "valid command with simple args",
-			input:       `/tool math {"operation": "add", "a": 5, "b": 3}`,
+			name:         "valid command with simple args",
+			input:        `/tool math {"operation": "add", "a": 5, "b": 3}`,
 			wantToolName: "math",
-			wantArgs:    `{"operation": "add", "a": 5, "b": 3}`,
-			wantErr:     false,
+			wantArgs:     `{"operation": "add", "a": 5, "b": 3}`,
+			wantErr:      false,
 		},
 		{
-			name:        "valid command with complex args",
-			input:       `/tool weather {"city": "San Francisco", "units": "metric", "lang": "en"}`,
+			name:         "valid command with complex args",
+			input:        `/tool weather {"city": "San Francisco", "units": "metric", "lang": "en"}`,
 			wantToolName: "weather",
-			wantArgs:    `{"city": "San Francisco", "units": "metric", "lang": "en"}`,
-			wantErr:     false,
+			wantArgs:     `{"city": "San Francisco", "units": "metric", "lang": "en"}`,
+			wantErr:      false,
 		},
 		{
-			name:        "valid command with nested JSON",
-			input:       `/tool complex {"data": {"nested": true, "value": 42}}`,
+			name:         "valid command with nested JSON",
+			input:        `/tool complex {"data": {"nested": true, "value": 42}}`,
 			wantToolName: "complex",
-			wantArgs:    `{"data": {"nested": true, "value": 42}}`,
-			wantErr:     false,
+			wantArgs:     `{"data": {"nested": true, "value": 42}}`,
+			wantErr:      false,
 		},
 		{
 			name:    "missing /tool prefix",
@@ -88,11 +87,11 @@ func TestParseDirectToolCommand(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:        "valid command with extra whitespace",
-			input:       `/tool   math   {"operation": "add"}`,
+			name:         "valid command with extra whitespace",
+			input:        `/tool   math   {"operation": "add"}`,
 			wantToolName: "math",
-			wantArgs:    `{"operation": "add"}`,
-			wantErr:     false,
+			wantArgs:     `{"operation": "add"}`,
+			wantErr:      false,
 		},
 	}
 
@@ -126,37 +125,37 @@ func TestParseDirectToolCommand(t *testing.T) {
 // TestExecuteDirectTool tests the execution of direct tool commands
 func TestExecuteDirectTool(t *testing.T) {
 	tests := []struct {
-		name           string
-		toolName       string
-		args           string
-		mockResult     string
-		mockErr        error
-		wantSuccess    bool
+		name               string
+		toolName           string
+		args               string
+		mockResult         string
+		mockErr            error
+		wantSuccess        bool
 		wantResultContains string
 	}{
 		{
-			name:           "successful tool execution",
-			toolName:       "math",
-			args:           `{"operation": "add", "a": 5, "b": 3}`,
-			mockResult:     "8",
-			mockErr:        nil,
-			wantSuccess:    true,
+			name:               "successful tool execution",
+			toolName:           "math",
+			args:               `{"operation": "add", "a": 5, "b": 3}`,
+			mockResult:         "8",
+			mockErr:            nil,
+			wantSuccess:        true,
 			wantResultContains: "8",
 		},
 		{
-			name:           "tool execution with error",
-			toolName:       "math",
-			args:           `{"operation": "divide", "a": 5, "b": 0}`,
-			mockResult:     "",
-			mockErr:        fmt.Errorf("division by zero"),
-			wantSuccess:    false,
+			name:               "tool execution with error",
+			toolName:           "math",
+			args:               `{"operation": "divide", "a": 5, "b": 0}`,
+			mockResult:         "",
+			mockErr:            fmt.Errorf("division by zero"),
+			wantSuccess:        false,
 			wantResultContains: "division by zero",
 		},
 		{
-			name:           "tool not found",
-			toolName:       "nonexistent",
-			args:           `{"param": "value"}`,
-			wantSuccess:    false,
+			name:               "tool not found",
+			toolName:           "nonexistent",
+			args:               `{"param": "value"}`,
+			wantSuccess:        false,
 			wantResultContains: "not found",
 		},
 	}
@@ -179,7 +178,7 @@ func TestExecuteDirectTool(t *testing.T) {
 						Tool: mock,
 						Definition: openai.FunctionDefinitionParam{
 							Name:        "math",
-							Description: openai.Stringable("Math operations"),
+							Description: openai.String("Math operations"),
 						},
 					},
 				},
@@ -268,8 +267,8 @@ func TestGetAvailableToolNames(t *testing.T) {
 // TestFormatDirectToolResponse tests formatting of direct tool results
 func TestFormatDirectToolResponse(t *testing.T) {
 	tests := []struct {
-		name   string
-		result *DirectToolResult
+		name       string
+		result     *DirectToolResult
 		wantFields []string
 	}{
 		{
@@ -338,7 +337,7 @@ func TestFormatDirectToolResponse(t *testing.T) {
 // Helper function to check if a string contains a substring
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		   (len(s) > len(substr) && findSubstring(s, substr)))
+		(len(s) > len(substr) && findSubstring(s, substr)))
 }
 
 func findSubstring(s, substr string) bool {

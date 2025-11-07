@@ -331,12 +331,6 @@
                 <label class="form-label" style="color: var(--text-primary);">Description</label>
                 <textarea id="workspace-description" class="form-control" rows="2" placeholder="Brief description of the workspace"></textarea>
               </div>
-              <div class="mb-3">
-                <label class="form-label" style="color: var(--text-primary);">Parent Agent</label>
-                <select id="parent-agent" class="form-control" required>
-                  <option value="">Loading agents...</option>
-                </select>
-              </div>
             </div>
 
             <!-- Agent Selection -->
@@ -345,22 +339,6 @@
               <p class="text-muted small mb-3">Choose which agents will participate in this workspace</p>
               <div id="agents-selection" class="row g-3">
                 <!-- Will be populated dynamically -->
-              </div>
-            </div>
-
-            <!-- Workflow Designer -->
-            <div class="mb-4">
-              <div class="d-flex justify-content-between align-items-center mb-3">
-                <h6 class="mb-0" style="color: var(--text-primary);">Workflow Design</h6>
-                <button type="button" class="modern-btn modern-btn-secondary" onclick="addWorkflowStep()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                  </svg>
-                  Add Step
-                </button>
-              </div>
-              <div id="workflow-steps">
-                <!-- Will be populated with steps -->
               </div>
             </div>
           </form>
@@ -454,7 +432,6 @@
   <script>
     let availableAgents = [];
     let selectedAgents = new Set();
-    let workflowSteps = [];
 
     // Auto-refresh workspaces every 10 seconds
     let workspaceRefreshInterval = null;
@@ -569,17 +546,6 @@
                 <small style="color: var(--text-secondary);">Agents: ${workspace.agents ? workspace.agents.length : 0}</small>
               </div>
 
-              ${workspace.workflow ? `
-                <div class="mt-auto">
-                  <div class="progress mb-2" style="height: 6px;">
-                    <div class="progress-bar" role="progressbar" style="width: ${workspace.workflow.progress || 0}%"></div>
-                  </div>
-                  <small style="color: var(--text-secondary);">
-                    ${workspace.workflow.progress || 0}% complete
-                  </small>
-                </div>
-              ` : ''}
-
               <div class="d-flex gap-2 mt-3">
                 <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
                   View
@@ -630,10 +596,8 @@
         </div>
       `).join('');
 
-      // Reset workflow steps
-      workflowSteps = [];
+      // Reset selected agents
       selectedAgents = new Set();
-      renderWorkflowSteps();
 
       const modal = new bootstrap.Modal(document.getElementById('createWorkspaceModal'));
       modal.show();
@@ -647,64 +611,11 @@
       }
     }
 
-    function addWorkflowStep() {
-      workflowSteps.push({
-        description: '',
-        assignedAgent: ''
-      });
-      renderWorkflowSteps();
-    }
-
-    function removeWorkflowStep(index) {
-      workflowSteps.splice(index, 1);
-      renderWorkflowSteps();
-    }
-
-    function renderWorkflowSteps() {
-      const container = document.getElementById('workflow-steps');
-
-      if (workflowSteps.length === 0) {
-        container.innerHTML = '<p class="text-muted">No workflow steps defined yet. Click "Add Step" to create your first step.</p>';
-        return;
-      }
-
-      container.innerHTML = workflowSteps.map((step, index) => `
-        <div class="modern-card p-3 mb-3">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong style="color: var(--text-primary);">Step ${index + 1}</strong>
-            <button type="button" class="modern-btn modern-btn-danger p-1" style="min-width: auto;" onclick="removeWorkflowStep(${index})">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-              </svg>
-            </button>
-          </div>
-          <div class="mb-2">
-            <label class="form-label small" style="color: var(--text-secondary);">Description</label>
-            <input type="text" class="form-control" value="${escapeHtml(step.description)}"
-                   onchange="workflowSteps[${index}].description = this.value"
-                   placeholder="Describe what this step should do">
-          </div>
-          <div>
-            <label class="form-label small" style="color: var(--text-secondary);">Assign Agent</label>
-            <select class="form-control" onchange="workflowSteps[${index}].assignedAgent = this.value">
-              <option value="">Select agent...</option>
-              ${Array.from(selectedAgents).map(agent =>
-                `<option value="${escapeHtml(agent)}" ${step.assignedAgent === agent ? 'selected' : ''}>
-                  ${escapeHtml(agent)}
-                </option>`
-              ).join('')}
-            </select>
-          </div>
-        </div>
-      `).join('');
-    }
-
     document.getElementById('createWorkspaceBtn').addEventListener('click', async function() {
       const name = document.getElementById('workspace-name').value;
       const description = document.getElementById('workspace-description').value;
-      const parentAgent = document.getElementById('parent-agent').value;
 
-      if (!name || !parentAgent) {
+      if (!name) {
         showError('Please fill in all required fields');
         return;
       }
@@ -721,11 +632,7 @@
           body: JSON.stringify({
             name: name,
             description: description,
-            parent_agent: parentAgent,
-            participating_agents: Array.from(selectedAgents),
-            workflow: workflowSteps.length > 0 ? {
-              steps: workflowSteps
-            } : undefined
+            participating_agents: Array.from(selectedAgents)
           })
         });
 
@@ -807,43 +714,6 @@
           <span class="modern-badge ${statusBadge}">${escapeHtml(workspace.status)}</span>
         </div>
       `;
-
-      if (workspace.workflow) {
-        html += `
-          <div class="modern-card p-3 mb-3">
-            <h6 style="color: var(--text-primary);">Workflow Progress</h6>
-            <div class="progress mb-2">
-              <div class="progress-bar" role="progressbar" style="width: ${workspace.workflow.progress}%">
-                ${workspace.workflow.progress}%
-              </div>
-            </div>
-          </div>
-        `;
-
-        if (workspace.workflow.steps && workspace.workflow.steps.length > 0) {
-          html += '<div class="mb-3"><h6 style="color: var(--text-primary);">Steps</h6>';
-
-          workspace.workflow.steps.forEach((step, index) => {
-            const stepBadge = step.status === 'completed' ? 'badge-success' :
-                             step.status === 'failed' ? 'badge-danger' :
-                             step.status === 'running' ? 'badge-info' : 'badge-secondary';
-
-            html += `
-              <div class="modern-card p-3 mb-2">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                  <strong style="color: var(--text-primary);">Step ${index + 1}: ${escapeHtml(step.description || 'Unnamed')}</strong>
-                  <span class="modern-badge ${stepBadge}">${escapeHtml(step.status)}</span>
-                </div>
-                ${step.assigned_agent ? `
-                  <p class="mb-1 small" style="color: var(--text-secondary);">Agent: ${escapeHtml(step.assigned_agent)}</p>
-                ` : ''}
-              </div>
-            `;
-          });
-
-          html += '</div>';
-        }
-      }
 
       container.innerHTML = html;
     }

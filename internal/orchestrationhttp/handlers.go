@@ -86,7 +86,6 @@ func (h *Handler) WorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Check if a specific workspace ID is requested
 	wsID := r.URL.Query().Get("id")
-	agentName := r.URL.Query().Get("agent")
 	activeOnly := r.URL.Query().Get("active") == "true"
 
 	if wsID != "" {
@@ -103,22 +102,6 @@ func (h *Handler) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List workspaces with optional filters
-	if agentName != "" {
-		// Get workspaces for specific agent
-		workspaces, err := h.workspaceStore.GetByParentAgent(agentName)
-		if err != nil {
-			log.Printf("❌ Error listing workspaces for agent %s: %v", agentName, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"workspaces": workspaces,
-			"count":      len(workspaces),
-		})
-		return
-	}
-
 	if activeOnly {
 		// Get only active workspaces
 		workspaces, err := h.workspaceStore.ListActive()
@@ -164,7 +147,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Name        string                 `json:"name"`
 		Description string                 `json:"description"`
-		ParentAgent string                 `json:"parent_agent"`
 		Agents      []string               `json:"participating_agents"`
 		InitialData map[string]interface{} `json:"initial_context"`
 	}
@@ -178,17 +160,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	// Validate required fields
 	if req.Name == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	if req.ParentAgent == "" {
-		http.Error(w, "parent_agent is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify parent agent exists
-	_, ok := h.agentStore.GetAgent(req.ParentAgent)
-	if !ok {
-		http.Error(w, "parent agent not found", http.StatusNotFound)
 		return
 	}
 
@@ -205,7 +176,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
 		Name:        req.Name,
 		Description: req.Description,
-		ParentAgent: req.ParentAgent,
 		Agents:      req.Agents,
 		InitialData: req.InitialData,
 	})
@@ -226,10 +196,9 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 			ws.ID,
 			"api",
 			map[string]interface{}{
-				"name":         req.Name,
-				"description":  req.Description,
-				"parent_agent": req.ParentAgent,
-				"agents":       req.Agents,
+				"name":        req.Name,
+				"description": req.Description,
+				"agents":      req.Agents,
 			},
 		)
 		h.eventBus.Publish(event)
@@ -375,12 +344,6 @@ func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.
 	if err != nil {
 		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
 		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
-		return
-	}
-
-	// Prevent removing parent agent
-	if agentName == ws.ParentAgent {
-		http.Error(w, "Cannot remove parent agent from workspace", http.StatusBadRequest)
 		return
 	}
 

@@ -200,10 +200,6 @@
                 <code id="workspace-id-display" class="detail-value">{{.Extra.WorkspaceID}}</code>
               </div>
               <div class="detail-row">
-                <span class="detail-label">Parent Agent</span>
-                <span id="workspace-parent-agent" class="detail-value">--</span>
-              </div>
-              <div class="detail-row">
                 <span class="detail-label">Description</span>
                 <span id="workspace-description" class="detail-value">--</span>
               </div>
@@ -454,7 +450,6 @@
         document.getElementById('workspace-name').textContent = workspace.name || 'Unnamed Workspace';
         document.getElementById('workspace-created').textContent = `Created: ${new Date(workspace.created_at).toLocaleString()}`;
         document.getElementById('workspace-updated').textContent = workspace.updated_at ? `Updated: ${new Date(workspace.updated_at).toLocaleString()}` : 'Updated: --';
-        document.getElementById('workspace-parent-agent').textContent = workspace.parent_agent || '--';
         document.getElementById('workspace-description').textContent = workspace.description || 'No description';
 
         // Update status badge

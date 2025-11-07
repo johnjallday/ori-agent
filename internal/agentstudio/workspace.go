@@ -35,7 +35,6 @@ type Workspace struct {
 	ID             string                 `json:"id"`
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description,omitempty"`
-	ParentAgent    string                 `json:"parent_agent"`
 	Agents         []string               `json:"agents"`
 	SharedData     map[string]interface{} `json:"shared_data"`
 	Messages       []AgentMessage         `json:"messages"`
@@ -172,7 +171,6 @@ type ScheduledTask struct {
 type CreateWorkspaceParams struct {
 	Name        string
 	Description string
-	ParentAgent string
 	Agents      []string
 	InitialData map[string]interface{}
 }
@@ -184,7 +182,6 @@ func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 		ID:          uuid.New().String(),
 		Name:        params.Name,
 		Description: params.Description,
-		ParentAgent: params.ParentAgent,
 		Agents:      params.Agents,
 		SharedData:  params.InitialData,
 		Messages:    []AgentMessage{},
@@ -201,12 +198,12 @@ func (w *Workspace) AddMessage(msg AgentMessage) error {
 	defer w.mu.Unlock()
 
 	// Validate sender is part of workspace
-	if !w.hasAgent(msg.From) && msg.From != w.ParentAgent {
+	if !w.hasAgent(msg.From) {
 		return fmt.Errorf("sender %s is not part of workspace", msg.From)
 	}
 
 	// Validate recipient if specified
-	if msg.To != "" && !w.hasAgent(msg.To) && msg.To != w.ParentAgent {
+	if msg.To != "" && !w.hasAgent(msg.To) {
 		return fmt.Errorf("recipient %s is not part of workspace", msg.To)
 	}
 
@@ -365,7 +362,6 @@ func (w *Workspace) GetSummary() map[string]interface{} {
 		"id":            w.ID,
 		"name":          w.Name,
 		"description":   w.Description,
-		"parent_agent":  w.ParentAgent,
 		"agents":        w.Agents,
 		"agent_count":   len(w.Agents),
 		"message_count": len(w.Messages),
@@ -381,19 +377,19 @@ func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	log.Printf("[DEBUG] AddTask - Workspace: %s, ParentAgent: %s, Agents: %v", w.ID, w.ParentAgent, w.Agents)
+	log.Printf("[DEBUG] AddTask - Workspace: %s, Agents: %v", w.ID, w.Agents)
 	log.Printf("[DEBUG] AddTask - Task: From=%s, To=%s", task.From, task.To)
-	log.Printf("[DEBUG] AddTask - hasAgent(From): %v, From==ParentAgent: %v", w.hasAgent(task.From), task.From == w.ParentAgent)
+	log.Printf("[DEBUG] AddTask - hasAgent(From): %v", w.hasAgent(task.From))
 
 	// Validate sender is part of workspace
 	// Allow "user" and "system" as special senders for UI-created tasks
-	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) && task.From != w.ParentAgent {
+	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
 		log.Printf("[DEBUG] AddTask - Validation FAILED: From agent not valid")
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
 
 	// Validate recipient if specified
-	if task.To != "" && !w.hasAgent(task.To) && task.To != w.ParentAgent {
+	if task.To != "" && !w.hasAgent(task.To) {
 		log.Printf("[DEBUG] AddTask - Validation FAILED: To agent not valid")
 		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
 	}
@@ -518,12 +514,12 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	defer w.mu.Unlock()
 
 	// Validate sender is part of workspace
-	if !w.hasAgent(st.From) && st.From != w.ParentAgent {
+	if !w.hasAgent(st.From) {
 		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
 	}
 
 	// Validate recipient
-	if st.To != "" && !w.hasAgent(st.To) && st.To != w.ParentAgent {
+	if st.To != "" && !w.hasAgent(st.To) {
 		return fmt.Errorf("task recipient %s is not part of workspace", st.To)
 	}
 

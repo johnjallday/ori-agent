@@ -66,7 +66,6 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
-		ParentAgent: "system",
 		Agents:      req.Agents,
 		SharedData:  make(map[string]interface{}),
 		Messages:    make([]AgentMessage, 0),
@@ -487,7 +486,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[DEBUG] CreateTask - Studio: %s, ParentAgent: %s, Agents: %v", studioID, studio.ParentAgent, studio.Agents)
+	log.Printf("[DEBUG] CreateTask - Studio: %s, Agents: %v", studioID, studio.Agents)
 	log.Printf("[DEBUG] CreateTask - Request: From=%s, To=%s", req.From, req.To)
 
 	// Create task

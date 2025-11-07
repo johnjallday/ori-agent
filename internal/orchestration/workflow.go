@@ -44,9 +44,13 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 
 	// Phase 1: Research
 	log.Printf("📚 Phase 1: Research")
+
+	// Use first agent in workspace as coordinator
+	coordinatorAgent := ws.Agents[0]
+
 	researchTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
-		From:        ws.ParentAgent,
+		From:        coordinatorAgent,
 		To:          researcherAgent,
 		Description: fmt.Sprintf("Research: %s", task.Goal),
 		Priority:    5,
@@ -66,7 +70,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 	log.Printf("🔍 Phase 2: Analysis")
 	analysisTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
-		From:        ws.ParentAgent,
+		From:        coordinatorAgent,
 		To:          analyzerAgent,
 		Description: fmt.Sprintf("Analyze findings from research on: %s", task.Goal),
 		Priority:    4,
@@ -89,7 +93,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 	log.Printf("✍️  Phase 3: Synthesis")
 	synthesisTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
-		From:        ws.ParentAgent,
+		From:        coordinatorAgent,
 		To:          synthesizerAgent,
 		Description: fmt.Sprintf("Create comprehensive report combining research and analysis on: %s", task.Goal),
 		Priority:    4,
@@ -114,7 +118,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 		log.Printf("✅ Phase 4: Validation")
 		validationTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 			WorkspaceID: ws.ID,
-			From:        ws.ParentAgent,
+			From:        coordinatorAgent,
 			To:          validatorAgent,
 			Description: fmt.Sprintf("Validate findings and check for inconsistencies in report on: %s", task.Goal),
 			Priority:    3,

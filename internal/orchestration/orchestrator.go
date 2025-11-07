@@ -57,8 +57,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	workspaceName := fmt.Sprintf("collab-%s-%d", mainAgent, time.Now().Unix())
 	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
 		Name:        workspaceName,
-		ParentAgent: mainAgent,
-		Agents:      []string{}, // Will be populated as we find agents
+		Agents:      []string{mainAgent}, // Add main agent as first member
 		InitialData: task.Context,
 	})
 
@@ -213,10 +212,13 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstu
 		return nil, fmt.Errorf("no researcher agent found")
 	}
 
+	// Use first agent as coordinator
+	coordinatorAgent := ws.Agents[0]
+
 	// Delegate research task
 	delegateTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
-		From:        ws.ParentAgent,
+		From:        coordinatorAgent,
 		To:          researcherAgent,
 		Description: task.Goal,
 		Priority:    5,
@@ -248,13 +250,16 @@ func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *agentstu
 	subResults := make(map[string]interface{})
 	taskIDs := make([]string, 0)
 
+	// Use first agent as coordinator
+	coordinatorAgent := ws.Agents[0]
+
 	// Delegate subtasks to each agent
 	for i, agentName := range agents {
 		subtaskDesc := fmt.Sprintf("%s (part %d of %d)", task.Goal, i+1, len(agents))
 
 		delegateTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 			WorkspaceID: ws.ID,
-			From:        ws.ParentAgent,
+			From:        coordinatorAgent,
 			To:          agentName,
 			Description: subtaskDesc,
 			Priority:    3,
