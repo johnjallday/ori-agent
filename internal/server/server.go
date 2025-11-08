@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -1154,4 +1155,17 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities
+type HTTPServerWrapper struct {
+	Server *http.Server
+}
+
+// Shutdown gracefully shuts down the HTTP server
+func (w *HTTPServerWrapper) Shutdown(ctx context.Context) error {
+	if w.Server == nil {
+		return nil
+	}
+	return w.Server.Shutdown(ctx)
 }

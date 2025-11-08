@@ -16,7 +16,7 @@ import (
 
 func main() {
 	// Define command-line flags
-	port := flag.Int("port", 8080, "Port to run server on")
+	port := flag.Int("port", 8765, "Port to run server on")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
 

@@ -6,7 +6,7 @@ This document provides comprehensive API documentation for Ori Agent, including 
 
 All API endpoints are relative to the base URL:
 ```
-http://localhost:8080/api
+http://localhost:8765/api
 ```
 
 ## Table of Contents
@@ -174,7 +174,7 @@ Upload and load a new plugin from a `.so` file.
 
 **Example using curl:**
 ```bash
-curl -X POST -F "plugin=@my_plugin.so" http://localhost:8080/api/plugins
+curl -X POST -F "plugin=@my_plugin.so" http://localhost:8765/api/plugins
 ```
 
 **Response:**
@@ -653,39 +653,39 @@ Here's a complete example of creating an agent, uploading a plugin, and using it
 # 1. Create a new agent
 curl -X POST -H "Content-Type: application/json" \
   -d '{"name": "my-test-agent"}' \
-  http://localhost:8080/api/agents
+  http://localhost:8765/api/agents
 
 # 2. Switch to the new agent
-curl -X PUT http://localhost:8080/api/agents?name=my-test-agent
+curl -X PUT http://localhost:8765/api/agents?name=my-test-agent
 
 # 3. Upload a plugin
 curl -X POST -F "plugin=@calculator.so" \
-  http://localhost:8080/api/plugins
+  http://localhost:8765/api/plugins
 
 # 4. Check if plugin needs initialization
-curl http://localhost:8080/api/plugins/init-status
+curl http://localhost:8765/api/plugins/init-status
 
 # 5. Initialize plugin if needed
 curl -X POST -H "Content-Type: application/json" \
   -d '{"config": {"api_key": "your-key"}}' \
-  http://localhost:8080/api/plugins/calculator/initialize
+  http://localhost:8765/api/plugins/calculator/initialize
 
 # 6. Test the plugin
 curl -X POST -H "Content-Type: application/json" \
   -d '{"plugin_name": "calculator", "args": "{\"operation\": \"add\", \"a\": 5, \"b\": 3}"}' \
-  http://localhost:8080/api/plugins/execute
+  http://localhost:8765/api/plugins/execute
 
 # 7. Chat with the agent
 curl -X POST -H "Content-Type: application/json" \
   -d '{"question": "What is 10 + 15?"}' \
-  http://localhost:8080/api/chat
+  http://localhost:8765/api/chat
 ```
 
 ### JavaScript Client Example
 
 ```javascript
 class OriAgentClient {
-  constructor(baseUrl = 'http://localhost:8080/api') {
+  constructor(baseUrl = 'http://localhost:8765/api') {
     this.baseUrl = baseUrl;
   }
 
@@ -743,7 +743,7 @@ import requests
 import json
 
 class OriAgentClient:
-    def __init__(self, base_url='http://localhost:8080/api'):
+    def __init__(self, base_url='http://localhost:8765/api'):
         self.base_url = base_url
 
     def create_agent(self, name):

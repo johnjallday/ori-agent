@@ -166,13 +166,13 @@ go test ./internal/chathttp/... -v
    ```
 
 2. **Test via web UI:**
-   - Open http://localhost:8080
+   - Open http://localhost:8765
    - Type `/tool math {"operation": "add", "a": 5, "b": 3}` in chat
    - Verify instant response
 
 3. **Test via API:**
    ```bash
-   curl -X POST http://localhost:8080/api/chat \
+   curl -X POST http://localhost:8765/api/chat \
      -H "Content-Type: application/json" \
      -d '{"question": "/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}"}'
    ```

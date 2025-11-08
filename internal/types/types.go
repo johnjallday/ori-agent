@@ -33,12 +33,18 @@ type DeviceInfo struct {
 	UserSet  bool   `json:"user_set"` // Whether user manually set device type
 }
 
+// MenuBarSettings tracks menu bar app preferences
+type MenuBarSettings struct {
+	AutoStartOnLogin bool `json:"auto_start_on_login"` // Launch Ori Agent menu bar on system startup
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding OnboardingState `json:"onboarding"`
-	Device     DeviceInfo      `json:"device"`
-	Version    string          `json:"version"`
-	Theme      string          `json:"theme,omitempty"` // "light" or "dark", defaults to "light"
+	Onboarding OnboardingState  `json:"onboarding"`
+	Device     DeviceInfo       `json:"device"`
+	Version    string           `json:"version"`
+	Theme      string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar    *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use

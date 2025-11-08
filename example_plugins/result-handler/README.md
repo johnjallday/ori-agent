@@ -111,14 +111,14 @@ go build -buildmode=plugin -o result-handler.so main.go
 
 ### 2. Upload to Ori Agent
 - Start your Ori Agent server
-- Open the web interface (http://localhost:8080)
+- Open the web interface (http://localhost:8765)
 - Go to **Plugins** tab in the sidebar
 - Upload `result-handler.so` using the file input
 - Click **Load** to activate the plugin
 
 ### 3. Verify Installation
 ```bash
-curl http://localhost:8080/api/plugins
+curl http://localhost:8765/api/plugins
 ```
 
 Expected response:
@@ -147,7 +147,7 @@ Expected response:
 ### Open File
 ```json
 {
-  "action": "open_file", 
+  "action": "open_file",
   "path": "/Users/username/config.json",
   "context": "configuration"
 }
@@ -198,7 +198,7 @@ AI: [Uses result_handler to open docs URL]
 
 ### Supported Protocols
 - **HTTP/HTTPS**: Web URLs
-- **File**: Local file URLs  
+- **File**: Local file URLs
 - **No Arbitrary Execution**: Only uses predefined system commands
 
 ## 🔍 Troubleshooting
@@ -247,7 +247,7 @@ sudo pacman -S nautilus
 
 1. Fork the repository
 2. Create a feature branch
-3. Add tests for new functionality  
+3. Add tests for new functionality
 4. Update documentation
 5. Submit a pull request
 

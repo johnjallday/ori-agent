@@ -23,7 +23,7 @@ export ANTHROPIC_API_KEY="your-key-here"  # Optional, for Claude support
 ### Building
 
 ```bash
-# Build everything (server + plugins)
+# Build everything (server + menubar + plugins)
 ./scripts/build.sh
 
 # Build server only
@@ -31,13 +31,17 @@ export ANTHROPIC_API_KEY="your-key-here"  # Optional, for Claude support
 # OR
 go build -o bin/ori-agent ./cmd/server
 
+# Build menu bar app (macOS only)
+go build -o bin/ori-menubar ./cmd/menubar
+
 # Build plugins as RPC executables (NOT shared libraries)
 ./scripts/build-plugins.sh
 
 # Using Makefile
 make build         # Build server binary
+make menubar       # Build menu bar app (macOS)
 make plugins       # Build all plugins
-make all           # Build everything
+make all           # Build server + menubar + plugins
 make build-all     # Cross-compile for multiple platforms
 ```
 
@@ -52,13 +56,19 @@ go run ./cmd/server
 # Run built binary
 ./bin/ori-agent
 
+# Run menu bar app (macOS)
+./bin/ori-menubar
+
 # Run with custom port
 PORT=9000 go run ./cmd/server
 
 # Using Makefile
 make run           # Requires OPENAI_API_KEY
 make run-dev       # Run with go run
+make run-menubar   # Run menu bar app (macOS)
 ```
+
+**Menu Bar App**: The macOS menu bar app provides a GUI to start/stop the server, with auto-start on login support and visual status indicators.
 
 ### Testing
 
@@ -149,6 +159,21 @@ Each domain has dedicated handler modules in `internal/*http/`:
 - `internal/orchestration/`: Multi-agent workflow orchestration
 - `internal/orchestration/templates/`: Pre-built orchestration templates
 
+**7. macOS Menu Bar App** (`cmd/menubar/`, `internal/menubar/`)
+- Menu bar GUI for controlling the server (macOS only)
+- Components:
+  - `controller.go` - Server lifecycle management (start/stop/status)
+  - `launchagent.go` - macOS auto-start integration (LaunchAgent plist)
+  - `settings.go` - Preference persistence via app_state.json
+  - `icons.go` - Embedded status icons (go:embed)
+  - `main.go` - Systray integration and menu handling
+- Features:
+  - Visual server status indicators (colored icons)
+  - Start/Stop server controls
+  - Open browser quick action
+  - Auto-start on login toggle
+  - Graceful shutdown handling
+
 ### Data Flow
 
 ```
@@ -185,7 +210,7 @@ Plugins can optionally implement additional interfaces for enhanced functionalit
 - `DefaultSettingsProvider` - Provides default configuration
 - `InitializationProvider` - Describes required configuration variables
 - `WebPageProvider` - Enables plugins to serve custom web pages through ori-agent
-  - URL pattern: `http://localhost:8080/api/plugins/{plugin-name}/pages/{page-path}`
+  - URL pattern: `http://localhost:8765/api/plugins/{plugin-name}/pages/{page-path}`
   - Useful for: script marketplaces, configuration UIs, data visualization
 - `MetadataProvider` - Provides plugin metadata (maintainers, license, repository)
 - `HealthCheckProvider` - Implements custom health checks
@@ -322,8 +347,8 @@ There is a `go.work` file in the parent directory. Edit it and remove non-existe
 
 ### Port already in use
 ```bash
-# Kill process on port 8080
-./kill-8080.sh
+# Kill process on port 8765
+./kill-8080.sh  # Script name unchanged for backward compatibility
 
 # Or use custom port
 PORT=9000 go run ./cmd/server

@@ -24,12 +24,23 @@ rm -f temp-rw.dmg
 mkdir -p "${BUILD_DIR}"
 mkdir -p releases
 
-# Step 1: Build the binary
+# Step 1: Build the binaries
 echo ""
-echo "🔨 Building ori-agent binary..."
+echo "🔨 Building binaries..."
+
+# Build the menu bar app (primary)
+echo "  Building menu bar app..."
+go build -ldflags="-s -w" -o "${BUILD_DIR}/ori-menubar" ./cmd/menubar
+chmod +x "${BUILD_DIR}/ori-menubar"
+echo "  ✅ Menu bar app built"
+
+# Build the CLI server (optional, for advanced users)
+echo "  Building CLI server..."
 go build -ldflags="-s -w" -o "${BUILD_DIR}/ori-agent" ./cmd/server
 chmod +x "${BUILD_DIR}/ori-agent"
-echo "✅ Binary built successfully"
+echo "  ✅ CLI server built"
+
+echo "✅ All binaries built successfully"
 
 # Step 2: Create .app bundle structure
 echo ""
@@ -53,31 +64,9 @@ mkdir -p "$HOME/Library/Logs"
 
 cd "$DATA_DIR"
 
-# Check if already running
-if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    osascript -e 'display notification "Ori Agent is already running" with title "Ori Agent"'
-    open http://localhost:8080
-    exit 0
-fi
-
-# Start server in background
-"$RESOURCES_DIR/ori-agent" > ~/Library/Logs/ori-agent.log 2>&1 &
-SERVER_PID=$!
-
-# Wait for server to start
-for i in {1..10}; do
-    if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        sleep 1
-        open http://localhost:8080
-        osascript -e 'display notification "Server started on port 8080" with title "Ori Agent"'
-        exit 0
-    fi
-    sleep 0.5
-done
-
-# Failed to start
-osascript -e 'display alert "Ori Agent" message "Failed to start server. Check logs at ~/Library/Logs/ori-agent.log" as critical'
-exit 1
+# Launch the menu bar app
+# The menu bar app provides a UI to start/stop the server
+exec "$RESOURCES_DIR/ori-menubar" > ~/Library/Logs/ori-menubar.log 2>&1
 LAUNCHER
 
 chmod +x "${APP_PATH}/Contents/MacOS/OriAgent"
@@ -113,6 +102,7 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
 PLIST
 
 # Copy resources
+cp "${BUILD_DIR}/ori-menubar" "${APP_PATH}/Contents/Resources/"
 cp "${BUILD_DIR}/ori-agent" "${APP_PATH}/Contents/Resources/"
 
 # Note: Plugins (example_plugins and uploaded_plugins) are excluded from DMG
@@ -140,16 +130,24 @@ Ori Agent Installation
 To install:
 1. Drag "Ori Agent.app" to the Applications folder
 2. Double-click "Ori Agent" in Applications to start
-3. Your browser will open to http://localhost:8080
+3. A menu bar icon will appear - click it to start the server
 
-The server runs in the background and can be accessed at:
-http://localhost:8080
+Features:
+• Menu bar app with Start/Stop server controls
+• Auto-start on login option
+• Quick access to open browser
+• Visual server status indicators
+
+The server can be accessed at:
+http://localhost:8765
 
 Logs are stored at:
+~/Library/Logs/ori-menubar.log
 ~/Library/Logs/ori-agent.log
 
-To stop the server:
-  lsof -ti:8080 | xargs kill
+Command Line (Advanced):
+For advanced users, a CLI version is also available:
+/Applications/Ori Agent.app/Contents/Resources/ori-agent
 
 For more information:
 https://github.com/johnjallday/ori-agent

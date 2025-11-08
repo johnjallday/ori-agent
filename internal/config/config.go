@@ -174,8 +174,8 @@ func (m *Manager) GetAllowedOrigins() []string {
 
 	// Default to localhost only for security
 	return []string{
-		"http://localhost:8080",
-		"http://127.0.0.1:8080",
+		"http://localhost:8765",
+		"http://127.0.0.1:8765",
 	}
 }
 
