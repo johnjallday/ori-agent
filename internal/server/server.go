@@ -454,6 +454,7 @@ func New() (*Server, error) {
 
 	// initialize task handler and executor
 	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory)
+	taskHandler.SetEventBus(s.eventBus) // Wire up event bus for execution events
 	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
@@ -538,7 +539,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/agents/", s.serveAgentFiles)
 
 	// Handlers: agents moved to separate package
-	mux.Handle("/api/agents", agenthttp.New(s.st))
+	agentHandler := agenthttp.New(s.st)
+	mux.Handle("/api/agents", agentHandler)
+	mux.Handle("/api/agents/", agentHandler) // Support /api/agents/{name}
 
 	// Plugin endpoints
 	mux.HandleFunc("/api/plugin-registry", s.pluginRegistryHandler.PluginRegistryHandler)
@@ -678,6 +681,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
+	mux.HandleFunc("/api/orchestration/progress/stream", s.orchestrationHandler.ProgressStreamHandler)
 	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
 
 	// Workflow template endpoints

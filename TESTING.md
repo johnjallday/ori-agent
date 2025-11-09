@@ -48,7 +48,7 @@ tests/
 ### Prerequisites
 
 ```bash
-# 1. Install Go 1.24+
+# 1. Install Go 1.25+
 go version
 
 # 2. Set up API keys (for integration/E2E tests)

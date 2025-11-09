@@ -191,19 +191,27 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get agent statistics
+	agentStats := studio.GetAgentStats()
+
+	// Get workspace progress
+	workspaceProgress := studio.GetWorkspaceProgress()
+
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":          studio.ID,
-		"name":        studio.Name,
-		"description": studio.Description,
-		"agents":      studio.Agents,
-		"status":      studio.Status,
-		"tasks":       studio.Tasks,
-		"messages":    studio.Messages,
-		"shared_data": studio.SharedData,
-		"created_at":  studio.CreatedAt,
-		"updated_at":  studio.UpdatedAt,
+		"id":                 studio.ID,
+		"name":               studio.Name,
+		"description":        studio.Description,
+		"agents":             studio.Agents,
+		"agent_stats":        agentStats,
+		"workspace_progress": workspaceProgress,
+		"status":             studio.Status,
+		"tasks":              studio.Tasks,
+		"messages":           studio.Messages,
+		"shared_data":        studio.SharedData,
+		"created_at":         studio.CreatedAt,
+		"updated_at":         studio.UpdatedAt,
 	})
 }
 

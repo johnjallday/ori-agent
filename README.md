@@ -58,7 +58,7 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Go 1.24 or later
+- Go 1.25 or later
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 - OpenAI API key
 

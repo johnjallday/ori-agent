@@ -99,7 +99,7 @@ make lint          # Requires golangci-lint
 
 ### Core Technology Stack
 
-- **Language**: Go 1.24+
+- **Language**: Go 1.25+
 - **Plugin System**: HashiCorp go-plugin with gRPC/Protocol Buffers
 - **LLM Providers**: OpenAI, Anthropic Claude, Ollama (via provider abstraction)
 - **Protocol Buffers**: `pluginapi/proto/tool.proto` defines plugin interface

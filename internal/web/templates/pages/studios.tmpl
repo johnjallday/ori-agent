@@ -575,6 +575,7 @@
 
     function populateAgentDropdown() {
       const select = document.getElementById('parent-agent');
+      if (!select) return; // Element doesn't exist in canvas view
       select.innerHTML = availableAgents.map(agent =>
         `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
       ).join('');

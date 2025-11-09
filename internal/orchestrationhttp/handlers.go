@@ -788,10 +788,11 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Status string `json:"status"`
-		Result string `json:"result"`
-		Error  string `json:"error"`
+		TaskID string  `json:"task_id"`
+		Status string  `json:"status"`
+		Result string  `json:"result"`
+		Error  string  `json:"error"`
+		To     *string `json:"to"` // Optional: reassign task to different agent
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -799,12 +800,82 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract task ID from URL path if present (e.g., /api/orchestration/tasks/{id})
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) > 0 && pathParts[0] != "" {
+		req.TaskID = pathParts[0]
+	}
+
 	if req.TaskID == "" {
 		http.Error(w, "task_id is required", http.StatusBadRequest)
 		return
 	}
+
+	// Handle task reassignment (changing "to" field)
+	if req.To != nil {
+		log.Printf("🔄 Reassigning task %s to %s", req.TaskID, *req.To)
+
+		// Get workspace from task
+		task, err := h.communicator.GetTask(req.TaskID)
+		if err != nil {
+			log.Printf("❌ Failed to get task: %v", err)
+			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		ws, err := h.workspaceStore.Get(task.WorkspaceID)
+		if err != nil {
+			log.Printf("❌ Failed to get workspace: %v", err)
+			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Update the task assignment
+		taskFound := false
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == req.TaskID {
+				ws.Tasks[i].To = *req.To
+				taskFound = true
+				log.Printf("📝 Updated task in workspace: %s -> %s", req.TaskID, *req.To)
+				break
+			}
+		}
+
+		if !taskFound {
+			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			return
+		}
+
+		// Save workspace
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Reassigned task %s to %s", req.TaskID, *req.To)
+
+		// Publish event
+		h.eventBus.Publish(agentstudio.Event{
+			Type:        agentstudio.EventTaskAssigned,
+			WorkspaceID: task.WorkspaceID,
+			Data: map[string]interface{}{
+				"task_id": req.TaskID,
+				"to":      *req.To,
+			},
+		})
+
+		// Return updated task
+		updatedTask, _ := h.communicator.GetTask(req.TaskID)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(updatedTask)
+		return
+	}
+
+	// Handle status update
 	if req.Status == "" {
-		http.Error(w, "status is required", http.StatusBadRequest)
+		http.Error(w, "status is required when not reassigning task", http.StatusBadRequest)
 		return
 	}
 
@@ -2247,4 +2318,159 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 	default:
 		return nil
 	}
+}
+
+// ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)
+// GET /api/orchestration/progress/stream?workspace_id=<id>
+func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get flusher
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	log.Printf("🔄 Starting progress SSE stream for workspace %s", workspaceID)
+
+	// If no event bus, return error
+	if h.eventBus == nil {
+		http.Error(w, "event bus not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Create event channel
+	eventChan := make(chan agentstudio.Event, 100)
+
+	// Subscribe to workspace events
+	subID := h.eventBus.SubscribeToWorkspace(workspaceID, func(event agentstudio.Event) {
+		select {
+		case eventChan <- event:
+		default:
+			log.Printf("⚠️  Progress event channel full for workspace %s", workspaceID)
+		}
+	})
+	defer h.eventBus.Unsubscribe(subID)
+
+	// Send initial workspace progress
+	h.sendInitialProgress(w, flusher, workspaceID)
+
+	// Create ticker for periodic workspace progress updates (every 10 seconds)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	// Stream events
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("⏹  Progress SSE stream closed for workspace %s", workspaceID)
+			return
+
+		case event := <-eventChan:
+			// Send event to client
+			eventData := map[string]interface{}{
+				"type":         event.Type,
+				"workspace_id": event.WorkspaceID,
+				"timestamp":    event.Timestamp,
+				"source":       event.Source,
+				"data":         event.Data,
+			}
+
+			data, err := json.Marshal(eventData)
+			if err != nil {
+				log.Printf("❌ Failed to marshal progress event: %v", err)
+				continue
+			}
+
+			// Send with event type prefix
+			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
+			if err != nil {
+				log.Printf("❌ Failed to write progress SSE event: %v", err)
+				return
+			}
+			flusher.Flush()
+
+			// After any task event, send updated workspace progress
+			if strings.HasPrefix(string(event.Type), "task.") {
+				h.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
+			}
+
+		case <-ticker.C:
+			// Send periodic workspace progress update
+			h.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
+		}
+	}
+}
+
+// sendInitialProgress sends the initial workspace progress
+func (h *Handler) sendInitialProgress(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		log.Printf("❌ Failed to get workspace for initial progress: %v", err)
+		return
+	}
+
+	progress := ws.GetWorkspaceProgress()
+	agentStats := ws.GetAgentStats()
+
+	data := map[string]interface{}{
+		"workspace_id":       workspaceID,
+		"workspace_progress": progress,
+		"agent_stats":        agentStats,
+		"tasks":              ws.Tasks,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("❌ Failed to marshal initial progress: %v", err)
+		return
+	}
+
+	_, _ = w.Write([]byte(fmt.Sprintf("event: initial\ndata: %s\n\n", jsonData)))
+	flusher.Flush()
+}
+
+// sendWorkspaceProgressUpdate sends a workspace progress update
+func (h *Handler) sendWorkspaceProgressUpdate(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return // Workspace might have been deleted
+	}
+
+	progress := ws.GetWorkspaceProgress()
+	agentStats := ws.GetAgentStats()
+
+	eventData := map[string]interface{}{
+		"type":               "workspace.progress",
+		"workspace_id":       workspaceID,
+		"timestamp":          time.Now(),
+		"workspace_progress": progress,
+		"agent_stats":        agentStats,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		log.Printf("❌ Failed to marshal workspace progress: %v", err)
+		return
+	}
+
+	_, _ = w.Write([]byte(fmt.Sprintf("event: workspace.progress\ndata: %s\n\n", data)))
+	flusher.Flush()
 }

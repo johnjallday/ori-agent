@@ -131,12 +131,13 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 			continue
 		}
 
-		// Find pending/assigned tasks
+		// Find tasks ready for execution
 		for i := range ws.Tasks {
 			task := &ws.Tasks[i]
 
-			// Skip if not pending/assigned
-			if task.Status != TaskStatusPending && task.Status != TaskStatusAssigned {
+			// Only auto-execute tasks with "assigned" status
+			// Pending tasks require manual execution via the UI (click RUN button)
+			if task.Status != TaskStatusAssigned {
 				continue
 			}
 
