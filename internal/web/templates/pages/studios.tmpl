@@ -328,6 +328,25 @@
             </form>
           </div>
 
+          <!-- Add to Workspace Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Add Agents to Workspace</h6>
+            <div class="modern-card p-3">
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Select Workspace</label>
+                <select id="studios-workspace-select" class="modern-input w-100">
+                  <option value="">Loading workspaces...</option>
+                </select>
+              </div>
+              <div class="alert alert-info mb-0" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+                Select a workspace above, then click "Add to Workspace" next to any agent below to add them to the selected workspace.
+              </div>
+            </div>
+          </div>
+
           <!-- Existing Agents Section -->
           <div>
             <h6 style="color: var(--text-primary);">Existing Agents</h6>
@@ -687,6 +706,9 @@
       // Load agents when modal opens
       await loadStudiosSystemAgents();
 
+      // Load workspaces for the dropdown
+      await loadWorkspacesForAgentManagement();
+
       // Load and populate available models
       try {
         await loadStudiosProviders();
@@ -736,11 +758,19 @@
               <div class="text-muted small">${escapeHtml(agent.type || 'tool-calling')}</div>
             </div>
           </div>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteStudiosSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-          </button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="addAgentToSelectedWorkspace('${escapeHtml(agent.name)}')" title="Add to workspace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+              Add to Workspace
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteStudiosSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       `).join('');
     }
@@ -831,6 +861,70 @@
       } catch (error) {
         console.error('Error deleting agent:', error);
         alert('Failed to delete agent: ' + error.message);
+      }
+    }
+
+    // Load workspaces for the agent management dropdown
+    async function loadWorkspacesForAgentManagement() {
+      try {
+        const response = await fetch('/api/orchestration/workspace');
+        const data = await response.json();
+
+        const workspaces = data.workspaces || [];
+        const select = document.getElementById('studios-workspace-select');
+
+        if (workspaces.length === 0) {
+          select.innerHTML = '<option value="">No workspaces available</option>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">-- Select a workspace --</option>' +
+          workspaces.map(ws =>
+            `<option value="${escapeHtml(ws.id)}">${escapeHtml(ws.name || ws.id)}</option>`
+          ).join('');
+      } catch (error) {
+        console.error('Error loading workspaces:', error);
+        const select = document.getElementById('studios-workspace-select');
+        select.innerHTML = '<option value="">Error loading workspaces</option>';
+      }
+    }
+
+    // Add an agent to the selected workspace
+    async function addAgentToSelectedWorkspace(agentName) {
+      const workspaceSelect = document.getElementById('studios-workspace-select');
+      const workspaceId = workspaceSelect.value;
+
+      if (!workspaceId) {
+        alert('Please select a workspace first');
+        workspaceSelect.focus();
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to add agent to workspace');
+        }
+
+        const result = await response.json();
+        alert(`Agent "${agentName}" added to workspace successfully!`);
+
+        // Refresh workspaces if we're in grid view
+        await loadWorkspaces();
+      } catch (error) {
+        console.error('Error adding agent to workspace:', error);
+        // Check if it's a conflict (agent already in workspace)
+        if (error.message.includes('already in workspace') || error.message.includes('409')) {
+          alert(`Agent "${agentName}" is already in this workspace`);
+        } else {
+          alert('Failed to add agent to workspace: ' + error.message);
+        }
       }
     }
 
