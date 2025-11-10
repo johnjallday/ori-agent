@@ -252,12 +252,39 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 // Some models (like llama3) appear in multiple categories
 func getModelCategories(provider, modelName string) []string {
 	switch provider {
+	case "openai":
+		// Flagship models (gpt-5, gpt-4.1) appear in orchestration and research
+		if modelName == "gpt-5" || modelName == "gpt-4.1" {
+			return []string{"orchestration", "research"}
+		}
+		// O-series models (reasoning models) are perfect for orchestration
+		if strings.HasPrefix(modelName, "o1") || strings.HasPrefix(modelName, "o3") {
+			return []string{"orchestration", "research"}
+		}
+		// General tier models can do orchestration too
+		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
+			return []string{"general", "orchestration"}
+		}
+		return []string{categorizeModel(provider, modelName)}
+
+	case "claude":
+		// Sonnet and Opus are great for orchestration
+		if strings.Contains(modelName, "sonnet") || strings.Contains(modelName, "opus") {
+			return []string{categorizeModel(provider, modelName), "orchestration"}
+		}
+		return []string{categorizeModel(provider, modelName)}
+
 	case "ollama":
 		lowerName := strings.ToLower(modelName)
 
 		// llama3 models appear in all categories (they're versatile local models)
 		if strings.Contains(lowerName, "llama3") {
-			return []string{"tool-calling", "general", "research"}
+			return []string{"tool-calling", "general", "orchestration", "research"}
+		}
+
+		// Larger models can do orchestration
+		if strings.Contains(lowerName, "70b") || strings.Contains(lowerName, "mixtral") {
+			return []string{"general", "orchestration", "research"}
 		}
 
 		// Other models get their single category
@@ -269,19 +296,23 @@ func getModelCategories(provider, modelName string) []string {
 	}
 }
 
-// categorizeModel categorizes models into tool-calling, general, or research tiers
+// categorizeModel categorizes models into tool-calling, general, orchestration, or research tiers
 func categorizeModel(provider, modelName string) string {
 	switch provider {
 	case "openai":
-		// Tool-calling tier (cheapest)
+		// Tool-calling tier (cheapest - nano models)
 		if modelName == "gpt-5-nano" || modelName == "gpt-4.1-nano" {
 			return "tool-calling"
 		}
-		// General purpose tier (mid-tier)
-		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" || modelName == "gpt-4o-mini" {
+		// General purpose tier (mid-tier - mini models)
+		if modelName == "gpt-5-mini" || modelName == "gpt-4.1-mini" {
 			return "general"
 		}
-		// Research tier (expensive)
+		// Flagship models (gpt-5, gpt-4.1) - research tier
+		if modelName == "gpt-5" || modelName == "gpt-4.1" {
+			return "research"
+		}
+		// All other OpenAI models default to research tier (expensive)
 		return "research"
 	case "claude":
 		if modelName == "claude-3-haiku-20240307" {

@@ -55,6 +55,12 @@
               <p class="mb-0" style="color: var(--text-secondary);">Collaborative multi-agent workspaces with visual canvas</p>
             </div>
             <div class="d-flex gap-2">
+              <button class="modern-btn modern-btn-secondary" onclick="openManageAgentsModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+                </svg>
+                Manage Agents
+              </button>
               <button class="modern-btn modern-btn-primary" onclick="openCreateWorkspaceModal()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -171,56 +177,6 @@
                 </button>
               </div>
 
-              <!-- Manage Agents -->
-              <div class="modern-card p-3 mb-3">
-                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
-                    <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
-                  </svg>
-                  Manage Agents
-                </h6>
-                <div class="mb-2">
-                  <select id="available-agents" class="form-control form-control-sm" style="font-size: 0.875rem;">
-                    <option value="">Select agent to add...</option>
-                  </select>
-                </div>
-                <button class="modern-btn modern-btn-success w-100 mb-2" onclick="addAgentToCanvas()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                  </svg>
-                  Add Agent
-                </button>
-                <div id="current-agents-list" style="font-size: 0.875rem;">
-                  <!-- Agents will be listed here -->
-                </div>
-              </div>
-
-              <!-- Create Task -->
-              <div class="modern-card p-3 mb-3">
-                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
-                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                  </svg>
-                  Create Task
-                </h6>
-                <div class="mb-2">
-                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">Description</label>
-                  <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="Task description..."></textarea>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" style="font-size: 0.875rem; color: var(--text-secondary);">Assign To</label>
-                  <select id="task-to-agent" class="form-control form-control-sm">
-                    <option value="">Select agent...</option>
-                  </select>
-                </div>
-                <button class="modern-btn modern-btn-success w-100" onclick="createTask()">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                  </svg>
-                  Add Task
-                </button>
-              </div>
-
               <!-- Agent Details -->
               <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
                 <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
@@ -300,6 +256,91 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Agents Modal -->
+  <div class="modal fade" id="manageAgentsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+            </svg>
+            Manage Agents
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+
+          <!-- Create Agent Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Create New Agent</h6>
+            <form id="studiosCreateAgentForm" class="modern-card p-3">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
+                  <input type="text" id="studios-new-agent-name" class="modern-input w-100" placeholder="Enter agent name..." required>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Type</label>
+                  <select id="studios-new-agent-type" class="modern-input w-100">
+                    <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
+                    <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                    <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
+                    <option value="research">Research (Expensive - Complex thinking)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Model</label>
+                <select id="studios-new-agent-model" class="modern-input w-100">
+                  <option value="">Loading models...</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">
+                  Temperature: <span id="studios-new-agent-temperature-value">1.0</span>
+                </label>
+                <input type="range" id="studios-new-agent-temperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
+                       style="cursor: pointer;">
+                <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: var(--text-muted);">
+                  <span>Focused (0)</span>
+                  <span>Balanced (1)</span>
+                  <span>Creative (2)</span>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">System Prompt</label>
+                <textarea id="studios-new-agent-prompt" class="form-control" rows="4"
+                          style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                          placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+              </div>
+              <button type="submit" class="modern-btn modern-btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Agent
+              </button>
+            </form>
+          </div>
+
+          <!-- Existing Agents Section -->
+          <div>
+            <h6 style="color: var(--text-primary);">Existing Agents</h6>
+            <div id="studios-agents-list-modal" class="modern-card p-3">
+              <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2" style="color: var(--text-muted);">Loading agents...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -580,6 +621,220 @@
         `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
       ).join('');
     }
+
+    // ========== MANAGE AGENTS MODAL FUNCTIONS ==========
+
+    let studiosSystemAgents = [];
+    let studiosAvailableProviders = [];
+
+    // Load providers for studios
+    async function loadStudiosProviders() {
+      try {
+        const response = await fetch('/api/providers');
+        const data = await response.json();
+        studiosAvailableProviders = data.providers || [];
+        return studiosAvailableProviders;
+      } catch (error) {
+        console.error('Failed to load providers:', error);
+        return [];
+      }
+    }
+
+    // Populate model select for studios
+    function populateStudiosModelSelect(modelSelect, selectedType = 'tool-calling') {
+      if (!modelSelect || studiosAvailableProviders.length === 0) {
+        console.warn('Cannot populate models: modelSelect or providers missing');
+        return;
+      }
+
+      modelSelect.innerHTML = '';
+
+      studiosAvailableProviders.forEach(provider => {
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+
+        provider.models.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model.value;
+          option.textContent = model.label;
+          option.setAttribute('data-type', model.type);
+          option.setAttribute('data-provider', model.provider);
+
+          if (model.type !== selectedType) {
+            option.style.display = 'none';
+            option.disabled = true;
+          }
+
+          providerGroup.appendChild(option);
+        });
+
+        modelSelect.appendChild(providerGroup);
+      });
+
+      // Select first available option
+      for (let i = 0; i < modelSelect.options.length; i++) {
+        if (!modelSelect.options[i].disabled) {
+          modelSelect.selectedIndex = i;
+          break;
+        }
+      }
+    }
+
+    async function openManageAgentsModal() {
+      const modal = new bootstrap.Modal(document.getElementById('manageAgentsModal'));
+      modal.show();
+
+      // Load agents when modal opens
+      await loadStudiosSystemAgents();
+
+      // Load and populate available models
+      try {
+        await loadStudiosProviders();
+        const modelSelect = document.getElementById('studios-new-agent-model');
+        const typeSelect = document.getElementById('studios-new-agent-type');
+        if (modelSelect && typeSelect) {
+          populateStudiosModelSelect(modelSelect, typeSelect.value);
+        }
+      } catch (error) {
+        console.error('Error loading providers:', error);
+      }
+    }
+
+    async function loadStudiosSystemAgents() {
+      try {
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+
+        studiosSystemAgents = data.agents || [];
+        renderStudiosAgentsListModal();
+      } catch (error) {
+        console.error('Error loading agents:', error);
+        document.getElementById('studios-agents-list-modal').innerHTML = `
+          <div class="alert alert-danger">Failed to load agents: ${escapeHtml(error.message)}</div>
+        `;
+      }
+    }
+
+    function renderStudiosAgentsListModal() {
+      const container = document.getElementById('studios-agents-list-modal');
+
+      if (studiosSystemAgents.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-3">
+            <p style="color: var(--text-muted);">No agents found</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = studiosSystemAgents.map(agent => `
+        <div class="d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--bg-secondary); border-radius: var(--radius-sm);">
+          <div class="d-flex align-items-center gap-3">
+            <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
+            <div>
+              <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
+              <div class="text-muted small">${escapeHtml(agent.type || 'tool-calling')}</div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteStudiosSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    // Update model dropdown when agent type changes
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('studios-new-agent-type').addEventListener('change', function(e) {
+        const modelSelect = document.getElementById('studios-new-agent-model');
+        if (modelSelect && studiosAvailableProviders.length > 0) {
+          populateStudiosModelSelect(modelSelect, e.target.value);
+        }
+      });
+
+      // Update temperature value display when slider changes
+      document.getElementById('studios-new-agent-temperature').addEventListener('input', function(e) {
+        document.getElementById('studios-new-agent-temperature-value').textContent = e.target.value;
+      });
+
+      // Create agent form submission
+      document.getElementById('studiosCreateAgentForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const name = document.getElementById('studios-new-agent-name').value.trim();
+        const type = document.getElementById('studios-new-agent-type').value;
+        const model = document.getElementById('studios-new-agent-model').value.trim();
+        const temperature = document.getElementById('studios-new-agent-temperature').value;
+        const systemPrompt = document.getElementById('studios-new-agent-prompt').value.trim();
+
+        if (!name) {
+          alert('Please enter an agent name');
+          return;
+        }
+
+        // Check if agent already exists
+        if (studiosSystemAgents.some(a => a.name === name)) {
+          alert('An agent with this name already exists');
+          return;
+        }
+
+        try {
+          const requestBody = { name, type };
+
+          if (model) requestBody.model = model;
+          if (temperature) requestBody.temperature = parseFloat(temperature);
+          if (systemPrompt) requestBody.system_prompt = systemPrompt;
+
+          const response = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+          });
+
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to create agent');
+          }
+
+          // Clear form and reload
+          document.getElementById('studiosCreateAgentForm').reset();
+          await loadStudiosSystemAgents();
+          await loadWorkspaceAgents(); // Refresh the workspace agents list
+          alert('Agent created successfully: ' + name);
+        } catch (error) {
+          console.error('Error creating agent:', error);
+          alert('Failed to create agent: ' + error.message);
+        }
+      });
+    });
+
+    async function deleteStudiosSystemAgent(agentName) {
+      if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to delete agent');
+        }
+
+        await loadStudiosSystemAgents();
+        await loadWorkspaceAgents(); // Refresh the workspace agents list
+        alert('Agent deleted successfully: ' + agentName);
+      } catch (error) {
+        console.error('Error deleting agent:', error);
+        alert('Failed to delete agent: ' + error.message);
+      }
+    }
+
+    // ========== END MANAGE AGENTS MODAL FUNCTIONS ==========
 
     function openCreateWorkspaceModal() {
       // Populate agent selection
