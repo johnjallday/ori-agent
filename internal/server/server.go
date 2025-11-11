@@ -20,6 +20,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -80,6 +82,8 @@ type Server struct {
 	mcpRegistry           *mcp.Registry
 	mcpConfigManager      *mcp.ConfigManager
 	mcpHandler            *mcphttp.Handler
+	locationManager       *location.Manager
+	locationHandler       *locationhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -163,6 +167,37 @@ func New() (*Server, error) {
 	// initialize health manager (must be before plugin loading)
 	s.healthManager = healthhttp.NewManager()
 
+	// initialize location manager (must be before plugin loading so plugins can access location context)
+	locationZonesPath := "locations.json"
+	if abs, err := filepath.Abs(locationZonesPath); err == nil {
+		locationZonesPath = abs
+	}
+	log.Printf("Using location zones file: %s", locationZonesPath)
+
+	// Load zones from file
+	zones, err := location.LoadZones(locationZonesPath)
+	if err != nil {
+		log.Printf("Warning: failed to load location zones: %v", err)
+		zones = []location.Zone{}
+	}
+	log.Printf("📍 Loaded %d location zones", len(zones))
+
+	// Create detectors
+	manualDetector := location.NewManualDetector()
+	wifiDetector := location.NewWiFiDetector()
+	detectors := []location.Detector{manualDetector, wifiDetector}
+
+	// Initialize location manager
+	s.locationManager = location.NewManager(detectors, zones)
+
+	// Set zones file path for persistence
+	s.locationManager.SetZonesFilePath(locationZonesPath)
+
+	// Start location detection loop
+	ctx := context.Background()
+	s.locationManager.Start(ctx, 60*time.Second)
+	log.Printf("📍 Location manager initialized and detection started")
+
 	// init plugin downloader
 	pluginCacheDir := "plugin_cache"
 	if p := os.Getenv("PLUGIN_CACHE_DIR"); p != "" {
@@ -236,7 +271,12 @@ func New() (*Server, error) {
 			if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
 				agentSpecificStorePath = abs
 			}
-			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath)
+			// Get current location from location manager (will be initialized later)
+			currentLocation := ""
+			if s.locationManager != nil {
+				currentLocation = s.locationManager.GetCurrentLocation()
+			}
+			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath, currentLocation)
 
 			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
 				log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
@@ -398,6 +438,7 @@ func New() (*Server, error) {
 	}
 
 	// initialize HTTP handlers
+	s.locationHandler = locationhttp.NewHandler(s.locationManager)
 	s.usageHandler = usagehttp.NewHandler(s.costTracker)
 	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
@@ -642,6 +683,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/usage/stats/range", s.usageHandler.GetCustomRangeStats)
 	mux.HandleFunc("/api/usage/summary", s.usageHandler.GetSummary)
 	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
+
+	// Location management endpoints
+	mux.HandleFunc("/api/location/current", s.locationHandler.GetCurrentLocation)
+	mux.HandleFunc("/api/location/zones", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.locationHandler.GetZones(w, r)
+		case http.MethodPost:
+			s.locationHandler.CreateZone(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			s.locationHandler.UpdateZone(w, r)
+		case http.MethodDelete:
+			s.locationHandler.DeleteZone(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
 
 	// MCP (Model Context Protocol) endpoints
 	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {

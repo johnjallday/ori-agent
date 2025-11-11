@@ -181,7 +181,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		// Set agent context for plugins that support it
 		// Construct the agent-specific path since agentStorePath is now the index file
 		agentSpecificPath := filepath.Join(filepath.Dir(h.agentStorePath), current, "config.json")
-		pluginloader.SetAgentContext(tool, current, agentSpecificPath)
+		// Pass empty location for now - location will be updated when location manager is available
+		pluginloader.SetAgentContext(tool, current, agentSpecificPath, "")
 
 		// Extract plugin settings schema for this agent if plugin supports get_settings
 		if err := pluginloader.ExtractPluginSettingsSchema(tool, current); err != nil {
