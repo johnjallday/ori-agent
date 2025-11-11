@@ -73,10 +73,14 @@ type Task struct {
 	Error       string                 `json:"error,omitempty"`
 	Progress    *TaskProgress          `json:"progress,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
-	InputTaskIDs []string   `json:"input_task_ids,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	InputTaskIDs []string `json:"input_task_ids,omitempty"`
+	// ResultCombinationMode specifies how to combine results from input tasks with the new task
+	ResultCombinationMode string `json:"result_combination_mode,omitempty"`
+	// CombinationInstruction provides custom instructions for how to combine results (used when mode is "custom")
+	CombinationInstruction string     `json:"combination_instruction,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -90,6 +94,24 @@ const (
 	TaskStatusFailed     TaskStatus = "failed"
 	TaskStatusCancelled  TaskStatus = "cancelled"
 	TaskStatusTimeout    TaskStatus = "timeout"
+)
+
+// ResultCombinationMode specifies how to combine results from input tasks
+type ResultCombinationMode string
+
+const (
+	// CombineModeDefault - Simply include input task results as context (existing behavior)
+	CombineModeDefault ResultCombinationMode = "default"
+	// CombineModeAppend - Append input results to the new task prompt
+	CombineModeAppend ResultCombinationMode = "append"
+	// CombineModeMerge - Ask the agent to merge/synthesize all input results
+	CombineModeMerge ResultCombinationMode = "merge"
+	// CombineModeSummarize - Ask the agent to create a summary of all input results
+	CombineModeSummarize ResultCombinationMode = "summarize"
+	// CombineModeCompare - Ask the agent to compare and contrast input results
+	CombineModeCompare ResultCombinationMode = "compare"
+	// CombineModeCustom - Use custom combination instruction provided by user
+	CombineModeCustom ResultCombinationMode = "custom"
 )
 
 // TaskProgress tracks the execution progress of a task

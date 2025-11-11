@@ -699,11 +699,14 @@ func (h *Handler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 // handleCreateTask creates a new task in a workspace
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"studio_id"`
-		From        string `json:"from"`
-		To          string `json:"to"`
-		Description string `json:"description"`
-		Priority    int    `json:"priority"`
+		WorkspaceID            string   `json:"studio_id"`
+		From                   string   `json:"from"`
+		To                     string   `json:"to"`
+		Description            string   `json:"description"`
+		Priority               int      `json:"priority"`
+		InputTaskIDs           []string `json:"input_task_ids"`
+		ResultCombinationMode  string   `json:"result_combination_mode"`
+		CombinationInstruction string   `json:"combination_instruction"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -739,12 +742,15 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := agentstudio.Task{
-		WorkspaceID: req.WorkspaceID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Status:      agentstudio.TaskStatusPending,
+		WorkspaceID:            req.WorkspaceID,
+		From:                   req.From,
+		To:                     req.To,
+		Description:            req.Description,
+		Priority:               req.Priority,
+		InputTaskIDs:           req.InputTaskIDs,
+		ResultCombinationMode:  req.ResultCombinationMode,
+		CombinationInstruction: req.CombinationInstruction,
+		Status:                 agentstudio.TaskStatusPending,
 	}
 
 	// Add task to workspace
@@ -777,7 +783,12 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+	if len(req.InputTaskIDs) > 0 {
+		log.Printf("✅ Created connected task %s in workspace %s: %s -> %s (receiving input from %d task(s))",
+			createdTask.ID, req.WorkspaceID, req.From, req.To, len(req.InputTaskIDs))
+	} else {
+		log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -788,11 +799,14 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID string  `json:"task_id"`
-		Status string  `json:"status"`
-		Result string  `json:"result"`
-		Error  string  `json:"error"`
-		To     *string `json:"to"` // Optional: reassign task to different agent
+		TaskID                 string   `json:"task_id"`
+		Status                 string   `json:"status"`
+		Result                 string   `json:"result"`
+		Error                  string   `json:"error"`
+		To                     *string  `json:"to"`                      // Optional: reassign task to different agent
+		InputTaskIDs           []string `json:"input_task_ids"`          // Optional: update input task connections
+		ResultCombinationMode  *string  `json:"result_combination_mode"` // Optional: update combination mode
+		CombinationInstruction *string  `json:"combination_instruction"` // Optional: update combination instruction
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -808,6 +822,77 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	if req.TaskID == "" {
 		http.Error(w, "task_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle input task connections update
+	if req.InputTaskIDs != nil {
+		log.Printf("🔗 Updating input connections for task %s", req.TaskID)
+
+		// Get workspace from task
+		task, err := h.communicator.GetTask(req.TaskID)
+		if err != nil {
+			log.Printf("❌ Failed to get task: %v", err)
+			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		ws, err := h.workspaceStore.Get(task.WorkspaceID)
+		if err != nil {
+			log.Printf("❌ Failed to get workspace: %v", err)
+			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Update the task's input connections
+		taskFound := false
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == req.TaskID {
+				ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
+				if req.ResultCombinationMode != nil {
+					ws.Tasks[i].ResultCombinationMode = *req.ResultCombinationMode
+				}
+				if req.CombinationInstruction != nil {
+					ws.Tasks[i].CombinationInstruction = *req.CombinationInstruction
+				}
+				taskFound = true
+				log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
+				break
+			}
+		}
+
+		if !taskFound {
+			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			return
+		}
+
+		// Save workspace
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Updated input connections for task %s", req.TaskID)
+
+		// Publish event
+		if h.eventBus != nil {
+			h.eventBus.Publish(agentstudio.Event{
+				Type:        agentstudio.EventWorkspaceUpdated,
+				WorkspaceID: task.WorkspaceID,
+				Data: map[string]interface{}{
+					"task_id":        req.TaskID,
+					"input_task_ids": req.InputTaskIDs,
+					"update_type":    "task_connections",
+				},
+			})
+		}
+
+		// Return updated task
+		updatedTask, _ := h.communicator.GetTask(req.TaskID)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(updatedTask)
 		return
 	}
 

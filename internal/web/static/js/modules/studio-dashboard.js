@@ -321,6 +321,24 @@ class WorkspaceDashboard {
                     </select>
                     <small class="text-muted">Hold Ctrl/Cmd to select multiple tasks</small>
                   </div>
+                  <div class="mb-3" id="combination-mode-container" style="display: none;">
+                    <label class="form-label small" style="color: var(--text-primary);">
+                      Result Combination Mode
+                      <span class="text-muted ms-1" title="How should results from previous tasks be combined with this task?">ℹ️</span>
+                    </label>
+                    <select id="task-combination-mode" class="form-control form-control-sm">
+                      <option value="default">Default (Include as context)</option>
+                      <option value="append">Append (Build upon results)</option>
+                      <option value="merge">Merge (Synthesize into coherent whole)</option>
+                      <option value="summarize">Summarize (Extract key points)</option>
+                      <option value="compare">Compare (Find similarities/differences)</option>
+                      <option value="custom">Custom (Specify instructions)</option>
+                    </select>
+                  </div>
+                  <div class="mb-3" id="combination-instruction-container" style="display: none;">
+                    <label class="form-label small" style="color: var(--text-primary);">Custom Combination Instructions</label>
+                    <textarea id="task-combination-instruction" class="form-control form-control-sm" rows="2" placeholder="Describe how to combine the results..."></textarea>
+                  </div>
                   <div class="d-flex gap-2">
                     <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -402,6 +420,41 @@ class WorkspaceDashboard {
         window.messageTimeline = this.messageTimeline;
       }, 100);
     }
+
+    // Initialize combination mode controls
+    this.initializeCombinationModeControls();
+  }
+
+  /**
+   * Initialize the combination mode UI controls
+   */
+  initializeCombinationModeControls() {
+    const inputTasksSelect = document.getElementById('task-input-tasks');
+    const combinationModeContainer = document.getElementById('combination-mode-container');
+    const combinationModeSelect = document.getElementById('task-combination-mode');
+    const combinationInstructionContainer = document.getElementById('combination-instruction-container');
+
+    if (!inputTasksSelect || !combinationModeContainer || !combinationModeSelect || !combinationInstructionContainer) {
+      return;
+    }
+
+    // Show/hide combination mode when input tasks selection changes
+    inputTasksSelect.addEventListener('change', () => {
+      const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
+      combinationModeContainer.style.display = hasInputTasks ? 'block' : 'none';
+
+      // Also hide instruction container if no input tasks
+      if (!hasInputTasks) {
+        combinationInstructionContainer.style.display = 'none';
+      }
+    });
+
+    // Show/hide custom instruction field based on combination mode
+    combinationModeSelect.addEventListener('change', () => {
+      const isCustomMode = combinationModeSelect.value === 'custom';
+      const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
+      combinationInstructionContainer.style.display = (isCustomMode && hasInputTasks) ? 'block' : 'none';
+    });
   }
 
   /**
@@ -546,6 +599,7 @@ class WorkspaceDashboard {
     const canExecute = task.status === 'pending' || task.status === 'assigned';
     const hasResult = task.result && task.status === 'completed';
     const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
+    const hasCombinationMode = task.result_combination_mode && task.result_combination_mode !== 'default';
 
     return `
       <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer;" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
@@ -565,6 +619,7 @@ class WorkspaceDashboard {
               <span>To: ${this.escapeHtml(task.to)}</span>
               ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
               ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
+              ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
             </div>
             ${task.result ? `
               <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
@@ -860,6 +915,10 @@ class WorkspaceDashboard {
     const inputTasksSelect = document.getElementById('task-input-tasks');
     const inputTaskIds = Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value);
 
+    // Get combination mode and instruction
+    const combinationMode = document.getElementById('task-combination-mode')?.value || 'default';
+    const combinationInstruction = document.getElementById('task-combination-instruction')?.value || '';
+
     if (!from || !to || !description) {
       alert('Please fill in all required fields');
       return;
@@ -877,6 +936,16 @@ class WorkspaceDashboard {
     // Add input_task_ids if any are selected
     if (inputTaskIds.length > 0) {
       requestBody.input_task_ids = inputTaskIds;
+
+      // Add combination mode if input tasks are selected
+      if (combinationMode && combinationMode !== 'default') {
+        requestBody.result_combination_mode = combinationMode;
+      }
+
+      // Add custom instruction if mode is custom
+      if (combinationMode === 'custom' && combinationInstruction) {
+        requestBody.combination_instruction = combinationInstruction;
+      }
     }
 
     try {

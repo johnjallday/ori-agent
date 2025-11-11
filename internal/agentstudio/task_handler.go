@@ -130,12 +130,7 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	// Handle input task results specially for better formatting
 	inputTaskResults, hasInputResults := task.Context["input_task_results"]
 	if hasInputResults {
-		prompt.WriteString("## Input from Previous Tasks\n\n")
-		if resultsMap, ok := inputTaskResults.(map[string]string); ok {
-			for taskID, result := range resultsMap {
-				prompt.WriteString(fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result))
-			}
-		}
+		h.formatInputResults(&prompt, task, inputTaskResults)
 	}
 
 	// Include other context fields
@@ -168,6 +163,58 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	prompt.WriteString("Provide a clear, concise response with your findings or results.")
 
 	return prompt.String()
+}
+
+// formatInputResults formats input task results based on the combination mode
+func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, inputTaskResults interface{}) {
+	resultsMap, ok := inputTaskResults.(map[string]string)
+	if !ok {
+		return
+	}
+
+	// Default mode or empty mode - use existing behavior
+	mode := task.ResultCombinationMode
+	if mode == "" || mode == string(CombineModeDefault) {
+		prompt.WriteString("## Input from Previous Tasks\n\n")
+		for taskID, result := range resultsMap {
+			prompt.WriteString(fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result))
+		}
+		return
+	}
+
+	// For all other modes, we provide specific instructions on how to combine
+	prompt.WriteString("## Input from Previous Tasks\n\n")
+
+	// First, list all the input results
+	for taskID, result := range resultsMap {
+		prompt.WriteString(fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result))
+	}
+
+	// Then add mode-specific instructions
+	switch ResultCombinationMode(mode) {
+	case CombineModeAppend:
+		prompt.WriteString("**Instruction:** Use the above results as additional context for your task. Build upon these results.\n\n")
+
+	case CombineModeMerge:
+		prompt.WriteString("**Instruction:** Merge and synthesize the above results into a coherent whole. Combine the information from all previous tasks, eliminating redundancies and creating a unified output.\n\n")
+
+	case CombineModeSummarize:
+		prompt.WriteString("**Instruction:** Create a comprehensive summary of all the above results. Extract key points and insights from each task result and present them in a concise, organized format.\n\n")
+
+	case CombineModeCompare:
+		prompt.WriteString("**Instruction:** Compare and contrast the above results. Identify similarities, differences, contradictions, and complementary information across all task results.\n\n")
+
+	case CombineModeCustom:
+		if task.CombinationInstruction != "" {
+			prompt.WriteString(fmt.Sprintf("**Combination Instruction:** %s\n\n", task.CombinationInstruction))
+		} else {
+			prompt.WriteString("**Instruction:** Use the above results to inform your task completion.\n\n")
+		}
+
+	default:
+		// Fallback to default behavior
+		prompt.WriteString("**Instruction:** Use the above results as context for your task.\n\n")
+	}
 }
 
 // getProviderForModel determines which LLM provider to use

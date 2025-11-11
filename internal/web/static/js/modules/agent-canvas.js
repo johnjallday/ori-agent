@@ -39,6 +39,10 @@ class AgentCanvas {
     this.expandedPanelWidth = 0;
     this.expandedPanelTargetWidth = 400;
     this.expandedPanelAnimating = false;
+    this.resultScrollOffset = 0; // Scroll offset for result content
+    this.resultBoxBounds = null; // Bounds of result box for scroll detection
+    this.copyButtonBounds = null; // Bounds of copy button for click detection
+    this.copyButtonState = 'idle'; // 'idle', 'hover', 'copied'
 
     // Expanded agent panel state
     this.expandedAgent = null;
@@ -93,6 +97,28 @@ class AgentCanvas {
     this.canvas.addEventListener('mouseleave', () => this.onMouseUp());
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e));
     this.canvas.addEventListener('click', (e) => this.onClick(e));
+
+    // Keyboard interactions
+    window.addEventListener('keydown', (e) => this.onKeyDown(e));
+  }
+
+  onKeyDown(e) {
+    // ESC key - cancel connection/assignment modes
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      if (this.connectionMode) {
+        this.connectionMode = false;
+        this.connectionSourceTask = null;
+        this.canvas.style.cursor = 'grab';
+        this.draw();
+        console.log('Connection mode cancelled');
+      } else if (this.assignmentMode) {
+        this.assignmentMode = false;
+        this.assignmentSourceTask = null;
+        this.canvas.style.cursor = 'grab';
+        this.draw();
+        console.log('Assignment mode cancelled');
+      }
+    }
   }
 
   resize() {
@@ -812,6 +838,9 @@ class AgentCanvas {
     // Draw timeline toggle button (always visible)
     this.drawTimelineToggleButton();
 
+    // Draw auto-layout button (always visible)
+    this.drawAutoLayoutButton();
+
     // Draw toast notifications (always on top)
     this.drawNotifications();
   }
@@ -957,6 +986,32 @@ class AgentCanvas {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillText(badge, cardX + 12, cardY + 49);
 
+      // Input indicator badge (if task receives input from other tasks)
+      // Position at top-left corner for better visibility
+      if (task.input_task_ids && task.input_task_ids.length > 0) {
+        const inputBadgeX = cardX + 8;
+        const inputBadgeY = cardY + 4;
+        const inputBadgeText = `🔗 ${task.input_task_ids.length}`;
+        this.ctx.font = 'bold 8px system-ui';
+        const inputBadgeWidth = this.ctx.measureText(inputBadgeText).width + 8;
+        const inputBadgeHeight = 14;
+
+        // Background with rounded corners
+        this.ctx.fillStyle = '#9b59b6'; // Purple to match connection lines
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 1.5;
+        this.roundRect(inputBadgeX, inputBadgeY, inputBadgeWidth, inputBadgeHeight, 7);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Text
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 8px system-ui';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(inputBadgeText, inputBadgeX + 4, inputBadgeY + inputBadgeHeight / 2);
+        this.ctx.textBaseline = 'alphabetic';
+      }
+
       // Delete button (always visible, top-right corner)
       const deleteBtnSize = 18;
       const deleteBtnX = cardX + cardWidth - deleteBtnSize - 4;
@@ -982,6 +1037,54 @@ class AgentCanvas {
       this.ctx.moveTo(deleteBtnX + deleteBtnSize - xOffset, deleteBtnY + xOffset);
       this.ctx.lineTo(deleteBtnX + xOffset, deleteBtnY + deleteBtnSize - xOffset);
       this.ctx.stroke();
+
+      // "Can Connect" indicator for completed tasks with results
+      if (task.status === 'completed' && task.result) {
+        const indicatorSize = 24;
+        const indicatorX = cardX + cardWidth - indicatorSize - 4;
+        const indicatorY = cardY + cardHeight - indicatorSize - 4;
+
+        // Store bounds for click detection
+        task.connectionIndicatorBounds = {
+          x: indicatorX,
+          y: indicatorY,
+          width: indicatorSize,
+          height: indicatorSize
+        };
+
+        // Pulsing glow effect
+        const pulsePhase = (Date.now() % 2000) / 2000; // 0 to 1
+        const glowIntensity = 0.3 + 0.2 * Math.sin(pulsePhase * Math.PI * 2);
+
+        this.ctx.save();
+        this.ctx.globalAlpha = glowIntensity;
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.beginPath();
+        this.ctx.arc(indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2, indicatorSize / 2 + 3, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+
+        // Main indicator background
+        this.ctx.fillStyle = '#9b59b6';
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2, indicatorSize / 2, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Link icon
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 12px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('🔗', indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2);
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'alphabetic';
+      } else {
+        // Clear bounds if task doesn't have result
+        task.connectionIndicatorBounds = null;
+      }
 
       // Execute button for pending tasks
       if (task.status === 'pending') {
@@ -1136,34 +1239,70 @@ class AgentCanvas {
         const inputTask = this.tasks.find(t => t.id === inputTaskId);
         if (!inputTask || !inputTask.x || !inputTask.y) return;
 
-        // Draw a dashed line with a different color to indicate result flow
+        // Draw a more prominent line with glow effect to indicate result flow
+        this.ctx.save();
+
+        // Glow effect for visibility
         this.ctx.strokeStyle = '#9b59b6'; // Purple for result connections
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([8, 4]);
+        this.ctx.lineWidth = 6;
+        this.ctx.globalAlpha = 0.3;
+        this.ctx.setLineDash([12, 6]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(inputTask.x, inputTask.y);
+        this.ctx.lineTo(task.x, task.y);
+        this.ctx.stroke();
+
+        // Main line (more prominent)
+        this.ctx.globalAlpha = 1.0;
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeStyle = '#9b59b6';
         this.ctx.beginPath();
         this.ctx.moveTo(inputTask.x, inputTask.y);
         this.ctx.lineTo(task.x, task.y);
         this.ctx.stroke();
         this.ctx.setLineDash([]);
+        this.ctx.restore();
 
-        // Draw an arrow at the midpoint
+        // Draw an arrow at the midpoint (larger and more visible)
         const midX = (inputTask.x + task.x) / 2;
         const midY = (inputTask.y + task.y) / 2;
         const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
 
-        // Draw arrow head
+        // Draw arrow head with white border
         this.ctx.fillStyle = '#9b59b6';
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        const arrowSize = 12;
         this.ctx.beginPath();
-        this.ctx.moveTo(midX, midY);
-        this.ctx.lineTo(midX - 10 * Math.cos(angle - Math.PI / 6), midY - 10 * Math.sin(angle - Math.PI / 6));
-        this.ctx.lineTo(midX - 10 * Math.cos(angle + Math.PI / 6), midY - 10 * Math.sin(angle + Math.PI / 6));
+        this.ctx.moveTo(midX + Math.cos(angle) * arrowSize, midY + Math.sin(angle) * arrowSize);
+        this.ctx.lineTo(midX - Math.cos(angle - Math.PI / 6) * arrowSize, midY - Math.sin(angle - Math.PI / 6) * arrowSize);
+        this.ctx.lineTo(midX - Math.cos(angle + Math.PI / 6) * arrowSize, midY - Math.sin(angle + Math.PI / 6) * arrowSize);
         this.ctx.closePath();
         this.ctx.fill();
+        this.ctx.stroke();
 
-        // Draw a small label "RESULT"
+        // Draw a more prominent label with background
+        const labelText = '📊 Result';
+        this.ctx.font = 'bold 10px system-ui';
+        const labelWidth = this.ctx.measureText(labelText).width + 8;
+        const labelX = midX - labelWidth / 2;
+        const labelY = midY - 25;
+
+        // Label background
         this.ctx.fillStyle = '#9b59b6';
-        this.ctx.font = 'bold 9px system-ui';
-        this.ctx.fillText('RESULT', midX + 5, midY - 5);
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.roundRect(labelX, labelY, labelWidth, 16, 8);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Label text
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(labelText, midX, labelY + 8);
+        this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'alphabetic';
       });
     });
   }
@@ -1757,34 +1896,111 @@ class AgentCanvas {
       this.ctx.fillStyle = '#059669';
       this.ctx.font = 'bold 14px system-ui';
       this.ctx.fillText('📊 Result', contentX, currentY);
+
+      // Copy button
+      const copyButtonWidth = 80;
+      const copyButtonHeight = 24;
+      const copyButtonX = panelX + this.expandedPanelWidth - padding - copyButtonWidth;
+      const copyButtonY = currentY - 18;
+
+      // Store bounds for click detection
+      this.copyButtonBounds = {
+        x: copyButtonX,
+        y: copyButtonY,
+        width: copyButtonWidth,
+        height: copyButtonHeight
+      };
+
+      // Button background
+      if (this.copyButtonState === 'copied') {
+        this.ctx.fillStyle = '#10b981';
+      } else if (this.copyButtonState === 'hover') {
+        this.ctx.fillStyle = '#059669';
+      } else {
+        this.ctx.fillStyle = '#047857';
+      }
+      this.ctx.strokeStyle = '#065f46';
+      this.ctx.lineWidth = 1.5;
+      this.roundRect(copyButtonX, copyButtonY, copyButtonWidth, copyButtonHeight, 4);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Button text
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 11px system-ui';
+      this.ctx.textAlign = 'center';
+      const buttonText = this.copyButtonState === 'copied' ? '✓ Copied!' : '📋 Copy';
+      this.ctx.fillText(buttonText, copyButtonX + copyButtonWidth / 2, copyButtonY + copyButtonHeight / 2 + 4);
+      this.ctx.textAlign = 'left';
+
       currentY += 25;
 
       // Result background box
       const resultBoxY = currentY;
       const resultBoxHeight = Math.min(300, panelHeight - currentY - padding);
+      const resultBoxWidth = this.expandedPanelWidth - padding * 2;
+
+      // Store bounds for scroll detection
+      this.resultBoxBounds = {
+        x: panelX + padding,
+        y: resultBoxY,
+        width: resultBoxWidth,
+        height: resultBoxHeight
+      };
+
       this.ctx.fillStyle = '#f0fdf4';
       this.ctx.strokeStyle = '#10b981';
       this.ctx.lineWidth = 2;
-      this.roundRect(contentX, resultBoxY, this.expandedPanelWidth - padding * 2, resultBoxHeight, 6);
+      this.roundRect(contentX, resultBoxY, resultBoxWidth, resultBoxHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
-      // Result text
+      // Result text with scrolling
       this.ctx.fillStyle = '#065f46';
       this.ctx.font = '11px monospace';
-      const resultLines = this.wrapText(this.expandedTask.result, this.expandedPanelWidth - padding * 2 - 20);
-      const maxLines = Math.floor((resultBoxHeight - 20) / 14);
+      const resultLines = this.wrapText(this.expandedTask.result, resultBoxWidth - 40); // Extra padding for scrollbar
+      const lineHeight = 14;
+      const visibleLines = Math.floor((resultBoxHeight - 20) / lineHeight);
+      const totalLines = resultLines.length;
 
-      resultLines.slice(0, maxLines).forEach((line, i) => {
-        this.ctx.fillText(line, contentX + 10, resultBoxY + 15 + i * 14);
+      // Clamp scroll offset
+      const maxScroll = Math.max(0, totalLines - visibleLines);
+      this.resultScrollOffset = Math.max(0, Math.min(this.resultScrollOffset, maxScroll));
+
+      // Enable clipping to prevent text overflow
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(contentX + 5, resultBoxY + 5, resultBoxWidth - 10, resultBoxHeight - 10);
+      this.ctx.clip();
+
+      // Render visible lines based on scroll offset
+      const startLine = Math.floor(this.resultScrollOffset);
+      const endLine = Math.min(startLine + visibleLines + 1, totalLines);
+
+      resultLines.slice(startLine, endLine).forEach((line, i) => {
+        const yPos = resultBoxY + 15 + (i * lineHeight) - ((this.resultScrollOffset - startLine) * lineHeight);
+        this.ctx.fillText(line, contentX + 10, yPos);
       });
 
-      if (resultLines.length > maxLines) {
-        this.ctx.fillStyle = '#6b7280';
-        this.ctx.font = 'italic 10px system-ui';
-        this.ctx.fillText('... (scroll in task list for full result)', contentX + 10, resultBoxY + resultBoxHeight - 10);
+      this.ctx.restore();
+
+      // Draw scrollbar if content is scrollable
+      if (totalLines > visibleLines) {
+        const scrollbarWidth = 8;
+        const scrollbarHeight = (visibleLines / totalLines) * (resultBoxHeight - 20);
+        const scrollbarY = resultBoxY + 10 + (this.resultScrollOffset / maxScroll) * (resultBoxHeight - 20 - scrollbarHeight);
+
+        // Scrollbar track
+        this.ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
+        this.ctx.fillRect(contentX + resultBoxWidth - scrollbarWidth - 5, resultBoxY + 10, scrollbarWidth, resultBoxHeight - 20);
+
+        // Scrollbar thumb
+        this.ctx.fillStyle = 'rgba(16, 185, 129, 0.5)';
+        this.ctx.fillRect(contentX + resultBoxWidth - scrollbarWidth - 5, scrollbarY, scrollbarWidth, scrollbarHeight);
       }
     } else if (this.expandedTask.error) {
+      this.resultBoxBounds = null;
+      this.copyButtonBounds = null;
       this.ctx.fillStyle = '#dc2626';
       this.ctx.font = 'bold 14px system-ui';
       this.ctx.fillText('❌ Error', contentX, currentY);
@@ -1798,6 +2014,8 @@ class AgentCanvas {
         currentY += 14;
       });
     } else {
+      this.resultBoxBounds = null;
+      this.copyButtonBounds = null;
       this.ctx.fillStyle = '#9ca3af';
       this.ctx.font = 'italic 12px system-ui';
       this.ctx.fillText('No result yet', contentX, currentY);
@@ -1842,13 +2060,13 @@ class AgentCanvas {
   drawConnectionModeIndicator() {
     const centerX = this.width / 2;
     const centerY = 50;
-    const boxWidth = 350;
-    const boxHeight = 60;
+    const boxWidth = 450;
+    const boxHeight = 80;
 
     // Draw semi-transparent background
-    this.ctx.fillStyle = 'rgba(59, 130, 246, 0.95)';
-    this.ctx.strokeStyle = '#1e40af';
-    this.ctx.lineWidth = 2;
+    this.ctx.fillStyle = 'rgba(155, 89, 182, 0.95)'; // Purple to match connection theme
+    this.ctx.strokeStyle = '#8e44ad';
+    this.ctx.lineWidth = 3;
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
     this.ctx.shadowBlur = 15;
     this.roundRect(centerX - boxWidth / 2, centerY, boxWidth, boxHeight, 8);
@@ -1861,9 +2079,12 @@ class AgentCanvas {
     this.ctx.font = 'bold 16px system-ui';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.ctx.fillText('🔗 Connection Mode Active', centerX, centerY + 20);
-    this.ctx.font = '12px system-ui';
-    this.ctx.fillText('Click an agent to create a linked task', centerX, centerY + 40);
+    this.ctx.fillText(`🔗 Connecting: "${this.connectionSourceTask.description.substring(0, 30)}..."`, centerX, centerY + 20);
+    this.ctx.font = '13px system-ui';
+    this.ctx.fillText('Click a task to link it  •  Click an agent to create new task', centerX, centerY + 45);
+    this.ctx.font = '11px system-ui';
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    this.ctx.fillText('Press ESC to cancel', centerX, centerY + 65);
   }
 
   drawExpandedAgentPanel() {
@@ -2260,6 +2481,28 @@ class AgentCanvas {
       this.offsetX = (e.clientX - rect.left) - this.dragStartX;
       this.offsetY = (e.clientY - rect.top) - this.dragStartY;
       this.draw();
+      return;
+    }
+
+    // Check hover over copy button (screen coordinates, not scaled)
+    if (this.copyButtonBounds) {
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const bounds = this.copyButtonBounds;
+
+      const isHovering = mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                        mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
+
+      const prevState = this.copyButtonState;
+      if (isHovering && this.copyButtonState === 'idle') {
+        this.copyButtonState = 'hover';
+        this.canvas.style.cursor = 'pointer';
+        this.draw();
+      } else if (!isHovering && this.copyButtonState === 'hover') {
+        this.copyButtonState = 'idle';
+        this.canvas.style.cursor = 'grab';
+        this.draw();
+      }
     }
   }
 
@@ -2282,6 +2525,25 @@ class AgentCanvas {
 
   onWheel(e) {
     e.preventDefault();
+
+    // Check if mouse is over result box for scrolling
+    if (this.resultBoxBounds && this.expandedTask) {
+      const rect = this.canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const bounds = this.resultBoxBounds;
+      if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+          mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+        // Scroll the result content
+        const scrollAmount = e.deltaY > 0 ? 3 : -3; // Scroll 3 lines at a time
+        this.resultScrollOffset += scrollAmount;
+        this.draw();
+        return;
+      }
+    }
+
+    // Otherwise, zoom the canvas
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     this.scale *= delta;
     this.scale = Math.max(0.5, Math.min(2, this.scale));
@@ -2403,6 +2665,16 @@ class AgentCanvas {
       }
     }
 
+    // Check for click on "Auto-Layout" button
+    if (this.autoLayoutButtonBounds) {
+      const btn = this.autoLayoutButtonBounds;
+      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+          screenY >= btn.y && screenY <= btn.y + btn.height) {
+        this.autoLayoutTasks();
+        return;
+      }
+    }
+
     // Check for click on timeline panel close button
     if (this.timelinePanelWidth > 0) {
       const panelX = this.width - this.timelinePanelWidth;
@@ -2449,6 +2721,16 @@ class AgentCanvas {
         return;
       }
 
+      // Check if click is on copy button
+      if (this.copyButtonBounds) {
+        const btn = this.copyButtonBounds;
+        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+            screenY >= btn.y && screenY <= btn.y + btn.height) {
+          this.copyResultToClipboard();
+          return;
+        }
+      }
+
       // Check if click is on "Connect Result to Agent" button
       if (this.connectButtonBounds) {
         const btn = this.connectButtonBounds;
@@ -2477,6 +2759,20 @@ class AgentCanvas {
         const cardHeight = 60;
         const cardX = task.x - cardWidth / 2;
         const cardY = task.y - cardHeight / 2;
+
+        // Check if click is on connection indicator (purple pulsing icon)
+        if (task.connectionIndicatorBounds && task.status === 'completed' && task.result) {
+          const btn = task.connectionIndicatorBounds;
+          if (x >= btn.x && x <= btn.x + btn.width &&
+              y >= btn.y && y <= btn.y + btn.height) {
+            // Connection indicator clicked - enter connection mode
+            this.connectionMode = true;
+            this.connectionSourceTask = task;
+            this.canvas.style.cursor = 'crosshair';
+            this.draw();
+            return;
+          }
+        }
 
         // Check if click is on delete button first
         if (task.deleteBtnBounds) {
@@ -2524,6 +2820,19 @@ class AgentCanvas {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
+          // Check if in connection mode
+          if (this.connectionMode && this.connectionSourceTask) {
+            // In connection mode - link this task to receive input from source task
+            // Don't link to itself
+            if (task.id === this.connectionSourceTask.id) {
+              alert('⚠️ Cannot connect a task to itself. Please select a different task.');
+              return;
+            }
+            // Connect this task to receive input
+            this.connectToExistingTask(task);
+            return;
+          }
+
           // Task clicked - expand/collapse panel
           this.toggleTaskPanel(task);
           return;
@@ -2570,6 +2879,8 @@ class AgentCanvas {
     } else {
       // Expand panel for this task
       this.expandedTask = task;
+      this.resultScrollOffset = 0; // Reset scroll when opening a new task
+      this.copyButtonState = 'idle'; // Reset copy button state
       this.expandedPanelAnimating = true;
       this.animatePanel(true);
     }
@@ -2601,6 +2912,7 @@ class AgentCanvas {
         if (this.expandedPanelWidth <= 0) {
           this.expandedPanelAnimating = false;
           this.expandedTask = null;
+          this.resultScrollOffset = 0; // Reset scroll when closing panel
         } else {
           requestAnimationFrame(animate);
         }
@@ -2701,6 +3013,35 @@ class AgentCanvas {
     this.draw();
   }
 
+  async copyResultToClipboard() {
+    if (!this.expandedTask || !this.expandedTask.result) {
+      return;
+    }
+
+    try {
+      // Use the Clipboard API to copy text
+      await navigator.clipboard.writeText(this.expandedTask.result);
+
+      // Update button state to show success
+      this.copyButtonState = 'copied';
+      this.draw();
+
+      // Reset button state after 2 seconds
+      setTimeout(() => {
+        if (this.copyButtonState === 'copied') {
+          this.copyButtonState = 'idle';
+          this.draw();
+        }
+      }, 2000);
+
+      console.log('✓ Result copied to clipboard');
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      // Fallback: show error notification
+      alert('Failed to copy to clipboard. Please try selecting and copying the text manually.');
+    }
+  }
+
   async createConnectedTask(agent) {
     // Prompt for task description
     const description = prompt(
@@ -2725,7 +3066,7 @@ class AgentCanvas {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          workspace_id: this.studioId,
+          studio_id: this.studioId,  // Backend expects 'studio_id', not 'workspace_id'
           from: this.connectionSourceTask.to, // From the agent that completed the source task
           to: agent.name,
           description: description,
@@ -2754,6 +3095,63 @@ class AgentCanvas {
     } catch (error) {
       console.error('❌ Error creating connected task:', error);
       alert('Failed to create task: ' + error.message);
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+    }
+  }
+
+  async connectToExistingTask(targetTask) {
+    // Connect an existing task to receive input from the source task
+    try {
+      // Add the source task ID to the target task's input_task_ids
+      const currentInputs = targetTask.input_task_ids || [];
+
+      // Check if already connected
+      if (currentInputs.includes(this.connectionSourceTask.id)) {
+        alert(`⚠️ This task is already connected to "${this.connectionSourceTask.description}"`);
+        this.connectionMode = false;
+        this.connectionSourceTask = null;
+        this.canvas.style.cursor = 'grab';
+        this.draw();
+        return;
+      }
+
+      const updatedInputs = [...currentInputs, this.connectionSourceTask.id];
+
+      // Update task via API
+      const response = await fetch('/api/orchestration/tasks/update', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: targetTask.id,
+          input_task_ids: updatedInputs,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to connect task: ${errorText}`);
+      }
+
+      console.log(`✅ Connected task ${targetTask.id} to receive input from ${this.connectionSourceTask.id}`);
+
+      // Exit connection mode
+      this.connectionMode = false;
+      this.connectionSourceTask = null;
+      this.canvas.style.cursor = 'grab';
+
+      // Reload studio data to show new connection
+      await this.init();
+
+      // Show success message
+      alert(`✅ Task connected!\n\n"${targetTask.description}" will now receive the result from "${this.connectionSourceTask.description}"`);
+    } catch (error) {
+      console.error('❌ Error connecting task:', error);
+      alert('Failed to connect task: ' + error.message);
       this.connectionMode = false;
       this.connectionSourceTask = null;
       this.canvas.style.cursor = 'grab';
@@ -2818,6 +3216,79 @@ class AgentCanvas {
     this.ctx.fill();
 
     this.ctx.restore();
+  }
+
+  /**
+   * Auto-layout tasks in a hierarchical flow (top to bottom)
+   */
+  autoLayoutTasks() {
+    if (!this.tasks || this.tasks.length === 0) return;
+
+    // Calculate dependency levels (topological sort)
+    const levels = this.calculateTaskLevels();
+
+    // Position tasks in hierarchical layout
+    const startY = 100;
+    const levelSpacing = 180;
+    const taskSpacing = 220;
+
+    levels.forEach((taskGroup, levelIndex) => {
+      const y = startY + (levelIndex * levelSpacing);
+      const totalWidth = taskGroup.length * taskSpacing;
+      const startX = (this.width / this.scale) / 2 - totalWidth / 2;
+
+      taskGroup.forEach((task, taskIndex) => {
+        const x = startX + (taskIndex * taskSpacing);
+        task.x = x;
+        task.y = y;
+      });
+    });
+
+    this.draw();
+    this.showNotification('✨ Tasks auto-arranged', 'success');
+  }
+
+  /**
+   * Calculate task dependency levels using topological sort
+   */
+  calculateTaskLevels() {
+    const levels = [];
+    const visited = new Set();
+    const taskMap = new Map(this.tasks.map(t => [t.id, t]));
+
+    // Helper to calculate task level recursively
+    const getLevel = (task) => {
+      if (visited.has(task.id)) {
+        return task.level || 0;
+      }
+
+      visited.add(task.id);
+
+      // If task has input tasks, its level is max(input levels) + 1
+      if (task.input_task_ids && task.input_task_ids.length > 0) {
+        const inputLevels = task.input_task_ids
+          .map(id => taskMap.get(id))
+          .filter(t => t)
+          .map(t => getLevel(t));
+
+        task.level = Math.max(...inputLevels, 0) + 1;
+      } else {
+        task.level = 0;
+      }
+
+      return task.level;
+    };
+
+    // Calculate levels for all tasks
+    this.tasks.forEach(task => getLevel(task));
+
+    // Group tasks by level
+    const maxLevel = Math.max(...this.tasks.map(t => t.level || 0));
+    for (let i = 0; i <= maxLevel; i++) {
+      levels[i] = this.tasks.filter(t => (t.level || 0) === i);
+    }
+
+    return levels;
   }
 
   async assignTaskToAgent(agent) {
@@ -3040,6 +3511,45 @@ class AgentCanvas {
     this.ctx.textBaseline = 'middle';
     const text = this.timelineVisible ? '📋 Hide Timeline' : '📋 Timeline';
     this.ctx.fillText(text, buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
+   * Draw auto-layout button
+   */
+  drawAutoLayoutButton() {
+    const buttonWidth = 140;
+    const buttonHeight = 40;
+    const buttonX = this.width - buttonWidth - 20;
+    const buttonY = 120; // Below timeline button
+
+    // Store button bounds for click detection
+    this.autoLayoutButtonBounds = {
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight
+    };
+
+    // Button background
+    this.ctx.fillStyle = '#8b5cf6'; // Purple to match connection theme
+    this.ctx.strokeStyle = '#7c3aed';
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowOffsetY = 2;
+    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.shadowColor = 'transparent';
+
+    // Button text
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 13px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('⚡ Auto-Layout', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'alphabetic';
   }
