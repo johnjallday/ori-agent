@@ -202,6 +202,30 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 		return fmt.Errorf("failed to get studio: %w", err)
 	}
 
+	// Inject input task results into task context if InputTaskIDs are specified
+	if len(task.InputTaskIDs) > 0 {
+		log.Printf("🔗 Task %s has %d input task IDs: %v", task.ID, len(task.InputTaskIDs), task.InputTaskIDs)
+		enrichedContext := studio.GetInputContext(&task)
+		task.Context = enrichedContext
+
+		// Debug: Check what was added to context
+		if inputResults, ok := enrichedContext["input_task_results"]; ok {
+			resultsMap := inputResults.(map[string]string)
+			log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), task.ID)
+			for taskID, result := range resultsMap {
+				preview := result
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
+				}
+				log.Printf("   - Task %s result: %s", taskID, preview)
+			}
+		} else {
+			log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", task.ID)
+		}
+	} else {
+		log.Printf("ℹ️  Task %s has no input task IDs", task.ID)
+	}
+
 	// Update task status to in_progress
 	now := time.Now()
 	task.Status = TaskStatusInProgress
@@ -304,19 +328,41 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 		task.To,
 	))
 
-	// Create user message with task description
-	userMsg := openai.UserMessage(task.Description)
+	// Build user message with task description and formatted context
+	taskPrompt := fmt.Sprintf("# Task Assignment\n\n%s\n\n", task.Description)
 
-	// Include context if available
-	contextStr := ""
-	if len(task.Context) > 0 {
-		contextJSON, _ := json.Marshal(task.Context)
-		contextStr = fmt.Sprintf("\n\nContext: %s", string(contextJSON))
+	// Format input task results if available
+	if inputResults, ok := task.Context["input_task_results"]; ok {
+		if resultsMap, ok := inputResults.(map[string]string); ok && len(resultsMap) > 0 {
+			taskPrompt += "## Input from Previous Tasks\n\n"
+			for taskID, result := range resultsMap {
+				taskPrompt += fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result)
+			}
+		}
 	}
 
-	if contextStr != "" {
-		userMsg = openai.UserMessage(task.Description + contextStr)
+	// Include other context fields
+	hasOtherContext := false
+	for key := range task.Context {
+		if key != "input_task_results" {
+			hasOtherContext = true
+			break
+		}
 	}
+
+	if hasOtherContext {
+		taskPrompt += "## Additional Context\n\n"
+		for key, value := range task.Context {
+			if key != "input_task_results" {
+				taskPrompt += fmt.Sprintf("- **%s**: %v\n", key, value)
+			}
+		}
+		taskPrompt += "\n"
+	}
+
+	taskPrompt += "Please complete this task to the best of your ability. Provide a clear, concise response with your findings or results."
+
+	userMsg := openai.UserMessage(taskPrompt)
 
 	messages := []openai.ChatCompletionMessageParamUnion{
 		systemMsg,

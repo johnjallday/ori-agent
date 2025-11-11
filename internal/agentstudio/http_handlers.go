@@ -210,6 +210,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"tasks":              studio.Tasks,
 		"messages":           studio.Messages,
 		"shared_data":        studio.SharedData,
+		"layout":             studio.Layout,
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
 	})

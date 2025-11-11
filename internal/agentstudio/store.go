@@ -69,8 +69,14 @@ func (s *FileStore) Save(ws *Workspace) error {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
-	// Update cache
-	s.cache[ws.ID] = ws
+	// Reload from disk to ensure cache has fresh copy with all fields properly set
+	freshWS, err := FromJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to reload workspace after save: %w", err)
+	}
+
+	// Update cache with fresh copy
+	s.cache[ws.ID] = freshWS
 
 	return nil
 }

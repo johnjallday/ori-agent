@@ -1213,9 +1213,15 @@
     // Manage Agents functions
     async function loadAvailableAgents() {
       try {
+        const select = document.getElementById('available-agents');
+
+        // Element doesn't exist in canvas view, skip update
+        if (!select) {
+          return;
+        }
+
         const response = await fetch('/api/agents');
         const data = await response.json();
-        const select = document.getElementById('available-agents');
 
         // Get current workspace agents
         const currentAgents = window.agentCanvas ? window.agentCanvas.agents.map(a => a.name) : [];
@@ -1292,6 +1298,12 @@
 
     function updateCurrentAgentsList() {
       const listDiv = document.getElementById('current-agents-list');
+
+      // Element doesn't exist in canvas view, skip update
+      if (!listDiv) {
+        return;
+      }
+
       if (!window.agentCanvas || !window.agentCanvas.agents) {
         listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
         return;
@@ -1328,6 +1340,11 @@
     // Task management functions
     function updateTaskAgentSelectors() {
       const toSelect = document.getElementById('task-to-agent');
+
+      // Element doesn't exist in canvas view, skip update
+      if (!toSelect) {
+        return;
+      }
 
       if (!window.agentCanvas || !window.agentCanvas.agents) {
         toSelect.innerHTML = '<option value="">Select agent...</option>';

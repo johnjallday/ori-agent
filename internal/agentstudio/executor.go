@@ -189,9 +189,26 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 	// Inject input task results into task context if InputTaskIDs are specified
 	if len(task.InputTaskIDs) > 0 {
+		log.Printf("🔗 Task %s has %d input task IDs: %v", task.ID, len(task.InputTaskIDs), task.InputTaskIDs)
 		enrichedContext := ws.GetInputContext(&task)
 		task.Context = enrichedContext
-		log.Printf("📥 Injected %d input task results into task %s context", len(task.InputTaskIDs), task.ID)
+
+		// Debug: Check what was added to context
+		if inputResults, ok := enrichedContext["input_task_results"]; ok {
+			resultsMap := inputResults.(map[string]string)
+			log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), task.ID)
+			for taskID, result := range resultsMap {
+				preview := result
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
+				}
+				log.Printf("   - Task %s result: %s", taskID, preview)
+			}
+		} else {
+			log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", task.ID)
+		}
+	} else {
+		log.Printf("ℹ️  Task %s has no input task IDs", task.ID)
 	}
 
 	// Update task status to in_progress
