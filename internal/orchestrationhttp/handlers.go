@@ -1775,6 +1775,30 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("▶️  Manually executing task %s for agent %s: %s", foundTask.ID, foundTask.To, foundTask.Description)
 
+		// Inject input task results into task context if InputTaskIDs are specified
+		if len(foundTask.InputTaskIDs) > 0 {
+			log.Printf("🔗 Task %s has %d input task IDs: %v", foundTask.ID, len(foundTask.InputTaskIDs), foundTask.InputTaskIDs)
+			enrichedContext := foundWorkspace.GetInputContext(foundTask)
+			foundTask.Context = enrichedContext
+
+			// Debug: Check what was added to context
+			if inputResults, ok := enrichedContext["input_task_results"]; ok {
+				resultsMap := inputResults.(map[string]string)
+				log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), foundTask.ID)
+				for taskID, result := range resultsMap {
+					preview := result
+					if len(preview) > 100 {
+						preview = preview[:100] + "..."
+					}
+					log.Printf("   - Task %s result: %s", taskID, preview)
+				}
+			} else {
+				log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", foundTask.ID)
+			}
+		} else {
+			log.Printf("ℹ️  Task %s has no input task IDs", foundTask.ID)
+		}
+
 		// Execute the task
 		result, execErr := h.taskHandler.ExecuteTask(ctx, foundTask.To, *foundTask)
 
@@ -2558,4 +2582,71 @@ func (h *Handler) sendWorkspaceProgressUpdate(w http.ResponseWriter, flusher htt
 
 	_, _ = w.Write([]byte(fmt.Sprintf("event: workspace.progress\ndata: %s\n\n", data)))
 	flusher.Flush()
+}
+
+// SaveLayoutHandler handles saving canvas layout positions
+func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		WorkspaceID    string                          `json:"workspace_id"`
+		TaskPositions  map[string]agentstudio.Position `json:"task_positions"`
+		AgentPositions map[string]agentstudio.Position `json:"agent_positions"`
+		Scale          float64                         `json:"scale"`
+		OffsetX        float64                         `json:"offset_x"`
+		OffsetY        float64                         `json:"offset_y"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Update layout
+	if ws.Layout == nil {
+		ws.Layout = &agentstudio.CanvasLayout{}
+	}
+
+	ws.Layout.TaskPositions = req.TaskPositions
+	ws.Layout.AgentPositions = req.AgentPositions
+	ws.Layout.Scale = req.Scale
+	ws.Layout.OffsetX = req.OffsetX
+	ws.Layout.OffsetY = req.OffsetY
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save workspace: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, scale: %.2f)",
+		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), req.Scale)
+
+	// Broadcast workspace update event to notify all connected clients
+	h.eventBus.Publish(agentstudio.Event{
+		WorkspaceID: req.WorkspaceID,
+		Type:        agentstudio.EventWorkspaceUpdated,
+		Timestamp:   time.Now(),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Layout saved successfully",
+	})
 }

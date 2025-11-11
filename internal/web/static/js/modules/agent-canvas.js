@@ -174,6 +174,9 @@ class AgentCanvas {
       // Initialize agent positions
       this.initializeAgents();
 
+      // Load saved layout (positions and zoom)
+      this.loadLayout();
+
       // Detect and initialize chains
       this.updateChains();
 
@@ -238,14 +241,27 @@ class AgentCanvas {
 
     // Load tasks if available
     if (this.studio.tasks) {
-      this.tasks = this.studio.tasks.map(task => ({
-        id: task.id,
-        from: task.from,
-        to: task.to,
-        description: task.description,
-        status: task.status,
-        progress: 0
-      }));
+      // Preserve existing positions when updating tasks
+      const existingPositions = {};
+      this.tasks.forEach(t => {
+        if (t.x !== null && t.y !== null) {
+          existingPositions[t.id] = { x: t.x, y: t.y };
+        }
+      });
+
+      this.tasks = this.studio.tasks.map(task => {
+        const existing = existingPositions[task.id];
+        return {
+          id: task.id,
+          from: task.from,
+          to: task.to,
+          description: task.description,
+          status: task.status,
+          progress: 0,
+          x: existing ? existing.x : null,
+          y: existing ? existing.y : null
+        };
+      });
     }
   }
 
@@ -287,11 +303,22 @@ class AgentCanvas {
           this.updateAgentStats(data.agent_stats);
         }
         if (data.tasks) {
-          this.tasks = data.tasks.map(task => ({
-            ...task,
-            x: task.x ?? null,
-            y: task.y ?? null
-          }));
+          // Preserve existing positions when updating tasks
+          const existingPositions = {};
+          this.tasks.forEach(t => {
+            if (t.x !== null && t.y !== null) {
+              existingPositions[t.id] = { x: t.x, y: t.y };
+            }
+          });
+
+          this.tasks = data.tasks.map(task => {
+            const existing = existingPositions[task.id];
+            return {
+              ...task,
+              x: existing ? existing.x : (task.x ?? null),
+              y: existing ? existing.y : (task.y ?? null)
+            };
+          });
         }
         this.draw();
       } catch (error) {
@@ -796,9 +823,6 @@ class AgentCanvas {
 
     this.ctx.restore();
 
-    // Draw workspace progress OUTSIDE the transform context (so it stays fixed at top)
-    this.drawWorkspaceProgress();
-
     // Draw mission OUTSIDE the transform context (so it stays fixed at top)
     this.drawMission();
 
@@ -841,6 +865,9 @@ class AgentCanvas {
     // Draw auto-layout button (always visible)
     this.drawAutoLayoutButton();
 
+    // Draw save layout button (always visible)
+    this.drawSaveLayoutButton();
+
     // Draw toast notifications (always on top)
     this.drawNotifications();
   }
@@ -857,6 +884,67 @@ class AgentCanvas {
         this.ctx.stroke();
       }
     }
+  }
+
+  /**
+   * Draw an arrow from (x1, y1) to (x2, y2)
+   */
+  drawArrow(x1, y1, x2, y2, color, lineWidth = 2, filled = true) {
+    const headLength = 20; // Length of arrow head
+    const headAngle = Math.PI / 6; // Angle of arrow head (30 degrees)
+
+    // Calculate angle
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+
+    // Draw the line (respects current dash pattern)
+    this.ctx.beginPath();
+    this.ctx.moveTo(x1, y1);
+    this.ctx.lineTo(x2, y2);
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.stroke();
+
+    // Save current dash pattern
+    const currentDash = this.ctx.getLineDash();
+
+    // Draw the arrow head (always solid for visibility)
+    this.ctx.setLineDash([]);
+
+    if (filled) {
+      // Filled arrowhead
+      this.ctx.beginPath();
+      this.ctx.moveTo(x2, y2);
+      this.ctx.lineTo(
+        x2 - headLength * Math.cos(angle - headAngle),
+        y2 - headLength * Math.sin(angle - headAngle)
+      );
+      this.ctx.lineTo(
+        x2 - headLength * Math.cos(angle + headAngle),
+        y2 - headLength * Math.sin(angle + headAngle)
+      );
+      this.ctx.closePath();
+      this.ctx.fillStyle = color;
+      this.ctx.fill();
+    } else {
+      // Outlined arrowhead
+      this.ctx.beginPath();
+      this.ctx.moveTo(x2, y2);
+      this.ctx.lineTo(
+        x2 - headLength * Math.cos(angle - headAngle),
+        y2 - headLength * Math.sin(angle - headAngle)
+      );
+      this.ctx.moveTo(x2, y2);
+      this.ctx.lineTo(
+        x2 - headLength * Math.cos(angle + headAngle),
+        y2 - headLength * Math.sin(angle + headAngle)
+      );
+      this.ctx.strokeStyle = color;
+      this.ctx.lineWidth = lineWidth + 1;
+      this.ctx.stroke();
+    }
+
+    // Restore dash pattern
+    this.ctx.setLineDash(currentDash);
   }
 
   drawTaskFlows() {
@@ -907,25 +995,33 @@ class AgentCanvas {
 
       // Draw connection line from sender to task (if not a system task)
       if (!isSystemTask && fromAgent) {
-        this.ctx.strokeStyle = fromAgent.color + '40';
-        this.ctx.lineWidth = 2;
+        const color = fromAgent.color + 'DD'; // More opaque (87% opacity)
         this.ctx.setLineDash([5, 5]);
-        this.ctx.beginPath();
-        this.ctx.moveTo(fromAgent.x, fromAgent.y);
-        this.ctx.lineTo(task.x, task.y);
-        this.ctx.stroke();
+        // Calculate shortened end point to avoid hiding arrowhead behind task card
+        const angle = Math.atan2(task.y - fromAgent.y, task.x - fromAgent.x);
+        const agentRadius = fromAgent.radius || 60;
+        const taskCardRadius = 80; // Approximate diagonal of task card
+        const x1 = fromAgent.x + agentRadius * Math.cos(angle);
+        const y1 = fromAgent.y + agentRadius * Math.sin(angle);
+        const x2 = task.x - taskCardRadius * Math.cos(angle);
+        const y2 = task.y - taskCardRadius * Math.sin(angle);
+        this.drawArrow(x1, y1, x2, y2, color, 3);
         this.ctx.setLineDash([]);
       }
 
       // Draw connection line from task to receiver (skip for unassigned tasks)
       if (toAgent && !isUnassigned) {
-        this.ctx.strokeStyle = toAgent.color + '40';
-        this.ctx.lineWidth = 2;
+        const color = toAgent.color + 'DD'; // More opaque (87% opacity)
         this.ctx.setLineDash([5, 5]);
-        this.ctx.beginPath();
-        this.ctx.moveTo(task.x, task.y);
-        this.ctx.lineTo(toAgent.x, toAgent.y);
-        this.ctx.stroke();
+        // Calculate shortened end point to avoid hiding arrowhead behind agent circle
+        const angle = Math.atan2(toAgent.y - task.y, toAgent.x - task.x);
+        const taskCardRadius = 80; // Approximate diagonal of task card
+        const agentRadius = toAgent.radius || 60;
+        const x1 = task.x + taskCardRadius * Math.cos(angle);
+        const y1 = task.y + taskCardRadius * Math.sin(angle);
+        const x2 = toAgent.x - agentRadius * Math.cos(angle);
+        const y2 = toAgent.y - agentRadius * Math.sin(angle);
+        this.drawArrow(x1, y1, x2, y2, color, 4);
         this.ctx.setLineDash([]);
       }
 
@@ -1247,39 +1343,17 @@ class AgentCanvas {
         this.ctx.lineWidth = 6;
         this.ctx.globalAlpha = 0.3;
         this.ctx.setLineDash([12, 6]);
-        this.ctx.beginPath();
-        this.ctx.moveTo(inputTask.x, inputTask.y);
-        this.ctx.lineTo(task.x, task.y);
-        this.ctx.stroke();
+        this.drawArrow(inputTask.x, inputTask.y, task.x, task.y, '#9b59b6', 6);
 
-        // Main line (more prominent)
+        // Main line (more prominent) with arrow
         this.ctx.globalAlpha = 1.0;
-        this.ctx.lineWidth = 3;
-        this.ctx.strokeStyle = '#9b59b6';
-        this.ctx.beginPath();
-        this.ctx.moveTo(inputTask.x, inputTask.y);
-        this.ctx.lineTo(task.x, task.y);
-        this.ctx.stroke();
         this.ctx.setLineDash([]);
+        this.drawArrow(inputTask.x, inputTask.y, task.x, task.y, '#9b59b6', 3);
         this.ctx.restore();
 
-        // Draw an arrow at the midpoint (larger and more visible)
+        // Calculate midpoint for label
         const midX = (inputTask.x + task.x) / 2;
         const midY = (inputTask.y + task.y) / 2;
-        const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
-
-        // Draw arrow head with white border
-        this.ctx.fillStyle = '#9b59b6';
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 2;
-        const arrowSize = 12;
-        this.ctx.beginPath();
-        this.ctx.moveTo(midX + Math.cos(angle) * arrowSize, midY + Math.sin(angle) * arrowSize);
-        this.ctx.lineTo(midX - Math.cos(angle - Math.PI / 6) * arrowSize, midY - Math.sin(angle - Math.PI / 6) * arrowSize);
-        this.ctx.lineTo(midX - Math.cos(angle + Math.PI / 6) * arrowSize, midY - Math.sin(angle + Math.PI / 6) * arrowSize);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
 
         // Draw a more prominent label with background
         const labelText = '📊 Result';
@@ -1547,9 +1621,9 @@ class AgentCanvas {
     if (!this.workspaceProgress || this.workspaceProgress.total_tasks === 0) return;
 
     const panelWidth = Math.min(600, this.width * 0.8);
-    const panelHeight = 100;
-    const panelX = 20;
-    const panelY = 20;
+    const panelHeight = 95;
+    const panelX = 100; // Move right to avoid overlapping with studio title
+    const panelY = 100; // Move down to avoid studio title overlay
     const padding = 15;
 
     this.ctx.save();
@@ -1571,15 +1645,15 @@ class AgentCanvas {
 
     // Title
     this.ctx.fillStyle = '#10b981';
-    this.ctx.font = 'bold 12px system-ui';
+    this.ctx.font = 'bold 11px system-ui';
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'top';
     this.ctx.fillText('📊 WORKSPACE PROGRESS', panelX + padding, panelY + padding);
 
     // Task status text
-    const statsY = panelY + padding + 20;
+    const statsY = panelY + padding + 18;
     this.ctx.fillStyle = '#4b5563';
-    this.ctx.font = '11px system-ui';
+    this.ctx.font = '10px system-ui';
     let statusText = `${this.workspaceProgress.completed_tasks}/${this.workspaceProgress.total_tasks} tasks complete | ${this.workspaceProgress.in_progress_tasks} running | ${this.workspaceProgress.pending_tasks} pending`;
     if (this.workspaceProgress.failed_tasks > 0) {
       statusText += ` | ${this.workspaceProgress.failed_tasks} failed`;
@@ -1587,9 +1661,9 @@ class AgentCanvas {
     this.ctx.fillText(statusText, panelX + padding, statsY);
 
     // Progress bar
-    const progressBarY = panelY + padding + 38;
+    const progressBarY = panelY + padding + 36;
     const progressBarWidth = panelWidth - padding * 2;
-    const progressBarHeight = 12;
+    const progressBarHeight = 16; // Slightly taller for better visibility
 
     // Background
     this.ctx.fillStyle = '#e5e7eb';
@@ -1607,15 +1681,17 @@ class AgentCanvas {
       this.ctx.fill();
     }
 
-    // Percentage text on progress bar
+    // Percentage text on progress bar - smaller font
     this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 10px system-ui';
+    this.ctx.font = 'bold 9px system-ui';
     this.ctx.textAlign = 'center';
-    this.ctx.fillText(`${this.workspaceProgress.percentage}%`, panelX + padding + progressBarWidth / 2, progressBarY + 9);
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(`${this.workspaceProgress.percentage}%`, panelX + padding + progressBarWidth / 2, progressBarY + progressBarHeight / 2);
 
     // Bottom row: Agent status and estimated time
-    const bottomY = panelY + padding + 60;
+    const bottomY = panelY + padding + 58;
     this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
 
     // Agent status
     this.ctx.fillStyle = '#6b7280';
@@ -2507,11 +2583,19 @@ class AgentCanvas {
   }
 
   onMouseUp() {
+    const wasDraggingAgent = this.isDraggingAgent;
+    const wasDraggingTask = this.isDraggingTask;
+
     this.isDragging = false;
     this.isDraggingAgent = false;
     this.draggedAgent = null;
     this.isDraggingTask = false;
     this.draggedTask = null;
+
+    // Save layout if we were dragging something
+    if (wasDraggingAgent || wasDraggingTask) {
+      this.saveLayout();
+    }
 
     // Preserve cursor state for assignment/connection modes
     if (this.assignmentMode) {
@@ -2671,6 +2755,17 @@ class AgentCanvas {
       if (screenX >= btn.x && screenX <= btn.x + btn.width &&
           screenY >= btn.y && screenY <= btn.y + btn.height) {
         this.autoLayoutTasks();
+        return;
+      }
+    }
+
+    // Check for click on "Save Layout" button
+    if (this.saveLayoutButtonBounds) {
+      const btn = this.saveLayoutButtonBounds;
+      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+          screenY >= btn.y && screenY <= btn.y + btn.height) {
+        this.saveLayout();
+        this.showNotification('💾 Layout saved', 'success');
         return;
       }
     }
@@ -3227,25 +3322,119 @@ class AgentCanvas {
     // Calculate dependency levels (topological sort)
     const levels = this.calculateTaskLevels();
 
-    // Position tasks in hierarchical layout
-    const startY = 100;
-    const levelSpacing = 180;
-    const taskSpacing = 220;
+    // Get canvas dimensions
+    const canvasWidth = this.width / this.scale;
+    const canvasHeight = this.height / this.scale;
 
+    // Vertical flow layout: tasks on the left, agents on the right
+    const taskColumnX = 300; // X position for tasks (left side)
+    const agentColumnX = 700; // X position for agents (right side)
+    const verticalSpacing = 250; // Space between task levels
+    const startY = 150; // Start position from top
+
+    // Position tasks level by level (vertically)
     levels.forEach((taskGroup, levelIndex) => {
-      const y = startY + (levelIndex * levelSpacing);
-      const totalWidth = taskGroup.length * taskSpacing;
-      const startX = (this.width / this.scale) / 2 - totalWidth / 2;
+      const baseY = startY + (levelIndex * verticalSpacing);
 
       taskGroup.forEach((task, taskIndex) => {
-        const x = startX + (taskIndex * taskSpacing);
-        task.x = x;
-        task.y = y;
+        // Tasks in same level: stack vertically with slight offset
+        const yOffset = taskIndex * 100; // Multiple tasks in same level
+        task.x = taskColumnX;
+        task.y = baseY + yOffset;
+
+        // Position the agent for this task to the right
+        const agentName = task.to;
+        if (agentName) {
+          const agent = this.agents.find(a => a.name === agentName);
+          if (agent) {
+            agent.x = agentColumnX;
+            agent.y = task.y; // Align agent with its task
+          }
+        }
       });
     });
 
+    // Auto-zoom to fit all content
+    this.zoomToFitContent();
+
     this.draw();
     this.showNotification('✨ Tasks auto-arranged', 'success');
+
+    // Save the new layout
+    this.saveLayout();
+  }
+
+  /**
+   * Zoom and pan to fit all tasks and agents in view
+   */
+  zoomToFitContent() {
+    if ((!this.tasks || this.tasks.length === 0) && (!this.agents || this.agents.length === 0)) {
+      return;
+    }
+
+    // Calculate bounding box of all content
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    // Include tasks
+    this.tasks.forEach(task => {
+      const taskWidth = 180;
+      const taskHeight = 100;
+      minX = Math.min(minX, task.x - taskWidth / 2);
+      maxX = Math.max(maxX, task.x + taskWidth / 2);
+      minY = Math.min(minY, task.y - taskHeight / 2);
+      maxY = Math.max(maxY, task.y + taskHeight / 2);
+    });
+
+    // Include agents
+    this.agents.forEach(agent => {
+      const agentRadius = 60;
+      minX = Math.min(minX, agent.x - agentRadius);
+      maxX = Math.max(maxX, agent.x + agentRadius);
+      minY = Math.min(minY, agent.y - agentRadius);
+      maxY = Math.max(maxY, agent.y + agentRadius);
+    });
+
+    // Calculate content dimensions
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+
+    // Calculate required scale to fit content with padding
+    const padding = 100; // Padding around content
+    const scaleX = this.width / (contentWidth + padding * 2);
+    const scaleY = this.height / (contentHeight + padding * 2);
+    const newScale = Math.min(scaleX, scaleY, 1.0); // Don't zoom in beyond 100%
+
+    // Clamp scale to reasonable limits
+    this.scale = Math.max(0.3, Math.min(1.0, newScale));
+
+    // Calculate offset to center content
+    this.offsetX = (this.width / 2) - (contentCenterX * this.scale);
+    this.offsetY = (this.height / 2) - (contentCenterY * this.scale);
+  }
+
+  /**
+   * Arrange agents at the bottom of the canvas
+   */
+  arrangeAgentsAtBottom(canvasWidth, canvasHeight, tasksBottomY) {
+    if (!this.agents || this.agents.length === 0) return;
+
+    const agentRadius = 60; // Approximate agent circle radius
+    const agentSpacing = 200; // Space between agents
+    const bottomMargin = 150; // Space from bottom
+
+    // Calculate horizontal positions
+    const totalWidth = (this.agents.length - 1) * agentSpacing;
+    const startX = (canvasWidth / 2) - (totalWidth / 2);
+    const y = Math.max(tasksBottomY + 150, canvasHeight - bottomMargin); // Below tasks or at bottom
+
+    this.agents.forEach((agent, index) => {
+      const x = startX + (index * agentSpacing);
+      agent.x = x;
+      agent.y = y;
+    });
   }
 
   /**
@@ -3550,6 +3739,45 @@ class AgentCanvas {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
     this.ctx.fillText('⚡ Auto-Layout', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
+   * Draw save layout button
+   */
+  drawSaveLayoutButton() {
+    const buttonWidth = 140;
+    const buttonHeight = 40;
+    const buttonX = this.width - buttonWidth - 20;
+    const buttonY = 170; // Below auto-layout button
+
+    // Store button bounds for click detection
+    this.saveLayoutButtonBounds = {
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight
+    };
+
+    // Button background
+    this.ctx.fillStyle = '#10b981'; // Green for save action
+    this.ctx.strokeStyle = '#059669';
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowOffsetY = 2;
+    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.shadowColor = 'transparent';
+
+    // Button text
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 13px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('💾 Save Layout', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
     this.ctx.textAlign = 'left';
     this.ctx.textBaseline = 'alphabetic';
   }
@@ -4330,6 +4558,127 @@ class AgentCanvas {
     if (this.eventSource) {
       this.eventSource.close();
     }
+  }
+
+  /**
+   * Save the current layout (positions and zoom) to the server
+   */
+  async saveLayout() {
+    if (!this.studioId) {
+      console.log('❌ Cannot save layout: no studioId');
+      return;
+    }
+
+    try {
+      // Collect task positions
+      const taskPositions = {};
+      this.tasks.forEach(task => {
+        console.log(`  📍 Task ${task.id}: (${task.x}, ${task.y})`);
+        taskPositions[task.id] = { x: task.x, y: task.y };
+      });
+
+      // Collect agent positions
+      const agentPositions = {};
+      this.agents.forEach(agent => {
+        console.log(`  📍 Agent ${agent.name}: (${agent.x}, ${agent.y})`);
+        agentPositions[agent.name] = { x: agent.x, y: agent.y };
+      });
+
+      console.log(`💾 Saving layout for workspace ${this.studioId}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}`);
+      console.log(`  Scale: ${this.scale}, Offset: (${this.offsetX}, ${this.offsetY})`);
+      console.log(`  Task positions:`, taskPositions);
+      console.log(`  Agent positions:`, agentPositions);
+
+      const response = await fetch('/api/orchestration/workspace/layout', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: this.studioId,
+          task_positions: taskPositions,
+          agent_positions: agentPositions,
+          scale: this.scale,
+          offset_x: this.offsetX,
+          offset_y: this.offsetY,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Failed to save layout:', errorText);
+      } else {
+        const result = await response.json();
+        console.log('✅ Layout saved successfully:', result);
+      }
+    } catch (error) {
+      console.error('❌ Error saving layout:', error);
+    }
+  }
+
+  /**
+   * Load the saved layout from the server
+   */
+  loadLayout() {
+    if (!this.studio) {
+      console.log('❌ No studio object, cannot load layout');
+      return;
+    }
+
+    if (!this.studio.layout) {
+      console.log('❌ No layout saved for this workspace');
+      return;
+    }
+
+    const layout = this.studio.layout;
+    console.log('📂 Loading layout:', layout);
+
+    let tasksRestored = 0;
+    let agentsRestored = 0;
+
+    // Restore task positions
+    if (layout.task_positions) {
+      this.tasks.forEach(task => {
+        const savedPos = layout.task_positions[task.id];
+        if (savedPos) {
+          console.log(`  Restoring task ${task.id} to (${savedPos.x}, ${savedPos.y})`);
+          task.x = savedPos.x;
+          task.y = savedPos.y;
+          tasksRestored++;
+        }
+      });
+    }
+
+    // Restore agent positions
+    if (layout.agent_positions) {
+      this.agents.forEach(agent => {
+        const savedPos = layout.agent_positions[agent.name];
+        if (savedPos) {
+          console.log(`  Restoring agent ${agent.name} to (${savedPos.x}, ${savedPos.y})`);
+          agent.x = savedPos.x;
+          agent.y = savedPos.y;
+          agentsRestored++;
+        }
+      });
+    }
+
+    // Restore zoom and pan
+    if (layout.scale) {
+      this.scale = layout.scale;
+      console.log(`  Restoring scale: ${layout.scale}`);
+    }
+    if (layout.offset_x !== undefined) {
+      this.offsetX = layout.offset_x;
+      console.log(`  Restoring offsetX: ${layout.offset_x}`);
+    }
+    if (layout.offset_y !== undefined) {
+      this.offsetY = layout.offset_y;
+      console.log(`  Restoring offsetY: ${layout.offset_y}`);
+    }
+
+    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents)`);
+    this.draw();
   }
 }
 

@@ -41,10 +41,26 @@ type Workspace struct {
 	Tasks          []Task                 `json:"tasks"`
 	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
 	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
+	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status         WorkspaceStatus        `json:"status"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
 	mu             sync.RWMutex           `json:"-"`
+}
+
+// CanvasLayout stores positions of tasks and agents on the canvas
+type CanvasLayout struct {
+	TaskPositions  map[string]Position `json:"task_positions,omitempty"`  // task ID -> position
+	AgentPositions map[string]Position `json:"agent_positions,omitempty"` // agent name -> position
+	Scale          float64             `json:"scale,omitempty"`           // zoom level
+	OffsetX        float64             `json:"offset_x,omitempty"`        // pan offset X
+	OffsetY        float64             `json:"offset_y,omitempty"`        // pan offset Y
+}
+
+// Position represents a 2D position on the canvas
+type Position struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // AgentMessage represents a message passed between agents
