@@ -49,6 +49,8 @@ class AgentCanvas {
     this.expandedAgentPanelWidth = 0;
     this.expandedAgentPanelTargetWidth = 400;
     this.expandedAgentPanelAnimating = false;
+    this.agentPanelScrollOffset = 0; // Scroll offset for agent panel content
+    this.agentPanelMaxScroll = 0; // Maximum scroll offset for agent panel
 
     // Connection mode state (task-to-task)
     this.connectionMode = false;
@@ -2166,6 +2168,13 @@ class AgentCanvas {
   drawExpandedAgentPanel() {
     if (!this.expandedAgent) return;
 
+    console.log('🎨 Drawing agent panel:', {
+      agent: this.expandedAgent.name,
+      hasConfig: !!this.expandedAgent.config,
+      hasSystemPrompt: !!(this.expandedAgent.config?.system_prompt),
+      panelWidth: this.expandedAgentPanelWidth
+    });
+
     const panelX = this.width - this.expandedAgentPanelWidth;
     const panelY = 0;
     const panelHeight = this.height;
@@ -2189,19 +2198,32 @@ class AgentCanvas {
     const contentX = panelX + padding;
     let currentY = padding + 10;
 
-    // Close button
+    // Close button (fixed, no scroll)
     this.ctx.fillStyle = '#6b7280';
     this.ctx.font = 'bold 24px system-ui';
     this.ctx.textAlign = 'right';
     this.ctx.fillText('×', panelX + this.expandedAgentPanelWidth - padding, currentY + 20);
     currentY += 40;
 
-    // Agent title
+    // Agent title (fixed, no scroll)
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = 'bold 16px system-ui';
     this.ctx.textAlign = 'left';
     this.ctx.fillText('Agent Details', contentX, currentY);
     currentY += 30;
+
+    // Start scrollable content area
+    const scrollableStartY = currentY;
+    const scrollableHeight = panelHeight - scrollableStartY;
+
+    // Enable clipping for scrollable area
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(panelX, scrollableStartY, this.expandedAgentPanelWidth, scrollableHeight);
+    this.ctx.clip();
+
+    // Apply scroll offset
+    currentY -= this.agentPanelScrollOffset;
 
     // Status badge
     let statusColor = '#6b7280';
@@ -2348,7 +2370,15 @@ class AgentCanvas {
 
       // System prompt box
       const promptBoxY = currentY;
-      const promptBoxHeight = 120;
+
+      // Calculate height based on actual content (now showing ALL lines)
+      this.ctx.fillStyle = '#7c2d12';
+      this.ctx.font = '10px system-ui';
+      const promptLines = this.wrapText(this.expandedAgent.config.system_prompt, this.expandedAgentPanelWidth - padding * 2 - 20);
+      const lineHeight = 13;
+      const promptBoxHeight = Math.max(60, 15 + (promptLines.length * lineHeight) + 15); // top padding + lines + bottom padding
+
+      // Draw box
       this.ctx.fillStyle = '#fff7ed';
       this.ctx.strokeStyle = '#ea580c';
       this.ctx.lineWidth = 2;
@@ -2356,21 +2386,12 @@ class AgentCanvas {
       this.ctx.fill();
       this.ctx.stroke();
 
-      // System prompt text
+      // System prompt text (show ALL lines now)
       this.ctx.fillStyle = '#7c2d12';
       this.ctx.font = '10px system-ui';
-      const promptLines = this.wrapText(this.expandedAgent.config.system_prompt, this.expandedAgentPanelWidth - padding * 2 - 20);
-      const maxPromptLines = 8;
-
-      promptLines.slice(0, maxPromptLines).forEach((line, i) => {
-        this.ctx.fillText(line, contentX + 10, promptBoxY + 15 + i * 13);
+      promptLines.forEach((line, i) => {
+        this.ctx.fillText(line, contentX + 10, promptBoxY + 15 + i * lineHeight);
       });
-
-      if (promptLines.length > maxPromptLines) {
-        this.ctx.fillStyle = '#6b7280';
-        this.ctx.font = 'italic 9px system-ui';
-        this.ctx.fillText('... (view agent settings for full prompt)', contentX + 10, promptBoxY + promptBoxHeight - 10);
-      }
 
       currentY += promptBoxHeight + 15;
 
@@ -2441,7 +2462,46 @@ class AgentCanvas {
         this.ctx.fillStyle = '#6b7280';
         this.ctx.font = 'italic 10px system-ui';
         this.ctx.fillText(`... and ${this.expandedAgent.tasks.length - maxTasksToShow} more`, contentX, currentY + 5);
+        currentY += 20;
       }
+    }
+
+    // Calculate total content height
+    // Note: currentY has scroll offset applied (subtracted), so add it back to get actual unscrolled content height
+    const totalContentHeight = currentY + this.agentPanelScrollOffset - scrollableStartY + 20; // +20 for bottom padding
+
+    // Restore clipping context
+    this.ctx.restore();
+
+    // Calculate scroll parameters
+    const maxScroll = Math.max(0, totalContentHeight - scrollableHeight);
+    this.agentPanelMaxScroll = maxScroll; // Store for wheel event handler
+
+    // Debug logging for scroll calculation
+    if (maxScroll !== this._lastLoggedMaxScroll) {
+      console.log('📏 Agent panel scroll calculation:', {
+        totalContentHeight,
+        scrollableHeight,
+        maxScroll,
+        scrollableStartY,
+        currentScrollOffset: this.agentPanelScrollOffset
+      });
+      this._lastLoggedMaxScroll = maxScroll;
+    }
+
+    // Clamp scroll offset
+    this.agentPanelScrollOffset = Math.max(0, Math.min(this.agentPanelScrollOffset, maxScroll));
+
+    // Draw scrollbar if content is scrollable
+    if (maxScroll > 0) {
+      const scrollbarWidth = 6;
+      const scrollbarX = panelX + this.expandedAgentPanelWidth - padding / 2 - scrollbarWidth;
+      const scrollbarHeight = Math.max(30, (scrollableHeight / totalContentHeight) * scrollableHeight);
+      const scrollbarY = scrollableStartY + (this.agentPanelScrollOffset / maxScroll) * (scrollableHeight - scrollbarHeight);
+
+      this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      this.roundRect(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, 3);
+      this.ctx.fill();
     }
 
     this.ctx.restore();
@@ -2610,12 +2670,45 @@ class AgentCanvas {
   onWheel(e) {
     e.preventDefault();
 
+    const rect = this.canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check if mouse is over agent panel for scrolling
+    if (this.expandedAgentPanelWidth > 0 && this.expandedAgent) {
+      const panelX = this.width - this.expandedAgentPanelWidth;
+      const panelY = 0;
+      const panelWidth = this.expandedAgentPanelWidth;
+      const panelHeight = this.height;
+
+      if (mouseX >= panelX && mouseX <= panelX + panelWidth &&
+          mouseY >= panelY && mouseY <= panelY + panelHeight) {
+        // Scroll the agent panel content
+        const scrollAmount = e.deltaY > 0 ? 20 : -20; // Scroll 20 pixels at a time
+
+        console.log('🖱️ Agent panel scroll:', {
+          deltaY: e.deltaY,
+          scrollAmount,
+          beforeOffset: this.agentPanelScrollOffset,
+          maxScroll: this.agentPanelMaxScroll,
+          mouseX,
+          mouseY,
+          panelX,
+          panelWidth
+        });
+
+        this.agentPanelScrollOffset += scrollAmount;
+        this.agentPanelScrollOffset = Math.max(0, Math.min(this.agentPanelMaxScroll, this.agentPanelScrollOffset));
+
+        console.log('  afterOffset:', this.agentPanelScrollOffset);
+
+        this.draw();
+        return;
+      }
+    }
+
     // Check if mouse is over result box for scrolling
     if (this.resultBoxBounds && this.expandedTask) {
-      const rect = this.canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
       const bounds = this.resultBoxBounds;
       if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
           mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
@@ -2968,6 +3061,11 @@ class AgentCanvas {
   }
 
   toggleTaskPanel(task) {
+    // Close agent panel if open
+    if (this.expandedAgent) {
+      this.closeAgentPanel();
+    }
+
     if (this.expandedTask && this.expandedTask.id === task.id) {
       // Clicking the same task - close panel
       this.closeTaskPanel();
@@ -3027,6 +3125,10 @@ class AgentCanvas {
       // Clicking the same agent - close panel
       this.closeAgentPanel();
     } else {
+      // Reset scroll offset when opening new agent
+      this.agentPanelScrollOffset = 0;
+      this.agentPanelMaxScroll = 0;
+
       // Fetch agent configuration before expanding (optional - doesn't block panel)
       try {
         const configResponse = await fetch(`/api/agents/${agent.name}`);
@@ -3084,6 +3186,8 @@ class AgentCanvas {
         if (this.expandedAgentPanelWidth <= 0) {
           this.expandedAgentPanelAnimating = false;
           this.expandedAgent = null;
+          this.agentPanelScrollOffset = 0; // Reset scroll when closing panel
+          this.agentPanelMaxScroll = 0; // Reset max scroll when closing panel
         } else {
           requestAnimationFrame(animate);
         }
