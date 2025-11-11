@@ -2168,13 +2168,6 @@ class AgentCanvas {
   drawExpandedAgentPanel() {
     if (!this.expandedAgent) return;
 
-    console.log('🎨 Drawing agent panel:', {
-      agent: this.expandedAgent.name,
-      hasConfig: !!this.expandedAgent.config,
-      hasSystemPrompt: !!(this.expandedAgent.config?.system_prompt),
-      panelWidth: this.expandedAgentPanelWidth
-    });
-
     const panelX = this.width - this.expandedAgentPanelWidth;
     const panelY = 0;
     const panelHeight = this.height;
@@ -2477,18 +2470,6 @@ class AgentCanvas {
     const maxScroll = Math.max(0, totalContentHeight - scrollableHeight);
     this.agentPanelMaxScroll = maxScroll; // Store for wheel event handler
 
-    // Debug logging for scroll calculation
-    if (maxScroll !== this._lastLoggedMaxScroll) {
-      console.log('📏 Agent panel scroll calculation:', {
-        totalContentHeight,
-        scrollableHeight,
-        maxScroll,
-        scrollableStartY,
-        currentScrollOffset: this.agentPanelScrollOffset
-      });
-      this._lastLoggedMaxScroll = maxScroll;
-    }
-
     // Clamp scroll offset
     this.agentPanelScrollOffset = Math.max(0, Math.min(this.agentPanelScrollOffset, maxScroll));
 
@@ -2686,21 +2667,8 @@ class AgentCanvas {
         // Scroll the agent panel content
         const scrollAmount = e.deltaY > 0 ? 20 : -20; // Scroll 20 pixels at a time
 
-        console.log('🖱️ Agent panel scroll:', {
-          deltaY: e.deltaY,
-          scrollAmount,
-          beforeOffset: this.agentPanelScrollOffset,
-          maxScroll: this.agentPanelMaxScroll,
-          mouseX,
-          mouseY,
-          panelX,
-          panelWidth
-        });
-
         this.agentPanelScrollOffset += scrollAmount;
         this.agentPanelScrollOffset = Math.max(0, Math.min(this.agentPanelMaxScroll, this.agentPanelScrollOffset));
-
-        console.log('  afterOffset:', this.agentPanelScrollOffset);
 
         this.draw();
         return;
