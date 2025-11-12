@@ -19,6 +19,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 BINARY_NAME="ori-agent"
+MENUBAR_BINARY_NAME="ori-menubar"
 OUTPUT_DIR="bin"
 VERSION_FILE="VERSION"
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -66,6 +67,30 @@ else
   exit 1
 fi
 
+# Build the menu bar app (macOS only)
+BUILD_MENUBAR=${BUILD_MENUBAR:-true}
+if [ "$BUILD_MENUBAR" = "true" ] && [ "$TARGET_OS" = "darwin" ]; then
+  echo -e "${YELLOW}Building menu bar app...${NC}"
+  MENUBAR_BINARY="${MENUBAR_BINARY_NAME}"
+  if [ "$TARGET_OS" = "windows" ]; then
+    MENUBAR_BINARY="${MENUBAR_BINARY}.exe"
+  fi
+
+  GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build \
+    -ldflags "$LDFLAGS" \
+    -o "$OUTPUT_DIR/$MENUBAR_BINARY" \
+    "./cmd/menubar"
+
+  if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✓ Menu bar app built successfully: $OUTPUT_DIR/$MENUBAR_BINARY${NC}"
+  else
+    echo -e "${RED}✗ Failed to build menu bar app${NC}"
+    exit 1
+  fi
+elif [ "$BUILD_MENUBAR" = "true" ]; then
+  echo -e "${YELLOW}Skipping menu bar app (only available on macOS)${NC}"
+fi
+
 # Build plugins if requested
 BUILD_PLUGINS=${BUILD_PLUGINS:-true}
 if [ "$BUILD_PLUGINS" = "true" ]; then
@@ -84,13 +109,22 @@ echo -e "${GREEN}🎉 Build completed successfully!${NC}"
 echo -e "${BLUE}Output files:${NC}"
 ls -la "$OUTPUT_DIR/$BINARY_NAME"
 
+if [ "$BUILD_MENUBAR" = "true" ] && [ "$TARGET_OS" = "darwin" ] && [ -f "$OUTPUT_DIR/$MENUBAR_BINARY_NAME" ]; then
+  ls -la "$OUTPUT_DIR/$MENUBAR_BINARY_NAME"
+fi
+
 if [ -d "uploaded_plugins" ] && [ "$(ls -A uploaded_plugins 2>/dev/null)" ]; then
   echo -e "${BLUE}Plugin files:${NC}"
   ls -la uploaded_plugins/*.so 2>/dev/null || true
 fi
 
 echo ""
-echo -e "${CYAN}To run the server:${NC}"
+echo -e "${CYAN}To run the server (CLI):${NC}"
 echo -e "${CYAN}  ./$OUTPUT_DIR/$BINARY_NAME${NC}"
-echo ""
 
+if [ "$BUILD_MENUBAR" = "true" ] && [ "$TARGET_OS" = "darwin" ]; then
+  echo ""
+  echo -e "${CYAN}To run the menu bar app (macOS):${NC}"
+  echo -e "${CYAN}  ./$OUTPUT_DIR/$MENUBAR_BINARY_NAME${NC}"
+fi
+echo ""

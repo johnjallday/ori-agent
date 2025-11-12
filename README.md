@@ -4,7 +4,7 @@ A modular, plugin-driven framework for building tool-calling AI agents.
 It provides secure plugin loading, agent orchestration, and HTTP/WebSocket interfaces — letting you create lightweight autonomous systems that can use tools or sub-agents efficiently.
 
 ![Version](https://img.shields.io/badge/Version-v0.0.7-blue)
-![Go](https://img.shields.io/badge/Go-1.24-00add8)
+![Go](https://img.shields.io/badge/Go-1.25-00add8)
 ![UI](https://img.shields.io/badge/UI-Modern%20Design-6366f1)
 ![Plugin System](https://img.shields.io/badge/Plugins-Extensible-10b981)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -58,7 +58,7 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Go 1.24 or later
+- Go 1.25 or later
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 - OpenAI API key
 
@@ -111,8 +111,56 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 
 6. **Open your browser**
    ```
-   http://localhost:8080
+   http://localhost:8765
    ```
+
+### 🍎 macOS Menu Bar App
+
+For macOS users, Ori Agent includes a convenient menu bar application that provides easy access to server controls.
+
+#### Features
+- **Menu Bar Icon**: Visual server status indicator (gray/yellow/green/red)
+- **Start/Stop Server**: Control the server with a click
+- **Open Browser**: Quick access to the web UI
+- **Auto-start on Login**: Optional LaunchAgent integration
+- **Graceful Shutdown**: Clean server shutdown when quitting
+
+#### Installation
+
+**Option 1: Build from source**
+```bash
+make menubar              # Build menu bar app
+./bin/ori-menubar         # Run it
+```
+
+**Option 2: Use the installer** (recommended)
+```bash
+./scripts/create-mac-installer.sh 0.0.8
+# Opens: releases/OriAgent-0.0.8.dmg
+# Drag "Ori Agent.app" to Applications folder
+```
+
+#### Usage
+1. Launch "Ori Agent" from Applications
+2. A menu bar icon appears in the top-right of your screen
+3. Click the icon to:
+   - Start/Stop the server
+   - Open the web UI in your browser
+   - Enable auto-start on login
+   - View server status
+
+#### Auto-start on Login
+1. Click the menu bar icon
+2. Select "Auto-start on Login"
+3. The app will launch automatically when you log in
+
+The setting is saved in `app_state.json` and creates a LaunchAgent at:
+`~/Library/LaunchAgents/com.ori.menubar.plist`
+
+#### Logs
+Menu bar app logs are stored at:
+- `~/Library/Logs/ori-menubar.log`
+- `~/Library/Logs/ori-menubar.error.log`
 
 ## 🔧 Usage
 
@@ -136,7 +184,7 @@ It provides secure plugin loading, agent orchestration, and HTTP/WebSocket inter
 Execute plugin operations directly without using the chat interface:
 
 ```bash
-curl -X POST http://localhost:8080/api/plugins/tool-call \
+curl -X POST http://localhost:8765/api/plugins/tool-call \
   -H "Content-Type: application/json" \
   -d '{
     "plugin_name": "reaper-script-launcher",

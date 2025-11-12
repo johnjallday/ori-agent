@@ -107,47 +107,6 @@ func NewCostTracker(dataDir string) *CostTracker {
 
 // initializePricingModels sets up default pricing for supported models
 func (ct *CostTracker) initializePricingModels() {
-	// OpenAI Pricing (as of 2024)
-	ct.addPricingModel(PricingModel{
-		ModelName:            "gpt-4o",
-		Provider:             "openai",
-		InputCostPerMillion:  2.50,  // $2.50 per 1M input tokens
-		OutputCostPerMillion: 10.00, // $10.00 per 1M output tokens
-		Currency:             "USD",
-	})
-
-	ct.addPricingModel(PricingModel{
-		ModelName:            "gpt-4o-mini",
-		Provider:             "openai",
-		InputCostPerMillion:  0.15, // $0.15 per 1M input tokens
-		OutputCostPerMillion: 0.60, // $0.60 per 1M output tokens
-		Currency:             "USD",
-	})
-
-	ct.addPricingModel(PricingModel{
-		ModelName:            "gpt-4-turbo",
-		Provider:             "openai",
-		InputCostPerMillion:  10.00, // $10 per 1M input tokens
-		OutputCostPerMillion: 30.00, // $30 per 1M output tokens
-		Currency:             "USD",
-	})
-
-	ct.addPricingModel(PricingModel{
-		ModelName:            "gpt-4",
-		Provider:             "openai",
-		InputCostPerMillion:  30.00, // $30 per 1M input tokens
-		OutputCostPerMillion: 60.00, // $60 per 1M output tokens
-		Currency:             "USD",
-	})
-
-	ct.addPricingModel(PricingModel{
-		ModelName:            "gpt-3.5-turbo",
-		Provider:             "openai",
-		InputCostPerMillion:  0.50, // $0.50 per 1M input tokens
-		OutputCostPerMillion: 1.50, // $1.50 per 1M output tokens
-		Currency:             "USD",
-	})
-
 	// Claude Pricing (Anthropic)
 	ct.addPricingModel(PricingModel{
 		ModelName:            "claude-3-5-sonnet-20241022",

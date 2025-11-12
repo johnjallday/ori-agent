@@ -1,0 +1,12 @@
+{
+  "ori-agent/feature/manage-agents-modal-box": {
+    "project": "ori-agent",
+    "branch": "feature/manage-agents-modal-box",
+    "title": "manage agents modal box",
+    "initial_query": "I want manage agents modal's model box to be selectable instead of user input",
+    "project_path": "/Users/jjdev/Projects/ori/ori-agent",
+    "created_at": "2025-11-09T19:36:42Z",
+    "active": true,
+    "session_id": "b9cfcf05-acbd-45a8-8c3b-33c010520ee7"
+  }
+}

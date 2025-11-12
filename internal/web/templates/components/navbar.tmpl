@@ -13,6 +13,13 @@
         <span class="status-indicator status-online"></span>
         <span class="fw-medium">{{.CurrentAgent}}</span>
       </span>
+      <!-- Location Indicator -->
+      <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-secondary);">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="fw-medium">Loading...</span>
+      </span>
       <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>

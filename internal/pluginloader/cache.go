@@ -46,7 +46,7 @@ func mapConfigTypeToFrontendType(configType pluginapi.ConfigVariableType) string
 }
 
 // SetAgentContext sets the agent context for plugins that support it.
-func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
+func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath, currentLocation string) {
 	if agentAwareTool, ok := tool.(pluginapi.AgentAwareTool); ok {
 		// The agentStorePath is already something like "agents/default/config.json"
 		// So we just need to get the agent directory from it
@@ -55,10 +55,11 @@ func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath string) {
 		settingsPath := filepath.Join(agentDir, "agent_settings.json")
 
 		agentAwareTool.SetAgentContext(pluginapi.AgentContext{
-			Name:         agentName,
-			ConfigPath:   configPath,
-			SettingsPath: settingsPath,
-			AgentDir:     agentDir,
+			Name:            agentName,
+			ConfigPath:      configPath,
+			SettingsPath:    settingsPath,
+			AgentDir:        agentDir,
+			CurrentLocation: currentLocation,
 		})
 	}
 }

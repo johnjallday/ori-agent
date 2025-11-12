@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -33,12 +34,18 @@ type DeviceInfo struct {
 	UserSet  bool   `json:"user_set"` // Whether user manually set device type
 }
 
+// MenuBarSettings tracks menu bar app preferences
+type MenuBarSettings struct {
+	AutoStartOnLogin bool `json:"auto_start_on_login"` // Launch Ori Agent menu bar on system startup
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding OnboardingState `json:"onboarding"`
-	Device     DeviceInfo      `json:"device"`
-	Version    string          `json:"version"`
-	Theme      string          `json:"theme,omitempty"` // "light" or "dark", defaults to "light"
+	Onboarding OnboardingState  `json:"onboarding"`
+	Device     DeviceInfo       `json:"device"`
+	Version    string           `json:"version"`
+	Theme      string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar    *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use
@@ -79,6 +86,7 @@ type PluginRegistryEntry struct {
 	DownloadURL   string          `json:"download_url,omitempty"`   // Direct download URL for GitHub releases
 	SupportedOS   []string        `json:"supported_os,omitempty"`   // Supported operating systems (darwin, linux, windows, all)
 	SupportedArch []string        `json:"supported_arch,omitempty"` // Supported architectures (amd64, arm64, all)
+	Platforms     []string        `json:"platforms,omitempty"`      // Supported platform strings (e.g., "darwin-arm64", "linux-amd64")
 	Metadata      *PluginMetadata `json:"metadata,omitempty"`       // Plugin metadata (maintainers, license, repository)
 }
 
@@ -108,6 +116,32 @@ func (p *PluginRegistryEntry) IsCompatibleWithSystem(os, arch string) bool {
 			}
 			// OS matches but arch doesn't
 			return false
+		}
+	}
+
+	return false
+}
+
+// IsCompatibleWith checks if a plugin is compatible with a given platform string (e.g., "darwin-arm64")
+func (p *PluginRegistryEntry) IsCompatibleWith(platform string) bool {
+	// If Platforms list is empty or contains "unknown", fall back to checking SupportedOS/SupportedArch
+	if len(p.Platforms) == 0 || (len(p.Platforms) == 1 && p.Platforms[0] == "unknown") {
+		// Parse platform string into OS and arch
+		parts := strings.Split(platform, "-")
+		if len(parts) != 2 {
+			return false
+		}
+		return p.IsCompatibleWithSystem(parts[0], parts[1])
+	}
+
+	// Check if platform is in the Platforms list
+	for _, supportedPlatform := range p.Platforms {
+		if supportedPlatform == platform {
+			return true
+		}
+		// Special case: if platform is "all", it's compatible
+		if supportedPlatform == "all" {
+			return true
 		}
 	}
 

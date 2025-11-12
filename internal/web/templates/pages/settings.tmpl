@@ -145,6 +145,44 @@
           </div>
         </div>
 
+        <!-- Location Zones Section -->
+        <div class="modern-card p-4 mb-4">
+          <h4 class="mb-4" style="color: var(--text-primary);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Location Zones
+            <small class="text-muted ms-2">(Location-Based Automation)</small>
+          </h4>
+
+          <div class="mb-3">
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+              Configure location zones based on WiFi networks. Zones enable location-aware workflows and automation.
+            </p>
+          </div>
+
+          <!-- Alerts Container -->
+          <div id="locationSettingsAlerts"></div>
+
+          <!-- Zones List -->
+          <div id="locationZonesList" class="mb-3">
+            <div class="text-center py-4" style="color: var(--text-secondary);">
+              <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+              Loading location zones...
+            </div>
+          </div>
+
+          <!-- Add Zone Button -->
+          <div class="d-grid">
+            <button id="addLocationZoneBtn" class="modern-btn modern-btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+              Add Zone
+            </button>
+          </div>
+        </div>
+
         <!-- System Information -->
         <div class="modern-card p-4 mb-4">
           <h4 class="mb-4" style="color: var(--text-primary);">
@@ -301,11 +339,49 @@
     </div>
   </div>
 
+  <!-- Location Zone Modal -->
+  <div class="modal fade" id="locationZoneModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="locationZoneModalLabel">Add Location Zone</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="locationZoneForm">
+            <div class="mb-3">
+              <label class="form-label">Zone Name</label>
+              <input type="text" class="form-control" id="zoneNameInput" required placeholder="e.g., Home, Office, Coffee Shop">
+              <small class="form-text text-muted">A descriptive name for this location</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <input type="text" class="form-control" id="zoneDescriptionInput" placeholder="e.g., My home network">
+              <small class="form-text text-muted">Optional description of this zone</small>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">WiFi SSID</label>
+              <input type="text" class="form-control" id="zoneSSIDInput" required placeholder="e.g., HomeNetwork or Network*">
+              <small class="form-text text-muted">WiFi network name. Use * as wildcard (e.g., "Home*" matches "HomeWiFi", "Home5G")</small>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="saveLocationZoneBtn" class="btn btn-primary">
+            Save Zone
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="js/modules/sidebar.js"></script>
   <script src="js/modules/settings-page.js"></script>
   <script src="js/modules/mcp.js"></script>
+  <script src="js/modules/location-settings.js"></script>
 </body>
 </html>
 {{end}}

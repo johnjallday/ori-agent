@@ -86,7 +86,6 @@ func (h *Handler) WorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Check if a specific workspace ID is requested
 	wsID := r.URL.Query().Get("id")
-	agentName := r.URL.Query().Get("agent")
 	activeOnly := r.URL.Query().Get("active") == "true"
 
 	if wsID != "" {
@@ -103,22 +102,6 @@ func (h *Handler) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List workspaces with optional filters
-	if agentName != "" {
-		// Get workspaces for specific agent
-		workspaces, err := h.workspaceStore.GetByParentAgent(agentName)
-		if err != nil {
-			log.Printf("❌ Error listing workspaces for agent %s: %v", agentName, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"workspaces": workspaces,
-			"count":      len(workspaces),
-		})
-		return
-	}
-
 	if activeOnly {
 		// Get only active workspaces
 		workspaces, err := h.workspaceStore.ListActive()
@@ -164,7 +147,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Name        string                 `json:"name"`
 		Description string                 `json:"description"`
-		ParentAgent string                 `json:"parent_agent"`
 		Agents      []string               `json:"participating_agents"`
 		InitialData map[string]interface{} `json:"initial_context"`
 	}
@@ -178,17 +160,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	// Validate required fields
 	if req.Name == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	if req.ParentAgent == "" {
-		http.Error(w, "parent_agent is required", http.StatusBadRequest)
-		return
-	}
-
-	// Verify parent agent exists
-	_, ok := h.agentStore.GetAgent(req.ParentAgent)
-	if !ok {
-		http.Error(w, "parent agent not found", http.StatusNotFound)
 		return
 	}
 
@@ -205,7 +176,6 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
 		Name:        req.Name,
 		Description: req.Description,
-		ParentAgent: req.ParentAgent,
 		Agents:      req.Agents,
 		InitialData: req.InitialData,
 	})
@@ -226,10 +196,9 @@ func (h *Handler) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 			ws.ID,
 			"api",
 			map[string]interface{}{
-				"name":         req.Name,
-				"description":  req.Description,
-				"parent_agent": req.ParentAgent,
-				"agents":       req.Agents,
+				"name":        req.Name,
+				"description": req.Description,
+				"agents":      req.Agents,
 			},
 		)
 		h.eventBus.Publish(event)
@@ -375,12 +344,6 @@ func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.
 	if err != nil {
 		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
 		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
-		return
-	}
-
-	// Prevent removing parent agent
-	if agentName == ws.ParentAgent {
-		http.Error(w, "Cannot remove parent agent from workspace", http.StatusBadRequest)
 		return
 	}
 
@@ -736,11 +699,14 @@ func (h *Handler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 // handleCreateTask creates a new task in a workspace
 func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string `json:"studio_id"`
-		From        string `json:"from"`
-		To          string `json:"to"`
-		Description string `json:"description"`
-		Priority    int    `json:"priority"`
+		WorkspaceID            string   `json:"studio_id"`
+		From                   string   `json:"from"`
+		To                     string   `json:"to"`
+		Description            string   `json:"description"`
+		Priority               int      `json:"priority"`
+		InputTaskIDs           []string `json:"input_task_ids"`
+		ResultCombinationMode  string   `json:"result_combination_mode"`
+		CombinationInstruction string   `json:"combination_instruction"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -776,12 +742,15 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := agentstudio.Task{
-		WorkspaceID: req.WorkspaceID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Status:      agentstudio.TaskStatusPending,
+		WorkspaceID:            req.WorkspaceID,
+		From:                   req.From,
+		To:                     req.To,
+		Description:            req.Description,
+		Priority:               req.Priority,
+		InputTaskIDs:           req.InputTaskIDs,
+		ResultCombinationMode:  req.ResultCombinationMode,
+		CombinationInstruction: req.CombinationInstruction,
+		Status:                 agentstudio.TaskStatusPending,
 	}
 
 	// Add task to workspace
@@ -814,7 +783,12 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+	if len(req.InputTaskIDs) > 0 {
+		log.Printf("✅ Created connected task %s in workspace %s: %s -> %s (receiving input from %d task(s))",
+			createdTask.ID, req.WorkspaceID, req.From, req.To, len(req.InputTaskIDs))
+	} else {
+		log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -825,10 +799,14 @@ func (h *Handler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Status string `json:"status"`
-		Result string `json:"result"`
-		Error  string `json:"error"`
+		TaskID                 string   `json:"task_id"`
+		Status                 string   `json:"status"`
+		Result                 string   `json:"result"`
+		Error                  string   `json:"error"`
+		To                     *string  `json:"to"`                      // Optional: reassign task to different agent
+		InputTaskIDs           []string `json:"input_task_ids"`          // Optional: update input task connections
+		ResultCombinationMode  *string  `json:"result_combination_mode"` // Optional: update combination mode
+		CombinationInstruction *string  `json:"combination_instruction"` // Optional: update combination instruction
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -836,12 +814,153 @@ func (h *Handler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract task ID from URL path if present (e.g., /api/orchestration/tasks/{id})
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) > 0 && pathParts[0] != "" {
+		req.TaskID = pathParts[0]
+	}
+
 	if req.TaskID == "" {
 		http.Error(w, "task_id is required", http.StatusBadRequest)
 		return
 	}
+
+	// Handle input task connections update
+	if req.InputTaskIDs != nil {
+		log.Printf("🔗 Updating input connections for task %s", req.TaskID)
+
+		// Get workspace from task
+		task, err := h.communicator.GetTask(req.TaskID)
+		if err != nil {
+			log.Printf("❌ Failed to get task: %v", err)
+			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		ws, err := h.workspaceStore.Get(task.WorkspaceID)
+		if err != nil {
+			log.Printf("❌ Failed to get workspace: %v", err)
+			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Update the task's input connections
+		taskFound := false
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == req.TaskID {
+				ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
+				if req.ResultCombinationMode != nil {
+					ws.Tasks[i].ResultCombinationMode = *req.ResultCombinationMode
+				}
+				if req.CombinationInstruction != nil {
+					ws.Tasks[i].CombinationInstruction = *req.CombinationInstruction
+				}
+				taskFound = true
+				log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
+				break
+			}
+		}
+
+		if !taskFound {
+			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			return
+		}
+
+		// Save workspace
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Updated input connections for task %s", req.TaskID)
+
+		// Publish event
+		if h.eventBus != nil {
+			h.eventBus.Publish(agentstudio.Event{
+				Type:        agentstudio.EventWorkspaceUpdated,
+				WorkspaceID: task.WorkspaceID,
+				Data: map[string]interface{}{
+					"task_id":        req.TaskID,
+					"input_task_ids": req.InputTaskIDs,
+					"update_type":    "task_connections",
+				},
+			})
+		}
+
+		// Return updated task
+		updatedTask, _ := h.communicator.GetTask(req.TaskID)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(updatedTask)
+		return
+	}
+
+	// Handle task reassignment (changing "to" field)
+	if req.To != nil {
+		log.Printf("🔄 Reassigning task %s to %s", req.TaskID, *req.To)
+
+		// Get workspace from task
+		task, err := h.communicator.GetTask(req.TaskID)
+		if err != nil {
+			log.Printf("❌ Failed to get task: %v", err)
+			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		ws, err := h.workspaceStore.Get(task.WorkspaceID)
+		if err != nil {
+			log.Printf("❌ Failed to get workspace: %v", err)
+			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Update the task assignment
+		taskFound := false
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == req.TaskID {
+				ws.Tasks[i].To = *req.To
+				taskFound = true
+				log.Printf("📝 Updated task in workspace: %s -> %s", req.TaskID, *req.To)
+				break
+			}
+		}
+
+		if !taskFound {
+			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			return
+		}
+
+		// Save workspace
+		if err := h.workspaceStore.Save(ws); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Reassigned task %s to %s", req.TaskID, *req.To)
+
+		// Publish event
+		h.eventBus.Publish(agentstudio.Event{
+			Type:        agentstudio.EventTaskAssigned,
+			WorkspaceID: task.WorkspaceID,
+			Data: map[string]interface{}{
+				"task_id": req.TaskID,
+				"to":      *req.To,
+			},
+		})
+
+		// Return updated task
+		updatedTask, _ := h.communicator.GetTask(req.TaskID)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(updatedTask)
+		return
+	}
+
+	// Handle status update
 	if req.Status == "" {
-		http.Error(w, "status is required", http.StatusBadRequest)
+		http.Error(w, "status is required when not reassigning task", http.StatusBadRequest)
 		return
 	}
 
@@ -889,6 +1008,77 @@ func (h *Handler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Task deleted successfully",
 		"task_id": taskID,
+	})
+}
+
+// TaskResultsHandler retrieves results from one or more tasks
+// GET /api/orchestration/task-results?task_ids=id1,id2,id3
+func (h *Handler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get task IDs from query parameter
+	taskIDsStr := r.URL.Query().Get("task_ids")
+	if taskIDsStr == "" {
+		http.Error(w, "task_ids parameter required (comma-separated)", http.StatusBadRequest)
+		return
+	}
+
+	// Split comma-separated task IDs
+	taskIDs := strings.Split(taskIDsStr, ",")
+	for i := range taskIDs {
+		taskIDs[i] = strings.TrimSpace(taskIDs[i])
+	}
+
+	// We need to find the workspace that contains these tasks
+	// For simplicity, we'll search through all workspaces
+	workspaceIDs, err := h.workspaceStore.List()
+	if err != nil {
+		log.Printf("❌ Error listing workspaces: %v", err)
+		http.Error(w, "Failed to retrieve workspaces", http.StatusInternalServerError)
+		return
+	}
+
+	// Collect results from all workspaces
+	allResults := make(map[string]interface{})
+	for _, wsID := range workspaceIDs {
+		ws, err := h.workspaceStore.Get(wsID)
+		if err != nil {
+			log.Printf("⚠️ Error getting workspace %s: %v", wsID, err)
+			continue
+		}
+
+		results := ws.GetTaskResults(taskIDs)
+		for taskID, result := range results {
+			// Get full task info
+			task, err := ws.GetTask(taskID)
+			if err == nil {
+				allResults[taskID] = map[string]interface{}{
+					"task_id":      task.ID,
+					"description":  task.Description,
+					"status":       task.Status,
+					"result":       result,
+					"from":         task.From,
+					"to":           task.To,
+					"completed_at": task.CompletedAt,
+				}
+			} else {
+				allResults[taskID] = map[string]interface{}{
+					"task_id": taskID,
+					"result":  result,
+				}
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"results": allResults,
 	})
 }
 
@@ -1585,6 +1775,30 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("▶️  Manually executing task %s for agent %s: %s", foundTask.ID, foundTask.To, foundTask.Description)
 
+		// Inject input task results into task context if InputTaskIDs are specified
+		if len(foundTask.InputTaskIDs) > 0 {
+			log.Printf("🔗 Task %s has %d input task IDs: %v", foundTask.ID, len(foundTask.InputTaskIDs), foundTask.InputTaskIDs)
+			enrichedContext := foundWorkspace.GetInputContext(foundTask)
+			foundTask.Context = enrichedContext
+
+			// Debug: Check what was added to context
+			if inputResults, ok := enrichedContext["input_task_results"]; ok {
+				resultsMap := inputResults.(map[string]string)
+				log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), foundTask.ID)
+				for taskID, result := range resultsMap {
+					preview := result
+					if len(preview) > 100 {
+						preview = preview[:100] + "..."
+					}
+					log.Printf("   - Task %s result: %s", taskID, preview)
+				}
+			} else {
+				log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", foundTask.ID)
+			}
+		} else {
+			log.Printf("ℹ️  Task %s has no input task IDs", foundTask.ID)
+		}
+
 		// Execute the task
 		result, execErr := h.taskHandler.ExecuteTask(ctx, foundTask.To, *foundTask)
 
@@ -2213,4 +2427,226 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 	default:
 		return nil
 	}
+}
+
+// ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)
+// GET /api/orchestration/progress/stream?workspace_id=<id>
+func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get flusher
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	log.Printf("🔄 Starting progress SSE stream for workspace %s", workspaceID)
+
+	// If no event bus, return error
+	if h.eventBus == nil {
+		http.Error(w, "event bus not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Create event channel
+	eventChan := make(chan agentstudio.Event, 100)
+
+	// Subscribe to workspace events
+	subID := h.eventBus.SubscribeToWorkspace(workspaceID, func(event agentstudio.Event) {
+		select {
+		case eventChan <- event:
+		default:
+			log.Printf("⚠️  Progress event channel full for workspace %s", workspaceID)
+		}
+	})
+	defer h.eventBus.Unsubscribe(subID)
+
+	// Send initial workspace progress
+	h.sendInitialProgress(w, flusher, workspaceID)
+
+	// Create ticker for periodic workspace progress updates (every 10 seconds)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	// Stream events
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("⏹  Progress SSE stream closed for workspace %s", workspaceID)
+			return
+
+		case event := <-eventChan:
+			// Send event to client
+			eventData := map[string]interface{}{
+				"type":         event.Type,
+				"workspace_id": event.WorkspaceID,
+				"timestamp":    event.Timestamp,
+				"source":       event.Source,
+				"data":         event.Data,
+			}
+
+			data, err := json.Marshal(eventData)
+			if err != nil {
+				log.Printf("❌ Failed to marshal progress event: %v", err)
+				continue
+			}
+
+			// Send with event type prefix
+			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
+			if err != nil {
+				log.Printf("❌ Failed to write progress SSE event: %v", err)
+				return
+			}
+			flusher.Flush()
+
+			// After any task event, send updated workspace progress
+			if strings.HasPrefix(string(event.Type), "task.") {
+				h.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
+			}
+
+		case <-ticker.C:
+			// Send periodic workspace progress update
+			h.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
+		}
+	}
+}
+
+// sendInitialProgress sends the initial workspace progress
+func (h *Handler) sendInitialProgress(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		log.Printf("❌ Failed to get workspace for initial progress: %v", err)
+		return
+	}
+
+	progress := ws.GetWorkspaceProgress()
+	agentStats := ws.GetAgentStats()
+
+	data := map[string]interface{}{
+		"workspace_id":       workspaceID,
+		"workspace_progress": progress,
+		"agent_stats":        agentStats,
+		"tasks":              ws.Tasks,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("❌ Failed to marshal initial progress: %v", err)
+		return
+	}
+
+	_, _ = w.Write([]byte(fmt.Sprintf("event: initial\ndata: %s\n\n", jsonData)))
+	flusher.Flush()
+}
+
+// sendWorkspaceProgressUpdate sends a workspace progress update
+func (h *Handler) sendWorkspaceProgressUpdate(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return // Workspace might have been deleted
+	}
+
+	progress := ws.GetWorkspaceProgress()
+	agentStats := ws.GetAgentStats()
+
+	eventData := map[string]interface{}{
+		"type":               "workspace.progress",
+		"workspace_id":       workspaceID,
+		"timestamp":          time.Now(),
+		"workspace_progress": progress,
+		"agent_stats":        agentStats,
+	}
+
+	data, err := json.Marshal(eventData)
+	if err != nil {
+		log.Printf("❌ Failed to marshal workspace progress: %v", err)
+		return
+	}
+
+	_, _ = w.Write([]byte(fmt.Sprintf("event: workspace.progress\ndata: %s\n\n", data)))
+	flusher.Flush()
+}
+
+// SaveLayoutHandler handles saving canvas layout positions
+func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		WorkspaceID    string                          `json:"workspace_id"`
+		TaskPositions  map[string]agentstudio.Position `json:"task_positions"`
+		AgentPositions map[string]agentstudio.Position `json:"agent_positions"`
+		Scale          float64                         `json:"scale"`
+		OffsetX        float64                         `json:"offset_x"`
+		OffsetY        float64                         `json:"offset_y"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get workspace
+	ws, err := h.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Update layout
+	if ws.Layout == nil {
+		ws.Layout = &agentstudio.CanvasLayout{}
+	}
+
+	ws.Layout.TaskPositions = req.TaskPositions
+	ws.Layout.AgentPositions = req.AgentPositions
+	ws.Layout.Scale = req.Scale
+	ws.Layout.OffsetX = req.OffsetX
+	ws.Layout.OffsetY = req.OffsetY
+
+	// Save workspace
+	if err := h.workspaceStore.Save(ws); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save workspace: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, scale: %.2f)",
+		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), req.Scale)
+
+	// Broadcast workspace update event to notify all connected clients
+	h.eventBus.Publish(agentstudio.Event{
+		WorkspaceID: req.WorkspaceID,
+		Type:        agentstudio.EventWorkspaceUpdated,
+		Timestamp:   time.Now(),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Layout saved successfully",
+	})
 }

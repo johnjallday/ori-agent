@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -80,6 +83,8 @@ type Server struct {
 	mcpRegistry           *mcp.Registry
 	mcpConfigManager      *mcp.ConfigManager
 	mcpHandler            *mcphttp.Handler
+	locationManager       *location.Manager
+	locationHandler       *locationhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies
@@ -163,6 +168,37 @@ func New() (*Server, error) {
 	// initialize health manager (must be before plugin loading)
 	s.healthManager = healthhttp.NewManager()
 
+	// initialize location manager (must be before plugin loading so plugins can access location context)
+	locationZonesPath := "locations.json"
+	if abs, err := filepath.Abs(locationZonesPath); err == nil {
+		locationZonesPath = abs
+	}
+	log.Printf("Using location zones file: %s", locationZonesPath)
+
+	// Load zones from file
+	zones, err := location.LoadZones(locationZonesPath)
+	if err != nil {
+		log.Printf("Warning: failed to load location zones: %v", err)
+		zones = []location.Zone{}
+	}
+	log.Printf("📍 Loaded %d location zones", len(zones))
+
+	// Create detectors
+	manualDetector := location.NewManualDetector()
+	wifiDetector := location.NewWiFiDetector()
+	detectors := []location.Detector{manualDetector, wifiDetector}
+
+	// Initialize location manager
+	s.locationManager = location.NewManager(detectors, zones)
+
+	// Set zones file path for persistence
+	s.locationManager.SetZonesFilePath(locationZonesPath)
+
+	// Start location detection loop
+	ctx := context.Background()
+	s.locationManager.Start(ctx, 60*time.Second)
+	log.Printf("📍 Location manager initialized and detection started")
+
 	// init plugin downloader
 	pluginCacheDir := "plugin_cache"
 	if p := os.Getenv("PLUGIN_CACHE_DIR"); p != "" {
@@ -236,7 +272,12 @@ func New() (*Server, error) {
 			if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
 				agentSpecificStorePath = abs
 			}
-			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath)
+			// Get current location from location manager (will be initialized later)
+			currentLocation := ""
+			if s.locationManager != nil {
+				currentLocation = s.locationManager.GetCurrentLocation()
+			}
+			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath, currentLocation)
 
 			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
 				log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
@@ -398,6 +439,7 @@ func New() (*Server, error) {
 	}
 
 	// initialize HTTP handlers
+	s.locationHandler = locationhttp.NewHandler(s.locationManager)
 	s.usageHandler = usagehttp.NewHandler(s.costTracker)
 	s.mcpHandler = mcphttp.NewHandler(s.mcpRegistry, s.mcpConfigManager, s.st)
 	s.settingsHandler = settingshttp.NewHandler(s.st, s.configManager, s.clientFactory, s.llmFactory)
@@ -407,6 +449,13 @@ func New() (*Server, error) {
 	s.chatHandler.SetCostTracker(s.costTracker)       // Inject cost tracker
 	s.chatHandler.SetMCPRegistry(s.mcpRegistry)       // Inject MCP registry
 	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Inject workspace store for /workspace commands
+	s.chatHandler.SetShutdownFunc(func() {
+		// Gracefully shut down server and exit
+		log.Println("🛑 Shutting down ori-agent server...")
+		s.Shutdown()
+		log.Println("✅ Server shut down complete. Exiting...")
+		os.Exit(0)
+	})
 	s.pluginRegistryHandler = pluginhttp.NewRegistryHandler(s.st, s.registryManager, s.pluginDownloader, s.agentStorePath)
 
 	// Create plugin main handler first so we can pass it to init handler
@@ -447,6 +496,7 @@ func New() (*Server, error) {
 
 	// initialize task handler and executor
 	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory)
+	taskHandler.SetEventBus(s.eventBus) // Wire up event bus for execution events
 	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
@@ -531,7 +581,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/agents/", s.serveAgentFiles)
 
 	// Handlers: agents moved to separate package
-	mux.Handle("/api/agents", agenthttp.New(s.st))
+	agentHandler := agenthttp.New(s.st)
+	mux.Handle("/api/agents", agentHandler)
+	mux.Handle("/api/agents/", agentHandler) // Support /api/agents/{name}
 
 	// Plugin endpoints
 	mux.HandleFunc("/api/plugin-registry", s.pluginRegistryHandler.PluginRegistryHandler)
@@ -633,6 +685,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/usage/summary", s.usageHandler.GetSummary)
 	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
 
+	// Location management endpoints
+	mux.HandleFunc("/api/location/current", s.locationHandler.GetCurrentLocation)
+	mux.HandleFunc("/api/location/zones", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.locationHandler.GetZones(w, r)
+		case http.MethodPost:
+			s.locationHandler.CreateZone(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			s.locationHandler.UpdateZone(w, r)
+		case http.MethodDelete:
+			s.locationHandler.DeleteZone(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
+
 	// MCP (Model Context Protocol) endpoints
 	mux.HandleFunc("/api/mcp/servers", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -664,12 +740,15 @@ func (s *Server) Handler() http.Handler {
 	// Orchestration endpoints
 	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
 	mux.HandleFunc("/api/orchestration/workspace/agents", s.orchestrationHandler.WorkspaceAgentsHandler)
+	mux.HandleFunc("/api/orchestration/workspace/layout", s.orchestrationHandler.SaveLayoutHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.orchestrationHandler.MessagesHandler)
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
+	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
+	mux.HandleFunc("/api/orchestration/progress/stream", s.orchestrationHandler.ProgressStreamHandler)
 	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
 
 	// Workflow template endpoints
@@ -1163,4 +1242,17 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities
+type HTTPServerWrapper struct {
+	Server *http.Server
+}
+
+// Shutdown gracefully shuts down the HTTP server
+func (w *HTTPServerWrapper) Shutdown(ctx context.Context) error {
+	if w.Server == nil {
+		return nil
+	}
+	return w.Server.Shutdown(ctx)
 }

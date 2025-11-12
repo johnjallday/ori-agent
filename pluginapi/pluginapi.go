@@ -64,6 +64,9 @@ type AgentContext struct {
 	SettingsPath string
 	// AgentDir is the path to the agent's directory (agents/{name}/)
 	AgentDir string
+	// CurrentLocation is the current detected location zone name (e.g., "Home", "Office", "Unknown")
+	// This field is populated by the location manager and provides environmental context to plugins
+	CurrentLocation string
 }
 
 // AgentAwareTool extends Tool with agent context information.

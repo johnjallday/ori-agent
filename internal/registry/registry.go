@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -19,6 +20,8 @@ type Manager struct {
 	cachePath          string
 	localRegistryPath  string
 	uploadedPluginsDir string
+	lastFetchTime      time.Time
+	fetchInterval      time.Duration
 }
 
 // NewManager creates a new registry manager
@@ -27,7 +30,29 @@ func NewManager() *Manager {
 		cachePath:          "plugin_registry_cache.json",
 		localRegistryPath:  "local_plugin_registry.json",
 		uploadedPluginsDir: "uploaded_plugins",
+		fetchInterval:      12 * time.Hour, // Refresh every 12 hours
 	}
+}
+
+// shouldFetchFromGitHub checks if enough time has passed since the last fetch
+func (m *Manager) shouldFetchFromGitHub() bool {
+	// If we've never fetched, check if cache file exists and is recent
+	if m.lastFetchTime.IsZero() {
+		// Check cache file modification time
+		if info, err := os.Stat(m.cachePath); err == nil {
+			cacheAge := time.Since(info.ModTime())
+			if cacheAge < m.fetchInterval {
+				// Cache is fresh, use it instead of fetching
+				m.lastFetchTime = info.ModTime()
+				return false
+			}
+		}
+		// No cache or cache is stale, fetch from GitHub
+		return true
+	}
+
+	// Check if enough time has passed since last fetch
+	return time.Since(m.lastFetchTime) >= m.fetchInterval
 }
 
 // fetchGitHubPluginRegistry fetches the plugin registry from GitHub
@@ -52,6 +77,9 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	if err := json.Unmarshal(data, &reg); err != nil {
 		return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
 	}
+
+	// Update last fetch time on successful fetch
+	m.lastFetchTime = time.Now()
 
 	return reg, nil
 }
@@ -416,21 +444,23 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		}
 	}
 
-	// 2) Try to fetch from GitHub (primary online source)
-	if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
-		// Success! Cache it for offline use
-		if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
-			os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
+	// 2) Try to fetch from GitHub (primary online source) - with time-based caching
+	if m.shouldFetchFromGitHub() {
+		if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
+			// Success! Cache it for offline use
+			if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
+				os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
+			}
+			onlineReg = githubReg
+			fmt.Println("plugin registry loaded from GitHub")
+		} else {
+			fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
 		}
-		onlineReg = githubReg
-		fmt.Println("plugin registry loaded from GitHub")
-	} else {
-		fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
 	}
 
-	// If GitHub failed, try other fallback sources
+	// If GitHub fetch was skipped or failed, try other fallback sources
 	if len(onlineReg.Plugins) == 0 {
-		// 3) Try cached version (offline fallback)
+		// 3) Try cached version (use if fresh enough or as offline fallback)
 		if b, err := os.ReadFile(m.cachePath); err == nil {
 			if err := json.Unmarshal(b, &onlineReg); err == nil {
 				fmt.Println("plugin registry loaded from cache")

@@ -1,10 +1,11 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins server deps docker-build docker-run check-env
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins server menubar run-menubar deps docker-build docker-run check-env
 
 # Default target
 .DEFAULT_GOAL := help
 
 # Variables
 BINARY_NAME=ori-agent
+MENUBAR_BINARY_NAME=ori-menubar
 BUILD_DIR=bin
 PLUGINS_DIR=plugins
 COVERAGE_DIR=coverage
@@ -14,7 +15,7 @@ GOBUILD=$(GO) build
 GORUN=$(GO) run
 GOVET=$(GO) vet
 GOFMT=$(GO) fmt
-PORT?=8080
+PORT?=8765
 
 # Colors for output
 RED=\033[0;31m
@@ -41,12 +42,17 @@ build: ## Build the server binary
 	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/server
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
+menubar: ## Build the menu bar app
+	@echo "$(BLUE)Building menu bar app...$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
+	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
+
 plugins: ## Build all plugins
 	@echo "$(BLUE)Building plugins...$(NC)"
 	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Plugins built$(NC)"
 
-all: deps build plugins ## Build everything (server + plugins)
+all: deps build menubar plugins ## Build everything (server + menubar + plugins)
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
 clean: ## Clean build artifacts
@@ -72,6 +78,10 @@ run: check-env build ## Build and run the server
 run-dev: check-env ## Run server in development mode (no build)
 	@echo "$(BLUE)Starting server in dev mode on port $(PORT)...$(NC)"
 	PORT=$(PORT) $(GORUN) ./cmd/server
+
+run-menubar: menubar ## Build and run the menu bar app
+	@echo "$(BLUE)Starting menu bar app...$(NC)"
+	./$(BUILD_DIR)/$(MENUBAR_BINARY_NAME)
 
 ## Test targets
 
@@ -168,7 +178,7 @@ dev-setup: deps build plugins ## Initial development setup
 	@echo "$(BLUE)Next steps:$(NC)"
 	@echo "  1. Set your API key: export OPENAI_API_KEY=your-key"
 	@echo "  2. Run the server: make run"
-	@echo "  3. Visit: http://localhost:8080"
+	@echo "  3. Visit: http://localhost:8765"
 
 install-tools: ## Install development tools
 	@echo "$(BLUE)Installing development tools...$(NC)"

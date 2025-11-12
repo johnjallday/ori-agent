@@ -233,3 +233,27 @@ func (m *Manager) SetTheme(theme string) error {
 	m.state.Theme = theme
 	return m.saveUnlocked()
 }
+
+// GetMenuBarAutoStart returns whether auto-start on login is enabled
+func (m *Manager) GetMenuBarAutoStart() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.state.MenuBar == nil {
+		return false
+	}
+	return m.state.MenuBar.AutoStartOnLogin
+}
+
+// SetMenuBarAutoStart sets the auto-start on login preference
+func (m *Manager) SetMenuBarAutoStart(enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Initialize MenuBar settings if nil
+	if m.state.MenuBar == nil {
+		m.state.MenuBar = &types.MenuBarSettings{}
+	}
+
+	m.state.MenuBar.AutoStartOnLogin = enabled
+	return m.saveUnlocked()
+}

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+	"log"
+	"os"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
@@ -16,6 +19,7 @@ type CommandHandler struct {
 	store          store.Store
 	workspaceStore agentstudio.Store
 	enumExtractor  *pluginhttp.EnumExtractor
+	shutdownFunc   func()
 }
 
 // NewCommandHandler creates a new command handler
@@ -29,6 +33,11 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 // SetWorkspaceStore sets the workspace store for workspace commands
 func (ch *CommandHandler) SetWorkspaceStore(ws agentstudio.Store) {
 	ch.workspaceStore = ws
+}
+
+// SetShutdownFunc sets the shutdown function to be called on exit
+func (ch *CommandHandler) SetShutdownFunc(fn func()) {
+	ch.shutdownFunc = fn
 }
 
 // HandleAgentStatus handles the /agent command to show agent status dashboard
@@ -351,6 +360,7 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - **/agents** - List all available agents
 - **/switch <agent-name>** - Switch to a different agent
 - **/tools** - List all available plugin tools and operations
+- **/tool <name> <args>** - Execute a tool directly without LLM decision-making
 
 **Workspace Commands:**
 - **/workspace** - Show active workspaces
@@ -368,12 +378,20 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 - Use **/tools** to see all available plugin operations
 - Each tool shows available options and parameters
 - Tools are specific to your current agent configuration
+- Use **/tool** to execute tools directly (faster, no LLM overhead)
+
+**Direct Tool Execution:**
+The **/tool** command allows you to call tools directly without LLM decision-making:
+- Format: /tool <tool_name> {"key": "value"}
+- Example: /tool math {"operation": "add", "a": 5, "b": 3}
+- Benefits: Faster execution, no API costs, deterministic results
 
 **Tips:**
 - Commands must start with **/** (forward slash)
 - Agent names are case-sensitive when switching
 - Use the web interface to configure plugins and agents
 - Workspaces allow multiple agents to collaborate on complex tasks
+- Direct tool calls bypass the LLM for instant execution
 
 Type any command above to get started!`
 
@@ -539,4 +557,34 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 		}
 		json.NewEncoder(w).Encode(response)
 	}
+}
+
+// HandleExit handles the /exit command to shut down the server
+func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Send acknowledgment response first
+	response := map[string]any{
+		"response": "👋 **Shutting down ori-agent server...**\n\nGoodbye!",
+	}
+	json.NewEncoder(w).Encode(response)
+
+	// Flush the response to ensure client receives it
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// Trigger shutdown in a goroutine to allow response to be sent
+	go func() {
+		// Small delay to ensure response is sent
+		time.Sleep(100 * time.Millisecond)
+
+		if ch.shutdownFunc != nil {
+			log.Println("Executing shutdown via /exit command...")
+			ch.shutdownFunc()
+		} else {
+			log.Println("Shutdown function not set, exiting immediately...")
+			os.Exit(0)
+		}
+	}()
 }

@@ -468,13 +468,6 @@
                     <div class="form-help">Give your workspace a descriptive name</div>
                 </div>
 
-                <div class="form-group">
-                    <label for="parent-agent">Parent Agent <span class="required">*</span></label>
-                    <select id="parent-agent" name="parent_agent" required>
-                        <option value="">Select parent agent...</option>
-                    </select>
-                    <div class="form-help">The agent that coordinates this workspace</div>
-                </div>
 
                 <div class="form-group">
                     <label>Participating Agents</label>
@@ -486,16 +479,6 @@
                         <div id="agent-list" class="agent-list">
                             <!-- Agents will be loaded here -->
                         </div>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Workflow Design (Optional)</label>
-                    <div class="workflow-designer" id="workflow-designer">
-                        <div id="workflow-steps"></div>
-                        <button type="button" class="add-step-btn" onclick="addWorkflowStep()">
-                            + Add Workflow Step
-                        </button>
                     </div>
                 </div>
 
@@ -529,7 +512,6 @@
 
         let agents = [];
         let workspaces = [];
-        let workflowSteps = [];
 
         // Load workspaces on page load
         async function loadWorkspaces() {
@@ -596,10 +578,6 @@
                 </div>
                 <div class="workspace-meta">
                     <div class="meta-row">
-                        <span class="meta-label">Parent Agent:</span>
-                        <strong>${escapeHtml(ws.parent_agent)}</strong>
-                    </div>
-                    <div class="meta-row">
                         <span class="meta-label">Agents:</span>
                         <strong>${agentCount}</strong>
                     </div>
@@ -655,10 +633,6 @@
                 agentList.appendChild(item);
             });
 
-            // Reset workflow steps
-            workflowSteps = [];
-            document.getElementById('workflow-steps').innerHTML = '';
-
             document.getElementById('create-workspace-modal').classList.add('active');
         };
 
@@ -674,63 +648,12 @@
             checkboxes.forEach(cb => cb.checked = true);
         };
 
-        // Add workflow step
-        window.addWorkflowStep = function() {
-            const stepId = Date.now();
-            workflowSteps.push({ id: stepId, agent: '', task: '' });
-            renderWorkflowSteps();
-        };
-
-        // Remove workflow step
-        window.removeWorkflowStep = function(stepId) {
-            workflowSteps = workflowSteps.filter(s => s.id !== stepId);
-            renderWorkflowSteps();
-        };
-
-        // Render workflow steps
-        function renderWorkflowSteps() {
-            const container = document.getElementById('workflow-steps');
-            container.innerHTML = '';
-
-            workflowSteps.forEach((step, index) => {
-                const stepEl = document.createElement('div');
-                stepEl.className = 'workflow-step';
-                stepEl.innerHTML = `
-                    <div class="step-header">
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                            <div class="step-number">${index + 1}</div>
-                            <strong>Step ${index + 1}</strong>
-                        </div>
-                        <button type="button" class="remove-step" onclick="removeWorkflowStep(${step.id})">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 8px;">
-                        <label style="font-size: 12px;">Agent</label>
-                        <select class="workflow-step-agent" data-step-id="${step.id}" style="padding: 6px;">
-                            <option value="">Select agent...</option>
-                            ${agents.map(a => `<option value="${a.name}">${a.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="form-group" style="margin-bottom: 0;">
-                        <label style="font-size: 12px;">Task Description</label>
-                        <input type="text" class="workflow-step-task" data-step-id="${step.id}"
-                               placeholder="Describe what this agent should do..." style="padding: 6px;">
-                    </div>
-                `;
-                container.appendChild(stepEl);
-            });
-        }
-
         // Handle form submission
         document.getElementById('create-workspace-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const formData = new FormData(e.target);
             const name = formData.get('name');
-            const parentAgent = formData.get('parent_agent');
 
             // Get selected agents
             const selectedAgents = [];
@@ -757,7 +680,6 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name: name,
-                        parent_agent: parentAgent,
                         participating_agents: selectedAgents,
                         initial_context: initialContext
                     })
@@ -793,9 +715,6 @@
                     </div>
                     <div style="margin-bottom: 16px;">
                         <strong>Status:</strong> <span class="workspace-status ${workspace.status}">${workspace.status}</span>
-                    </div>
-                    <div style="margin-bottom: 16px;">
-                        <strong>Parent Agent:</strong> ${escapeHtml(workspace.parent_agent)}
                     </div>
                     <div style="margin-bottom: 16px;">
                         <strong>Participating Agents:</strong>

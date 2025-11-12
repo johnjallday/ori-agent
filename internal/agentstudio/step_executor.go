@@ -453,10 +453,16 @@ func (se *StepExecutor) executeTaskStep(ctx context.Context, ws *Workspace, step
 	}
 
 	// Create task for this step
+	// Use first agent as coordinator
+	coordinatorAgent := "system"
+	if len(ws.Agents) > 0 {
+		coordinatorAgent = ws.Agents[0]
+	}
+
 	task := Task{
 		ID:          fmt.Sprintf("step-%s", step.ID),
 		WorkspaceID: ws.ID,
-		From:        ws.ParentAgent,
+		From:        coordinatorAgent,
 		To:          step.AssignedTo,
 		Description: step.Description,
 		Priority:    5,

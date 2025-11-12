@@ -23,9 +23,6 @@ type Store interface {
 
 	// ListActive returns all active workspaces
 	ListActive() ([]*Workspace, error)
-
-	// GetByParentAgent returns workspaces for a specific parent agent
-	GetByParentAgent(agentName string) ([]*Workspace, error)
 }
 
 // FileStore implements Store using file-based persistence
@@ -72,8 +69,14 @@ func (s *FileStore) Save(ws *Workspace) error {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 
-	// Update cache
-	s.cache[ws.ID] = ws
+	// Reload from disk to ensure cache has fresh copy with all fields properly set
+	freshWS, err := FromJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to reload workspace after save: %w", err)
+	}
+
+	// Update cache with fresh copy
+	s.cache[ws.ID] = freshWS
 
 	return nil
 }
@@ -172,27 +175,6 @@ func (s *FileStore) ListActive() ([]*Workspace, error) {
 	}
 
 	return active, nil
-}
-
-// GetByParentAgent returns workspaces for a specific parent agent
-func (s *FileStore) GetByParentAgent(agentName string) ([]*Workspace, error) {
-	ids, err := s.List()
-	if err != nil {
-		return nil, err
-	}
-
-	var workspaces []*Workspace
-	for _, id := range ids {
-		ws, err := s.Get(id)
-		if err != nil {
-			continue // Skip workspaces that fail to load
-		}
-		if ws.ParentAgent == agentName {
-			workspaces = append(workspaces, ws)
-		}
-	}
-
-	return workspaces, nil
 }
 
 // getFilePath returns the file path for a workspace ID
@@ -304,19 +286,4 @@ func (s *InMemoryStore) ListActive() ([]*Workspace, error) {
 	}
 
 	return active, nil
-}
-
-// GetByParentAgent returns workspaces for a specific parent agent
-func (s *InMemoryStore) GetByParentAgent(agentName string) ([]*Workspace, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var workspaces []*Workspace
-	for _, ws := range s.workspaces {
-		if ws.ParentAgent == agentName {
-			workspaces = append(workspaces, ws)
-		}
-	}
-
-	return workspaces, nil
 }

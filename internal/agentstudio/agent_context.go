@@ -35,7 +35,7 @@ func (ac *AgentContext) GetActiveWorkspaces() ([]*Workspace, error) {
 		}
 
 		// Check if agent is in this workspace
-		if ws.HasAgent(ac.AgentName) || ws.ParentAgent == ac.AgentName {
+		if ws.HasAgent(ac.AgentName) {
 			if ws.Status == StatusActive {
 				activeWorkspaces = append(activeWorkspaces, ws)
 			}
@@ -60,7 +60,7 @@ func (ac *AgentContext) GetPendingTasks() ([]Task, error) {
 		}
 
 		// Only get tasks from active workspaces where agent participates
-		if ws.Status == StatusActive && (ws.HasAgent(ac.AgentName) || ws.ParentAgent == ac.AgentName) {
+		if ws.Status == StatusActive && ws.HasAgent(ac.AgentName) {
 			tasks := ws.GetPendingTasksForAgent(ac.AgentName)
 			pendingTasks = append(pendingTasks, tasks...)
 		}
@@ -84,7 +84,7 @@ func (ac *AgentContext) GetAllTasks() ([]Task, error) {
 		}
 
 		// Only get tasks from workspaces where agent participates
-		if ws.HasAgent(ac.AgentName) || ws.ParentAgent == ac.AgentName {
+		if ws.HasAgent(ac.AgentName) {
 			tasks := ws.GetTasksForAgent(ac.AgentName)
 			allTasks = append(allTasks, tasks...)
 		}
@@ -136,7 +136,6 @@ func (ac *AgentContext) GetWorkspaceSummary() (string, error) {
 		}
 		sb.WriteString(fmt.Sprintf("   - **ID**: `%s`\n", ws.ID))
 		sb.WriteString(fmt.Sprintf("   - **Status**: %s\n", ws.Status))
-		sb.WriteString(fmt.Sprintf("   - **Parent**: %s\n", ws.ParentAgent))
 		sb.WriteString(fmt.Sprintf("   - **Agents**: %s\n", strings.Join(ws.Agents, ", ")))
 
 		// Count tasks

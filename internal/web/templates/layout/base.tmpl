@@ -78,6 +78,7 @@
               <select id="agentType" class="modern-input w-100">
                 <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
                 <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
                 <option value="research">Research (Expensive - Complex thinking)</option>
               </select>
             </div>
@@ -166,7 +167,7 @@
           <div class="mb-3">
             <p style="color: var(--text-secondary);">Upload a plugin binary by dragging and dropping it below or clicking to browse.</p>
           </div>
-          
+
           <!-- Drag and Drop Area -->
           <div id="uploadDropZone" class="upload-drop-zone mb-3" style="border: 2px dashed var(--border-color); border-radius: 8px; background: var(--bg-secondary); cursor: pointer; transition: all 0.3s ease;">
             <div class="text-center py-5">
@@ -183,10 +184,10 @@
               </button>
             </div>
           </div>
-          
+
           <!-- Hidden File Input -->
           <input type="file" id="pluginFileInput" style="display: none;">
-          
+
           <!-- Upload Progress -->
           <div id="uploadProgress" class="d-none mb-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -197,7 +198,7 @@
               <div id="uploadProgressBar" class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
             </div>
           </div>
-          
+
           <!-- Upload Result -->
           <div id="uploadResult" class="d-none"></div>
         </div>
@@ -286,6 +287,7 @@
   <script src="js/modules/plugin-update-checker.js"></script>
   <script src="js/modules/plugin-health.js"></script>
   <script src="js/modules/file-upload.js"></script>
+  <script src="js/modules/location.js"></script>
   <script src="js/app.js?v=1694538177"></script>
 </body>
 </html>

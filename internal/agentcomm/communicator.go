@@ -94,10 +94,10 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*agentstudio.Task, e
 	}
 
 	// Verify both agents are in the workspace
-	if !ws.HasAgent(req.From) && ws.ParentAgent != req.From {
+	if !ws.HasAgent(req.From) {
 		return nil, fmt.Errorf("delegating agent %s not in workspace", req.From)
 	}
-	if !ws.HasAgent(req.To) && ws.ParentAgent != req.To {
+	if !ws.HasAgent(req.To) {
 		return nil, fmt.Errorf("receiving agent %s not in workspace", req.To)
 	}
 

@@ -66,7 +66,6 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
-		ParentAgent: "system",
 		Agents:      req.Agents,
 		SharedData:  make(map[string]interface{}),
 		Messages:    make([]AgentMessage, 0),
@@ -192,19 +191,28 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get agent statistics
+	agentStats := studio.GetAgentStats()
+
+	// Get workspace progress
+	workspaceProgress := studio.GetWorkspaceProgress()
+
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":          studio.ID,
-		"name":        studio.Name,
-		"description": studio.Description,
-		"agents":      studio.Agents,
-		"status":      studio.Status,
-		"tasks":       studio.Tasks,
-		"messages":    studio.Messages,
-		"shared_data": studio.SharedData,
-		"created_at":  studio.CreatedAt,
-		"updated_at":  studio.UpdatedAt,
+		"id":                 studio.ID,
+		"name":               studio.Name,
+		"description":        studio.Description,
+		"agents":             studio.Agents,
+		"agent_stats":        agentStats,
+		"workspace_progress": workspaceProgress,
+		"status":             studio.Status,
+		"tasks":              studio.Tasks,
+		"messages":           studio.Messages,
+		"shared_data":        studio.SharedData,
+		"layout":             studio.Layout,
+		"created_at":         studio.CreatedAt,
+		"updated_at":         studio.UpdatedAt,
 	})
 }
 
@@ -487,7 +495,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[DEBUG] CreateTask - Studio: %s, ParentAgent: %s, Agents: %v", studioID, studio.ParentAgent, studio.Agents)
+	log.Printf("[DEBUG] CreateTask - Studio: %s, Agents: %v", studioID, studio.Agents)
 	log.Printf("[DEBUG] CreateTask - Request: From=%s, To=%s", req.From, req.To)
 
 	// Create task

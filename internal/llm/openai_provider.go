@@ -79,14 +79,9 @@ func (p *OpenAIProvider) DefaultModels() []string {
 		// General purpose tier (mid-tier)
 		"gpt-5-mini",
 		"gpt-4.1-mini",
-		"gpt-4o-mini",
 		// Research tier (expensive)
 		"gpt-5",
 		"gpt-4.1",
-		"gpt-4o",
-		"gpt-4-turbo",
-		"gpt-4",
-		"gpt-3.5-turbo",
 		"o1-preview",
 		"o1-mini",
 	}

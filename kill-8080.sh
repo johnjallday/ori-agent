@@ -1,13 +1,13 @@
 #!/bin/bash
-# Kill any process running on port 8080
+# Kill any process running on port 8765
 
-echo "Looking for processes on port 8080..."
+echo "Looking for processes on port 8765..."
 
 # Find the process ID using lsof (works on macOS)
-PID=$(lsof -ti tcp:8080)
+PID=$(lsof -ti tcp:8765)
 
 if [ -z "$PID" ]; then
-    echo "No process found running on port 8080"
+    echo "No process found running on port 8765"
     exit 0
 fi
 
@@ -18,7 +18,7 @@ echo "Killing process(es)..."
 kill -9 $PID
 
 if [ $? -eq 0 ]; then
-    echo "✅ Successfully killed process(es) on port 8080"
+    echo "✅ Successfully killed process(es) on port 8765"
 else
     echo "❌ Failed to kill process(es)"
     exit 1

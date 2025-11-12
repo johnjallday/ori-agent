@@ -19,12 +19,17 @@ const (
 	EventWorkspaceDeleted   EventType = "studio.deleted"
 
 	// Task events
-	EventTaskCreated   EventType = "task.created"
-	EventTaskAssigned  EventType = "task.assigned"
-	EventTaskStarted   EventType = "task.started"
-	EventTaskCompleted EventType = "task.completed"
-	EventTaskFailed    EventType = "task.failed"
-	EventTaskTimeout   EventType = "task.timeout"
+	EventTaskCreated    EventType = "task.created"
+	EventTaskAssigned   EventType = "task.assigned"
+	EventTaskStarted    EventType = "task.started"
+	EventTaskCompleted  EventType = "task.completed"
+	EventTaskFailed     EventType = "task.failed"
+	EventTaskTimeout    EventType = "task.timeout"
+	EventTaskProgress   EventType = "task.progress"
+	EventTaskDeleted    EventType = "task.deleted"
+	EventTaskThinking   EventType = "task.thinking"    // Agent is processing/thinking
+	EventTaskToolCall   EventType = "task.tool_call"   // Agent is calling a tool
+	EventTaskToolResult EventType = "task.tool_result" // Tool call completed
 
 	// Workflow events
 	EventWorkflowStarted   EventType = "workflow.started"
@@ -38,7 +43,12 @@ const (
 	// Agent events
 	EventAgentJoined EventType = "agent.joined"
 	EventAgentLeft   EventType = "agent.left"
+	EventAgentActive EventType = "agent.active"
+	EventAgentIdle   EventType = "agent.idle"
 	EventMessageSent EventType = "message.sent"
+
+	// Progress events
+	EventWorkspaceProgress EventType = "workspace.progress"
 
 	// System events
 	EventError   EventType = "error"

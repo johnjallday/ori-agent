@@ -290,7 +290,6 @@ class WorkspaceDashboard {
                   <div class="mb-2">
                     <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
                     <select id="task-from" class="form-control form-control-sm" required>
-                      <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
                       ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
                     </select>
                   </div>
@@ -304,13 +303,41 @@ class WorkspaceDashboard {
                     <label class="form-label small" style="color: var(--text-primary);">Task Description</label>
                     <textarea id="task-description" class="form-control form-control-sm" rows="2" placeholder="What should this agent do?" required></textarea>
                   </div>
-                  <div class="mb-3">
+                  <div class="mb-2">
                     <label class="form-label small" style="color: var(--text-primary);">Priority</label>
                     <select id="task-priority" class="form-control form-control-sm">
                       <option value="0">Normal</option>
                       <option value="1">High</option>
                       <option value="2">Urgent</option>
                     </select>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label small" style="color: var(--text-primary);">
+                      Use Results From Previous Tasks (Optional)
+                      <span class="text-muted ms-1" title="Select completed tasks whose results will be provided as input to this task">ℹ️</span>
+                    </label>
+                    <select id="task-input-tasks" class="form-control form-control-sm" multiple size="3">
+                      ${this.renderCompletedTaskOptions()}
+                    </select>
+                    <small class="text-muted">Hold Ctrl/Cmd to select multiple tasks</small>
+                  </div>
+                  <div class="mb-3" id="combination-mode-container" style="display: none;">
+                    <label class="form-label small" style="color: var(--text-primary);">
+                      Result Combination Mode
+                      <span class="text-muted ms-1" title="How should results from previous tasks be combined with this task?">ℹ️</span>
+                    </label>
+                    <select id="task-combination-mode" class="form-control form-control-sm">
+                      <option value="default">Default (Include as context)</option>
+                      <option value="append">Append (Build upon results)</option>
+                      <option value="merge">Merge (Synthesize into coherent whole)</option>
+                      <option value="summarize">Summarize (Extract key points)</option>
+                      <option value="compare">Compare (Find similarities/differences)</option>
+                      <option value="custom">Custom (Specify instructions)</option>
+                    </select>
+                  </div>
+                  <div class="mb-3" id="combination-instruction-container" style="display: none;">
+                    <label class="form-label small" style="color: var(--text-primary);">Custom Combination Instructions</label>
+                    <textarea id="task-combination-instruction" class="form-control form-control-sm" rows="2" placeholder="Describe how to combine the results..."></textarea>
                   </div>
                   <div class="d-flex gap-2">
                     <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm">
@@ -393,6 +420,41 @@ class WorkspaceDashboard {
         window.messageTimeline = this.messageTimeline;
       }, 100);
     }
+
+    // Initialize combination mode controls
+    this.initializeCombinationModeControls();
+  }
+
+  /**
+   * Initialize the combination mode UI controls
+   */
+  initializeCombinationModeControls() {
+    const inputTasksSelect = document.getElementById('task-input-tasks');
+    const combinationModeContainer = document.getElementById('combination-mode-container');
+    const combinationModeSelect = document.getElementById('task-combination-mode');
+    const combinationInstructionContainer = document.getElementById('combination-instruction-container');
+
+    if (!inputTasksSelect || !combinationModeContainer || !combinationModeSelect || !combinationInstructionContainer) {
+      return;
+    }
+
+    // Show/hide combination mode when input tasks selection changes
+    inputTasksSelect.addEventListener('change', () => {
+      const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
+      combinationModeContainer.style.display = hasInputTasks ? 'block' : 'none';
+
+      // Also hide instruction container if no input tasks
+      if (!hasInputTasks) {
+        combinationInstructionContainer.style.display = 'none';
+      }
+    });
+
+    // Show/hide custom instruction field based on combination mode
+    combinationModeSelect.addEventListener('change', () => {
+      const isCustomMode = combinationModeSelect.value === 'custom';
+      const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
+      combinationInstructionContainer.style.display = (isCustomMode && hasInputTasks) ? 'block' : 'none';
+    });
   }
 
   /**
@@ -535,10 +597,18 @@ class WorkspaceDashboard {
     const statusBadge = this.getStatusBadgeClass(task.status);
     const statusIcon = this.getStatusIcon(task.status);
     const canExecute = task.status === 'pending' || task.status === 'assigned';
+    const hasResult = task.result && task.status === 'completed';
+    const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
+    const hasCombinationMode = task.result_combination_mode && task.result_combination_mode !== 'default';
 
     return `
-      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}">
-        <div class="d-flex justify-content-between align-items-start">
+      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer;" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
+        ${hasResult ? `
+          <span class="position-absolute top-0 end-0 m-2" title="This task has a result that can be used in other tasks" style="cursor: help;">
+            📊
+          </span>
+        ` : ''}
+        <div class="d-flex justify-content-between align-items-start" onclick="event.stopPropagation();">
           <div class="flex-grow-1">
             <div class="d-flex align-items-center gap-2 mb-2">
               ${statusIcon}
@@ -548,6 +618,8 @@ class WorkspaceDashboard {
               <span>From: ${this.escapeHtml(task.from)}</span>
               <span>To: ${this.escapeHtml(task.to)}</span>
               ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
+              ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
+              ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
             </div>
             ${task.result ? `
               <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
@@ -594,12 +666,29 @@ class WorkspaceDashboard {
   }
 
   /**
+   * Render options for completed tasks that can be used as inputs
+   */
+  renderCompletedTaskOptions() {
+    const tasks = this.data.tasks || [];
+    const completedTasks = tasks.filter(task => task.status === 'completed' && task.result);
+
+    if (completedTasks.length === 0) {
+      return '<option disabled>No completed tasks with results available</option>';
+    }
+
+    return completedTasks.map(task => {
+      const truncatedDesc = task.description.length > 50
+        ? task.description.substring(0, 47) + '...'
+        : task.description;
+      return `<option value="${task.id}">${this.escapeHtml(truncatedDesc)} (${task.from} → ${task.to})</option>`;
+    }).join('');
+  }
+
+  /**
    * Render agent list
    */
   renderAgentList() {
     const agents = this.data.agents || [];
-    const ws = this.data.workspace;
-    const parentAgent = ws?.parent_agent || '';
 
     if (agents.length === 0) {
       return '<p class="text-muted">No participating agents configured</p>';
@@ -614,18 +703,15 @@ class WorkspaceDashboard {
               <div>
                 <div style="color: var(--text-primary); font-weight: 500;">
                   ${this.escapeHtml(agent)}
-                  ${agent === parentAgent ? '<span class="badge bg-secondary ms-2" style="font-size: 0.7rem;">Parent</span>' : ''}
                 </div>
                 <div class="text-muted small">Active</div>
               </div>
             </div>
-            ${agent !== parentAgent ? `
-              <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19,13H5V11H19V13Z"/>
-                </svg>
-              </button>
-            ` : ''}
+            <button class="btn btn-sm btn-outline-danger" onclick="workspaceDashboard.removeAgent('${this.escapeHtml(agent)}')" title="Remove agent from workspace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,13H5V11H19V13Z"/>
+              </svg>
+            </button>
           </div>
         `).join('')}
       </div>
@@ -825,9 +911,41 @@ class WorkspaceDashboard {
     const description = document.getElementById('task-description').value;
     const priority = parseInt(document.getElementById('task-priority').value) || 0;
 
+    // Get selected input task IDs
+    const inputTasksSelect = document.getElementById('task-input-tasks');
+    const inputTaskIds = Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value);
+
+    // Get combination mode and instruction
+    const combinationMode = document.getElementById('task-combination-mode')?.value || 'default';
+    const combinationInstruction = document.getElementById('task-combination-instruction')?.value || '';
+
     if (!from || !to || !description) {
       alert('Please fill in all required fields');
       return;
+    }
+
+    // Build request body
+    const requestBody = {
+      workspace_id: this.workspaceId,
+      from: from,
+      to: to,
+      description: description,
+      priority: priority,
+    };
+
+    // Add input_task_ids if any are selected
+    if (inputTaskIds.length > 0) {
+      requestBody.input_task_ids = inputTaskIds;
+
+      // Add combination mode if input tasks are selected
+      if (combinationMode && combinationMode !== 'default') {
+        requestBody.result_combination_mode = combinationMode;
+      }
+
+      // Add custom instruction if mode is custom
+      if (combinationMode === 'custom' && combinationInstruction) {
+        requestBody.combination_instruction = combinationInstruction;
+      }
     }
 
     try {
@@ -836,13 +954,7 @@ class WorkspaceDashboard {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          workspace_id: this.workspaceId,
-          from: from,
-          to: to,
-          description: description,
-          priority: priority,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -943,6 +1055,41 @@ class WorkspaceDashboard {
       return;
     }
 
+    // Get input tasks if any
+    let inputTasksHTML = '';
+    if (task.input_task_ids && task.input_task_ids.length > 0) {
+      const inputTasks = task.input_task_ids.map(id => this.data.tasks.find(t => t.id === id)).filter(Boolean);
+      if (inputTasks.length > 0) {
+        inputTasksHTML = `
+          <h6>Input Tasks:</h6>
+          <div class="mb-3">
+            ${inputTasks.map(it => `
+              <div class="card mb-2" style="background-color: var(--bg-secondary);">
+                <div class="card-body py-2">
+                  <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                      <strong>${this.escapeHtml(it.description.substring(0, 60))}${it.description.length > 60 ? '...' : ''}</strong>
+                      <br>
+                      <small class="text-muted">${it.from} → ${it.to}</small>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" onclick="workspaceDashboard.showTaskDetails('${it.id}')">
+                      View
+                    </button>
+                  </div>
+                  ${it.result ? `
+                    <div class="mt-2">
+                      <small class="text-muted">Result:</small>
+                      <pre style="font-size: 0.75rem; max-height: 100px; overflow-y: auto; background: var(--surface-color); padding: 8px; border-radius: 4px;">${this.escapeHtml(it.result.substring(0, 200))}${it.result.length > 200 ? '...' : ''}</pre>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    }
+
     // Create modal HTML
     const modalHTML = `
       <div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true">
@@ -968,9 +1115,17 @@ class WorkspaceDashboard {
                 ${task.completed_at ? `<li><strong>Completed:</strong> ${new Date(task.completed_at).toLocaleString()}</li>` : ''}
               </ul>
 
+              ${inputTasksHTML}
+
               ${task.result ? `
                 <h6>Result:</h6>
                 <div class="alert alert-success">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <strong>Task Output:</strong>
+                    <button class="btn btn-sm btn-outline-success" onclick="navigator.clipboard.writeText(\`${this.escapeHtml(task.result).replace(/`/g, '\\`')}\`).then(() => alert('Result copied to clipboard!'))">
+                      📋 Copy
+                    </button>
+                  </div>
                   <pre style="white-space: pre-wrap; margin-bottom: 0; max-height: 400px; overflow-y: auto;">${this.escapeHtml(task.result)}</pre>
                 </div>
               ` : ''}
@@ -983,6 +1138,11 @@ class WorkspaceDashboard {
               ` : ''}
             </div>
             <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              ${task.result && task.status === 'completed' ? `
+                <button type="button" class="btn btn-primary" onclick="workspaceDashboard.useTaskResultInNewTask('${task.id}')" data-bs-dismiss="modal">
+                  ✨ Use Result in New Task
+                </button>
+              ` : ''}
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
           </div>
@@ -1007,6 +1167,35 @@ class WorkspaceDashboard {
     document.getElementById('taskDetailsModal').addEventListener('hidden.bs.modal', function () {
       this.remove();
     });
+  }
+
+  /**
+   * Pre-fill task creation form with selected task result as input
+   */
+  useTaskResultInNewTask(taskId) {
+    // Show the create task form
+    this.showCreateTaskForm();
+
+    // Pre-select the task in the input tasks dropdown
+    setTimeout(() => {
+      const inputTasksSelect = document.getElementById('task-input-tasks');
+      if (inputTasksSelect) {
+        // Find and select the option with matching task ID
+        for (let option of inputTasksSelect.options) {
+          if (option.value === taskId) {
+            option.selected = true;
+            break;
+          }
+        }
+
+        // Add a helpful placeholder text
+        const descriptionField = document.getElementById('task-description');
+        if (descriptionField && !descriptionField.value) {
+          descriptionField.placeholder = 'Describe how to process the result from the selected task...';
+          descriptionField.focus();
+        }
+      }
+    }, 100);
   }
 
   /**
@@ -1052,11 +1241,10 @@ class WorkspaceDashboard {
 
       // Get current workspace agents
       const currentAgents = this.data.agents || [];
-      const parentAgent = this.data.workspace?.parent_agent || '';
 
       // Add agents that are not already in the workspace
       agents.forEach(agent => {
-        if (!currentAgents.includes(agent.name) && agent.name !== parentAgent) {
+        if (!currentAgents.includes(agent.name)) {
           const option = document.createElement('option');
           option.value = agent.name;
           option.textContent = agent.name;
@@ -1260,7 +1448,6 @@ class WorkspaceDashboard {
               <div class="col-md-6 mb-2">
                 <label class="form-label small" style="color: var(--text-primary);">From (Sender Agent)</label>
                 <select id="st-from" class="form-control form-control-sm" required>
-                  <option value="${this.escapeHtml(ws.parent_agent)}">${this.escapeHtml(ws.parent_agent)} (Parent)</option>
                   ${this.data.agents.map(agent => `<option value="${this.escapeHtml(agent)}">${this.escapeHtml(agent)}</option>`).join('')}
                 </select>
               </div>

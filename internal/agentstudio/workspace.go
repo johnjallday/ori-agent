@@ -35,17 +35,32 @@ type Workspace struct {
 	ID             string                 `json:"id"`
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description,omitempty"`
-	ParentAgent    string                 `json:"parent_agent"`
 	Agents         []string               `json:"agents"`
 	SharedData     map[string]interface{} `json:"shared_data"`
 	Messages       []AgentMessage         `json:"messages"`
 	Tasks          []Task                 `json:"tasks"`
 	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
 	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
+	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status         WorkspaceStatus        `json:"status"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
 	mu             sync.RWMutex           `json:"-"`
+}
+
+// CanvasLayout stores positions of tasks and agents on the canvas
+type CanvasLayout struct {
+	TaskPositions  map[string]Position `json:"task_positions,omitempty"`  // task ID -> position
+	AgentPositions map[string]Position `json:"agent_positions,omitempty"` // agent name -> position
+	Scale          float64             `json:"scale,omitempty"`           // zoom level
+	OffsetX        float64             `json:"offset_x,omitempty"`        // pan offset X
+	OffsetY        float64             `json:"offset_y,omitempty"`        // pan offset Y
+}
+
+// Position represents a 2D position on the canvas
+type Position struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // AgentMessage represents a message passed between agents
@@ -72,9 +87,16 @@ type Task struct {
 	Status      TaskStatus             `json:"status"`
 	Result      string                 `json:"result,omitempty"`
 	Error       string                 `json:"error,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	StartedAt   *time.Time             `json:"started_at,omitempty"`
-	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Progress    *TaskProgress          `json:"progress,omitempty"`
+	// InputTaskIDs specifies task IDs whose results should be included as input context
+	InputTaskIDs []string `json:"input_task_ids,omitempty"`
+	// ResultCombinationMode specifies how to combine results from input tasks with the new task
+	ResultCombinationMode string `json:"result_combination_mode,omitempty"`
+	// CombinationInstruction provides custom instructions for how to combine results (used when mode is "custom")
+	CombinationInstruction string     `json:"combination_instruction,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -89,6 +111,34 @@ const (
 	TaskStatusCancelled  TaskStatus = "cancelled"
 	TaskStatusTimeout    TaskStatus = "timeout"
 )
+
+// ResultCombinationMode specifies how to combine results from input tasks
+type ResultCombinationMode string
+
+const (
+	// CombineModeDefault - Simply include input task results as context (existing behavior)
+	CombineModeDefault ResultCombinationMode = "default"
+	// CombineModeAppend - Append input results to the new task prompt
+	CombineModeAppend ResultCombinationMode = "append"
+	// CombineModeMerge - Ask the agent to merge/synthesize all input results
+	CombineModeMerge ResultCombinationMode = "merge"
+	// CombineModeSummarize - Ask the agent to create a summary of all input results
+	CombineModeSummarize ResultCombinationMode = "summarize"
+	// CombineModeCompare - Ask the agent to compare and contrast input results
+	CombineModeCompare ResultCombinationMode = "compare"
+	// CombineModeCustom - Use custom combination instruction provided by user
+	CombineModeCustom ResultCombinationMode = "custom"
+)
+
+// TaskProgress tracks the execution progress of a task
+type TaskProgress struct {
+	Percentage     int       `json:"percentage"`             // 0-100
+	CurrentStep    string    `json:"current_step,omitempty"` // e.g. "Analyzing data..."
+	TotalSteps     int       `json:"total_steps,omitempty"`
+	CompletedSteps int       `json:"completed_steps,omitempty"`
+	ElapsedTimeMs  float64   `json:"elapsed_time_ms,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+}
 
 // ScheduleType represents the type of schedule
 type ScheduleType string
@@ -170,7 +220,6 @@ type ScheduledTask struct {
 type CreateWorkspaceParams struct {
 	Name        string
 	Description string
-	ParentAgent string
 	Agents      []string
 	InitialData map[string]interface{}
 }
@@ -182,7 +231,6 @@ func NewWorkspace(params CreateWorkspaceParams) *Workspace {
 		ID:          uuid.New().String(),
 		Name:        params.Name,
 		Description: params.Description,
-		ParentAgent: params.ParentAgent,
 		Agents:      params.Agents,
 		SharedData:  params.InitialData,
 		Messages:    []AgentMessage{},
@@ -199,12 +247,12 @@ func (w *Workspace) AddMessage(msg AgentMessage) error {
 	defer w.mu.Unlock()
 
 	// Validate sender is part of workspace
-	if !w.hasAgent(msg.From) && msg.From != w.ParentAgent {
+	if !w.hasAgent(msg.From) {
 		return fmt.Errorf("sender %s is not part of workspace", msg.From)
 	}
 
 	// Validate recipient if specified
-	if msg.To != "" && !w.hasAgent(msg.To) && msg.To != w.ParentAgent {
+	if msg.To != "" && !w.hasAgent(msg.To) {
 		return fmt.Errorf("recipient %s is not part of workspace", msg.To)
 	}
 
@@ -363,7 +411,6 @@ func (w *Workspace) GetSummary() map[string]interface{} {
 		"id":            w.ID,
 		"name":          w.Name,
 		"description":   w.Description,
-		"parent_agent":  w.ParentAgent,
 		"agents":        w.Agents,
 		"agent_count":   len(w.Agents),
 		"message_count": len(w.Messages),
@@ -374,24 +421,299 @@ func (w *Workspace) GetSummary() map[string]interface{} {
 	}
 }
 
+// AgentStats holds statistics for a single agent
+type AgentStats struct {
+	Name            string    `json:"name"`
+	Status          string    `json:"status"` // "idle", "active", "busy", "error"
+	CurrentTasks    []string  `json:"current_tasks"`
+	QueuedTasks     []string  `json:"queued_tasks"`
+	CompletedTasks  int       `json:"completed_tasks"`
+	FailedTasks     int       `json:"failed_tasks"`
+	TotalExecutions int       `json:"total_executions"`
+	LastActive      time.Time `json:"last_active,omitempty"`
+}
+
+// GetAgentStats returns statistics for all agents in the workspace
+func (w *Workspace) GetAgentStats() map[string]AgentStats {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	stats := make(map[string]AgentStats)
+
+	// Initialize stats for all agents
+	for _, agentName := range w.Agents {
+		stats[agentName] = AgentStats{
+			Name:         agentName,
+			Status:       "idle",
+			CurrentTasks: []string{},
+			QueuedTasks:  []string{},
+		}
+	}
+
+	// Analyze tasks to calculate agent stats
+	for _, task := range w.Tasks {
+		if task.To == "" || task.To == "unassigned" {
+			continue
+		}
+
+		agentStat, exists := stats[task.To]
+		if !exists {
+			continue // Skip tasks for agents not in this workspace
+		}
+
+		switch task.Status {
+		case TaskStatusInProgress:
+			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
+			agentStat.Status = "active"
+			if task.StartedAt != nil && task.StartedAt.After(agentStat.LastActive) {
+				agentStat.LastActive = *task.StartedAt
+			}
+
+		case TaskStatusPending, TaskStatusAssigned:
+			agentStat.QueuedTasks = append(agentStat.QueuedTasks, task.ID)
+			if agentStat.Status == "idle" {
+				agentStat.Status = "queued"
+			}
+
+		case TaskStatusCompleted:
+			agentStat.CompletedTasks++
+			agentStat.TotalExecutions++
+			if task.CompletedAt != nil && task.CompletedAt.After(agentStat.LastActive) {
+				agentStat.LastActive = *task.CompletedAt
+			}
+
+		case TaskStatusFailed, TaskStatusTimeout:
+			agentStat.FailedTasks++
+			agentStat.TotalExecutions++
+			if agentStat.Status == "idle" || agentStat.Status == "queued" {
+				agentStat.Status = "error"
+			}
+			if task.CompletedAt != nil && task.CompletedAt.After(agentStat.LastActive) {
+				agentStat.LastActive = *task.CompletedAt
+			}
+		}
+
+		stats[task.To] = agentStat
+	}
+
+	// Determine if agent is busy (multiple tasks queued)
+	for agentName, agentStat := range stats {
+		if len(agentStat.QueuedTasks) > 5 {
+			agentStat.Status = "busy"
+			stats[agentName] = agentStat
+		}
+	}
+
+	return stats
+}
+
+// WorkspaceProgress represents overall workspace progress metrics
+type WorkspaceProgress struct {
+	TotalTasks      int       `json:"total_tasks"`
+	CompletedTasks  int       `json:"completed_tasks"`
+	InProgressTasks int       `json:"in_progress_tasks"`
+	PendingTasks    int       `json:"pending_tasks"`
+	FailedTasks     int       `json:"failed_tasks"`
+	Percentage      int       `json:"percentage"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	EstimatedEnd    time.Time `json:"estimated_end,omitempty"`
+	ElapsedTimeMs   float64   `json:"elapsed_time_ms,omitempty"`
+	RemainingTimeMs float64   `json:"remaining_time_ms,omitempty"`
+	ActiveAgents    int       `json:"active_agents"`
+	IdleAgents      int       `json:"idle_agents"`
+	TotalAgents     int       `json:"total_agents"`
+	AverageTaskTime float64   `json:"average_task_time_ms,omitempty"`
+}
+
+// GetWorkspaceProgress calculates overall workspace progress
+func (w *Workspace) GetWorkspaceProgress() WorkspaceProgress {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	progress := WorkspaceProgress{
+		TotalTasks:  len(w.Tasks),
+		TotalAgents: len(w.Agents),
+	}
+
+	if progress.TotalTasks == 0 {
+		return progress
+	}
+
+	// Count tasks by status
+	var firstStartTime time.Time
+	var totalDuration float64
+	var completedCount int
+
+	for _, task := range w.Tasks {
+		switch task.Status {
+		case "completed":
+			progress.CompletedTasks++
+			completedCount++
+
+			// Calculate task duration if we have timestamps
+			if task.StartedAt != nil && task.CompletedAt != nil && !task.StartedAt.IsZero() && !task.CompletedAt.IsZero() {
+				duration := task.CompletedAt.Sub(*task.StartedAt).Milliseconds()
+				totalDuration += float64(duration)
+			}
+		case "in_progress":
+			progress.InProgressTasks++
+
+			// Track earliest start time
+			if task.StartedAt != nil && !task.StartedAt.IsZero() {
+				if firstStartTime.IsZero() || task.StartedAt.Before(firstStartTime) {
+					firstStartTime = *task.StartedAt
+				}
+			}
+		case "pending":
+			progress.PendingTasks++
+		case "failed":
+			progress.FailedTasks++
+		}
+
+		// Track earliest task creation time for workspace start
+		if !task.CreatedAt.IsZero() {
+			if firstStartTime.IsZero() || task.CreatedAt.Before(firstStartTime) {
+				firstStartTime = task.CreatedAt
+			}
+		}
+	}
+
+	// Calculate percentage (completed / total)
+	if progress.TotalTasks > 0 {
+		progress.Percentage = (progress.CompletedTasks * 100) / progress.TotalTasks
+	}
+
+	// Calculate average task time
+	if completedCount > 0 {
+		progress.AverageTaskTime = totalDuration / float64(completedCount)
+	}
+
+	// Calculate elapsed time
+	if !firstStartTime.IsZero() {
+		progress.StartedAt = firstStartTime
+		progress.ElapsedTimeMs = float64(time.Since(firstStartTime).Milliseconds())
+	}
+
+	// Estimate remaining time based on average task time and remaining tasks
+	if progress.AverageTaskTime > 0 {
+		remainingTasks := progress.InProgressTasks + progress.PendingTasks
+		progress.RemainingTimeMs = progress.AverageTaskTime * float64(remainingTasks)
+
+		// Estimate completion time
+		if progress.RemainingTimeMs > 0 {
+			progress.EstimatedEnd = time.Now().Add(time.Duration(progress.RemainingTimeMs) * time.Millisecond)
+		}
+	}
+
+	// Count active vs idle agents using agent stats
+	agentStats := w.getAgentStatsUnlocked() // Use unlocked version since we already have read lock
+	for _, stats := range agentStats {
+		if stats.Status == "active" || stats.Status == "busy" {
+			progress.ActiveAgents++
+		} else {
+			progress.IdleAgents++
+		}
+	}
+
+	return progress
+}
+
+// getAgentStatsUnlocked is the unlocked version of GetAgentStats for internal use
+func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
+	stats := make(map[string]AgentStats)
+
+	// Initialize stats for all agents
+	for _, agentName := range w.Agents {
+		stats[agentName] = AgentStats{
+			Name:            agentName,
+			Status:          "idle",
+			CurrentTasks:    []string{},
+			QueuedTasks:     []string{},
+			CompletedTasks:  0,
+			FailedTasks:     0,
+			TotalExecutions: 0,
+		}
+	}
+
+	// Analyze tasks to populate stats
+	for _, task := range w.Tasks {
+		// Skip unassigned tasks
+		if task.To == "unassigned" || task.To == "" {
+			continue
+		}
+
+		agentStat, exists := stats[task.To]
+		if !exists {
+			continue
+		}
+
+		switch task.Status {
+		case "in_progress":
+			agentStat.CurrentTasks = append(agentStat.CurrentTasks, task.ID)
+			agentStat.Status = "active"
+			if task.StartedAt != nil {
+				agentStat.LastActive = *task.StartedAt
+			}
+			agentStat.TotalExecutions++
+
+		case "pending":
+			agentStat.QueuedTasks = append(agentStat.QueuedTasks, task.ID)
+			// Set status to queued if not already active
+			if agentStat.Status == "idle" {
+				agentStat.Status = "queued"
+			} else if agentStat.Status == "active" {
+				agentStat.Status = "busy" // Active with queued tasks
+			}
+
+		case "completed":
+			agentStat.CompletedTasks++
+			agentStat.TotalExecutions++
+			if task.CompletedAt != nil && !task.CompletedAt.IsZero() && task.CompletedAt.After(agentStat.LastActive) {
+				agentStat.LastActive = *task.CompletedAt
+			}
+
+		case "failed":
+			agentStat.FailedTasks++
+			agentStat.TotalExecutions++
+			agentStat.Status = "error"
+			if task.CompletedAt != nil && !task.CompletedAt.IsZero() && task.CompletedAt.After(agentStat.LastActive) {
+				agentStat.LastActive = *task.CompletedAt
+			}
+		}
+
+		stats[task.To] = agentStat
+	}
+
+	// Determine if agent is busy (multiple tasks queued)
+	for agentName, agentStat := range stats {
+		if len(agentStat.QueuedTasks) > 5 {
+			agentStat.Status = "busy"
+			stats[agentName] = agentStat
+		}
+	}
+
+	return stats
+}
+
 // AddTask adds a task to the workspace
 func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	log.Printf("[DEBUG] AddTask - Workspace: %s, ParentAgent: %s, Agents: %v", w.ID, w.ParentAgent, w.Agents)
+	log.Printf("[DEBUG] AddTask - Workspace: %s, Agents: %v", w.ID, w.Agents)
 	log.Printf("[DEBUG] AddTask - Task: From=%s, To=%s", task.From, task.To)
-	log.Printf("[DEBUG] AddTask - hasAgent(From): %v, From==ParentAgent: %v", w.hasAgent(task.From), task.From == w.ParentAgent)
+	log.Printf("[DEBUG] AddTask - hasAgent(From): %v", w.hasAgent(task.From))
 
 	// Validate sender is part of workspace
 	// Allow "user" and "system" as special senders for UI-created tasks
-	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) && task.From != w.ParentAgent {
+	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
 		log.Printf("[DEBUG] AddTask - Validation FAILED: From agent not valid")
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
 
 	// Validate recipient if specified
-	if task.To != "" && !w.hasAgent(task.To) && task.To != w.ParentAgent {
+	// Allow "unassigned" as a special value for tasks without a specific recipient
+	if task.To != "" && task.To != "unassigned" && !w.hasAgent(task.To) {
 		log.Printf("[DEBUG] AddTask - Validation FAILED: To agent not valid")
 		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
 	}
@@ -516,12 +838,12 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	defer w.mu.Unlock()
 
 	// Validate sender is part of workspace
-	if !w.hasAgent(st.From) && st.From != w.ParentAgent {
+	if !w.hasAgent(st.From) {
 		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
 	}
 
 	// Validate recipient
-	if st.To != "" && !w.hasAgent(st.To) && st.To != w.ParentAgent {
+	if st.To != "" && !w.hasAgent(st.To) {
 		return fmt.Errorf("task recipient %s is not part of workspace", st.To)
 	}
 
@@ -602,4 +924,44 @@ func (w *Workspace) GetEnabledScheduledTasks() []ScheduledTask {
 		}
 	}
 	return enabled
+}
+
+// GetTaskResults retrieves results from multiple tasks by their IDs
+// Returns a map of task ID to task result, skipping tasks that don't exist or have no result
+func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	results := make(map[string]string)
+	for _, taskID := range taskIDs {
+		for _, task := range w.Tasks {
+			if task.ID == taskID {
+				if task.Result != "" {
+					results[taskID] = task.Result
+				}
+				break
+			}
+		}
+	}
+	return results
+}
+
+// GetInputContext builds a context map that includes results from input tasks
+func (w *Workspace) GetInputContext(task *Task) map[string]interface{} {
+	context := make(map[string]interface{})
+
+	// Copy existing context
+	for k, v := range task.Context {
+		context[k] = v
+	}
+
+	// Add input task results if any
+	if len(task.InputTaskIDs) > 0 {
+		inputResults := w.GetTaskResults(task.InputTaskIDs)
+		if len(inputResults) > 0 {
+			context["input_task_results"] = inputResults
+		}
+	}
+
+	return context
 }

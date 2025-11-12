@@ -29,6 +29,14 @@
         <span class="fw-medium" style="color: var(--text-secondary); font-size: 0.875rem;">{{.CurrentAgent}} • {{.Model}}</span>
       </div>
 
+      <!-- Location Indicator -->
+      <div id="locationIndicator" class="d-flex align-items-center me-3 px-3 py-2 modern-card" style="background: var(--bg-primary); border: 1px solid var(--border-color);" title="Current location">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-2" style="color: var(--text-secondary);">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="fw-medium" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
+      </div>
+
       <!-- Theme Toggle -->
       <button class="modern-btn modern-btn-secondary" id="themeToggle" title="Toggle theme">
         <svg id="themeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

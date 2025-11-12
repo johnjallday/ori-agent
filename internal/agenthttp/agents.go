@@ -17,6 +17,45 @@ func New(state store.Store) *Handler { return &Handler{State: state} }
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		// Check if requesting a specific agent: /api/agents/{name}
+		agentName := r.URL.Query().Get("name")
+		if agentName == "" {
+			// Try to extract from path: /api/agents/AgentName
+			path := r.URL.Path
+			if len(path) > len("/api/agents/") {
+				agentName = path[len("/api/agents/"):]
+			}
+		}
+
+		// If specific agent requested, return its details
+		if agentName != "" {
+			agent, ok := h.State.GetAgent(agentName)
+			if !ok || agent == nil {
+				http.Error(w, "Agent not found", http.StatusNotFound)
+				return
+			}
+
+			// Get enabled plugins list
+			enabledPlugins := make([]string, 0, len(agent.Plugins))
+			for pluginName := range agent.Plugins {
+				enabledPlugins = append(enabledPlugins, pluginName)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"name":            agentName,
+				"type":            agent.Type,
+				"role":            agent.Role,
+				"capabilities":    agent.Capabilities,
+				"model":           agent.Settings.Model,
+				"temperature":     agent.Settings.Temperature,
+				"system_prompt":   agent.Settings.SystemPrompt,
+				"enabled_plugins": enabledPlugins,
+			})
+			return
+		}
+
+		// Otherwise, return list of all agents
 		names, current := h.State.ListAgents()
 
 		// Build agent details list with name and type
@@ -41,6 +80,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"agents":  agentInfos,
 			"current": current,

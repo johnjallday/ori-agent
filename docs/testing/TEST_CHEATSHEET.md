@@ -140,7 +140,7 @@ grep -r "^func Test" --include="*_test.go"
 export OPENAI_API_KEY="your-key"
 
 # Port in use
-lsof -i :8080
+lsof -i :8765
 kill -9 <PID>
 
 # Module issues

@@ -164,7 +164,6 @@ class PluginHealthManager {
                     </div>
                 `;
             }
-            }
 
             // Show errors/warnings if any
             if (plugin.errors && plugin.errors.length > 0) {
