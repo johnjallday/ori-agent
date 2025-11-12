@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
@@ -894,6 +895,14 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Add platform information for system info display
+	currentPlatform := platform.DetectPlatform()
+	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
+	data.Extra = map[string]interface{}{
+		"CurrentPlatform":        currentPlatform,
+		"CurrentPlatformDisplay": currentPlatformDisplay,
+	}
+
 	html, err := s.templateRenderer.RenderTemplate("settings", data)
 	if err != nil {
 		log.Printf("Failed to render settings template: %v", err)
@@ -918,6 +927,14 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 			currentAgentName = agents[0]
 		}
 		data.CurrentAgent = currentAgentName
+	}
+
+	// Add platform information for compatibility checking
+	currentPlatform := platform.DetectPlatform()
+	currentPlatformDisplay := platform.GetPlatformDisplayName(currentPlatform)
+	data.Extra = map[string]interface{}{
+		"CurrentPlatform":        currentPlatform,
+		"CurrentPlatformDisplay": currentPlatformDisplay,
 	}
 
 	html, err := s.templateRenderer.RenderTemplate("marketplace", data)

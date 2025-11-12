@@ -190,6 +190,33 @@
                 </div>
               </div>
             </div>
+
+            {{if .Extra}}
+            <div class="col-md-6">
+              <div class="p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+                <div class="d-flex justify-content-between align-items-center">
+                  <span style="color: var(--text-secondary);" title="Current platform for plugin compatibility">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M17,19H7V5H17M17,1H7C5.89,1 5,1.89 5,3V21A2,2 0 0,0 7,23H17A2,2 0 0,0 19,21V3C19,1.89 18.1,1 17,1Z"/>
+                    </svg>
+                    Platform
+                  </span>
+                  <span style="color: var(--text-primary); font-weight: 500;">{{index .Extra "CurrentPlatformDisplay"}}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+                <div class="d-flex justify-content-between align-items-center">
+                  <span style="color: var(--text-secondary);" title="Platform string used for compatibility checks">
+                    Platform ID
+                  </span>
+                  <code style="color: var(--text-primary); font-size: 0.85rem;">{{index .Extra "CurrentPlatform"}}</code>
+                </div>
+              </div>
+            </div>
+            {{end}}
           </div>
         </div>
 
