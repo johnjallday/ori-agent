@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/registry"
@@ -451,6 +452,28 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": "plugin not found in registry",
 		})
+		return
+	}
+
+	// Check platform compatibility
+	currentPlatform := platform.DetectPlatform()
+	if !pluginEntry.IsCompatibleWith(currentPlatform) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		// Build response with detailed compatibility information
+		response := map[string]any{
+			"success":             false,
+			"error":               "platform_incompatible",
+			"message":             "Plugin not available for your platform",
+			"user_platform":       currentPlatform,
+			"supported_platforms": pluginEntry.Platforms,
+			"supported_os":        pluginEntry.SupportedOS,
+			"supported_arch":      pluginEntry.SupportedArch,
+		}
+
+		log.Printf("Plugin download blocked: %s not compatible with %s", req.Name, currentPlatform)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
