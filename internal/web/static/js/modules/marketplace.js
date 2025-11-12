@@ -8,14 +8,31 @@ class PluginMarketplace {
         this.updates = [];
         this.filter = 'all';
         this.searchTerm = '';
+        this.currentPlatform = '';
+        this.currentPlatformDisplay = '';
+        this.showIncompatible = false; // Track compatibility filter state
     }
 
     async init() {
+        // Get current platform information from hidden inputs
+        this.currentPlatform = document.getElementById('currentPlatform')?.value || '';
+        this.currentPlatformDisplay = document.getElementById('currentPlatformDisplay')?.value || '';
+
+        // Restore compatibility filter state from localStorage
+        const savedState = localStorage.getItem('showIncompatiblePlugins');
+        this.showIncompatible = savedState === 'true';
+
         // Load marketplace data
         await this.loadMarketplaceData();
 
         // Setup event listeners
         this.setupEventListeners();
+
+        // Set initial toggle state
+        const toggle = document.getElementById('showIncompatibleToggle');
+        if (toggle) {
+            toggle.checked = this.showIncompatible;
+        }
 
         // Render initial view
         this.render();
@@ -84,6 +101,102 @@ class PluginMarketplace {
             await this.loadMarketplaceData();
             this.render();
         });
+
+        // Platform compatibility toggle
+        document.getElementById('showIncompatibleToggle')?.addEventListener('change', (e) => {
+            this.showIncompatible = e.target.checked;
+            // Save state to localStorage
+            localStorage.setItem('showIncompatiblePlugins', this.showIncompatible.toString());
+            this.render();
+        });
+    }
+
+    // Check if plugin is compatible with current platform
+    isPluginCompatible(plugin) {
+        if (!this.currentPlatform) {
+            return true; // If we can't detect platform, assume compatible
+        }
+
+        // Check platforms array first
+        if (plugin.platforms && plugin.platforms.length > 0) {
+            // If platforms contains "unknown", fall through to OS/arch check
+            if (plugin.platforms.length === 1 && plugin.platforms[0] === 'unknown') {
+                // Fall through to OS/arch check below
+            } else {
+                // Check if current platform is in the platforms array
+                return plugin.platforms.includes(this.currentPlatform) || plugin.platforms.includes('all');
+            }
+        }
+
+        // Fallback to checking supported_os and supported_arch
+        const [os, arch] = this.currentPlatform.split('-');
+
+        // If no OS support specified, assume compatible
+        if (!plugin.supported_os || plugin.supported_os.length === 0) {
+            return true;
+        }
+
+        // Check OS compatibility
+        const osCompatible = plugin.supported_os.includes(os) || plugin.supported_os.includes('all');
+
+        // If no arch support specified, just check OS
+        if (!plugin.supported_arch || plugin.supported_arch.length === 0) {
+            return osCompatible;
+        }
+
+        // Check arch compatibility
+        const archCompatible = plugin.supported_arch.includes(arch) || plugin.supported_arch.includes('all');
+
+        return osCompatible && archCompatible;
+    }
+
+    // Get platform icon badges for a plugin
+    getPlatformBadges(plugin) {
+        const badges = [];
+        const platformIcons = {
+            'darwin': '🍎',
+            'linux': '🐧',
+            'windows': '🪟',
+            'freebsd': '🐡'
+        };
+
+        // Use supported_os if available
+        if (plugin.supported_os && plugin.supported_os.length > 0) {
+            plugin.supported_os.forEach(os => {
+                if (os !== 'all' && platformIcons[os]) {
+                    const archInfo = plugin.supported_arch && plugin.supported_arch.length > 0
+                        ? ` (${plugin.supported_arch.filter(a => a !== 'all').join(', ')})`
+                        : '';
+                    badges.push(`<span class="badge bg-secondary me-1" title="${os}${archInfo}">${platformIcons[os]} ${os}</span>`);
+                }
+            });
+        }
+
+        // If "all" OS or no OS specified, show "All Platforms"
+        if (!plugin.supported_os || plugin.supported_os.length === 0 || plugin.supported_os.includes('all')) {
+            badges.push('<span class="badge bg-secondary me-1">All Platforms</span>');
+        }
+
+        return badges.join('');
+    }
+
+    // Get compatibility indicator for a plugin
+    getCompatibilityIndicator(plugin) {
+        const compatible = this.isPluginCompatible(plugin);
+
+        if (compatible) {
+            return {
+                compatible: true,
+                badge: '<span class="badge bg-success-subtle text-success me-1" title="Compatible with your platform">✅ Compatible</span>',
+                cssClass: 'compatible'
+            };
+        } else {
+            return {
+                compatible: false,
+                badge: '<span class="badge bg-warning-subtle text-warning me-1" title="Not available for your platform">⚠️ Not Available</span>',
+                cssClass: 'incompatible'
+            };
+        }
     }
 
     render() {
@@ -97,6 +210,11 @@ class PluginMarketplace {
                 const matchesSearch = plugin.name.toLowerCase().includes(this.searchTerm) ||
                     (plugin.description && plugin.description.toLowerCase().includes(this.searchTerm));
                 if (!matchesSearch) return false;
+            }
+
+            // Platform compatibility filter
+            if (!this.showIncompatible && !this.isPluginCompatible(plugin)) {
+                return false;
             }
 
             // Category filter
@@ -128,22 +246,38 @@ class PluginMarketplace {
         filteredPlugins.forEach(plugin => {
             const isInstalled = this.installedPlugins.has(plugin.name);
             const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
+            const compatibility = this.getCompatibilityIndicator(plugin);
+            const platformBadges = this.getPlatformBadges(plugin);
 
             html += `
-                <div class="col-md-6 col-lg-4 mb-4">
-                    <div class="card h-100 plugin-card" style="cursor: pointer;" onclick="marketplace.showPluginDetails('${plugin.name}')">
+                <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
+                    <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h5 class="card-title mb-0">${plugin.name}</h5>
-                                ${isInstalled ? `
-                                    <span class="badge bg-success-subtle text-success">Installed</span>
-                                ` : ''}
-                                ${hasUpdate ? `
-                                    <span class="badge bg-warning-subtle text-warning">Update</span>
-                                ` : ''}
+                                <div class="d-flex flex-column align-items-end gap-1">
+                                    ${isInstalled ? `
+                                        <span class="badge bg-success-subtle text-success">Installed</span>
+                                    ` : ''}
+                                    ${hasUpdate ? `
+                                        <span class="badge bg-warning-subtle text-warning">Update</span>
+                                    ` : ''}
+                                </div>
                             </div>
 
                             <p class="card-text text-muted small">${plugin.description || 'No description available'}</p>
+
+                            <!-- Platform badges -->
+                            ${platformBadges ? `
+                                <div class="mb-2">
+                                    ${platformBadges}
+                                </div>
+                            ` : ''}
+
+                            <!-- Compatibility indicator -->
+                            <div class="mb-2">
+                                ${compatibility.badge}
+                            </div>
 
                             <div class="mt-3">
                                 <div class="d-flex justify-content-between align-items-center small text-muted">
@@ -192,7 +326,14 @@ class PluginMarketplace {
                             </div>
                         </div>
                         <div class="card-footer bg-transparent border-top-0">
-                            ${!isInstalled ? `
+                            ${!isInstalled && !compatibility.compatible ? `
+                                <button class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                                        <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+                                    </svg>
+                                    Not Available
+                                </button>
+                            ` : !isInstalled ? `
                                 <button class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                                         <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
@@ -331,6 +472,13 @@ class PluginMarketplace {
     async installPlugin(pluginName) {
         console.log('Installing plugin:', pluginName);
 
+        // Check compatibility before installation
+        const plugin = this.plugins.find(p => p.name === pluginName);
+        if (plugin && !this.isPluginCompatible(plugin)) {
+            this.showPlatformIncompatibleModal(plugin);
+            return;
+        }
+
         // Show confirmation dialog
         if (!confirm(`Download and install ${pluginName}?`)) {
             return;
@@ -345,6 +493,12 @@ class PluginMarketplace {
 
             const result = await response.json();
 
+            // Handle platform incompatibility error from backend
+            if (!response.ok && result.error === 'platform_incompatible') {
+                this.showPlatformIncompatibleModal(plugin, result);
+                return;
+            }
+
             if (result.success) {
                 alert(`Successfully installed ${pluginName}!\n\nThe plugin has been downloaded to: ${result.path}\n\nRefreshing marketplace...`);
 
@@ -358,6 +512,79 @@ class PluginMarketplace {
             console.error('Error installing plugin:', error);
             alert(`Error installing ${pluginName}: ${error.message}`);
         }
+    }
+
+    // Show platform incompatibility modal (Task 6)
+    showPlatformIncompatibleModal(plugin, errorData = null) {
+        const modal = new bootstrap.Modal(document.getElementById('platformIncompatibleModal') || this.createPlatformIncompatibleModal());
+
+        const supportedPlatforms = errorData?.supported_platforms || plugin.platforms || [];
+        const supportedOS = errorData?.supported_os || plugin.supported_os || [];
+        const userPlatform = errorData?.user_platform || this.currentPlatform;
+
+        const platformList = supportedPlatforms.length > 0
+            ? supportedPlatforms.map(p => `<li>${this.formatPlatformName(p)}</li>`).join('')
+            : supportedOS.map(os => `<li>${os}</li>`).join('');
+
+        document.getElementById('platformIncompatibleModalBody').innerHTML = `
+            <div class="alert alert-warning">
+                <h6>Plugin Not Available for Your Platform</h6>
+                <p class="mb-0">This plugin is not compatible with <strong>${this.currentPlatformDisplay}</strong> (${userPlatform}).</p>
+            </div>
+
+            <h6>Supported Platforms:</h6>
+            <ul>
+                ${platformList}
+            </ul>
+
+            <h6>What you can do:</h6>
+            <ul>
+                <li>Contact the plugin maintainer to request support for your platform</li>
+                <li>Build the plugin manually from source if available</li>
+                <li>Look for similar plugins that support your platform</li>
+            </ul>
+        `;
+
+        modal.show();
+    }
+
+    // Helper to create platform incompatibility modal if it doesn't exist
+    createPlatformIncompatibleModal() {
+        const modalHtml = `
+            <div class="modal fade" id="platformIncompatibleModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">⚠️ Plugin Not Available</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="platformIncompatibleModalBody">
+                            <!-- Content populated by showPlatformIncompatibleModal -->
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        return document.getElementById('platformIncompatibleModal');
+    }
+
+    // Helper to format platform names for display
+    formatPlatformName(platform) {
+        const names = {
+            'darwin-amd64': 'macOS (Intel)',
+            'darwin-arm64': 'macOS (Apple Silicon)',
+            'linux-amd64': 'Linux (x86_64)',
+            'linux-arm64': 'Linux (ARM64)',
+            'windows-amd64': 'Windows (x86_64)',
+            'windows-arm64': 'Windows (ARM64)',
+            'freebsd-amd64': 'FreeBSD (x86_64)',
+            'freebsd-arm64': 'FreeBSD (ARM64)'
+        };
+        return names[platform] || platform;
     }
 
     async updatePlugin(pluginName) {
