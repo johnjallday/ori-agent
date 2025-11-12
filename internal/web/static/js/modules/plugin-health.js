@@ -42,7 +42,7 @@ class PluginHealthManager {
         const plugins = this.healthData.plugins || [];
 
         if (plugins.length === 0) {
-            container.innerHTML = '<p class="small mb-0" style="color: var(--text-muted);">No plugins loaded</p>';
+            container.innerHTML = '<p class="small mb-0" style="color: var(--text-primary);">No plugins loaded</p>';
             return;
         }
 

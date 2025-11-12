@@ -93,7 +93,7 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
   if (!pluginsList) return;
 
   if (plugins.length === 0) {
-    pluginsList.innerHTML = '<div class="text-muted small">No plugins available</div>';
+    pluginsList.innerHTML = '<div class="small" style="color: var(--text-primary);">No plugins available</div>';
     return;
   }
 
@@ -340,12 +340,12 @@ async function removePlugin(pluginName, pluginPath) {
   const response = await fetch(`/api/plugin-registry?name=${encodeURIComponent(pluginName)}`, {
     method: 'DELETE'
   });
-  
+
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(errorText || 'Failed to remove plugin');
   }
-  
+
   console.log(`Plugin ${pluginName} removed successfully from registry and filesystem`);
 }
 
@@ -354,7 +354,7 @@ async function removePlugin(pluginName, pluginPath) {
 function showPluginUploadModal() {
   const modal = new bootstrap.Modal(document.getElementById('pluginUploadModal'));
   modal.show();
-  
+
   // Setup drag and drop and file input listeners only once
   if (!uploadListenersSetup) {
     setupUploadListeners();
@@ -365,9 +365,9 @@ function showPluginUploadModal() {
 function setupUploadListeners() {
   const dropZone = document.getElementById('uploadDropZone');
   const fileInput = document.getElementById('pluginFileInput');
-  
+
   if (!dropZone || !fileInput) return;
-  
+
   // Drag and drop events
   dropZone.addEventListener('dragover', handleDragOver);
   dropZone.addEventListener('dragleave', handleDragLeave);
@@ -395,7 +395,7 @@ function handleDrop(e) {
   const dropZone = document.getElementById('uploadDropZone');
   dropZone.style.borderColor = 'var(--border-color)';
   dropZone.style.backgroundColor = 'var(--bg-secondary)';
-  
+
   const files = e.dataTransfer.files;
   if (files.length > 0) {
     handlePluginFile(files[0]);
@@ -407,7 +407,7 @@ function handleDropZoneClick(e) {
   if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
     return;
   }
-  
+
   const fileInput = document.getElementById('pluginFileInput');
   fileInput.click();
 }
@@ -439,19 +439,19 @@ function handlePluginFile(file) {
 async function uploadPluginFile(file) {
   const formData = new FormData();
   formData.append('plugin', file);
-  
+
   const progressDiv = document.getElementById('uploadProgress');
   const progressBar = document.getElementById('uploadProgressBar');
   const progressPercent = document.getElementById('uploadPercent');
   const resultDiv = document.getElementById('uploadResult');
-  
+
   // Show progress, hide result
   progressDiv.classList.remove('d-none');
   resultDiv.classList.add('d-none');
-  
+
   try {
     const xhr = new XMLHttpRequest();
-    
+
     // Track upload progress
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
@@ -461,22 +461,22 @@ async function uploadPluginFile(file) {
         progressPercent.textContent = Math.round(percentComplete) + '%';
       }
     });
-    
+
     // Handle completion
     xhr.addEventListener('load', () => {
       progressDiv.classList.add('d-none');
-      
+
       if (xhr.status === 200) {
         showUploadResult('success', 'Plugin uploaded successfully!');
-        
+
         // Refresh plugins in sidebar
         setTimeout(() => {
           loadPlugins();
         }, 1000);
-        
+
         // Reset file input
         document.getElementById('pluginFileInput').value = '';
-        
+
       } else {
         let errorMessage = 'Upload failed';
         try {
@@ -488,16 +488,16 @@ async function uploadPluginFile(file) {
         showUploadResult('error', errorMessage);
       }
     });
-    
+
     xhr.addEventListener('error', () => {
       progressDiv.classList.add('d-none');
       showUploadResult('error', 'Network error occurred during upload');
     });
-    
+
     // Start upload
     xhr.open('POST', '/api/plugins/upload');
     xhr.send(formData);
-    
+
   } catch (error) {
     progressDiv.classList.add('d-none');
     showUploadResult('error', 'Upload failed: ' + error.message);
@@ -507,12 +507,12 @@ async function uploadPluginFile(file) {
 function showUploadResult(type, message) {
   const resultDiv = document.getElementById('uploadResult');
   if (!resultDiv) return;
-  
+
   const isSuccess = type === 'success';
-  const iconPath = isSuccess 
+  const iconPath = isSuccess
     ? 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z'
     : 'M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z';
-  
+
   resultDiv.innerHTML = `
     <div class="alert alert-${isSuccess ? 'success' : 'danger'}" role="alert">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
@@ -521,7 +521,7 @@ function showUploadResult(type, message) {
       ${message}
     </div>
   `;
-  
+
   resultDiv.classList.remove('d-none');
 }
 
