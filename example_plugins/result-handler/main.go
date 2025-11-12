@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -13,13 +14,19 @@ import (
 	"github.com/openai/openai-go/v2"
 )
 
+//go:embed plugin.yaml
+var configYAML string
+
 // resultHandlerTool implements pluginapi.Tool for handling chat result actions
-type resultHandlerTool struct{}
+type resultHandlerTool struct {
+	config pluginapi.PluginConfig
+}
 
 // Ensure compile-time conformance
 var _ pluginapi.Tool = resultHandlerTool{}
 var _ pluginapi.VersionedTool = resultHandlerTool{}
 var _ pluginapi.PluginCompatibility = resultHandlerTool{}
+var _ pluginapi.MetadataProvider = resultHandlerTool{}
 
 func (t resultHandlerTool) Definition() openai.FunctionDefinitionParam {
 	return openai.FunctionDefinitionParam{
@@ -185,14 +192,14 @@ func getFileManagerName() string {
 	}
 }
 
-// Version returns the plugin version.
+// Version returns the plugin version from config.
 func (t resultHandlerTool) Version() string {
-	return "0.0.1"
+	return t.config.Version
 }
 
-// MinAgentVersion returns the minimum compatible agent version (empty = no limit).
+// MinAgentVersion returns the minimum compatible agent version from config.
 func (t resultHandlerTool) MinAgentVersion() string {
-	return ""
+	return t.config.Requirements.MinOriVersion
 }
 
 // MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
@@ -205,11 +212,19 @@ func (t resultHandlerTool) APIVersion() string {
 	return "v1"
 }
 
+// GetMetadata returns plugin metadata from config.
+func (t resultHandlerTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
+	return t.config.ToMetadata()
+}
+
 func main() {
+	// Parse plugin config from embedded YAML
+	config := pluginapi.ReadPluginConfig(configYAML)
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: resultHandlerTool{}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: resultHandlerTool{config: config}},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

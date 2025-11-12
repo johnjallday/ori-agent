@@ -129,11 +129,28 @@ message Maintainer {
     bool primary = 6;                  // Is this the primary/original author?
 }
 
+// Platform represents a supported operating system and its architectures
+message Platform {
+    string os = 1;                     // Operating system (e.g., "darwin", "linux", "windows")
+    repeated string architectures = 2; // Supported architectures (e.g., "amd64", "arm64")
+}
+
+// Requirements represents plugin dependencies and version requirements
+message Requirements {
+    string min_ori_version = 1;        // Minimum ori-agent version required
+    repeated string dependencies = 2;  // List of required plugin names
+}
+
 // PluginMetadata contains comprehensive plugin information
 message PluginMetadata {
-    repeated Maintainer maintainers = 1;
-    string license = 2;                // e.g., "MIT", "Apache-2.0", "GPL-3.0"
-    string repository = 3;             // Source code repository URL
+    string name = 1;                   // Plugin name
+    string version = 2;                // Plugin version (semver)
+    string description = 3;            // Short description of the plugin
+    string license = 4;                // e.g., "MIT", "Apache-2.0", "GPL-3.0"
+    string repository = 5;             // Source code repository URL
+    repeated Maintainer maintainers = 6;
+    repeated Platform platforms = 7;   // Supported platforms
+    Requirements requirements = 8;     // Plugin requirements
 }
 
 // MetadataResponse contains plugin metadata

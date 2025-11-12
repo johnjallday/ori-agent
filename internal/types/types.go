@@ -66,11 +66,28 @@ type Maintainer struct {
 	Primary      bool   `json:"primary,omitempty"`      // Is this the primary/original author?
 }
 
+// Platform represents a supported operating system and its architectures
+type Platform struct {
+	Os            string   `json:"os"`            // Operating system (e.g., "darwin", "linux", "windows")
+	Architectures []string `json:"architectures"` // Supported architectures (e.g., "amd64", "arm64")
+}
+
+// Requirements represents plugin dependencies and version requirements
+type Requirements struct {
+	MinOriVersion string   `json:"min_ori_version,omitempty"` // Minimum ori-agent version required
+	Dependencies  []string `json:"dependencies,omitempty"`    // List of required plugin names
+}
+
 // PluginMetadata contains comprehensive plugin information
 type PluginMetadata struct {
-	Maintainers []Maintainer `json:"maintainers,omitempty"`
-	License     string       `json:"license,omitempty"`    // e.g., "MIT", "Apache-2.0", "GPL-3.0"
-	Repository  string       `json:"repository,omitempty"` // Source code repository URL
+	Name         string       `json:"name,omitempty"`        // Plugin name
+	Version      string       `json:"version,omitempty"`     // Plugin version (semver)
+	Description  string       `json:"description,omitempty"` // Short description of the plugin
+	Maintainers  []Maintainer `json:"maintainers,omitempty"`
+	License      string       `json:"license,omitempty"`      // e.g., "MIT", "Apache-2.0", "GPL-3.0"
+	Repository   string       `json:"repository,omitempty"`   // Source code repository URL
+	Platforms    []Platform   `json:"platforms,omitempty"`    // Supported platforms
+	Requirements Requirements `json:"requirements,omitempty"` // Plugin requirements
 }
 
 // PluginRegistryEntry represents a plugin in the plugin registry

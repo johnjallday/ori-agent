@@ -179,10 +179,31 @@ func (m *Manager) ScanUploadedPlugins() error {
 						Primary:      m.Primary,
 					}
 				}
+
+				// Convert platforms
+				platforms := make([]types.Platform, len(protoMeta.Platforms))
+				for i, p := range protoMeta.Platforms {
+					platforms[i] = types.Platform{
+						Os:            p.Os,
+						Architectures: p.Architectures,
+					}
+				}
+
+				// Convert requirements
+				requirements := types.Requirements{
+					MinOriVersion: protoMeta.Requirements.GetMinOriVersion(),
+					Dependencies:  protoMeta.Requirements.GetDependencies(),
+				}
+
 				metadata = &types.PluginMetadata{
-					Maintainers: maintainers,
-					License:     protoMeta.License,
-					Repository:  protoMeta.Repository,
+					Name:         protoMeta.Name,
+					Version:      protoMeta.Version,
+					Description:  protoMeta.Description,
+					Maintainers:  maintainers,
+					License:      protoMeta.License,
+					Repository:   protoMeta.Repository,
+					Platforms:    platforms,
+					Requirements: requirements,
 				}
 			}
 
@@ -281,10 +302,31 @@ func (m *Manager) RefreshLocalRegistry() error {
 						Primary:      m.Primary,
 					}
 				}
+
+				// Convert platforms
+				platforms := make([]types.Platform, len(protoMeta.Platforms))
+				for i, p := range protoMeta.Platforms {
+					platforms[i] = types.Platform{
+						Os:            p.Os,
+						Architectures: p.Architectures,
+					}
+				}
+
+				// Convert requirements
+				requirements := types.Requirements{
+					MinOriVersion: protoMeta.Requirements.GetMinOriVersion(),
+					Dependencies:  protoMeta.Requirements.GetDependencies(),
+				}
+
 				metadata = &types.PluginMetadata{
-					Maintainers: maintainers,
-					License:     protoMeta.License,
-					Repository:  protoMeta.Repository,
+					Name:         protoMeta.Name,
+					Version:      protoMeta.Version,
+					Description:  protoMeta.Description,
+					Maintainers:  maintainers,
+					License:      protoMeta.License,
+					Repository:   protoMeta.Repository,
+					Platforms:    platforms,
+					Requirements: requirements,
 				}
 			}
 

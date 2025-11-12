@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,13 +11,19 @@ import (
 	"github.com/openai/openai-go/v2"
 )
 
+//go:embed plugin.yaml
+var configYAML string
+
 // ensure weatherTool implements pluginapi.Tool and pluginapi.VersionedTool
 var _ pluginapi.Tool = (*weatherTool)(nil)
 var _ pluginapi.VersionedTool = (*weatherTool)(nil)
 var _ pluginapi.PluginCompatibility = (*weatherTool)(nil)
+var _ pluginapi.MetadataProvider = (*weatherTool)(nil)
 
 // weatherTool implements pluginapi.Tool for fetching weather.
-type weatherTool struct{}
+type weatherTool struct {
+	config pluginapi.PluginConfig
+}
 
 // Definition returns the OpenAI function definition for get_weather.
 func (w *weatherTool) Definition() openai.FunctionDefinitionParam {
@@ -49,14 +56,14 @@ func (w *weatherTool) Call(ctx context.Context, args string) (string, error) {
 	return result, nil
 }
 
-// Version returns the plugin version.
+// Version returns the plugin version from config.
 func (w *weatherTool) Version() string {
-	return "1.0.0"
+	return w.config.Version
 }
 
-// MinAgentVersion returns the minimum compatible agent version (empty = no limit).
+// MinAgentVersion returns the minimum compatible agent version from config.
 func (w *weatherTool) MinAgentVersion() string {
-	return ""
+	return w.config.Requirements.MinOriVersion
 }
 
 // MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
@@ -69,11 +76,19 @@ func (w *weatherTool) APIVersion() string {
 	return "v1"
 }
 
+// GetMetadata returns plugin metadata from config.
+func (w *weatherTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
+	return w.config.ToMetadata()
+}
+
 func main() {
+	// Parse plugin config from embedded YAML
+	config := pluginapi.ReadPluginConfig(configYAML)
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: &weatherTool{}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: &weatherTool{config: config}},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

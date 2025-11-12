@@ -1,0 +1,21 @@
+name: result_handler
+version: 0.0.1
+description: Handle actions on chat results like opening directories, files, or URLs
+license: MIT
+repository: https://github.com/johnjallday/ori-agent
+
+maintainers:
+  - name: Ori Agent Team
+    email: noreply@ori-agent.dev
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
+
+requirements:
+  min_ori_version: "0.1.0"
+  dependencies: []

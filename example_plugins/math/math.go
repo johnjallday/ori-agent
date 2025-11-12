@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,13 +12,19 @@ import (
 	"github.com/openai/openai-go/v2"
 )
 
+//go:embed plugin.yaml
+var configYAML string
+
 // mathTool implements pluginapi.Tool for basic arithmetic operations.
-type mathTool struct{}
+type mathTool struct {
+	config pluginapi.PluginConfig
+}
 
 // ensure mathTool implements pluginapi.Tool and pluginapi.VersionedTool at compile time
 var _ pluginapi.Tool = (*mathTool)(nil)
 var _ pluginapi.VersionedTool = (*mathTool)(nil)
 var _ pluginapi.PluginCompatibility = (*mathTool)(nil)
+var _ pluginapi.MetadataProvider = (*mathTool)(nil)
 
 // Definition returns the OpenAI function definition for the math operation.
 func (m *mathTool) Definition() openai.FunctionDefinitionParam {
@@ -75,14 +82,14 @@ func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
 	return fmt.Sprintf("%g", result), nil
 }
 
-// Version returns the plugin version.
+// Version returns the plugin version from config.
 func (m *mathTool) Version() string {
-	return "1.0.0"
+	return m.config.Version
 }
 
-// MinAgentVersion returns the minimum compatible agent version (empty = no limit).
+// MinAgentVersion returns the minimum compatible agent version from config.
 func (m *mathTool) MinAgentVersion() string {
-	return ""
+	return m.config.Requirements.MinOriVersion
 }
 
 // MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
@@ -95,11 +102,19 @@ func (m *mathTool) APIVersion() string {
 	return "v1"
 }
 
+// GetMetadata returns plugin metadata from config.
+func (m *mathTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
+	return m.config.ToMetadata()
+}
+
 func main() {
+	// Parse plugin config from embedded YAML
+	config := pluginapi.ReadPluginConfig(configYAML)
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: &mathTool{}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: &mathTool{config: config}},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

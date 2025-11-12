@@ -1,0 +1,21 @@
+name: get_weather
+version: 1.0.0
+description: Get weather information for a given location (mock implementation)
+license: MIT
+repository: https://github.com/johnjallday/ori-agent
+
+maintainers:
+  - name: Ori Agent Team
+    email: noreply@ori-agent.dev
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
+
+requirements:
+  min_ori_version: "0.1.0"
+  dependencies: []
