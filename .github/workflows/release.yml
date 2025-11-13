@@ -6,8 +6,132 @@ on:
       - 'v*.*.*'
 
 jobs:
+  build-macos:
+    name: Build macOS Binaries
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: macos-13  # Intel runner
+          - arch: arm64
+            runner: macos-latest  # Apple Silicon runner
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build menubar app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Building menubar app for darwin/${{ matrix.arch }}..."
+          CGO_ENABLED=1 go build -o ori-menubar-darwin-${{ matrix.arch }} ./cmd/menubar
+
+      - name: Create .app bundle and DMG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="${{ matrix.arch }}"
+          BINARY="ori-menubar-darwin-${ARCH}"
+          BUILD_DIR="build-dmg-${ARCH}"
+          APP_NAME="Ori Agent"
+          DMG_NAME="OriAgent-${VERSION}-${ARCH}.dmg"
+
+          echo "Creating DMG for ${ARCH}..."
+
+          # Create build directory
+          mkdir -p "$BUILD_DIR"
+
+          # Create .app bundle structure
+          APP_BUNDLE="$BUILD_DIR/OriAgent.app"
+          mkdir -p "$APP_BUNDLE/Contents/MacOS"
+          mkdir -p "$APP_BUNDLE/Contents/Resources"
+
+          # Create launcher script
+          cat > "$APP_BUNDLE/Contents/MacOS/OriAgent" <<'EOF'
+          #!/bin/bash
+          APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+          RESOURCES_DIR="$APP_DIR/Contents/Resources"
+          DATA_DIR="$HOME/Library/Application Support/OriAgent"
+          mkdir -p "$DATA_DIR"
+          mkdir -p "$HOME/Library/Logs"
+          cd "$DATA_DIR"
+          nohup "$RESOURCES_DIR/ori-menubar" > "$HOME/Library/Logs/ori-menubar.log" 2>&1 &
+          sleep 0.5
+          exit 0
+          EOF
+          chmod +x "$APP_BUNDLE/Contents/MacOS/OriAgent"
+
+          # Create Info.plist
+          cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>OriAgent</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.ori.ori-agent</string>
+              <key>CFBundleName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleDisplayName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.15</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>LSUIElement</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+
+          # Copy binary
+          cp "$BINARY" "$APP_BUNDLE/Contents/Resources/ori-menubar"
+          chmod +x "$APP_BUNDLE/Contents/Resources/ori-menubar"
+
+          # Create DMG staging area
+          DMG_STAGING="$BUILD_DIR/dmg-staging"
+          mkdir -p "$DMG_STAGING"
+          cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+
+          # Create releases directory
+          mkdir -p releases
+
+          # Create DMG
+          hdiutil create \
+            -srcfolder "$DMG_STAGING" \
+            -volname "${APP_NAME} ${VERSION}" \
+            -fs HFS+ \
+            -fsargs "-c c=64,a=16,e=16" \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "releases/$DMG_NAME"
+
+          echo "✅ Created releases/$DMG_NAME"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: releases/*.dmg
+          retention-days: 1
+
   release:
     name: Create Release
+    needs: build-macos
     runs-on: macos-latest
     permissions:
       contents: write
@@ -39,116 +163,12 @@ jobs:
           # Windows
           GOOS=windows GOARCH=amd64 go build -o bin/ori-agent-windows-amd64.exe ./cmd/server
 
-      - name: Build macOS DMG installers
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-
-          # Build menubar binaries for macOS
-          echo "Building menubar app for darwin/amd64..."
-          GOOS=darwin GOARCH=amd64 go build -o bin/ori-menubar-darwin-amd64 ./cmd/menubar
-
-          echo "Building menubar app for darwin/arm64..."
-          GOOS=darwin GOARCH=arm64 go build -o bin/ori-menubar-darwin-arm64 ./cmd/menubar
-
-          # Create releases directory
-          mkdir -p releases
-
-          # Function to create DMG
-          create_dmg() {
-            local ARCH=$1
-            local BINARY="bin/ori-menubar-darwin-${ARCH}"
-            local BUILD_DIR="build-dmg-${ARCH}"
-            local APP_NAME="Ori Agent"
-            local DMG_NAME="OriAgent-${VERSION}-${ARCH}.dmg"
-
-            echo "Creating DMG for ${ARCH}..."
-
-            # Create build directory
-            rm -rf "$BUILD_DIR"
-            mkdir -p "$BUILD_DIR"
-
-            # Create .app bundle structure
-            APP_BUNDLE="$BUILD_DIR/OriAgent.app"
-            mkdir -p "$APP_BUNDLE/Contents/MacOS"
-            mkdir -p "$APP_BUNDLE/Contents/Resources"
-
-            # Create launcher script
-            cat > "$APP_BUNDLE/Contents/MacOS/OriAgent" <<'EOF'
-          #!/bin/bash
-          APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-          RESOURCES_DIR="$APP_DIR/Contents/Resources"
-          DATA_DIR="$HOME/Library/Application Support/OriAgent"
-          mkdir -p "$DATA_DIR"
-          mkdir -p "$HOME/Library/Logs"
-          cd "$DATA_DIR"
-          nohup "$RESOURCES_DIR/ori-menubar" > "$HOME/Library/Logs/ori-menubar.log" 2>&1 &
-          sleep 0.5
-          exit 0
-          EOF
-            chmod +x "$APP_BUNDLE/Contents/MacOS/OriAgent"
-
-            # Create Info.plist
-            cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>OriAgent</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.ori.ori-agent</string>
-              <key>CFBundleName</key>
-              <string>${APP_NAME}</string>
-              <key>CFBundleDisplayName</key>
-              <string>${APP_NAME}</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
-              <key>CFBundleVersion</key>
-              <string>${VERSION}</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>10.15</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>LSUIElement</key>
-              <false/>
-          </dict>
-          </plist>
-          EOF
-
-            # Copy binary
-            cp "$BINARY" "$APP_BUNDLE/Contents/Resources/ori-menubar"
-            chmod +x "$APP_BUNDLE/Contents/Resources/ori-menubar"
-
-            # Create DMG staging area
-            DMG_STAGING="$BUILD_DIR/dmg-staging"
-            mkdir -p "$DMG_STAGING"
-            cp -R "$APP_BUNDLE" "$DMG_STAGING/"
-            ln -s /Applications "$DMG_STAGING/Applications"
-
-            # Create DMG
-            hdiutil create \
-              -srcfolder "$DMG_STAGING" \
-              -volname "${APP_NAME} ${VERSION}" \
-              -fs HFS+ \
-              -fsargs "-c c=64,a=16,e=16" \
-              -format UDZO \
-              -imagekey zlib-level=9 \
-              "releases/$DMG_NAME"
-
-            # Clean up
-            rm -rf "$BUILD_DIR"
-
-            echo "✅ Created releases/$DMG_NAME"
-          }
-
-          # Create DMGs for both architectures
-          create_dmg "amd64"
-          create_dmg "arm64"
-
-          # List created files
-          ls -lh releases/
+      - name: Download DMG artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          path: releases
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
