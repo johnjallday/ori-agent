@@ -10,13 +10,12 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
-// RPCPluginClient wraps a plugin client connection and implements pluginapi.Tool
+// RPCPluginClient wraps a plugin client connection and implements pluginapi.PluginTool
 type RPCPluginClient struct {
 	client *plugin.Client
-	tool   pluginapi.Tool
+	tool   pluginapi.PluginTool
 }
 
 // LoadPluginRPC loads a plugin executable via go-plugin RPC
@@ -62,11 +61,11 @@ func LoadPluginRPC(path string) (*RPCPluginClient, error) {
 		return nil, fmt.Errorf("failed to dispense plugin: %w", err)
 	}
 
-	// Cast to Tool interface
-	tool, ok := raw.(pluginapi.Tool)
+	// Cast to PluginTool interface
+	tool, ok := raw.(pluginapi.PluginTool)
 	if !ok {
 		client.Kill()
-		return nil, fmt.Errorf("plugin does not implement Tool interface")
+		return nil, fmt.Errorf("plugin does not implement PluginTool interface")
 	}
 
 	return &RPCPluginClient{
@@ -75,12 +74,12 @@ func LoadPluginRPC(path string) (*RPCPluginClient, error) {
 	}, nil
 }
 
-// Definition implements pluginapi.Tool
-func (r *RPCPluginClient) Definition() openai.FunctionDefinitionParam {
+// Definition implements pluginapi.PluginTool
+func (r *RPCPluginClient) Definition() pluginapi.Tool {
 	return r.tool.Definition()
 }
 
-// Call implements pluginapi.Tool
+// Call implements pluginapi.PluginTool
 func (r *RPCPluginClient) Call(ctx context.Context, args string) (string, error) {
 	return r.tool.Call(ctx, args)
 }

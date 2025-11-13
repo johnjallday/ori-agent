@@ -8,32 +8,33 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
 //go:embed plugin.yaml
 var configYAML string
 
-// ensure weatherTool implements pluginapi.Tool and pluginapi.VersionedTool
-var _ pluginapi.Tool = (*weatherTool)(nil)
-var _ pluginapi.VersionedTool = (*weatherTool)(nil)
-var _ pluginapi.PluginCompatibility = (*weatherTool)(nil)
-var _ pluginapi.MetadataProvider = (*weatherTool)(nil)
+// ensure weatherTool implements pluginapi.PluginTool and optional interfaces
+var (
+	_ pluginapi.PluginTool          = (*weatherTool)(nil)
+	_ pluginapi.VersionedTool       = (*weatherTool)(nil)
+	_ pluginapi.PluginCompatibility = (*weatherTool)(nil)
+	_ pluginapi.MetadataProvider    = (*weatherTool)(nil)
+)
 
 // weatherTool implements pluginapi.Tool for fetching weather.
 type weatherTool struct {
-	config pluginapi.PluginConfig
+	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
-// Definition returns the OpenAI function definition for get_weather.
-func (w *weatherTool) Definition() openai.FunctionDefinitionParam {
-	return openai.FunctionDefinitionParam{
+// Definition returns the generic function definition for get_weather.
+func (w *weatherTool) Definition() pluginapi.Tool {
+	return pluginapi.Tool{
 		Name:        "get_weather",
-		Description: openai.String("Get weather for a given location"),
-		Parameters: openai.FunctionParameters{
+		Description: "Get weather for a given location",
+		Parameters: map[string]interface{}{
 			"type": "object",
-			"properties": map[string]any{
-				"location": map[string]any{
+			"properties": map[string]interface{}{
+				"location": map[string]interface{}{
 					"type":        "string",
 					"description": "Location to get weather for",
 				},
@@ -56,39 +57,30 @@ func (w *weatherTool) Call(ctx context.Context, args string) (string, error) {
 	return result, nil
 }
 
-// Version returns the plugin version from config.
-func (w *weatherTool) Version() string {
-	return w.config.Version
-}
-
-// MinAgentVersion returns the minimum compatible agent version from config.
-func (w *weatherTool) MinAgentVersion() string {
-	return w.config.Requirements.MinOriVersion
-}
-
-// MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
-func (w *weatherTool) MaxAgentVersion() string {
-	return ""
-}
-
-// APIVersion returns the API version this plugin implements.
-func (w *weatherTool) APIVersion() string {
-	return "v1"
-}
-
-// GetMetadata returns plugin metadata from config.
-func (w *weatherTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
-	return w.config.ToMetadata()
-}
-
 func main() {
 	// Parse plugin config from embedded YAML
 	config := pluginapi.ReadPluginConfig(configYAML)
 
+	// Create weather tool with base plugin
+	tool := &weatherTool{
+		BasePlugin: pluginapi.NewBasePlugin(
+			"weather",                         // Plugin name
+			config.Version,                    // Version from config
+			config.Requirements.MinOriVersion, // Min agent version
+			"",                                // Max agent version (no limit)
+			"v1",                              // API version
+		),
+	}
+
+	// Set metadata from config
+	if metadata, err := config.ToMetadata(); err == nil {
+		tool.SetMetadata(metadata)
+	}
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: &weatherTool{config: config}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: tool},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

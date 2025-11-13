@@ -10,27 +10,21 @@ import (
 // GRPCServer implements the gRPC server for plugins
 type GRPCServer struct {
 	pluginapi.UnimplementedToolServiceServer
-	Impl pluginapi.Tool
+	Impl pluginapi.PluginTool
 }
 
-func (s *GRPCServer) GetDefinition(ctx context.Context, _ *pluginapi.Empty) (*pluginapi.FunctionDefinition, error) {
+func (s *GRPCServer) GetDefinition(ctx context.Context, _ *pluginapi.Empty) (*pluginapi.ToolDefinition, error) {
 	def := s.Impl.Definition()
 
-	// Convert OpenAI definition to protobuf message
+	// Convert generic definition to protobuf message
 	paramsJSON, err := json.Marshal(def.Parameters)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract description from param.Opt[string]
-	desc := ""
-	if def.Description.Valid() {
-		desc = def.Description.Value
-	}
-
-	return &pluginapi.FunctionDefinition{
+	return &pluginapi.ToolDefinition{
 		Name:           def.Name,
-		Description:    desc,
+		Description:    def.Description,
 		ParametersJson: string(paramsJSON),
 	}, nil
 }

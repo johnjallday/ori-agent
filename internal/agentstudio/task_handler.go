@@ -255,12 +255,10 @@ func (h *LLMTaskHandler) convertPluginsToTools(ag *agent.Agent) []llm.Tool {
 
 		def := plugin.Tool.Definition()
 
-		// Extract description
-		desc := def.Description.String()
-
+		// Definition is already in generic pluginapi.Tool format
 		tools = append(tools, llm.Tool{
 			Name:        def.Name,
-			Description: desc,
+			Description: def.Description,
 			Parameters:  def.Parameters,
 		})
 	}
@@ -300,7 +298,7 @@ func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, a
 	}
 
 	// Find the tool
-	var tool pluginapi.Tool
+	var tool pluginapi.PluginTool
 	for _, plugin := range ag.Plugins {
 		if plugin.Tool != nil && plugin.Tool.Definition().Name == toolCall.Name {
 			tool = plugin.Tool

@@ -143,7 +143,7 @@ func (m *Manager) GetHealthHistory(pluginName string, limit int) []HealthEvent {
 
 // StartPeriodicChecks starts background periodic health checks
 // It accepts a function that returns all loaded plugins
-func (m *Manager) StartPeriodicChecks(getPlugins func() map[string]pluginapi.Tool) {
+func (m *Manager) StartPeriodicChecks(getPlugins func() map[string]pluginapi.PluginTool) {
 	go func() {
 		ticker := time.NewTicker(m.periodicCheckInterval)
 		defer ticker.Stop()
@@ -182,7 +182,7 @@ func (m *Manager) StopPeriodicChecks() {
 }
 
 // CheckAndCachePlugin performs a health check and caches the result
-func (m *Manager) CheckAndCachePlugin(name string, tool pluginapi.Tool) health.CheckResult {
+func (m *Manager) CheckAndCachePlugin(name string, tool pluginapi.PluginTool) health.CheckResult {
 	result := m.checker.CheckPlugin(name, tool)
 
 	// Get old status for comparison

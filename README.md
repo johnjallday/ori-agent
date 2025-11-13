@@ -222,10 +222,99 @@ This bypasses OpenAI API calls for faster, free plugin execution.
 For detailed information on creating custom plugins, see the Plugin Development section in [CLAUDE.md](CLAUDE.md#plugin-development).
 
 **Quick Overview:**
-- Plugins are Go shared libraries (`.so` files) that implement the `pluginapi.Tool` interface
+- Plugins are **RPC executables** (not shared libraries) that implement the `pluginapi.PluginTool` interface
+- Communication via gRPC using Protocol Buffers
+- Provider-agnostic: Works with OpenAI, Claude, Ollama, and future LLM providers
 - Support for initialization, configuration, and agent-specific contexts
 - Can return structured results (tables, modals, lists) for enhanced UI display
-- Example plugins included: Math, Weather, Result Handler, and REAPER Script Launcher
+- Example plugins included: Math, Weather, Result Handler
+
+**Basic Plugin Interface:**
+
+```go
+package main
+
+import (
+    "context"
+    _ "embed"
+    "github.com/hashicorp/go-plugin"
+    "github.com/johnjallday/ori-agent/pluginapi"
+)
+
+//go:embed plugin.yaml
+var configYAML string
+
+type myTool struct {
+    pluginapi.BasePlugin // Embed to eliminate boilerplate getter methods!
+}
+
+// Implement PluginTool interface
+var _ pluginapi.PluginTool = (*myTool)(nil)
+
+func (m *myTool) Definition() pluginapi.Tool {
+    return pluginapi.Tool{
+        Name:        "my_tool",
+        Description: "Does something useful",
+        Parameters: map[string]interface{}{
+            "type": "object",
+            "properties": map[string]interface{}{
+                "param1": map[string]interface{}{
+                    "type":        "string",
+                    "description": "First parameter",
+                },
+            },
+            "required": []string{"param1"},
+        },
+    }
+}
+
+func (m *myTool) Call(ctx context.Context, args string) (string, error) {
+    // Implementation
+    return "result", nil
+}
+
+func main() {
+    config := pluginapi.ReadPluginConfig(configYAML)
+
+    tool := &myTool{
+        BasePlugin: pluginapi.NewBasePlugin(
+            "my-tool",                         // Plugin name
+            config.Version,                    // Version
+            config.Requirements.MinOriVersion, // Min agent version
+            "",                                // Max agent version (no limit)
+            "v1",                              // API version
+        ),
+    }
+
+    plugin.Serve(&plugin.ServeConfig{
+        HandshakeConfig: pluginapi.Handshake,
+        Plugins: map[string]plugin.Plugin{
+            "tool": &pluginapi.ToolRPCPlugin{Impl: tool},
+        },
+        GRPCServer: plugin.DefaultGRPCServer,
+    })
+}
+```
+
+**No More Boilerplate!**
+
+By embedding `pluginapi.BasePlugin`, you automatically get implementations for:
+- `Version()`, `MinAgentVersion()`, `MaxAgentVersion()`, `APIVersion()`
+- `SetAgentContext()` / `GetAgentContext()` for agent context
+- `GetMetadata()` for plugin metadata
+- `GetDefaultSettings()` for default configuration
+
+This eliminates 20-30 lines of repetitive getter methods from every plugin!
+
+**Building Plugins:**
+
+```bash
+# Build as standalone executable
+cd my-plugin
+go build -o my-plugin main.go
+
+# NOT as a shared library (no -buildmode=plugin)
+```
 
 **Structured Result System:**
 
@@ -258,6 +347,9 @@ return result.ToJSON()
 - `card` - Card-based layouts
 - `json` - Formatted JSON display
 - `text` - Plain text (default)
+
+**Migration Guide:**
+If you have existing plugins using the old OpenAI-specific interface, see [PLUGIN_MIGRATION_GUIDE.md](PLUGIN_MIGRATION_GUIDE.md) for step-by-step migration instructions.
 
 See the Plugin Development section in [CLAUDE.md](CLAUDE.md#plugin-development) for complete examples.
 

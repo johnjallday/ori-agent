@@ -12,7 +12,7 @@ import (
 
 // GetPluginVersion extracts version information from a plugin tool.
 // Returns empty string if the plugin doesn't implement VersionedTool.
-func GetPluginVersion(tool pluginapi.Tool) string {
+func GetPluginVersion(tool pluginapi.PluginTool) string {
 	if versionedTool, ok := tool.(pluginapi.VersionedTool); ok {
 		return versionedTool.Version()
 	}
@@ -46,7 +46,7 @@ func mapConfigTypeToFrontendType(configType pluginapi.ConfigVariableType) string
 }
 
 // SetAgentContext sets the agent context for plugins that support it.
-func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath, currentLocation string) {
+func SetAgentContext(tool pluginapi.PluginTool, agentName, agentStorePath, currentLocation string) {
 	if agentAwareTool, ok := tool.(pluginapi.AgentAwareTool); ok {
 		// The agentStorePath is already something like "agents/default/config.json"
 		// So we just need to get the agent directory from it
@@ -68,7 +68,7 @@ func SetAgentContext(tool pluginapi.Tool, agentName, agentStorePath, currentLoca
 // Priority order:
 // 1. InitializationProvider (modern, declarative)
 // 2. DefaultSettingsProvider (simple defaults)
-func ExtractPluginSettingsSchema(tool pluginapi.Tool, agentName string) error {
+func ExtractPluginSettingsSchema(tool pluginapi.PluginTool, agentName string) error {
 	// Get plugin definition
 	def := tool.Definition()
 

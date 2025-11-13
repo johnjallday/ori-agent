@@ -3,7 +3,7 @@ package pluginhttp
 import (
 	"fmt"
 
-	"github.com/openai/openai-go/v2"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // EnumExtractor provides functionality to extract enum values from OpenAI function parameters
@@ -15,7 +15,7 @@ func NewEnumExtractor() *EnumExtractor {
 }
 
 // ExtractEnumsFromParameter extracts all enum values from a function parameter
-func (e *EnumExtractor) ExtractEnumsFromParameter(param openai.FunctionDefinitionParam, propertyName string) ([]string, error) {
+func (e *EnumExtractor) ExtractEnumsFromParameter(param pluginapi.Tool, propertyName string) ([]string, error) {
 	// Get the properties from the parameters
 	properties, ok := param.Parameters["properties"].(map[string]any)
 	if !ok {
@@ -55,7 +55,7 @@ func (e *EnumExtractor) ExtractEnumsFromParameter(param openai.FunctionDefinitio
 }
 
 // GetAllEnumsFromParameter returns a map of property names to their enum values
-func (e *EnumExtractor) GetAllEnumsFromParameter(param openai.FunctionDefinitionParam) (map[string][]string, error) {
+func (e *EnumExtractor) GetAllEnumsFromParameter(param pluginapi.Tool) (map[string][]string, error) {
 	result := make(map[string][]string)
 
 	// Get the properties from the parameters
@@ -99,7 +99,7 @@ func (e *EnumExtractor) GetAllEnumsFromParameter(param openai.FunctionDefinition
 }
 
 // ValidateEnumValue checks if a given value is valid for a specific property's enum
-func (e *EnumExtractor) ValidateEnumValue(param openai.FunctionDefinitionParam, propertyName, value string) (bool, error) {
+func (e *EnumExtractor) ValidateEnumValue(param pluginapi.Tool, propertyName, value string) (bool, error) {
 	enumValues, err := e.ExtractEnumsFromParameter(param, propertyName)
 	if err != nil {
 		return false, err

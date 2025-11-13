@@ -162,7 +162,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 		var metadata *types.PluginMetadata
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
-			description = def.Description.String()
+			description = def.Description
 			version = pluginloader.GetPluginVersion(tool)
 
 			// Extract metadata if available
@@ -285,7 +285,7 @@ func (m *Manager) RefreshLocalRegistry() error {
 		var metadata *types.PluginMetadata
 		if tool, loadErr := pluginloader.LoadPluginUnified(pluginPath); loadErr == nil {
 			def := tool.Definition()
-			description = def.Description.String()
+			description = def.Description
 			version = pluginloader.GetPluginVersion(tool)
 
 			// Extract metadata if available

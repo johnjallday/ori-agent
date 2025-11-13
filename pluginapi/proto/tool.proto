@@ -6,8 +6,8 @@ option go_package = "github.com/johnjallday/ori-agent/pluginapi";
 
 // ToolService defines the RPC service for plugin tools
 service ToolService {
-    // GetDefinition returns the OpenAI function definition for this tool
-    rpc GetDefinition(Empty) returns (FunctionDefinition);
+    // GetDefinition returns the generic, provider-agnostic tool definition
+    rpc GetDefinition(Empty) returns (ToolDefinition);
 
     // Call executes the tool with the given arguments
     rpc Call(CallRequest) returns (CallResponse);
@@ -48,11 +48,13 @@ service ToolService {
 // Empty message for RPCs that don't need parameters
 message Empty {}
 
-// FunctionDefinition represents an OpenAI function definition
-message FunctionDefinition {
+// ToolDefinition represents a generic, provider-agnostic tool definition.
+// This format works with any LLM provider (OpenAI, Claude, Ollama, etc.)
+// and will be automatically translated to provider-specific formats by the server.
+message ToolDefinition {
     string name = 1;
     string description = 2;
-    string parameters_json = 3;  // JSON-encoded OpenAI parameters schema
+    string parameters_json = 3;  // JSON-encoded JSON Schema for parameters
 }
 
 // CallRequest contains the arguments for calling a tool

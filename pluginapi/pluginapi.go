@@ -2,30 +2,31 @@ package pluginapi
 
 import (
 	"context"
-	"github.com/openai/openai-go/v2"
 )
 
-// Tool is the interface that plugins must implement to be used as tools.
-type Tool interface {
-	// Definition returns the function definition for OpenAI function calling.
-	Definition() openai.FunctionDefinitionParam
+// PluginTool is the interface that plugins must implement to be used as tools.
+// This interface is provider-agnostic and works with any LLM provider (OpenAI, Claude, Ollama, etc.).
+type PluginTool interface {
+	// Definition returns the generic tool definition that will be automatically
+	// translated to the appropriate format for the active LLM provider.
+	Definition() Tool
 	// Call executes the tool logic with the given arguments JSON string and returns the result JSON string.
 	Call(ctx context.Context, args string) (string, error)
 }
 
-// VersionedTool extends Tool with version information.
+// VersionedTool extends PluginTool with version information.
 // Plugins can optionally implement this interface to provide version info.
 type VersionedTool interface {
-	Tool
+	PluginTool
 	// Version returns the plugin version (e.g., "1.0.0", "1.2.3-beta")
 	Version() string
 }
 
-// PluginCompatibility extends Tool with detailed version compatibility information.
+// PluginCompatibility extends PluginTool with detailed version compatibility information.
 // Plugins should implement this interface to enable health checking and compatibility validation.
 // Note: This was renamed from PluginMetadata to avoid conflict with the proto-generated struct.
 type PluginCompatibility interface {
-	Tool
+	PluginTool
 	// Version returns the plugin version (e.g., "0.0.5", "1.2.3-beta")
 	Version() string
 	// MinAgentVersion returns the minimum ori-agent version required (e.g., "0.0.6")
@@ -69,10 +70,10 @@ type AgentContext struct {
 	CurrentLocation string
 }
 
-// AgentAwareTool extends Tool with agent context information.
+// AgentAwareTool extends PluginTool with agent context information.
 // Plugins can optionally implement this interface to receive current agent info.
 type AgentAwareTool interface {
-	Tool
+	PluginTool
 	// SetAgentContext provides the current agent information to the plugin
 	SetAgentContext(ctx AgentContext)
 }
@@ -125,9 +126,9 @@ type InitializationProvider interface {
 	InitializeWithConfig(config map[string]interface{}) error
 }
 
-// InitializableTool combines Tool with InitializationProvider for full initialization support.
+// InitializableTool combines PluginTool with InitializationProvider for full initialization support.
 type InitializableTool interface {
-	Tool
+	PluginTool
 	InitializationProvider
 }
 

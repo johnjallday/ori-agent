@@ -9,7 +9,7 @@ import (
 
 // LoadPluginUnified loads a plugin as an RPC executable
 // All plugins are now RPC-based executables for cross-platform compatibility
-func LoadPluginUnified(path string) (pluginapi.Tool, error) {
+func LoadPluginUnified(path string) (pluginapi.PluginTool, error) {
 	// Verify file exists
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("plugin file not found: %w", err)
@@ -24,20 +24,20 @@ func LoadPluginUnified(path string) (pluginapi.Tool, error) {
 }
 
 // IsRPCPlugin checks if a tool was loaded via RPC
-func IsRPCPlugin(tool pluginapi.Tool) bool {
+func IsRPCPlugin(tool pluginapi.PluginTool) bool {
 	_, ok := tool.(*RPCPluginClient)
 	return ok
 }
 
 // CloseRPCPlugin safely closes an RPC plugin if it is one
-func CloseRPCPlugin(tool pluginapi.Tool) {
+func CloseRPCPlugin(tool pluginapi.PluginTool) {
 	if rpcClient, ok := tool.(*RPCPluginClient); ok {
 		rpcClient.Kill()
 	}
 }
 
 // GetPluginMetadata retrieves metadata from a plugin if it implements MetadataProvider
-func GetPluginMetadata(tool pluginapi.Tool) (*pluginapi.PluginMetadata, error) {
+func GetPluginMetadata(tool pluginapi.PluginTool) (*pluginapi.PluginMetadata, error) {
 	if metadataProvider, ok := tool.(pluginapi.MetadataProvider); ok {
 		return metadataProvider.GetMetadata()
 	}

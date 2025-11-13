@@ -27,7 +27,7 @@ func NewInitHandler(store store.Store, registryManager *registry.Manager, plugin
 }
 
 // handlePluginDefaultSettings handles requests for plugin default settings
-func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pluginapi.Tool, pluginName string) {
+func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pluginapi.PluginTool, pluginName string) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Check if the tool supports GetDefaultSettings
@@ -122,7 +122,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 						}
 						// Load plugin temporarily to check InitializationProvider
 						fmt.Printf("🔄 Loading plugin temporarily from: %s\n", regPlugin.Path)
-						var tool pluginapi.Tool
+						var tool pluginapi.PluginTool
 						tool, loadErr := NativeLoader{}.Load(regPlugin.Path)
 						if loadErr != nil {
 							fmt.Printf("❌ Failed to load plugin: %v\n", loadErr)
@@ -181,7 +181,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.Tool, pluginName, agentName string) {
+func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pluginapi.PluginTool, pluginName, agentName string) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current agent
@@ -253,7 +253,7 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	json.NewEncoder(w).Encode(response)
 }
 
-func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.Request, tool pluginapi.Tool, pluginName, agentName string) {
+func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.Request, tool pluginapi.PluginTool, pluginName, agentName string) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Parse configuration from request body first

@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/go-plugin"
-	"github.com/openai/openai-go/v2"
 	"google.golang.org/grpc"
 )
 
@@ -14,7 +13,7 @@ import (
 type ToolRPCPlugin struct {
 	plugin.Plugin
 	// Impl is the concrete implementation (only set for plugin-side)
-	Impl Tool
+	Impl PluginTool
 }
 
 // GRPCServer registers this plugin for serving over gRPC
@@ -33,27 +32,21 @@ func (p *ToolRPCPlugin) GRPCClient(ctx context.Context, broker *plugin.GRPCBroke
 // grpcServer is a local wrapper for the server implementation
 type grpcServer struct {
 	UnimplementedToolServiceServer
-	Impl Tool
+	Impl PluginTool
 }
 
-func (s *grpcServer) GetDefinition(ctx context.Context, _ *Empty) (*FunctionDefinition, error) {
+func (s *grpcServer) GetDefinition(ctx context.Context, _ *Empty) (*ToolDefinition, error) {
 	def := s.Impl.Definition()
 
-	// Convert OpenAI definition to protobuf message
+	// Convert generic Tool definition to protobuf message
 	paramsJSON, err := json.Marshal(def.Parameters)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract description from param.Opt[string]
-	desc := ""
-	if def.Description.Valid() {
-		desc = def.Description.Value
-	}
-
-	return &FunctionDefinition{
+	return &ToolDefinition{
 		Name:           def.Name,
-		Description:    desc,
+		Description:    def.Description,
 		ParametersJson: string(paramsJSON),
 	}, nil
 }
@@ -190,20 +183,20 @@ type grpcClient struct {
 	client ToolServiceClient
 }
 
-func (c *grpcClient) Definition() openai.FunctionDefinitionParam {
+func (c *grpcClient) Definition() Tool {
 	resp, err := c.client.GetDefinition(context.Background(), &Empty{})
 	if err != nil {
-		return openai.FunctionDefinitionParam{}
+		return Tool{}
 	}
 
-	var params openai.FunctionParameters
+	var params map[string]interface{}
 	if err := json.Unmarshal([]byte(resp.ParametersJson), &params); err != nil {
-		params = openai.FunctionParameters{}
+		params = map[string]interface{}{}
 	}
 
-	return openai.FunctionDefinitionParam{
+	return Tool{
 		Name:        resp.Name,
-		Description: openai.String(resp.Description),
+		Description: resp.Description,
 		Parameters:  params,
 	}
 }
@@ -400,7 +393,7 @@ func (c *grpcClient) ServeWebPage(path string, query map[string]string) (string,
 
 // Compile-time interface checks
 var (
-	_ Tool                    = (*grpcClient)(nil)
+	_ PluginTool              = (*grpcClient)(nil)
 	_ VersionedTool           = (*grpcClient)(nil)
 	_ PluginCompatibility     = (*grpcClient)(nil)
 	_ MetadataProvider        = (*grpcClient)(nil)

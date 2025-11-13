@@ -31,8 +31,8 @@ type Handler struct {
 	orchestrator   *orchestration.Orchestrator
 	costTracker    *llm.CostTracker
 	mcpRegistry    interface {
-		GetToolsForServer(string) ([]pluginapi.Tool, error)
-		GetAllTools() []pluginapi.Tool
+		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
+		GetAllTools() []pluginapi.PluginTool
 	}
 }
 
@@ -67,8 +67,8 @@ func (h *Handler) SetCostTracker(tracker *llm.CostTracker) {
 
 // SetMCPRegistry sets the MCP registry
 func (h *Handler) SetMCPRegistry(registry interface {
-	GetToolsForServer(string) ([]pluginapi.Tool, error)
-	GetAllTools() []pluginapi.Tool
+	GetToolsForServer(string) ([]pluginapi.PluginTool, error)
+	GetAllTools() []pluginapi.PluginTool
 }) {
 	h.mcpRegistry = registry
 }
@@ -84,7 +84,7 @@ func (h *Handler) SetShutdownFunc(fn func()) {
 }
 
 // findTool searches for a tool by name in both plugins and MCP servers
-func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.Tool, bool) {
+func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
 	// First check native plugins
 	for _, plugin := range ag.Plugins {
 		if plugin.Definition.Name == toolName && plugin.Tool != nil {
@@ -116,7 +116,7 @@ func (h *Handler) getClientForAgent(ag *agent.Agent) openai.Client {
 }
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
 	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
 	defer cancel()
 
@@ -142,31 +142,14 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Add user message
 	messages = append(messages, llm.NewUserMessage(userMessage))
 
-	// Convert tools
-	var llmTools []llm.Tool
-	for _, tool := range tools {
-		if tool.OfFunction != nil {
-			// Extract function definition
-			fn := tool.OfFunction.Function
-
-			// Get description string
-			desc := fn.Description.String()
-
-			// Parameters is already map[string]interface{}
-			llmTools = append(llmTools, llm.Tool{
-				Name:        fn.Name,
-				Description: desc,
-				Parameters:  fn.Parameters,
-			})
-		}
-	}
+	// Tools are already in generic llm.Tool format, no conversion needed
 
 	// Call Claude
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
 		Model:       ag.Settings.Model,
 		Messages:    messages,
-		Tools:       llmTools,
+		Tools:       tools,
 		Temperature: ag.Settings.Temperature,
 		MaxTokens:   4000,
 	})
@@ -315,7 +298,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		resp2, err := provider.Chat(ctx, llm.ChatRequest{
 			Model:       ag.Settings.Model,
 			Messages:    append(messages, llm.NewSystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation.")),
-			Tools:       llmTools,
+			Tools:       tools,
 			Temperature: ag.Settings.Temperature,
 			MaxTokens:   4000,
 		})
@@ -363,7 +346,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 }
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []openai.ChatCompletionToolUnionParam, agentName string, baseCtx context.Context) {
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
 	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
 	defer cancel()
 
@@ -389,25 +372,14 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Add user message
 	messages = append(messages, llm.NewUserMessage(userMessage))
 
-	// Convert tools
-	var llmTools []llm.Tool
-	for _, tool := range tools {
-		if tool.OfFunction != nil {
-			fn := tool.OfFunction.Function
-			llmTools = append(llmTools, llm.Tool{
-				Name:        fn.Name,
-				Description: fn.Description.String(),
-				Parameters:  fn.Parameters,
-			})
-		}
-	}
+	// Tools are already in generic llm.Tool format, no conversion needed
 
 	// Call Ollama
 	start := time.Now()
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
 		Model:       ag.Settings.Model,
 		Messages:    messages,
-		Tools:       llmTools,
+		Tools:       tools,
 		Temperature: ag.Settings.Temperature,
 		MaxTokens:   4000,
 	})
@@ -483,7 +455,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		finalResp, err := provider.Chat(ctx, llm.ChatRequest{
 			Model:       ag.Settings.Model,
 			Messages:    messages,
-			Tools:       llmTools, // Include tools in follow-up request
+			Tools:       tools, // Include tools in follow-up request
 			Temperature: ag.Settings.Temperature,
 			MaxTokens:   4000,
 		})
@@ -582,7 +554,7 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 
 			uninitializedPlugins = append(uninitializedPlugins, map[string]any{
 				"name":            name,
-				"description":     def.Description.String(),
+				"description":     def.Description,
 				"required_config": configVars,
 			})
 		}
@@ -807,17 +779,26 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build tools - refresh definitions to get latest dynamic enums (e.g., script lists)
-	tools := []openai.ChatCompletionToolUnionParam{}
+	tools := []llm.Tool{}
 
 	// Add native plugin tools
 	for _, pl := range ag.Plugins {
 		// Call Tool.Definition() to get fresh definition with dynamic enums
 		if pl.Tool != nil {
 			freshDef := pl.Tool.Definition()
-			tools = append(tools, openai.ChatCompletionFunctionTool(freshDef))
+			// Convert pluginapi.Tool to llm.Tool
+			tools = append(tools, llm.Tool{
+				Name:        freshDef.Name,
+				Description: freshDef.Description,
+				Parameters:  freshDef.Parameters,
+			})
 		} else {
 			// Fallback to cached definition if tool is not available
-			tools = append(tools, openai.ChatCompletionFunctionTool(pl.Definition))
+			tools = append(tools, llm.Tool{
+				Name:        pl.Definition.Name,
+				Description: pl.Definition.Description,
+				Parameters:  pl.Definition.Parameters,
+			})
 		}
 	}
 
@@ -830,7 +811,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			for _, mcpTool := range mcpTools {
-				tools = append(tools, openai.ChatCompletionFunctionTool(mcpTool.Definition()))
+				mcpDef := mcpTool.Definition()
+				tools = append(tools, llm.Tool{
+					Name:        mcpDef.Name,
+					Description: mcpDef.Description,
+					Parameters:  mcpDef.Parameters,
+				})
 			}
 			log.Printf("Added %d MCP tools from server %s", len(mcpTools), serverName)
 		}
@@ -894,11 +880,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Convert llm.Tool to OpenAI format
+	var openaiTools []openai.ChatCompletionToolUnionParam
+	for _, tool := range tools {
+		funcDef := openai.FunctionDefinitionParam{
+			Name:        tool.Name,
+			Description: openai.String(tool.Description),
+			Parameters:  openai.FunctionParameters(tool.Parameters),
+		}
+		openaiTools = append(openaiTools, openai.ChatCompletionFunctionTool(funcDef))
+	}
+
 	params := openai.ChatCompletionNewParams{
 		Model:       ag.Settings.Model,
 		Temperature: openai.Float(ag.Settings.Temperature),
 		Messages:    ag.Messages,
-		Tools:       tools,
+		Tools:       openaiTools,
 	}
 
 	start := time.Now()

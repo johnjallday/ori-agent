@@ -76,7 +76,7 @@ func (c *Checker) SetRegistry(reg PluginRegistryProvider) {
 }
 
 // CheckPlugin performs a comprehensive health check on a plugin
-func (c *Checker) CheckPlugin(name string, tool pluginapi.Tool) CheckResult {
+func (c *Checker) CheckPlugin(name string, tool pluginapi.PluginTool) CheckResult {
 	result := CheckResult{
 		Health: PluginHealth{
 			Name:       name,
@@ -214,7 +214,7 @@ func (c *Checker) CheckPlugin(name string, tool pluginapi.Tool) CheckResult {
 }
 
 // checkFunctionality performs basic functionality tests
-func (c *Checker) checkFunctionality(tool pluginapi.Tool) CompatibilityCheck {
+func (c *Checker) checkFunctionality(tool pluginapi.PluginTool) CompatibilityCheck {
 	// Test Definition() call
 	defer func() {
 		if r := recover(); r != nil {

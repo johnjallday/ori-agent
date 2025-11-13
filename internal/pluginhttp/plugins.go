@@ -20,13 +20,13 @@ import (
 
 // ToolLoader abstracts loading a plugin Tool from a path.
 type ToolLoader interface {
-	Load(path string) (pluginapi.Tool, error)
+	Load(path string) (pluginapi.PluginTool, error)
 }
 
 // NativeLoader uses the unified plugin loader to load both .so files and RPC executables.
 type NativeLoader struct{}
 
-func (NativeLoader) Load(path string) (pluginapi.Tool, error) {
+func (NativeLoader) Load(path string) (pluginapi.PluginTool, error) {
 	return pluginloader.LoadPluginUnified(path)
 }
 
@@ -121,7 +121,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 
 				plist = append(plist, map[string]any{
 					"name":                    name,
-					"description":             pl.Definition.Description.String(),
+					"description":             pl.Definition.Description,
 					"definition":              pl.Definition,
 					"path":                    pl.Path,
 					"version":                 pl.Version,
@@ -281,7 +281,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	version := pluginloader.GetPluginVersion(tool)
 
 	// Add to plugin registry
-	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description.String(), pluginFile, version); err != nil {
+	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
 		os.Remove(pluginFile)
 		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
@@ -292,7 +292,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"success":     true,
 		"name":        def.Name,
-		"description": def.Description.String(),
+		"description": def.Description,
 		"path":        pluginFile,
 		"version":     version,
 		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
@@ -377,7 +377,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"success":           true,
 		"name":              name,
-		"description":       def.Description.String(),
+		"description":       def.Description,
 		"path":              path,
 		"version":           version,
 		"message":           "Plugin loaded successfully from registry",
@@ -465,7 +465,7 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 	logger.Verbosef("✓ Plugin found: %s, Path: %s, Tool: %v", pluginName, plugin.Path, plugin.Tool != nil)
 
 	// If Tool is not loaded, load it now
-	var tool pluginapi.Tool
+	var tool pluginapi.PluginTool
 	if plugin.Tool != nil {
 		logger.Verbosef("✓ Using already loaded tool")
 		tool = plugin.Tool

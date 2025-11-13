@@ -122,11 +122,11 @@ func (r *Registry) GetServerStatus(name string) (ServerStatus, error) {
 }
 
 // GetAllTools returns all tools from all running servers as adapters
-func (r *Registry) GetAllTools() []pluginapi.Tool {
+func (r *Registry) GetAllTools() []pluginapi.PluginTool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var tools []pluginapi.Tool
+	var tools []pluginapi.PluginTool
 
 	for _, server := range r.servers {
 		if server.GetStatus() != StatusRunning {
@@ -144,7 +144,7 @@ func (r *Registry) GetAllTools() []pluginapi.Tool {
 }
 
 // GetToolsForServer returns all tools from a specific server as adapters
-func (r *Registry) GetToolsForServer(serverName string) ([]pluginapi.Tool, error) {
+func (r *Registry) GetToolsForServer(serverName string) ([]pluginapi.PluginTool, error) {
 	server, err := r.GetServer(serverName)
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func (r *Registry) GetToolsForServer(serverName string) ([]pluginapi.Tool, error
 	}
 
 	mcpTools := server.GetTools()
-	tools := make([]pluginapi.Tool, 0, len(mcpTools))
+	tools := make([]pluginapi.PluginTool, 0, len(mcpTools))
 
 	for _, tool := range mcpTools {
 		adapter := NewMCPAdapter(server, tool)

@@ -3,11 +3,11 @@ package chathttp
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
-	"log"
-	"os"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
@@ -134,7 +134,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 			emoji := getPluginEmoji(name)
 			toolsResponse.WriteString(fmt.Sprintf("### %s %s\n\n", emoji, def.Name))
 
-			description := def.Description.String()
+			description := def.Description
 			if description != "" {
 				toolsResponse.WriteString(fmt.Sprintf("**Description:** %s\n\n", description))
 			}

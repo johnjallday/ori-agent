@@ -11,7 +11,6 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
 //go:embed plugin.yaml
@@ -23,28 +22,28 @@ type resultHandlerTool struct {
 }
 
 // Ensure compile-time conformance
-var _ pluginapi.Tool = resultHandlerTool{}
+var _ pluginapi.PluginTool = resultHandlerTool{}
 var _ pluginapi.VersionedTool = resultHandlerTool{}
 var _ pluginapi.PluginCompatibility = resultHandlerTool{}
 var _ pluginapi.MetadataProvider = resultHandlerTool{}
 
-func (t resultHandlerTool) Definition() openai.FunctionDefinitionParam {
-	return openai.FunctionDefinitionParam{
+func (t resultHandlerTool) Definition() pluginapi.Tool {
+	return pluginapi.Tool{
 		Name:        "result_handler",
-		Description: openai.String("Handle actions on chat results like opening directories, files, or URLs"),
-		Parameters: openai.FunctionParameters{
+		Description: "Handle actions on chat results like opening directories, files, or URLs",
+		Parameters: map[string]interface{}{
 			"type": "object",
-			"properties": map[string]any{
-				"action": map[string]any{
+			"properties": map[string]interface{}{
+				"action": map[string]interface{}{
 					"type":        "string",
 					"description": "Action to perform",
 					"enum":        []string{"open_directory", "open_file", "open_url", "reveal_in_finder"},
 				},
-				"path": map[string]any{
+				"path": map[string]interface{}{
 					"type":        "string",
 					"description": "File path, directory path, or URL to open",
 				},
-				"context": map[string]any{
+				"context": map[string]interface{}{
 					"type":        "string",
 					"description": "Optional context about what triggered this action (e.g., 'reaper_scripts', 'config_file')",
 				},

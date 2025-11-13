@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
 // Settings represents LLM configuration shared across agents
@@ -50,10 +49,10 @@ type AppState struct {
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use
 type LoadedPlugin struct {
-	Tool       pluginapi.Tool                 `json:"-"`
-	Definition openai.FunctionDefinitionParam `json:"Definition"`
-	Path       string                         `json:"Path"`
-	Version    string                         `json:"Version,omitempty"`
+	Tool       pluginapi.PluginTool `json:"-"`
+	Definition pluginapi.Tool       `json:"Definition"`
+	Path       string               `json:"Path"`
+	Version    string               `json:"Version,omitempty"`
 }
 
 // Maintainer represents a single plugin maintainer/contributor

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.33.0
-// source: proto/tool.proto
+// source: pluginapi/proto/tool.proto
 
 package pluginapi
 
@@ -39,8 +39,8 @@ const (
 //
 // ToolService defines the RPC service for plugin tools
 type ToolServiceClient interface {
-	// GetDefinition returns the OpenAI function definition for this tool
-	GetDefinition(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*FunctionDefinition, error)
+	// GetDefinition returns the generic, provider-agnostic tool definition
+	GetDefinition(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ToolDefinition, error)
 	// Call executes the tool with the given arguments
 	Call(ctx context.Context, in *CallRequest, opts ...grpc.CallOption) (*CallResponse, error)
 	// GetVersion returns the plugin version (optional)
@@ -75,9 +75,9 @@ func NewToolServiceClient(cc grpc.ClientConnInterface) ToolServiceClient {
 	return &toolServiceClient{cc}
 }
 
-func (c *toolServiceClient) GetDefinition(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*FunctionDefinition, error) {
+func (c *toolServiceClient) GetDefinition(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ToolDefinition, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(FunctionDefinition)
+	out := new(ToolDefinition)
 	err := c.cc.Invoke(ctx, ToolService_GetDefinition_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -201,8 +201,8 @@ func (c *toolServiceClient) ServeWebPage(ctx context.Context, in *WebPageRequest
 //
 // ToolService defines the RPC service for plugin tools
 type ToolServiceServer interface {
-	// GetDefinition returns the OpenAI function definition for this tool
-	GetDefinition(context.Context, *Empty) (*FunctionDefinition, error)
+	// GetDefinition returns the generic, provider-agnostic tool definition
+	GetDefinition(context.Context, *Empty) (*ToolDefinition, error)
 	// Call executes the tool with the given arguments
 	Call(context.Context, *CallRequest) (*CallResponse, error)
 	// GetVersion returns the plugin version (optional)
@@ -237,7 +237,7 @@ type ToolServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedToolServiceServer struct{}
 
-func (UnimplementedToolServiceServer) GetDefinition(context.Context, *Empty) (*FunctionDefinition, error) {
+func (UnimplementedToolServiceServer) GetDefinition(context.Context, *Empty) (*ToolDefinition, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDefinition not implemented")
 }
 func (UnimplementedToolServiceServer) Call(context.Context, *CallRequest) (*CallResponse, error) {
@@ -567,5 +567,5 @@ var ToolService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/tool.proto",
+	Metadata: "pluginapi/proto/tool.proto",
 }

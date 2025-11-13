@@ -9,41 +9,40 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
 //go:embed plugin.yaml
 var configYAML string
 
-// mathTool implements pluginapi.Tool for basic arithmetic operations.
-type mathTool struct {
-	config pluginapi.PluginConfig
-}
-
-// ensure mathTool implements pluginapi.Tool and pluginapi.VersionedTool at compile time
-var _ pluginapi.Tool = (*mathTool)(nil)
+// ensure mathTool implements pluginapi.PluginTool and optional interfaces at compile time
+var _ pluginapi.PluginTool = (*mathTool)(nil)
 var _ pluginapi.VersionedTool = (*mathTool)(nil)
 var _ pluginapi.PluginCompatibility = (*mathTool)(nil)
 var _ pluginapi.MetadataProvider = (*mathTool)(nil)
 
-// Definition returns the OpenAI function definition for the math operation.
-func (m *mathTool) Definition() openai.FunctionDefinitionParam {
-	return openai.FunctionDefinitionParam{
+// mathTool implements pluginapi.Tool for basic arithmetic operations.
+type mathTool struct {
+	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
+}
+
+// Definition returns the generic function definition for the math operation.
+func (m *mathTool) Definition() pluginapi.Tool {
+	return pluginapi.Tool{
 		Name:        "math",
-		Description: openai.String("Perform basic math operations: add, subtract, multiply, divide"),
-		Parameters: openai.FunctionParameters{
+		Description: "Perform basic math operations: add, subtract, multiply, divide",
+		Parameters: map[string]interface{}{
 			"type": "object",
-			"properties": map[string]any{
-				"operation": map[string]any{
+			"properties": map[string]interface{}{
+				"operation": map[string]interface{}{
 					"type":        "string",
 					"description": "Operation to perform: add, subtract, multiply, divide",
 					"enum":        []string{"add", "subtract", "multiply", "divide"},
 				},
-				"a": map[string]any{
+				"a": map[string]interface{}{
 					"type":        "number",
 					"description": "First operand",
 				},
-				"b": map[string]any{
+				"b": map[string]interface{}{
 					"type":        "number",
 					"description": "Second operand",
 				},
@@ -82,39 +81,32 @@ func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
 	return fmt.Sprintf("%g", result), nil
 }
 
-// Version returns the plugin version from config.
-func (m *mathTool) Version() string {
-	return m.config.Version
-}
-
-// MinAgentVersion returns the minimum compatible agent version from config.
-func (m *mathTool) MinAgentVersion() string {
-	return m.config.Requirements.MinOriVersion
-}
-
-// MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
-func (m *mathTool) MaxAgentVersion() string {
-	return ""
-}
-
-// APIVersion returns the API version this plugin implements.
-func (m *mathTool) APIVersion() string {
-	return "v1"
-}
-
-// GetMetadata returns plugin metadata from config.
-func (m *mathTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
-	return m.config.ToMetadata()
-}
+// No need for getter methods - BasePlugin provides them all!
 
 func main() {
 	// Parse plugin config from embedded YAML
 	config := pluginapi.ReadPluginConfig(configYAML)
 
+	// Create math tool with base plugin
+	tool := &mathTool{
+		BasePlugin: pluginapi.NewBasePlugin(
+			"math",                            // Plugin name
+			config.Version,                    // Version from config
+			config.Requirements.MinOriVersion, // Min agent version
+			"",                                // Max agent version (no limit)
+			"v1",                              // API version
+		),
+	}
+
+	// Set metadata from config
+	if metadata, err := config.ToMetadata(); err == nil {
+		tool.SetMetadata(metadata)
+	}
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: &mathTool{config: config}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: tool},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

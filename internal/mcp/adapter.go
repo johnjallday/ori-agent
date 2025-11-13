@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
 )
 
 // MCPAdapter adapts an MCP server to the pluginapi.Tool interface
@@ -26,10 +25,10 @@ func NewMCPAdapter(server *Server, tool Tool) *MCPAdapter {
 	}
 }
 
-// Definition converts MCP tool schema to OpenAI function definition
+// Definition converts MCP tool schema to generic tool definition
 // This is the bridge that makes MCP tools compatible with any LLM provider
-func (a *MCPAdapter) Definition() openai.FunctionDefinitionParam {
-	// Convert MCP inputSchema to OpenAI parameters format
+func (a *MCPAdapter) Definition() pluginapi.Tool {
+	// Convert MCP inputSchema to generic parameters format
 	parameters := a.tool.InputSchema
 	if parameters == nil {
 		parameters = map[string]interface{}{
@@ -38,9 +37,9 @@ func (a *MCPAdapter) Definition() openai.FunctionDefinitionParam {
 		}
 	}
 
-	return openai.FunctionDefinitionParam{
+	return pluginapi.Tool{
 		Name:        a.tool.Name,
-		Description: openai.String(a.tool.Description),
+		Description: a.tool.Description,
 		Parameters:  parameters,
 	}
 }
@@ -123,6 +122,6 @@ func (a *MCPAdapter) Version() string {
 }
 
 // Ensure MCPAdapter implements required interfaces
-var _ pluginapi.Tool = (*MCPAdapter)(nil)
+var _ pluginapi.PluginTool = (*MCPAdapter)(nil)
 var _ pluginapi.AgentAwareTool = (*MCPAdapter)(nil)
 var _ pluginapi.VersionedTool = (*MCPAdapter)(nil)

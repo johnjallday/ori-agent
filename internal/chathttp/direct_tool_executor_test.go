@@ -7,7 +7,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/openai/openai-go/v2"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // mockTool is a mock implementation of pluginapi.Tool for testing
@@ -17,10 +17,14 @@ type mockTool struct {
 	callFunc    func(ctx context.Context, args string) (string, error)
 }
 
-func (m *mockTool) Definition() openai.FunctionDefinitionParam {
-	return openai.FunctionDefinitionParam{
+func (m *mockTool) Definition() pluginapi.Tool {
+	return pluginapi.Tool{
 		Name:        m.name,
-		Description: openai.String(m.description),
+		Description: m.description,
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
 	}
 }
 
@@ -176,9 +180,13 @@ func TestExecuteDirectTool(t *testing.T) {
 				Plugins: map[string]types.LoadedPlugin{
 					"math": {
 						Tool: mock,
-						Definition: openai.FunctionDefinitionParam{
+						Definition: pluginapi.Tool{
 							Name:        "math",
-							Description: openai.String("Math operations"),
+							Description: "Math operations",
+							Parameters: map[string]interface{}{
+								"type":       "object",
+								"properties": map[string]interface{}{},
+							},
 						},
 					},
 				},
@@ -223,14 +231,24 @@ func TestGetAvailableToolNames(t *testing.T) {
 		Plugins: map[string]types.LoadedPlugin{
 			"math": {
 				Tool: &mockTool{name: "math", description: "Math operations"},
-				Definition: openai.FunctionDefinitionParam{
-					Name: "math",
+				Definition: pluginapi.Tool{
+					Name:        "math",
+					Description: "Math operations",
+					Parameters: map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
 				},
 			},
 			"weather": {
 				Tool: &mockTool{name: "weather", description: "Weather info"},
-				Definition: openai.FunctionDefinitionParam{
-					Name: "weather",
+				Definition: pluginapi.Tool{
+					Name:        "weather",
+					Description: "Weather info",
+					Parameters: map[string]interface{}{
+						"type":       "object",
+						"properties": map[string]interface{}{},
+					},
 				},
 			},
 		},
