@@ -83,6 +83,7 @@ type Server struct {
 	mcpRegistry           *mcp.Registry
 	mcpConfigManager      *mcp.ConfigManager
 	mcpHandler            *mcphttp.Handler
+	agentMCPHandler       *agenthttp.MCPHandler
 	locationManager       *location.Manager
 	locationHandler       *locationhttp.Handler
 }
@@ -589,7 +590,25 @@ func (s *Server) Handler() http.Handler {
 	// Handlers: agents moved to separate package
 	agentHandler := agenthttp.New(s.st)
 	mux.Handle("/api/agents", agentHandler)
-	mux.Handle("/api/agents/", agentHandler) // Support /api/agents/{name}
+
+	// Agent MCP handlers
+	s.agentMCPHandler = agenthttp.NewMCPHandler(s.mcpRegistry, s.mcpConfigManager, agentHandler)
+	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
+		// Route agent MCP-specific requests
+		if strings.Contains(r.URL.Path, "/mcp-servers") {
+			if strings.HasSuffix(r.URL.Path, "/enable") {
+				s.agentMCPHandler.EnableAgentMCPServerHandler(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/disable") {
+				s.agentMCPHandler.DisableAgentMCPServerHandler(w, r)
+			} else {
+				// List MCP servers for agent
+				s.agentMCPHandler.ListAgentMCPServersHandler(w, r)
+			}
+		} else {
+			// Regular agent requests - delegate to agentHandler
+			agentHandler.ServeHTTP(w, r)
+		}
+	})
 
 	// Plugin endpoints
 	mux.HandleFunc("/api/plugin-registry", s.pluginRegistryHandler.PluginRegistryHandler)

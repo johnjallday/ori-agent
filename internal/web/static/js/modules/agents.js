@@ -474,6 +474,20 @@ function createAgentElement(agentName, agentType, currentAgent) {
           </div>
         </div>
 
+        <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <h6 class="fw-semibold mb-2" style="color: var(--text-primary); font-size: 0.85rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
+              </svg>
+              MCP Servers
+            </h6>
+            <div id="mcpServersList-${accordionId}" style="font-size: 0.85rem;">
+              <div class="text-muted small">Loading MCP servers...</div>
+            </div>
+          </div>
+        </div>
+
         <button id="updateSettingsBtn-${accordionId}" class="modern-btn modern-btn-primary w-100" onclick="updateAgentSettings('${agentName}', '${accordionId}')">
           Update Settings
         </button>
@@ -819,8 +833,108 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
         systemPromptInput.value = systemPromptValue;
       }
     }
+
+    // Load MCP servers for this agent
+    await loadAgentMCPServers(agentName, accordionId);
+
   } catch (error) {
     console.error('Error loading settings for agent:', agentName, error);
+  }
+}
+
+// Load MCP servers for a specific agent
+async function loadAgentMCPServers(agentName, accordionId) {
+  const mcpServersList = document.getElementById(`mcpServersList-${accordionId}`);
+  if (!mcpServersList) return;
+
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const servers = data.servers || [];
+
+    if (servers.length === 0) {
+      mcpServersList.innerHTML = '<div class="text-muted small">No MCP servers configured</div>';
+      return;
+    }
+
+    // Render MCP servers list
+    let html = '';
+    servers.forEach(server => {
+      const statusColor = server.status === 'running' ? 'success' :
+                         server.status === 'error' ? 'danger' : 'secondary';
+      const statusIcon = server.status === 'running' ? '●' : '○';
+
+      html += `
+        <div class="d-flex align-items-center justify-content-between mb-2 p-2"
+             style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;">
+          <div class="d-flex flex-column flex-grow-1">
+            <div class="d-flex align-items-center gap-2">
+              <span class="text-${statusColor}" style="font-size: 0.6rem;">${statusIcon}</span>
+              <span style="color: var(--text-primary); font-weight: 500;">${server.name}</span>
+              ${server.tool_count > 0 ? `<span class="badge bg-secondary" style="font-size: 0.65rem;">${server.tool_count} tools</span>` : ''}
+            </div>
+            ${server.description ? `<span class="text-muted small mt-1">${server.description}</span>` : ''}
+          </div>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="mcp-${server.name}-${accordionId}"
+                   ${server.enabled ? 'checked' : ''}
+                   onchange="toggleMCPServer('${agentName}', '${server.name}', this.checked, '${accordionId}')"
+                   style="cursor: pointer;">
+          </div>
+        </div>
+      `;
+    });
+
+    mcpServersList.innerHTML = html;
+
+  } catch (error) {
+    console.error('Error loading MCP servers for agent:', agentName, error);
+    mcpServersList.innerHTML = '<div class="text-danger small">Failed to load MCP servers</div>';
+  }
+}
+
+// Toggle MCP server for an agent
+async function toggleMCPServer(agentName, serverName, enabled, accordionId) {
+  const checkbox = document.getElementById(`mcp-${serverName}-${accordionId}`);
+  const originalState = !enabled; // Store original state for rollback
+
+  try {
+    const endpoint = enabled ? 'enable' : 'disable';
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${serverName}/${endpoint}`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // Show success notification
+    if (typeof showNotification === 'function') {
+      showNotification(data.message || `MCP server ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    }
+
+    // Reload MCP servers list to update status and tool count
+    await loadAgentMCPServers(agentName, accordionId);
+
+  } catch (error) {
+    console.error('Error toggling MCP server:', error);
+
+    // Rollback checkbox state on error
+    if (checkbox) {
+      checkbox.checked = originalState;
+    }
+
+    // Show error notification
+    if (typeof showNotification === 'function') {
+      showNotification(`Failed to ${enabled ? 'enable' : 'disable'} MCP server: ${error.message}`, 'error');
+    }
   }
 }
 
