@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v3"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"

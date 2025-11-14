@@ -15,10 +15,12 @@ import (
 var configYAML string
 
 // ensure mathTool implements pluginapi.PluginTool and optional interfaces at compile time
-var _ pluginapi.PluginTool = (*mathTool)(nil)
-var _ pluginapi.VersionedTool = (*mathTool)(nil)
-var _ pluginapi.PluginCompatibility = (*mathTool)(nil)
-var _ pluginapi.MetadataProvider = (*mathTool)(nil)
+var (
+	_ pluginapi.PluginTool          = (*mathTool)(nil)
+	_ pluginapi.VersionedTool       = (*mathTool)(nil)
+	_ pluginapi.PluginCompatibility = (*mathTool)(nil)
+	_ pluginapi.MetadataProvider    = (*mathTool)(nil)
+)
 
 // mathTool implements pluginapi.Tool for basic arithmetic operations.
 type mathTool struct {

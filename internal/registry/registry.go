@@ -55,6 +55,27 @@ func (m *Manager) shouldFetchFromGitHub() bool {
 	return time.Since(m.lastFetchTime) >= m.fetchInterval
 }
 
+// RefreshFromGitHub forces a refresh from GitHub on startup
+func (m *Manager) RefreshFromGitHub() error {
+	fmt.Println("🔄 Refreshing plugin registry from GitHub...")
+
+	githubReg, err := m.fetchGitHubPluginRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to fetch from GitHub: %w", err)
+	}
+
+	// Cache it for offline use
+	if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
+		if writeErr := os.WriteFile(m.cachePath, data, 0644); writeErr != nil {
+			fmt.Printf("Warning: failed to cache registry: %v\n", writeErr)
+		} else {
+			fmt.Println("✅ Plugin registry cache updated successfully")
+		}
+	}
+
+	return nil
+}
+
 // fetchGitHubPluginRegistry fetches the plugin registry from GitHub
 func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
@@ -74,8 +95,59 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 		return reg, fmt.Errorf("failed to read GitHub response: %w", err)
 	}
 
-	if err := json.Unmarshal(data, &reg); err != nil {
-		return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
+	// Try to parse as the new metadata format first
+	var metadataReg struct {
+		Plugins []types.PluginMetadata `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &metadataReg); err == nil && len(metadataReg.Plugins) > 0 {
+		// Convert metadata format to registry entry format
+		reg.Plugins = make([]types.PluginRegistryEntry, len(metadataReg.Plugins))
+		for i, meta := range metadataReg.Plugins {
+			entry := types.PluginRegistryEntry{
+				Name:        meta.Name,
+				Description: meta.Description,
+				Version:     meta.Version,
+				Metadata:    &meta,
+			}
+
+			// Extract supported OS and arch from platforms
+			if len(meta.Platforms) > 0 {
+				osSet := make(map[string]bool)
+				archSet := make(map[string]bool)
+				for _, platform := range meta.Platforms {
+					osSet[platform.Os] = true
+					for _, arch := range platform.Architectures {
+						archSet[arch] = true
+					}
+				}
+
+				entry.SupportedOS = make([]string, 0, len(osSet))
+				for os := range osSet {
+					entry.SupportedOS = append(entry.SupportedOS, os)
+				}
+
+				entry.SupportedArch = make([]string, 0, len(archSet))
+				for arch := range archSet {
+					entry.SupportedArch = append(entry.SupportedArch, arch)
+				}
+			}
+
+			// Set GitHub repo and download URL if available in repository field
+			if meta.Repository != "" {
+				entry.GitHubRepo = meta.Repository
+				// Construct download URL from repository
+				// Example: https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/repo
+				repoName := strings.TrimSuffix(filepath.Base(meta.Repository), ".git")
+				entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s", strings.TrimSuffix(meta.Repository, "/"), repoName)
+			}
+
+			reg.Plugins[i] = entry
+		}
+	} else {
+		// Fall back to old format
+		if err := json.Unmarshal(data, &reg); err != nil {
+			return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
+		}
 	}
 
 	// Update last fetch time on successful fetch

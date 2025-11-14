@@ -2,7 +2,7 @@ package agent
 
 import (
 	"github.com/johnjallday/ori-agent/internal/types"
-	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v3"
 )
 
 // Type constants define agent capability tiers

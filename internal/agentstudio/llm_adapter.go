@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v3"
 )
 
 // LLMFactoryAdapter adapts llm.Factory to implement LLMProvider interface

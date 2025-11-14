@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
-	"github.com/openai/openai-go/v2"
+	"github.com/openai/openai-go/v3"
 )
 
 // GRPCClient implements pluginapi.Tool via RPC

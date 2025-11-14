@@ -106,6 +106,12 @@ func New() (*Server, error) {
 	// Initialize registry manager
 	s.registryManager = registry.NewManager()
 
+	// Refresh plugin registry from GitHub on startup
+	if err := s.registryManager.RefreshFromGitHub(); err != nil {
+		log.Printf("⚠️  Failed to refresh plugin registry from GitHub: %v", err)
+		log.Printf("   Will use cached or local registry")
+	}
+
 	// Get API key from configuration (checks settings then env var)
 	apiKey := s.configManager.GetAPIKey()
 	if apiKey == "" {
