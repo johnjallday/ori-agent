@@ -5,7 +5,8 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem"
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/jjdev/Projects"
       ],
       "env": {},
       "transport": "stdio",

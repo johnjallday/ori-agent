@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 )
@@ -80,6 +81,8 @@ func (t *StdioTransport) Send(message interface{}) error {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
+	fmt.Fprintf(os.Stderr, "[MCP send] %s\n", string(data))
+
 	// MCP uses newline-delimited JSON
 	_, err = t.stdin.Write(append(data, '\n'))
 	if err != nil {
@@ -109,6 +112,8 @@ func (t *StdioTransport) Receive() (json.RawMessage, error) {
 	if len(line) == 0 {
 		return nil, fmt.Errorf("empty line received")
 	}
+
+	fmt.Fprintf(os.Stderr, "[MCP recv] %s\n", string(line))
 
 	// Return raw JSON message
 	return json.RawMessage(line), nil
@@ -149,12 +154,10 @@ func (t *StdioTransport) Close() error {
 func (t *StdioTransport) readStderr() {
 	scanner := bufio.NewScanner(t.stderr)
 	for scanner.Scan() {
-		// TODO: Forward stderr to logging system
 		line := scanner.Text()
 		if len(line) > 0 {
-			// For now, we'll just ignore stderr
-			// In future, integrate with ori-agent logging
-			_ = line
+			// Log stderr output for debugging
+			fmt.Fprintf(os.Stderr, "[MCP stderr] %s\n", line)
 		}
 	}
 }

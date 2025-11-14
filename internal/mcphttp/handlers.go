@@ -2,6 +2,7 @@ package mcphttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -142,11 +143,33 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Start the server if not already running
-	if err := h.registry.StartServer(serverName); err != nil {
-		log.Printf("Failed to start MCP server: %v", err)
+	// Check current server status
+	status, err := h.registry.GetServerStatus(serverName)
+	if err != nil {
+		log.Printf("Failed to get MCP server status: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// If server is in error state or stopped, try to start/restart it
+	if status == mcp.StatusError || status == mcp.StatusStopped {
+		// Stop first if in error state to clean up
+		if status == mcp.StatusError {
+			h.registry.StopServer(serverName) // Ignore error, might already be stopped
+		}
+
+		// Start the server
+		if err := h.registry.StartServer(serverName); err != nil {
+			log.Printf("Failed to start MCP server: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to start server: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else if status == mcp.StatusRunning {
+		// Already running, this is fine
+		log.Printf("MCP server %s is already running", serverName)
+	} else {
+		// Status is starting or restarting, wait a bit or just continue
+		log.Printf("MCP server %s is in state: %s", serverName, status)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

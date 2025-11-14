@@ -127,6 +127,41 @@ func (m *LaunchAgentManager) generatePlist() string {
 	homeDir, _ := os.UserHomeDir()
 	logDir := filepath.Join(homeDir, "Library", "Logs")
 
+	// Build PATH with common locations for development tools
+	// Include Homebrew, NVM, system paths, and user's local bin
+	pathComponents := []string{
+		"/opt/homebrew/bin",                  // Homebrew (Apple Silicon)
+		"/usr/local/bin",                     // Homebrew (Intel) and other tools
+		filepath.Join(homeDir, ".local/bin"), // User local binaries
+	}
+
+	// Try to detect Node.js from current environment first
+	if npxPath, err := exec.LookPath("npx"); err == nil {
+		// Get the directory containing npx
+		nodeBinDir := filepath.Dir(npxPath)
+		pathComponents = append(pathComponents, nodeBinDir)
+	} else {
+		// Fallback: Try to detect NVM Node.js installation
+		nvmDir := filepath.Join(homeDir, ".nvm/versions/node")
+		if entries, err := os.ReadDir(nvmDir); err == nil && len(entries) > 0 {
+			// Use the latest Node.js version (entries are typically sorted)
+			for i := len(entries) - 1; i >= 0; i-- {
+				if entries[i].IsDir() {
+					nodeBinPath := filepath.Join(nvmDir, entries[i].Name(), "bin")
+					if _, err := os.Stat(nodeBinPath); err == nil {
+						pathComponents = append(pathComponents, nodeBinPath)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Add system paths
+	pathComponents = append(pathComponents, "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+
+	pathEnv := strings.Join(pathComponents, ":")
+
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -148,7 +183,7 @@ func (m *LaunchAgentManager) generatePlist() string {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>%s</string>
     </dict>
 </dict>
 </plist>
@@ -157,6 +192,7 @@ func (m *LaunchAgentManager) generatePlist() string {
 		m.executablePath,
 		logDir,
 		logDir,
+		pathEnv,
 	)
 
 	return plist

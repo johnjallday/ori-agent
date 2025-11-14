@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -67,6 +68,12 @@ func (s *Server) Start() error {
 	env := os.Environ()
 	for k, v := range s.config.Env {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Check if command exists in PATH
+	if _, err := exec.LookPath(s.config.Command); err != nil {
+		s.setStatus(StatusError)
+		return fmt.Errorf("command %q not found in PATH: %w. Please ensure the required runtime (e.g., Node.js/npm for npx commands) is installed and available in your PATH", s.config.Command, err)
 	}
 
 	// Create transport

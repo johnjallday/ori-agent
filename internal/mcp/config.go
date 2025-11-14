@@ -280,12 +280,19 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 		return nil
 	}
 
+	// Get user's home directory for default allowed directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp" // Fallback
+	}
+
 	// Add default filesystem server (disabled by default for security)
+	// Uses user's home directory as the allowed directory
 	defaultServers := []ServerConfig{
 		{
 			Name:      "filesystem",
 			Command:   "npx",
-			Args:      []string{"-y", "@modelcontextprotocol/server-filesystem"},
+			Args:      []string{"-y", "@modelcontextprotocol/server-filesystem", homeDir},
 			Env:       make(map[string]string),
 			Transport: "stdio",
 			Enabled:   false,

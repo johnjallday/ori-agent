@@ -396,6 +396,18 @@ func (s *fileStore) load() error {
 						ag.Plugins = make(map[string]types.LoadedPlugin)
 					}
 
+					// Load MCP servers from mcp_servers.json
+					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
+					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
+						var mcpConfig struct {
+							EnabledServers []string `json:"enabled_servers"`
+						}
+						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
+							ag.MCPServers = mcpConfig.EnabledServers
+							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s'", len(mcpConfig.EnabledServers), agentName)
+						}
+					}
+
 					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
 					// Legacy flat structure: agents/agent.json
@@ -415,6 +427,18 @@ func (s *fileStore) load() error {
 					// ensure maps
 					if ag.Plugins == nil {
 						ag.Plugins = make(map[string]types.LoadedPlugin)
+					}
+
+					// Load MCP servers from mcp_servers.json (legacy structure)
+					mcpServersPath := filepath.Join(agentsDir, agentName, "mcp_servers.json")
+					if mcpData, err := os.ReadFile(mcpServersPath); err == nil {
+						var mcpConfig struct {
+							EnabledServers []string `json:"enabled_servers"`
+						}
+						if err := json.Unmarshal(mcpData, &mcpConfig); err == nil {
+							ag.MCPServers = mcpConfig.EnabledServers
+							logger.Verbosef("✅ Loaded %d MCP servers for agent '%s' (legacy)", len(mcpConfig.EnabledServers), agentName)
+						}
 					}
 
 					s.agents[agentName] = &ag

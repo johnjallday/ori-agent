@@ -803,8 +803,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add MCP tools for enabled servers
+	log.Printf("DEBUG: Agent '%s' has %d MCP servers: %v", current, len(ag.MCPServers), ag.MCPServers)
 	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
+		log.Printf("DEBUG: Loading MCP tools for agent '%s'", current)
 		for _, serverName := range ag.MCPServers {
+			log.Printf("DEBUG: Attempting to get tools for MCP server '%s'", serverName)
 			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
 			if err != nil {
 				log.Printf("Warning: failed to get MCP tools for server %s: %v", serverName, err)

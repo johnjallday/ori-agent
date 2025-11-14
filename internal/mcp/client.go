@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -151,13 +152,20 @@ func (c *Client) receiveLoop() {
 		var resp Response
 		if err := json.Unmarshal(msg, &resp); err != nil {
 			// Invalid message, skip
+			fmt.Fprintf(os.Stderr, "[MCP] Failed to unmarshal response: %v\n", err)
 			continue
 		}
 
 		// Check if this is a response to a pending request
 		if resp.ID != nil {
+			// Convert float64 to int64 if needed (JSON unmarshals numbers as float64)
+			var normalizedID interface{} = resp.ID
+			if f, ok := resp.ID.(float64); ok {
+				normalizedID = int64(f)
+			}
+
 			c.pendingMu.RLock()
-			ch, ok := c.pending[resp.ID]
+			ch, ok := c.pending[normalizedID]
 			c.pendingMu.RUnlock()
 
 			if ok {
@@ -165,10 +173,25 @@ func (c *Client) receiveLoop() {
 				case ch <- &resp:
 				default:
 					// Channel full, skip
+					fmt.Fprintf(os.Stderr, "[MCP] Pending channel full for ID %v\n", normalizedID)
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "[MCP] No pending request for ID %v (type: %T, all pending: %v)\n", normalizedID, normalizedID, c.getPendingIDs())
 			}
 		}
 	}
+}
+
+// getPendingIDs returns all pending request IDs (for debugging)
+func (c *Client) getPendingIDs() []interface{} {
+	c.pendingMu.RLock()
+	defer c.pendingMu.RUnlock()
+
+	ids := make([]interface{}, 0, len(c.pending))
+	for id := range c.pending {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // closeAllPending closes all pending request channels
