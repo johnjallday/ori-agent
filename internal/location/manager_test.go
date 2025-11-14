@@ -2,6 +2,7 @@ package location
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -150,10 +151,13 @@ func TestLocationChangeEvent(t *testing.T) {
 	manager := NewManager([]Detector{detector}, []Zone{zone})
 
 	// Register event callback
+	var mu sync.Mutex
 	eventReceived := false
 	var receivedEvent LocationChangeEvent
 
 	manager.OnLocationChange(func(event LocationChangeEvent) {
+		mu.Lock()
+		defer mu.Unlock()
 		eventReceived = true
 		receivedEvent = event
 	})
@@ -163,6 +167,9 @@ func TestLocationChangeEvent(t *testing.T) {
 
 	// Wait for event to be processed
 	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if !eventReceived {
 		t.Error("Expected location change event to be received")
@@ -197,9 +204,12 @@ func TestDuplicateEventPrevention(t *testing.T) {
 	manager := NewManager([]Detector{detector}, []Zone{zone})
 
 	// Register event callback
+	var mu sync.Mutex
 	eventCount := 0
 
 	manager.OnLocationChange(func(event LocationChangeEvent) {
+		mu.Lock()
+		defer mu.Unlock()
 		eventCount++
 	})
 
@@ -209,6 +219,9 @@ func TestDuplicateEventPrevention(t *testing.T) {
 
 	manager.detectAndUpdate()
 	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if eventCount != 1 {
 		t.Errorf("Expected 1 event, got %d events", eventCount)
