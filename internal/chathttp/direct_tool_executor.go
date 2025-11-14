@@ -21,8 +21,9 @@ type DirectToolCommand struct {
 // parseDirectToolCommand parses a direct tool command in the format:
 // /tool <tool_name> <json_args>
 // Examples:
-//   /tool math {"operation": "add", "a": 5, "b": 3}
-//   /tool weather {"city": "San Francisco"}
+//
+//	/tool math {"operation": "add", "a": 5, "b": 3}
+//	/tool weather {"city": "San Francisco"}
 func parseDirectToolCommand(message string) (*DirectToolCommand, error) {
 	// Remove leading/trailing whitespace
 	message = strings.TrimSpace(message)
@@ -178,11 +179,11 @@ func (h *Handler) getAvailableToolNames(ag *agent.Agent) []string {
 // formatDirectToolResponse formats a direct tool result into a chat response
 func formatDirectToolResponse(result *DirectToolResult) map[string]any {
 	response := map[string]any{
-		"response":           result.Result,
-		"direct_tool_call":   true,
-		"tool_name":          result.ToolName,
-		"execution_time_ms":  result.ExecutionTimeMs,
-		"success":            result.Success,
+		"response":          result.Result,
+		"direct_tool_call":  true,
+		"tool_name":         result.ToolName,
+		"execution_time_ms": result.ExecutionTimeMs,
+		"success":           result.Success,
 	}
 
 	// Add structured result metadata if available
