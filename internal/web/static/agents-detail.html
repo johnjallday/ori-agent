@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Details - Ori Agent</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        body {
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .simple-navbar {
+            background: var(--bg-secondary, #f8f9fa);
+            border-bottom: 1px solid var(--border-color, #ddd);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .navbar-brand {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-color, #333);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 16px;
+            margin-left: auto;
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            text-decoration: none;
+            color: var(--text-color, #333);
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .nav-link:hover {
+            background: var(--border-color, #e0e0e0);
+        }
+
+        .nav-link.active {
+            background: var(--primary-color, #007bff);
+            color: white;
+        }
+
+        .detail-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary, #f8f9fa);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 6px;
+            text-decoration: none;
+            color: var(--text-color, #333);
+            margin-bottom: 20px;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background: var(--border-color, #e0e0e0);
+        }
+
+        .agent-header {
+            background: var(--card-bg, white);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .agent-avatar-large {
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 600;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .agent-header-info {
+            flex: 1;
+        }
+
+        .agent-name-large {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .agent-description-large {
+            color: var(--text-muted, #666);
+            font-size: 16px;
+            margin-bottom: 12px;
+        }
+
+        .agent-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .agent-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color, #007bff);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary, #f8f9fa);
+            color: var(--text-color, #333);
+            border: 1px solid var(--border-color, #ddd);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        .status-badge {
+            padding: 6px 16px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .status-active { background: #d4edda; color: #155724; }
+        .status-idle { background: #fff3cd; color: #856404; }
+        .status-error { background: #f8d7da; color: #721c24; }
+        .status-disabled { background: #e2e3e5; color: #383d41; }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .section-card {
+            background: var(--card-bg, white);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color, #ddd);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            padding: 16px;
+            background: var(--bg-secondary, #f8f9fa);
+            border-radius: 8px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted, #666);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color, #ddd);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 500;
+            color: var(--text-muted, #666);
+        }
+
+        .info-value {
+            font-weight: 500;
+        }
+
+        .plugin-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .plugin-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg-secondary, #f8f9fa);
+            border-radius: 8px;
+        }
+
+        .plugin-name {
+            font-weight: 500;
+        }
+
+        .plugin-version {
+            font-size: 12px;
+            color: var(--text-muted, #666);
+        }
+
+        .chart-container {
+            height: 250px;
+            margin: 20px 0;
+        }
+
+        .activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            padding: 12px;
+            background: var(--bg-secondary, #f8f9fa);
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .activity-time {
+            color: var(--text-muted, #666);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .empty-message {
+            text-align: center;
+            color: var(--text-muted, #666);
+            padding: 40px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted, #666);
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background: var(--bg-secondary, #f8f9fa);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 12px;
+            font-size: 12px;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        @media (max-width: 968px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .agent-header {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .agent-actions {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="simple-navbar">
+        <div class="navbar-brand">Ori Agent</div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Chat</a>
+            <a href="/agents-dashboard" class="nav-link active">Agents</a>
+            <a href="/studios" class="nav-link">Workspaces</a>
+            <a href="/settings" class="nav-link">Settings</a>
+        </div>
+    </nav>
+
+    <div class="detail-container">
+        <!-- Back Button -->
+        <a href="/agents-dashboard" class="back-button">
+            <span>←</span> Back to Dashboard
+        </a>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="loading">
+            <p>Loading agent details...</p>
+        </div>
+
+        <!-- Agent Header -->
+        <div id="agentHeader" class="agent-header" style="display: none;">
+            <div id="agentAvatar" class="agent-avatar-large"></div>
+            <div class="agent-header-info">
+                <h1 id="agentName" class="agent-name-large"></h1>
+                <p id="agentDescription" class="agent-description-large"></p>
+                <div class="agent-meta">
+                    <div class="meta-item">
+                        <span class="status-badge" id="statusBadge"></span>
+                    </div>
+                    <div class="meta-item">
+                        📦 <span id="agentType"></span>
+                    </div>
+                    <div class="meta-item">
+                        🤖 <span id="agentModel"></span>
+                    </div>
+                    <div class="meta-item">
+                        🔧 <span id="pluginCount"></span> plugins
+                    </div>
+                </div>
+            </div>
+            <div class="agent-actions">
+                <button class="btn btn-primary" onclick="chatWithAgent()">💬 Chat</button>
+                <button class="btn btn-secondary" onclick="editAgent()">✏️ Edit</button>
+                <button class="btn btn-danger" onclick="confirmDelete()">🗑️ Delete</button>
+            </div>
+        </div>
+
+        <!-- Content Grid -->
+        <div id="contentGrid" class="content-grid" style="display: none;">
+            <!-- Left Column -->
+            <div>
+                <!-- Statistics -->
+                <div class="section-card">
+                    <h2 class="section-title">Statistics</h2>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-label">Messages</div>
+                            <div class="stat-value" id="statMessages">0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Tokens Used</div>
+                            <div class="stat-value" id="statTokens">0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Total Cost</div>
+                            <div class="stat-value" id="statCost">$0.00</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Avg Tokens/Msg</div>
+                            <div class="stat-value" id="statAvgTokens">0</div>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Created</span>
+                        <span class="info-value" id="createdAt">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Last Active</span>
+                        <span class="info-value" id="lastActive">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Last Updated</span>
+                        <span class="info-value" id="updatedAt">-</span>
+                    </div>
+                </div>
+
+                <!-- Configuration -->
+                <div class="section-card" style="margin-top: 24px;">
+                    <h2 class="section-title">Configuration</h2>
+                    <div class="info-row">
+                        <span class="info-label">Model</span>
+                        <span class="info-value" id="configModel">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Temperature</span>
+                        <span class="info-value" id="configTemp">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Type</span>
+                        <span class="info-value" id="configType">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Role</span>
+                        <span class="info-value" id="configRole">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">System Prompt</span>
+                        <span class="info-value" id="configPrompt" style="font-size: 12px; max-width: 400px; word-wrap: break-word;">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div>
+                <!-- Enabled Plugins -->
+                <div class="section-card">
+                    <h2 class="section-title">Enabled Plugins</h2>
+                    <div id="pluginsList" class="plugin-list">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Tags -->
+                <div class="section-card" style="margin-top: 24px;" id="tagsSection">
+                    <h2 class="section-title">Tags</h2>
+                    <div id="tagsList">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- MCP Servers -->
+                <div class="section-card" style="margin-top: 24px;" id="mcpSection">
+                    <h2 class="section-title">MCP Servers</h2>
+                    <div id="mcpList">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/agents-detail.js"></script>
+</body>
+</html>

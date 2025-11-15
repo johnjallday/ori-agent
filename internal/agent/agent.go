@@ -70,4 +70,24 @@ type Agent struct {
 	Plugins      map[string]types.LoadedPlugin            `json:"Plugins"`
 	MCPServers   []string                                 `json:"mcp_servers,omitempty"` // List of enabled MCP server names
 	Messages     []openai.ChatCompletionMessageParamUnion `json:"-"`                     // in-memory only
+
+	// Dashboard-specific fields (optional for backward compatibility)
+	Status     types.AgentStatus      `json:"status,omitempty"`     // Operational status (active, idle, error, disabled)
+	Statistics *types.AgentStatistics `json:"statistics,omitempty"` // Usage and performance metrics
+	Metadata   *types.AgentMetadata   `json:"metadata,omitempty"`   // Descriptive information and tags
+}
+
+// InitializeStatistics safely initializes the statistics if nil
+// This method is idempotent and can be called multiple times
+func (a *Agent) InitializeStatistics() {
+	if a.Statistics == nil {
+		a.Statistics = types.NewAgentStatistics()
+	}
+}
+
+// UpdateLastActive updates the last activity timestamp for the agent
+func (a *Agent) UpdateLastActive() {
+	if a.Statistics != nil {
+		a.Statistics.UpdateLastActive()
+	}
 }

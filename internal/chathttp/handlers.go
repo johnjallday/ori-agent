@@ -165,6 +165,9 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp.Usage, ""); err != nil {
 			log.Printf("Warning: failed to track usage: %v", err)
 		}
+
+		// Track statistics in agent
+		h.trackAgentStatistics(ag, resp.Usage.TotalTokens, "claude", ag.Settings.Model)
 	}
 
 	// Tool-call branch
@@ -392,6 +395,11 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Track usage (Ollama is free/local, so no cost tracking needed)
 	log.Printf("Ollama response received in %v", time.Since(start))
+
+	// Track statistics in agent (with zero cost for Ollama)
+	if resp.Usage.TotalTokens > 0 {
+		h.trackAgentStatistics(ag, resp.Usage.TotalTokens, "ollama", ag.Settings.Model)
+	}
 
 	// Tool-call branch (similar to Claude handler)
 	if len(resp.ToolCalls) > 0 {
@@ -928,6 +936,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
 			log.Printf("Warning: failed to track usage: %v", err)
 		}
+
+		// Track statistics in agent
+		h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
 	}
 
 	choice := resp.Choices[0].Message
@@ -958,6 +969,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
 					log.Printf("Warning: failed to track fallback usage: %v", err)
 				}
+
+				// Track statistics in agent
+				h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
 			}
 		}
 	}
@@ -1126,4 +1140,36 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Chat response in %s: %q", time.Since(start), text)
 	_ = h.store.SetAgent(current, ag) // persists settings/plugins only
 	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
+}
+
+// trackAgentStatistics records message and token usage in agent statistics
+func (h *Handler) trackAgentStatistics(ag *agent.Agent, tokenCount int, provider string, model string) {
+	// Initialize statistics if needed
+	ag.InitializeStatistics()
+
+	// Calculate cost estimate (this is a simple estimation, actual costs tracked by cost tracker)
+	var costPerToken float64
+	switch provider {
+	case "ollama":
+		costPerToken = 0.0 // Ollama is free/local
+	default:
+		switch {
+		case strings.Contains(model, "gpt-4"):
+			costPerToken = 0.00003 // ~$0.03 per 1K tokens (average of input/output)
+		case strings.Contains(model, "gpt-3.5"):
+			costPerToken = 0.000002 // ~$0.002 per 1K tokens
+		case strings.Contains(model, "claude"):
+			costPerToken = 0.00003 // ~$0.03 per 1K tokens (average)
+		default:
+			costPerToken = 0.00001 // Default estimate
+		}
+	}
+
+	estimatedCost := float64(tokenCount) * costPerToken
+
+	// Record the message with tokens and cost
+	ag.Statistics.RecordMessage(tokenCount, estimatedCost)
+
+	log.Printf("📊 Statistics updated: %d messages, %d tokens, $%.4f total cost",
+		ag.Statistics.MessageCount, ag.Statistics.TokenUsage, ag.Statistics.TotalCost)
 }

@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Agent - Ori Agent</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+        body {
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .simple-navbar {
+            background: var(--bg-secondary, #f8f9fa);
+            border-bottom: 1px solid var(--border-color, #ddd);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .navbar-brand {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-color, #333);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 16px;
+            margin-left: auto;
+        }
+
+        .nav-link {
+            padding: 8px 16px;
+            text-decoration: none;
+            color: var(--text-color, #333);
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+
+        .nav-link:hover {
+            background: var(--border-color, #e0e0e0);
+        }
+
+        .nav-link.active {
+            background: var(--primary-color, #007bff);
+            color: white;
+        }
+
+        .create-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .page-header {
+            margin-bottom: 30px;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .page-header p {
+            color: var(--text-muted, #666);
+            font-size: 14px;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary, #f8f9fa);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 6px;
+            text-decoration: none;
+            color: var(--text-color, #333);
+            margin-bottom: 20px;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background: var(--border-color, #e0e0e0);
+        }
+
+        .form-card {
+            background: var(--card-bg, white);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 24px;
+        }
+
+        .form-section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color, #ddd);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-color, #333);
+        }
+
+        .form-label.required::after {
+            content: " *";
+            color: #dc3545;
+        }
+
+        .form-input,
+        .form-select,
+        .form-textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            background: var(--card-bg, white);
+            color: var(--text-color, #333);
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus,
+        .form-select:focus,
+        .form-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color, #007bff);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .form-help {
+            font-size: 12px;
+            color: var(--text-muted, #666);
+            margin-top: 4px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .color-picker-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 2px solid var(--border-color, #ddd);
+        }
+
+        .color-input {
+            width: 120px;
+        }
+
+        .tags-input-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px;
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 6px;
+            min-height: 44px;
+            cursor: text;
+        }
+
+        .tag-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            background: var(--primary-color, #007bff);
+            color: white;
+            border-radius: 12px;
+            font-size: 13px;
+        }
+
+        .tag-remove {
+            cursor: pointer;
+            font-weight: bold;
+            opacity: 0.8;
+        }
+
+        .tag-remove:hover {
+            opacity: 1;
+        }
+
+        .tag-input {
+            border: none;
+            outline: none;
+            padding: 4px;
+            flex: 1;
+            min-width: 120px;
+            font-size: 14px;
+        }
+
+        .plugin-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: 6px;
+            padding: 8px;
+        }
+
+        .plugin-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            transition: background 0.2s;
+        }
+
+        .plugin-item:hover {
+            background: var(--bg-secondary, #f8f9fa);
+        }
+
+        .plugin-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .plugin-info {
+            flex: 1;
+        }
+
+        .plugin-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .plugin-description {
+            font-size: 12px;
+            color: var(--text-muted, #666);
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color, #ddd);
+        }
+
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary-color, #007bff);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary, #f8f9fa);
+            color: var(--text-color, #333);
+            border: 1px solid var(--border-color, #ddd);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color, #e0e0e0);
+        }
+
+        .error-message {
+            padding: 12px;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="simple-navbar">
+        <div class="navbar-brand">Ori Agent</div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Chat</a>
+            <a href="/agents-dashboard" class="nav-link active">Agents</a>
+            <a href="/studios" class="nav-link">Workspaces</a>
+            <a href="/settings" class="nav-link">Settings</a>
+        </div>
+    </nav>
+
+    <div class="create-container">
+        <!-- Back Button -->
+        <a href="/agents-dashboard" class="back-button">
+            <span>←</span> Back to Dashboard
+        </a>
+
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1>Create New Agent</h1>
+            <p>Configure and customize your AI agent</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="errorMessage" class="error-message"></div>
+
+        <!-- Basic Information -->
+        <div class="form-card">
+            <h2 class="form-section-title">Basic Information</h2>
+
+            <div class="form-group">
+                <label class="form-label required" for="agentName">Agent Name</label>
+                <input type="text" id="agentName" class="form-input" placeholder="e.g., Code Assistant" required>
+                <div class="form-help">Choose a unique, descriptive name for your agent</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="agentDescription">Description</label>
+                <textarea id="agentDescription" class="form-textarea" placeholder="Describe what this agent does..."></textarea>
+                <div class="form-help">Optional: Help others understand the agent's purpose</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label required" for="agentType">Agent Type</label>
+                    <select id="agentType" class="form-select" required>
+                        <option value="tool-calling">Tool Calling</option>
+                        <option value="conversational">Conversational</option>
+                        <option value="task-oriented">Task Oriented</option>
+                    </select>
+                    <div class="form-help">Defines the agent's interaction style</div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required" for="agentRole">Role</label>
+                    <select id="agentRole" class="form-select" required>
+                        <option value="general">General</option>
+                        <option value="coding">Coding</option>
+                        <option value="research">Research</option>
+                        <option value="creative">Creative</option>
+                        <option value="analysis">Analysis</option>
+                    </select>
+                    <div class="form-help">The agent's primary role or specialty</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LLM Configuration -->
+        <div class="form-card">
+            <h2 class="form-section-title">LLM Configuration</h2>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label required" for="llmProvider">Provider</label>
+                    <select id="llmProvider" class="form-select" required onchange="updateModelOptions()">
+                        <option value="openai">OpenAI</option>
+                        <option value="claude">Anthropic Claude</option>
+                        <option value="ollama">Ollama (Local)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required" for="llmModel">Model</label>
+                    <select id="llmModel" class="form-select" required>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="temperature">Temperature: <span id="tempValue">1.0</span></label>
+                <input type="range" id="temperature" class="form-input" min="0" max="2" step="0.1" value="1.0"
+                       oninput="document.getElementById('tempValue').textContent = this.value">
+                <div class="form-help">Controls randomness: 0 = focused, 2 = creative</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="systemPrompt">System Prompt</label>
+                <textarea id="systemPrompt" class="form-textarea" placeholder="You are a helpful assistant..."></textarea>
+                <div class="form-help">Optional: Custom instructions for the agent's behavior</div>
+            </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="form-card">
+            <h2 class="form-section-title">Appearance</h2>
+
+            <div class="form-group">
+                <label class="form-label" for="avatarColor">Avatar Color</label>
+                <div class="color-picker-group">
+                    <div id="colorPreview" class="color-preview" style="background: #007bff;"></div>
+                    <input type="color" id="avatarColor" class="form-input color-input" value="#007bff"
+                           onchange="document.getElementById('colorPreview').style.background = this.value">
+                    <span class="form-help">Choose a color for the agent's avatar</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="tagsInput">Tags</label>
+                <div id="tagsContainer" class="tags-input-container" onclick="document.getElementById('tagsInput').focus()">
+                    <input type="text" id="tagsInput" class="tag-input" placeholder="Add tags...">
+                </div>
+                <div class="form-help">Press Enter to add tags (e.g., "coding", "creative", "research")</div>
+            </div>
+        </div>
+
+        <!-- Plugins -->
+        <div class="form-card">
+            <h2 class="form-section-title">Plugins</h2>
+            <div class="form-help" style="margin-bottom: 12px;">Select which plugins this agent can use</div>
+
+            <div id="pluginsList" class="plugin-list">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="form-card">
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="window.location.href='/agents-dashboard'">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <p>Creating agent...</p>
+        </div>
+    </div>
+
+    <script src="/js/agents-create.js"></script>
+</body>
+</html>

@@ -100,13 +100,17 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			}
 		}
 
-		s.agents[name] = &agent.Agent{
+		newAgent := &agent.Agent{
 			Type:         agentType,
 			Role:         types.RoleGeneral, // Default role
 			Capabilities: []string{},        // Empty capabilities by default
 			Settings:     defaultSettings,
 			Plugins:      make(map[string]types.LoadedPlugin),
+			Status:       types.AgentStatusActive, // New agents start as active
 		}
+		// Initialize statistics for the new agent
+		newAgent.InitializeStatistics()
+		s.agents[name] = newAgent
 	}
 	return s.saveUnlocked()
 }
@@ -242,9 +246,15 @@ func (s *fileStore) saveUnlocked() error {
 
 	// Save individual agent files in nested structure
 	type persistSettings struct {
-		Type     string                        `json:"type"` // Agent type
-		Settings types.Settings                `json:"Settings"`
-		Plugins  map[string]types.LoadedPlugin `json:"Plugins"`
+		Type         string                        `json:"type"` // Agent type
+		Role         types.AgentRole               `json:"role,omitempty"`
+		Capabilities []string                      `json:"capabilities,omitempty"`
+		Settings     types.Settings                `json:"Settings"`
+		Plugins      map[string]types.LoadedPlugin `json:"Plugins"`
+		MCPServers   []string                      `json:"mcp_servers,omitempty"`
+		Status       types.AgentStatus             `json:"status,omitempty"`
+		Statistics   *types.AgentStatistics        `json:"statistics,omitempty"`
+		Metadata     *types.AgentMetadata          `json:"metadata,omitempty"`
 	}
 
 	for agentName, agent := range s.agents {
@@ -257,9 +267,15 @@ func (s *fileStore) saveUnlocked() error {
 		// Only save agent_settings.json with everything (Type + Settings + Plugins)
 		// Don't create config.json unless necessary
 		agentSettings := persistSettings{
-			Type:     agent.Type,
-			Settings: agent.Settings,
-			Plugins:  agent.Plugins,
+			Type:         agent.Type,
+			Role:         agent.Role,
+			Capabilities: agent.Capabilities,
+			Settings:     agent.Settings,
+			Plugins:      agent.Plugins,
+			MCPServers:   agent.MCPServers,
+			Status:       agent.Status,
+			Statistics:   agent.Statistics,
+			Metadata:     agent.Metadata,
 		}
 
 		settingsData, err := json.MarshalIndent(agentSettings, "", "  ")

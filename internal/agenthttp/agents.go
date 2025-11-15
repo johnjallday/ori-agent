@@ -4,15 +4,23 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type Handler struct {
-	State store.Store
+	State          store.Store
+	ActivityLogger *ActivityLogger
 }
 
-func New(state store.Store) *Handler { return &Handler{State: state} }
+func New(state store.Store) *Handler {
+	return &Handler{
+		State:          state,
+		ActivityLogger: nil, // Will be set by server initialization
+	}
+}
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -88,11 +96,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Name         string  `json:"name"`
-			Type         string  `json:"type,omitempty"`
-			Model        string  `json:"model,omitempty"`
-			Temperature  float64 `json:"temperature,omitempty"`
-			SystemPrompt string  `json:"system_prompt,omitempty"`
+			Name         string   `json:"name"`
+			Type         string   `json:"type,omitempty"`
+			Model        string   `json:"model,omitempty"`
+			Temperature  float64  `json:"temperature,omitempty"`
+			SystemPrompt string   `json:"system_prompt,omitempty"`
+			Description  string   `json:"description,omitempty"`
+			Tags         []string `json:"tags,omitempty"`
+			AvatarColor  string   `json:"avatar_color,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
@@ -122,7 +133,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		// Set metadata if provided
+		if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" {
+			agent, ok := h.State.GetAgent(req.Name)
+			if ok && agent != nil {
+				if agent.Metadata == nil {
+					agent.Metadata = &types.AgentMetadata{}
+				}
+				agent.Metadata.Description = req.Description
+				agent.Metadata.Tags = req.Tags
+				agent.Metadata.AvatarColor = req.AvatarColor
+				if err := h.State.SetAgent(req.Name, agent); err != nil {
+					log.Printf("⚠️  Failed to set metadata: %v", err)
+				}
+			}
+		}
+
 		log.Printf("✅ Agent created successfully: %s", req.Name)
+
+		// Log activity
+		if h.ActivityLogger != nil {
+			details := map[string]interface{}{
+				"type":        req.Type,
+				"model":       req.Model,
+				"description": req.Description,
+			}
+			if err := h.ActivityLogger.LogActivity(req.Name, types.ActivityEventCreated, details, ""); err != nil {
+				log.Printf("⚠️  Failed to log activity: %v", err)
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]any{
@@ -142,6 +183,103 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 
+	case http.MethodPatch:
+		// PATCH /api/agents/:name - Update agent metadata
+		path := r.URL.Path
+		var agentName string
+		if len(path) > len("/api/agents/") {
+			agentName = path[len("/api/agents/"):]
+		}
+		if agentName == "" {
+			agentName = r.URL.Query().Get("name")
+		}
+		if agentName == "" {
+			http.Error(w, "agent name required", http.StatusBadRequest)
+			return
+		}
+
+		// Get existing agent
+		agent, ok := h.State.GetAgent(agentName)
+		if !ok || agent == nil {
+			http.Error(w, "Agent not found", http.StatusNotFound)
+			return
+		}
+
+		// Parse update request
+		var req struct {
+			Description *string   `json:"description,omitempty"`
+			Tags        *[]string `json:"tags,omitempty"`
+			AvatarColor *string   `json:"avatar_color,omitempty"`
+			Favorite    *bool     `json:"favorite,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Initialize metadata if nil
+		if agent.Metadata == nil {
+			agent.Metadata = &types.AgentMetadata{}
+		}
+
+		// Update fields if provided (partial update)
+		if req.Description != nil {
+			agent.Metadata.Description = *req.Description
+		}
+		if req.Tags != nil {
+			agent.Metadata.Tags = *req.Tags
+		}
+		if req.AvatarColor != nil {
+			agent.Metadata.AvatarColor = *req.AvatarColor
+		}
+		if req.Favorite != nil {
+			agent.Metadata.Favorite = *req.Favorite
+		}
+
+		// Update timestamp if statistics exist
+		if agent.Statistics != nil {
+			agent.Statistics.UpdatedAt = time.Now()
+		}
+
+		// Save updated agent
+		if err := h.State.SetAgent(agentName, agent); err != nil {
+			log.Printf("❌ Failed to update agent metadata: %v", err)
+			http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Agent metadata updated: %s", agentName)
+
+		// Log activity
+		if h.ActivityLogger != nil {
+			updatedFields := []string{}
+			if req.Description != nil {
+				updatedFields = append(updatedFields, "description")
+			}
+			if req.Tags != nil {
+				updatedFields = append(updatedFields, "tags")
+			}
+			if req.AvatarColor != nil {
+				updatedFields = append(updatedFields, "avatar_color")
+			}
+			if req.Favorite != nil {
+				updatedFields = append(updatedFields, "favorite")
+			}
+
+			details := map[string]interface{}{
+				"fields": updatedFields,
+			}
+			if err := h.ActivityLogger.LogActivity(agentName, types.ActivityEventUpdated, details, ""); err != nil {
+				log.Printf("⚠️  Failed to log activity: %v", err)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"message": "Agent metadata updated successfully",
+		})
+
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if name == "" {
@@ -152,6 +290,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		// Log activity
+		if h.ActivityLogger != nil {
+			details := map[string]interface{}{}
+			if err := h.ActivityLogger.LogActivity(name, types.ActivityEventDeleted, details, ""); err != nil {
+				log.Printf("⚠️  Failed to log activity: %v", err)
+			}
+		}
+
 		w.WriteHeader(http.StatusOK)
 
 	default:

@@ -58,6 +58,7 @@ type Server struct {
 	pluginDownloader      *plugindownloader.PluginDownloader
 	updateMgr             *updatemanager.Manager
 	healthManager         *healthhttp.Manager
+	activityLogger        *agenthttp.ActivityLogger
 	settingsHandler       *settingshttp.Handler
 	chatHandler           *chathttp.Handler
 	pluginHandler         *pluginhttp.Handler
@@ -170,6 +171,20 @@ func New() (*Server, error) {
 	s.st, err = store.NewFileStore(s.agentStorePath, defaultConf)
 	if err != nil {
 		return nil, err
+	}
+
+	// initialize activity logger
+	activityLogDir := "activity_logs"
+	if abs, err := filepath.Abs(activityLogDir); err == nil {
+		activityLogDir = abs
+	}
+	s.activityLogger, err = agenthttp.NewActivityLogger(activityLogDir)
+	if err != nil {
+		log.Printf("⚠️  Failed to initialize activity logger: %v", err)
+		// Continue without activity logging
+		s.activityLogger = nil
+	} else {
+		log.Printf("✅ Activity logger initialized: %s", activityLogDir)
 	}
 
 	// initialize health manager (must be before plugin loading)
@@ -575,6 +590,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
+	mux.HandleFunc("/agents.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/agents.html", http.StatusFound)
+	})
 	mux.HandleFunc("/studios/", s.serveWorkspaceDashboard) // Dynamic route for /studios/:id
 	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
@@ -589,11 +610,33 @@ func (s *Server) Handler() http.Handler {
 
 	// Handlers: agents moved to separate package
 	agentHandler := agenthttp.New(s.st)
+	agentHandler.ActivityLogger = s.activityLogger
 	mux.Handle("/api/agents", agentHandler)
+
+	// Dashboard handlers
+	dashboardHandler := agenthttp.NewDashboardHandler(s.st)
+	dashboardHandler.ActivityLogger = s.activityLogger
+	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
+	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
 	// Agent MCP handlers
 	s.agentMCPHandler = agenthttp.NewMCPHandler(s.mcpRegistry, s.mcpConfigManager, agentHandler)
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
+		// Route dashboard detail requests first
+		if strings.Contains(r.URL.Path, "/detail") {
+			dashboardHandler.GetAgentDetail(w, r)
+			return
+		}
+		// Route status update requests
+		if strings.Contains(r.URL.Path, "/status") && r.Method == http.MethodPost {
+			dashboardHandler.UpdateAgentStatus(w, r)
+			return
+		}
+		// Route activity log requests
+		if strings.Contains(r.URL.Path, "/activity") && r.Method == http.MethodGet {
+			dashboardHandler.GetAgentActivity(w, r)
+			return
+		}
 		// Route agent MCP-specific requests
 		if strings.Contains(r.URL.Path, "/mcp-servers") {
 			if strings.HasSuffix(r.URL.Path, "/enable") {
