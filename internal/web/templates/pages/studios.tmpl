@@ -611,8 +611,13 @@
                 <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
                   View
                 </button>
-                <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')">
-                  Delete
+                <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
+                  Canvas
+                </button>
+                <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                  </svg>
                 </button>
               </div>
             </div>
@@ -1101,6 +1106,21 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Open workspace in canvas mode
+    function openWorkspaceCanvas(workspaceId) {
+      // Switch to canvas view and load the specific workspace
+      switchView('canvas');
+
+      // Wait a bit for the select to be populated, then select and load the workspace
+      setTimeout(() => {
+        const select = document.getElementById('canvas-studio-select');
+        if (select) {
+          select.value = workspaceId;
+          loadCanvasStudio(workspaceId);
+        }
+      }, 100);
     }
 
     // View switching

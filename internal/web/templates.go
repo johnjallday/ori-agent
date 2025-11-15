@@ -54,6 +54,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/studios.tmpl",
 		"templates/pages/workspace-dashboard.tmpl",
 		"templates/pages/usage.tmpl",
+		"templates/pages/mcp.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -80,6 +81,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["studios"] = tmpl
 	tr.templates["workspace-dashboard"] = tmpl
 	tr.templates["usage"] = tmpl
+	tr.templates["mcp"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
@@ -100,8 +102,8 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	if name == "index" {
 		templateName = "base.tmpl"
 	}
-	// Marketplace, settings, workflows, studios, workspace-dashboard, and usage use their own template names
-	if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" {
+	// Marketplace, settings, workflows, studios, workspace-dashboard, usage, and mcp use their own template names
+	if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" {
 		templateName = name
 	}
 

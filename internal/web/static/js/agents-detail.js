@@ -159,8 +159,10 @@ function renderMCPServers() {
     const container = document.getElementById('mcpList');
     const servers = currentAgent.mcp_servers || [];
 
+    document.getElementById('mcpSection').style.display = 'block';
+
     if (servers.length === 0) {
-        document.getElementById('mcpSection').style.display = 'none';
+        container.innerHTML = '<p style="color: var(--text-secondary); font-size: 14px;">No MCP servers enabled for this agent. Click "Configure" to enable MCP servers.</p>';
         return;
     }
 
@@ -173,6 +175,135 @@ function renderMCPServers() {
         `;
         container.appendChild(item);
     });
+}
+
+// Toggle MCP configuration panel
+async function toggleMCPConfig() {
+    const panel = document.getElementById('mcpConfigPanel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        await loadMCPConfigPanel();
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+// Load MCP configuration panel
+async function loadMCPConfigPanel() {
+    const panel = document.getElementById('mcpConfigPanel');
+
+    try {
+        // Fetch all available MCP servers
+        const response = await fetch('/api/mcp/servers');
+        const data = await response.json();
+        const allServers = data.servers || [];
+        const enabledServers = currentAgent.mcp_servers || [];
+
+        panel.innerHTML = `
+            <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--text-primary);">Available MCP Servers</h3>
+            <div id="mcpServersList">
+                ${allServers.map(server => `
+                    <div class="mcp-server-config" style="margin-bottom: 16px; padding: 16px; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="checkbox"
+                                    id="mcp_${server.name}"
+                                    ${enabledServers.includes(server.name) ? 'checked' : ''}
+                                    onchange="toggleMCPServer('${server.name}', this.checked)"
+                                    style="cursor: pointer;">
+                                <label for="mcp_${server.name}" style="cursor: pointer; font-weight: 600; color: var(--text-primary); margin: 0;">
+                                    ${server.name}
+                                </label>
+                            </div>
+                        </div>
+                        <div id="mcpConfig_${server.name}" style="display: ${enabledServers.includes(server.name) ? 'block' : 'none'}; margin-top: 12px; padding-left: 24px;">
+                            ${getMCPServerConfigUI(server)}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Failed to load MCP config:', error);
+        panel.innerHTML = '<p style="color: var(--text-secondary);">Failed to load MCP configuration</p>';
+    }
+}
+
+// Get configuration UI for specific MCP server
+function getMCPServerConfigUI(server) {
+    // Special handling for filesystem server
+    if (server.name === 'filesystem') {
+        const currentPath = server.args && server.args.length > 2 ? server.args[2] : '/path/to/directory';
+        return `
+            <div class="mb-2">
+                <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 4px;">
+                    Allowed Directory Path:
+                </label>
+                <input type="text"
+                    id="filesystem_path"
+                    value="${currentPath}"
+                    placeholder="/path/to/directory"
+                    style="width: 100%; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 14px;"
+                    onchange="updateMCPServerConfig('filesystem', 'path', this.value)">
+                <small style="color: var(--text-secondary); font-size: 12px;">The directory this agent can access via the filesystem MCP server</small>
+            </div>
+        `;
+    }
+
+    // Default: show command and args
+    return `
+        <div style="font-size: 13px; color: var(--text-secondary);">
+            <div><strong>Command:</strong> ${server.command}</div>
+            <div><strong>Args:</strong> ${server.args ? server.args.join(' ') : 'none'}</div>
+        </div>
+    `;
+}
+
+// Toggle MCP server for this agent
+async function toggleMCPServer(serverName, enabled) {
+    const configDiv = document.getElementById(`mcpConfig_${serverName}`);
+    if (configDiv) {
+        configDiv.style.display = enabled ? 'block' : 'none';
+    }
+
+    try {
+        const endpoint = enabled ? `/api/mcp/servers/${serverName}/enable` : `/api/mcp/servers/${serverName}/disable`;
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (response.ok) {
+            showToast(`${serverName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+            await loadAgent();
+        } else {
+            const error = await response.text();
+            showToast(`Failed: ${error}`, 'error');
+            document.getElementById(`mcp_${serverName}`).checked = !enabled;
+        }
+    } catch (error) {
+        console.error('Toggle MCP server error:', error);
+        showToast('Failed to update MCP server', 'error');
+        document.getElementById(`mcp_${serverName}`).checked = !enabled;
+    }
+}
+
+// Update MCP server configuration
+async function updateMCPServerConfig(serverName, configKey, value) {
+    // For now, just store the value - you can expand this to save to backend
+    console.log(`Update ${serverName} config: ${configKey} = ${value}`);
+    showToast(`${serverName} path updated`, 'info');
+
+    // TODO: Add API call to save per-agent MCP server config
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    // Simple toast implementation - you can enhance this
+    console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
 // Actions

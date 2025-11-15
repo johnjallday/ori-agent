@@ -590,6 +590,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
+	mux.HandleFunc("/mcp", s.serveMCP)
 	mux.HandleFunc("/agents.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
@@ -798,12 +799,18 @@ func (s *Server) Handler() http.Handler {
 			s.mcpHandler.GetServerToolsHandler(w, r)
 		} else if strings.HasSuffix(r.URL.Path, "/status") {
 			s.mcpHandler.GetServerStatusHandler(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/test") {
+			s.mcpHandler.TestConnectionHandler(w, r)
+		} else if strings.HasSuffix(r.URL.Path, "/retry") {
+			s.mcpHandler.RetryConnectionHandler(w, r)
 		} else if r.Method == http.MethodDelete {
 			s.mcpHandler.RemoveServerHandler(w, r)
 		} else {
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
 	})
+	mux.HandleFunc("/api/mcp/import", s.mcpHandler.ImportServersHandler)
+	mux.HandleFunc("/api/mcp/marketplace", s.mcpHandler.GetMarketplaceServersHandler)
 
 	// Orchestration endpoints
 	mux.HandleFunc("/api/orchestration/workspace", s.orchestrationHandler.WorkspaceHandler)
@@ -1053,6 +1060,37 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("settings", data)
 	if err != nil {
 		log.Printf("Failed to render settings template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.CurrentPage = "mcp"
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("mcp", data)
+	if err != nil {
+		log.Printf("Failed to render mcp template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

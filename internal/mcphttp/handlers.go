@@ -269,3 +269,230 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 		"status": status,
 	})
 }
+
+// TestConnectionHandler tests connection to an MCP server
+// POST /api/mcp/servers/:name/test
+func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract server name from path
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "Server name required", http.StatusBadRequest)
+		return
+	}
+	serverName := parts[4]
+
+	// Get server
+	server, err := h.registry.GetServer(serverName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Check current status
+	status := server.GetStatus()
+
+	// If stopped, try to start temporarily for testing
+	wasStarted := false
+	if status == mcp.StatusStopped {
+		if err := server.Start(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("Failed to start server: %v", err),
+			})
+			return
+		}
+		wasStarted = true
+	}
+
+	// Test connection by getting tools
+	tools := server.GetTools()
+
+	// Stop if we started it just for testing
+	if wasStarted {
+		server.Stop()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"tool_count": len(tools),
+		"message":    "Connection successful",
+	})
+}
+
+// RetryConnectionHandler manually retries a failed server connection
+// POST /api/mcp/servers/:name/retry
+func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract server name from path
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "Server name required", http.StatusBadRequest)
+		return
+	}
+	serverName := parts[4]
+
+	// Get server
+	server, err := h.registry.GetServer(serverName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	// Restart the server (stops if running, then starts)
+	if err := server.Restart(); err != nil {
+		log.Printf("Failed to restart MCP server %s: %v", serverName, err)
+		http.Error(w, fmt.Sprintf("Failed to restart server: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Server restart initiated"})
+}
+
+// ImportServersHandler imports MCP server configurations from uploaded JSON/YAML
+// POST /api/mcp/import
+func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	// Get uploaded file
+	file, _, err := r.FormFile("config_file")
+	if err != nil {
+		http.Error(w, "No file uploaded", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Read file content
+	var config struct {
+		Servers []mcp.ServerConfig `json:"servers"`
+	}
+	if err := json.NewDecoder(file).Decode(&config); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON format: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate and add servers
+	var added []string
+	var errors []string
+
+	for _, serverConfig := range config.Servers {
+		// Validate required fields
+		if serverConfig.Name == "" || serverConfig.Command == "" {
+			errors = append(errors, fmt.Sprintf("Server missing required fields (name or command)"))
+			continue
+		}
+
+		// Add to config manager (persists to disk)
+		if err := h.configManager.AddServer(serverConfig); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", serverConfig.Name, err))
+			continue
+		}
+
+		// Add to registry (runtime)
+		if err := h.registry.AddServer(serverConfig); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", serverConfig.Name, err))
+			continue
+		}
+
+		added = append(added, serverConfig.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"added":  added,
+		"errors": errors,
+	})
+}
+
+// GetMarketplaceServersHandler returns available MCP servers from marketplace
+// GET /api/mcp/marketplace
+func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// For now, return a curated list of well-known MCP servers
+	// TODO: Fetch from external registry in the future
+	marketplaceServers := []map[string]interface{}{
+		{
+			"name":        "filesystem",
+			"description": "Provides read/write access to files and directories",
+			"command":     "npx",
+			"args":        []string{"-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"},
+			"maintainer":  "Anthropic",
+			"category":    "file-system",
+			"transport":   "stdio",
+		},
+		{
+			"name":        "github",
+			"description": "Interact with GitHub repositories, issues, and pull requests",
+			"command":     "npx",
+			"args":        []string{"-y", "@modelcontextprotocol/server-github"},
+			"maintainer":  "Anthropic",
+			"category":    "development",
+			"transport":   "stdio",
+			"env_required": map[string]string{
+				"GITHUB_TOKEN": "GitHub personal access token",
+			},
+		},
+		{
+			"name":        "brave-search",
+			"description": "Perform web searches using Brave Search API",
+			"command":     "npx",
+			"args":        []string{"-y", "@modelcontextprotocol/server-brave-search"},
+			"maintainer":  "Anthropic",
+			"category":    "search",
+			"transport":   "stdio",
+			"env_required": map[string]string{
+				"BRAVE_API_KEY": "Brave Search API key",
+			},
+		},
+		{
+			"name":        "postgres",
+			"description": "Query and manage PostgreSQL databases",
+			"command":     "npx",
+			"args":        []string{"-y", "@modelcontextprotocol/server-postgres"},
+			"maintainer":  "Anthropic",
+			"category":    "database",
+			"transport":   "stdio",
+			"env_required": map[string]string{
+				"DATABASE_URL": "PostgreSQL connection string",
+			},
+		},
+		{
+			"name":        "memory",
+			"description": "Persistent memory storage across conversations",
+			"command":     "npx",
+			"args":        []string{"-y", "@modelcontextprotocol/server-memory"},
+			"maintainer":  "Anthropic",
+			"category":    "storage",
+			"transport":   "stdio",
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"servers": marketplaceServers,
+	})
+}
