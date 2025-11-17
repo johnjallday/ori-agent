@@ -36,6 +36,7 @@ type DeviceInfo struct {
 // MenuBarSettings tracks menu bar app preferences
 type MenuBarSettings struct {
 	AutoStartOnLogin bool `json:"auto_start_on_login"` // Launch Ori Agent menu bar on system startup
+	Port             int  `json:"port,omitempty"`      // Server port (defaults to 8765 if not set)
 }
 
 // AppState tracks application-level state (persisted separately from agent data)

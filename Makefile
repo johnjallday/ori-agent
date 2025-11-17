@@ -132,6 +132,27 @@ test-watch: ## Run tests in watch mode (requires entr)
 test-all: test test-e2e ## Run all tests including E2E
 	@echo "$(GREEN)✓ All tests completed$(NC)"
 
+test-user: build plugins ## Run user workflow tests
+	@echo "$(BLUE)Running user tests...$(NC)"
+	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "$(YELLOW)Skipping user tests (no API key set)$(NC)"; \
+	else \
+		$(GOTEST) -v -timeout 5m ./tests/user/...; \
+		echo "$(GREEN)✓ User tests passed$(NC)"; \
+	fi
+
+test-cli: build ## Build and run interactive testing CLI
+	@echo "$(BLUE)Building test CLI...$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/ori-test-cli ./cmd/test-cli
+	@echo "$(GREEN)✓ Test CLI built$(NC)"
+	@echo ""
+	@echo "$(BLUE)Starting test CLI...$(NC)"
+	./$(BUILD_DIR)/ori-test-cli
+
+test-scenarios: ## Run manual scenario runner
+	@echo "$(BLUE)Starting scenario runner...$(NC)"
+	@cd tests/user/scenarios && go run scenario_runner.go
+
 ## Code quality targets
 
 fmt: ## Format code

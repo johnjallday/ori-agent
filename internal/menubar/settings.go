@@ -25,3 +25,13 @@ func (m *SettingsManager) GetAutoStartEnabled() bool {
 func (m *SettingsManager) SetAutoStartEnabled(enabled bool) error {
 	return m.onboardingMgr.SetMenuBarAutoStart(enabled)
 }
+
+// GetPort returns the configured server port (defaults to 8765)
+func (m *SettingsManager) GetPort() int {
+	return m.onboardingMgr.GetMenuBarPort()
+}
+
+// SetPort sets the server port preference
+func (m *SettingsManager) SetPort(port int) error {
+	return m.onboardingMgr.SetMenuBarPort(port)
+}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"fyne.io/systray"
@@ -23,17 +24,15 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Create server controller
-	port := 8765
-	if portEnv := os.Getenv("PORT"); portEnv != "" {
-		// Could parse portEnv if needed, but 8765 is default
-	}
-
-	controller := menubar.NewController(port)
-
-	// Initialize settings managers
+	// Initialize settings managers first
 	onboardingMgr := onboarding.NewManager("app_state.json")
 	settingsMgr := menubar.NewSettingsManager(onboardingMgr)
+
+	// Get port from settings (defaults to 8765)
+	port := settingsMgr.GetPort()
+	log.Printf("Using port: %d", port)
+
+	controller := menubar.NewController(port)
 
 	// Initialize LaunchAgent manager
 	launchAgentMgr, err := menubar.NewLaunchAgentManager()
@@ -101,17 +100,24 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 
 	systray.AddSeparator()
 
+	// Settings submenu
+	settingsMenu := systray.AddMenuItem("Settings", "Application Settings")
+
 	// Check if auto-start is currently enabled
 	autoStartEnabled := false
 	if settingsMgr != nil && launchAgentMgr != nil {
 		autoStartEnabled = settingsMgr.GetAutoStartEnabled()
 	}
-	autoStartItem := systray.AddMenuItemCheckbox("Auto-start on Login", "Launch Ori Agent on system startup", autoStartEnabled)
+	autoStartItem := settingsMenu.AddSubMenuItemCheckbox("Auto-start on Login", "Launch Ori Agent on system startup", autoStartEnabled)
 
 	// Disable auto-start if manager is not available
 	if launchAgentMgr == nil {
 		autoStartItem.Disable()
 	}
+
+	// Port configuration
+	currentPort := controller.GetPort()
+	portItem := settingsMenu.AddSubMenuItem(fmt.Sprintf("Port: %d", currentPort), "Change server port")
 
 	systray.AddSeparator()
 
@@ -178,6 +184,10 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 						log.Println("Auto-start enabled")
 					}
 				}
+
+			case <-portItem.ClickedCh:
+				log.Println("Port configuration clicked")
+				handlePortConfiguration(controller, settingsMgr, portItem)
 
 			case <-aboutItem.ClickedCh:
 				log.Println("About clicked")
@@ -273,5 +283,101 @@ func openBrowser(port int) {
 
 	if err := exec.Command(cmd, args...).Start(); err != nil {
 		log.Printf("Failed to open browser: %v", err)
+	}
+}
+
+func handlePortConfiguration(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, portItem *systray.MenuItem) {
+	// Check if server is running
+	if controller.GetStatus() != menubar.StatusStopped {
+		log.Println("Cannot change port while server is running")
+		showNotification("Port Configuration", "Please stop the server before changing the port")
+		return
+	}
+
+	// Get current port
+	currentPort := controller.GetPort()
+
+	// Show input dialog (macOS only for now)
+	if runtime.GOOS == "darwin" {
+		newPortStr, err := showInputDialog("Server Port Configuration", fmt.Sprintf("Enter new port number (current: %d):", currentPort), fmt.Sprintf("%d", currentPort))
+		if err != nil {
+			log.Printf("Failed to show port dialog: %v", err)
+			return
+		}
+
+		// User cancelled
+		if newPortStr == "" {
+			log.Println("Port configuration cancelled")
+			return
+		}
+
+		// Parse the new port
+		var newPort int
+		if _, err := fmt.Sscanf(newPortStr, "%d", &newPort); err != nil {
+			log.Printf("Invalid port number: %s", newPortStr)
+			showNotification("Invalid Port", "Please enter a valid port number")
+			return
+		}
+
+		// Validate port range
+		if newPort < 1024 || newPort > 65535 {
+			log.Printf("Port out of range: %d", newPort)
+			showNotification("Invalid Port", "Port must be between 1024 and 65535")
+			return
+		}
+
+		// Update controller
+		if err := controller.SetPort(newPort); err != nil {
+			log.Printf("Failed to set port on controller: %v", err)
+			showNotification("Error", fmt.Sprintf("Failed to set port: %v", err))
+			return
+		}
+
+		// Save to settings
+		if err := settingsMgr.SetPort(newPort); err != nil {
+			log.Printf("Failed to save port to settings: %v", err)
+			showNotification("Error", fmt.Sprintf("Failed to save port: %v", err))
+			return
+		}
+
+		// Update menu item
+		portItem.SetTitle(fmt.Sprintf("Port: %d", newPort))
+		log.Printf("Port updated to %d", newPort)
+		showNotification("Port Updated", fmt.Sprintf("Server port changed to %d", newPort))
+	} else {
+		log.Println("Port configuration dialog not supported on this platform")
+		showNotification("Not Supported", "Port configuration dialog is only supported on macOS")
+	}
+}
+
+func showInputDialog(title, prompt, defaultValue string) (string, error) {
+	script := fmt.Sprintf(`display dialog "%s" default answer "%s" with title "%s"`, prompt, defaultValue, title)
+	cmd := exec.Command("osascript", "-e", script)
+	output, err := cmd.Output()
+	if err != nil {
+		// User cancelled or error
+		return "", err
+	}
+
+	// Parse output: "button returned:OK, text returned:8080"
+	outputStr := strings.TrimSpace(string(output))
+
+	// Find "text returned:" and extract everything after it
+	textReturnedPrefix := "text returned:"
+	if idx := strings.Index(outputStr, textReturnedPrefix); idx != -1 {
+		result := outputStr[idx+len(textReturnedPrefix):]
+		return strings.TrimSpace(result), nil
+	}
+
+	return "", fmt.Errorf("failed to parse dialog output: %s", outputStr)
+}
+
+func showNotification(title, message string) {
+	if runtime.GOOS == "darwin" {
+		script := fmt.Sprintf(`display notification "%s" with title "%s"`, message, title)
+		cmd := exec.Command("osascript", "-e", script)
+		if err := cmd.Run(); err != nil {
+			log.Printf("Failed to show notification: %v", err)
+		}
 	}
 }

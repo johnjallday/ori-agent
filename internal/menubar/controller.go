@@ -192,6 +192,21 @@ func (c *Controller) GetPort() int {
 	return c.port
 }
 
+// SetPort updates the port the server should run on
+// Note: Server must be stopped before changing the port
+func (c *Controller) SetPort(port int) error {
+	c.statusMu.Lock()
+	defer c.statusMu.Unlock()
+
+	// Don't allow port changes while server is running
+	if c.status != StatusStopped {
+		return fmt.Errorf("cannot change port while server is %s", c.status.String())
+	}
+
+	c.port = port
+	return nil
+}
+
 // WatchStatus registers a callback to be notified of status changes
 func (c *Controller) WatchStatus(callback func(ServerStatus)) {
 	c.subMu.Lock()

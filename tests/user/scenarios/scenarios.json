@@ -1,0 +1,419 @@
+{
+  "scenarios": [
+    {
+      "id": "sc001",
+      "name": "Basic Agent Creation",
+      "category": "core-workflow",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "2 minutes",
+      "description": "Create a simple agent and verify it responds to chat",
+      "prerequisites": [
+        "Server running on http://localhost:8765",
+        "API key configured (OPENAI_API_KEY or ANTHROPIC_API_KEY)"
+      ],
+      "steps": [
+        "Open http://localhost:8765 in your browser",
+        "Click 'Create New Agent' button",
+        "Enter agent name: 'Test Assistant'",
+        "Select model: 'gpt-4o-mini'",
+        "Click 'Create'",
+        "Click on the newly created agent",
+        "Send message: 'Hello, can you confirm you're working?'",
+        "Observe the response"
+      ],
+      "verification": "Did the agent respond with a coherent message?",
+      "expected": "Agent should respond confirming it's working",
+      "notes": "This is the most basic workflow - if this fails, check server logs"
+    },
+    {
+      "id": "sc002",
+      "name": "Math Plugin Integration",
+      "category": "plugin-workflow",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "3 minutes",
+      "description": "Create agent, enable math plugin, and test tool calling",
+      "prerequisites": [
+        "Server running",
+        "Math plugin built (./plugins/math/math exists)"
+      ],
+      "steps": [
+        "Create new agent: 'Math Helper'",
+        "Go to agent settings",
+        "Enable 'math' plugin",
+        "Save settings",
+        "Send message: 'What is 15 plus 27?'",
+        "Observe the response and tool calls panel"
+      ],
+      "verification": "Did the agent call the math tool and return 42?",
+      "expected": "Agent should use math tool and respond with '42'",
+      "notes": "Check 'Tool Calls' panel to verify the math tool was invoked"
+    },
+    {
+      "id": "sc003",
+      "name": "Weather Plugin Test",
+      "category": "plugin-workflow",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "3 minutes",
+      "description": "Test weather plugin with location query",
+      "prerequisites": [
+        "Server running",
+        "Weather plugin built"
+      ],
+      "steps": [
+        "Create new agent: 'Weather Bot'",
+        "Enable 'weather' plugin",
+        "Send message: 'What's the weather in Tokyo?'",
+        "Observe tool call and response"
+      ],
+      "verification": "Did the agent call get_weather tool with location 'Tokyo'?",
+      "expected": "Agent should invoke weather tool and provide mock weather data",
+      "notes": "Weather plugin returns mock data - verify tool was called correctly"
+    },
+    {
+      "id": "sc004",
+      "name": "Multi-Turn Conversation",
+      "category": "core-workflow",
+      "platform": "all",
+      "difficulty": "medium",
+      "estimatedTime": "5 minutes",
+      "description": "Test conversation memory and context retention",
+      "prerequisites": [
+        "Server running"
+      ],
+      "steps": [
+        "Create agent: 'Context Tester'",
+        "Send message: 'My favorite color is blue'",
+        "Wait for response",
+        "Send message: 'What is my favorite color?'",
+        "Observe if agent remembers"
+      ],
+      "verification": "Did the agent remember your favorite color?",
+      "expected": "Agent should respond with 'blue'",
+      "notes": "Tests conversation history persistence"
+    },
+    {
+      "id": "sc005",
+      "name": "Multiple Plugins on One Agent",
+      "category": "plugin-workflow",
+      "platform": "all",
+      "difficulty": "medium",
+      "estimatedTime": "5 minutes",
+      "description": "Enable multiple plugins and verify agent can use both",
+      "prerequisites": [
+        "Server running",
+        "Math and weather plugins built"
+      ],
+      "steps": [
+        "Create agent: 'Multi-Tool Agent'",
+        "Enable both 'math' and 'weather' plugins",
+        "Send message: 'What is 10 + 5, and what's the weather in Paris?'",
+        "Observe if agent uses both tools"
+      ],
+      "verification": "Did the agent call both math and weather tools?",
+      "expected": "Agent should use both tools and provide both answers",
+      "notes": "Check tool calls panel for both invocations"
+    },
+    {
+      "id": "sc006",
+      "name": "Music Project Manager Plugin (macOS)",
+      "category": "plugin-workflow",
+      "platform": "macos",
+      "difficulty": "hard",
+      "estimatedTime": "10 minutes",
+      "description": "Test music-project-manager plugin with real workflow",
+      "prerequisites": [
+        "Server running",
+        "music-project-manager plugin built",
+        "Reaper DAW installed (optional)"
+      ],
+      "steps": [
+        "Create agent: 'Music Producer'",
+        "Enable 'music-project-manager' plugin",
+        "Send message: 'Create a new project called Test Song'",
+        "Observe tool calls",
+        "Send message: 'List my projects'",
+        "Verify 'Test Song' appears"
+      ],
+      "verification": "Was the project created and listed?",
+      "expected": "Project should be created and visible in list",
+      "notes": "This tests real file system operations on macOS"
+    },
+    {
+      "id": "sc007",
+      "name": "Ori-Reaper Plugin Integration (macOS)",
+      "category": "plugin-workflow",
+      "platform": "macos",
+      "difficulty": "hard",
+      "estimatedTime": "15 minutes",
+      "description": "Test ori-reaper plugin with Reaper DAW",
+      "prerequisites": [
+        "Server running",
+        "ori-reaper plugin built",
+        "Reaper DAW installed and running",
+        "Reaper web interface enabled"
+      ],
+      "steps": [
+        "Open Reaper DAW",
+        "Enable Reaper web interface (Preferences → Control/OSC/web)",
+        "Create agent: 'Reaper Controller'",
+        "Enable 'ori-reaper' plugin",
+        "Send message: 'Create a new track'",
+        "Check Reaper for new track",
+        "Send message: 'Play the project'",
+        "Verify playback starts"
+      ],
+      "verification": "Did Reaper respond to commands?",
+      "expected": "Track should be created and playback should start",
+      "notes": "Requires Reaper running with web interface enabled"
+    },
+    {
+      "id": "sc008",
+      "name": "Plugin Health Check",
+      "category": "plugin-testing",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "2 minutes",
+      "description": "Verify plugin health check functionality",
+      "prerequisites": [
+        "Server running",
+        "At least one plugin built"
+      ],
+      "steps": [
+        "Open http://localhost:8765/api/plugins/health",
+        "Observe JSON response",
+        "Check status for each plugin"
+      ],
+      "verification": "Do all plugins show 'healthy' status?",
+      "expected": "All built plugins should report healthy status",
+      "notes": "If any plugin shows unhealthy, check server logs"
+    },
+    {
+      "id": "sc009",
+      "name": "Error Recovery - Invalid Plugin",
+      "category": "error-handling",
+      "platform": "all",
+      "difficulty": "medium",
+      "estimatedTime": "3 minutes",
+      "description": "Test system behavior with invalid plugin configuration",
+      "prerequisites": [
+        "Server running"
+      ],
+      "steps": [
+        "Create agent: 'Error Test'",
+        "Manually edit agents/error-test/config.json",
+        "Add non-existent plugin to enabled list",
+        "Reload page",
+        "Try to chat with agent",
+        "Observe error handling"
+      ],
+      "verification": "Did the system handle the error gracefully?",
+      "expected": "System should show error message without crashing",
+      "notes": "Tests error recovery mechanisms"
+    },
+    {
+      "id": "sc010",
+      "name": "Agent Deletion and Cleanup",
+      "category": "core-workflow",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "2 minutes",
+      "description": "Verify agent deletion removes all associated data",
+      "prerequisites": [
+        "Server running",
+        "Test agent exists"
+      ],
+      "steps": [
+        "Create agent: 'Delete Me'",
+        "Send a few chat messages",
+        "Note the agent directory path",
+        "Delete the agent via UI",
+        "Check file system - verify agent directory removed",
+        "Refresh agent list - verify agent not shown"
+      ],
+      "verification": "Was the agent and its data completely removed?",
+      "expected": "Agent directory should be deleted, agent not in list",
+      "notes": "Check agents/ directory to verify cleanup"
+    },
+    {
+      "id": "sc011",
+      "name": "Ori-Music-Project-Manager Plugin",
+      "category": "shared-plugin",
+      "platform": "macos",
+      "difficulty": "medium",
+      "estimatedTime": "8 minutes",
+      "description": "Test music-project-manager plugin for creating and managing music projects",
+      "prerequisites": [
+        "Server running",
+        "ori-music-project-manager plugin built (../plugins/ori-music-project-manager/)",
+        "macOS system"
+      ],
+      "steps": [
+        "Create new agent: 'Music Producer'",
+        "Enable 'ori-music-project-manager' plugin",
+        "Send message: 'Create a new project called Test Song in ~/Music/Projects'",
+        "Observe tool call and response",
+        "Send message: 'List all my music projects'",
+        "Verify 'Test Song' appears in the list",
+        "Send message: 'What are the details of Test Song?'",
+        "Verify project information is displayed"
+      ],
+      "verification": "Was the project created and can it be listed and queried?",
+      "expected": "Project created on file system, appears in list, details accessible",
+      "notes": "Check ~/Music/Projects for actual project directory"
+    },
+    {
+      "id": "sc012",
+      "name": "Ori-Mac-OS-Tools Plugin",
+      "category": "shared-plugin",
+      "platform": "macos",
+      "difficulty": "easy",
+      "estimatedTime": "5 minutes",
+      "description": "Test macOS-specific tools and utilities",
+      "prerequisites": [
+        "Server running",
+        "ori-mac-os-tools plugin built",
+        "macOS system"
+      ],
+      "steps": [
+        "Create new agent: 'macOS Assistant'",
+        "Enable 'ori-mac-os-tools' plugin",
+        "Send message: 'What system am I running?'",
+        "Observe system information response",
+        "Send message: 'What applications are currently running?'",
+        "Verify list of running applications",
+        "Send message: 'What's my current directory?'",
+        "Verify working directory information"
+      ],
+      "verification": "Did the plugin provide accurate macOS system information?",
+      "expected": "System info, running apps, and directory info displayed correctly",
+      "notes": "Verify responses match actual system state"
+    },
+    {
+      "id": "sc013",
+      "name": "Ori-Script-Runner Plugin",
+      "category": "shared-plugin",
+      "platform": "all",
+      "difficulty": "medium",
+      "estimatedTime": "6 minutes",
+      "description": "Test script execution capabilities",
+      "prerequisites": [
+        "Server running",
+        "ori-script-runner plugin built"
+      ],
+      "steps": [
+        "Create new agent: 'Script Runner'",
+        "Enable 'ori-script-runner' plugin",
+        "Send message: 'Run a simple echo command: echo Hello World'",
+        "Verify command execution and output",
+        "Send message: 'List files in the current directory'",
+        "Verify file listing output",
+        "Send message: 'What is the date?'",
+        "Verify date command output"
+      ],
+      "verification": "Were scripts executed successfully with correct output?",
+      "expected": "Commands execute, output displayed, no errors",
+      "notes": "Test with safe, read-only commands first"
+    },
+    {
+      "id": "sc014",
+      "name": "Ori-Agent-Doc-Builder Plugin",
+      "category": "shared-plugin",
+      "platform": "all",
+      "difficulty": "medium",
+      "estimatedTime": "7 minutes",
+      "description": "Test documentation building capabilities",
+      "prerequisites": [
+        "Server running",
+        "ori-agent-doc-builder plugin built"
+      ],
+      "steps": [
+        "Create new agent: 'Doc Builder'",
+        "Enable 'ori-agent-doc-builder' plugin",
+        "Send message: 'Build documentation for the current project'",
+        "Observe documentation generation process",
+        "Send message: 'What documentation formats are supported?'",
+        "Verify supported formats listed",
+        "Send message: 'Generate a README template'",
+        "Verify template generation"
+      ],
+      "verification": "Did the plugin generate documentation successfully?",
+      "expected": "Documentation built, formats listed, templates generated",
+      "notes": "Check output directories for generated docs"
+    },
+    {
+      "id": "sc015",
+      "name": "Ori-Meta-Threads-Manager Plugin",
+      "category": "shared-plugin",
+      "platform": "all",
+      "difficulty": "hard",
+      "estimatedTime": "10 minutes",
+      "description": "Test multi-threaded conversation management",
+      "prerequisites": [
+        "Server running",
+        "ori-meta-threads-manager plugin built"
+      ],
+      "steps": [
+        "Create new agent: 'Threads Manager'",
+        "Enable 'ori-meta-threads-manager' plugin",
+        "Send message: 'Create a new conversation thread about project planning'",
+        "Verify thread creation",
+        "Send message: 'List all active threads'",
+        "Verify thread appears in list",
+        "Send message: 'Switch to the project planning thread'",
+        "Verify context switch",
+        "Send message: 'What thread am I in?'",
+        "Verify correct thread identification"
+      ],
+      "verification": "Were conversation threads managed correctly?",
+      "expected": "Threads created, listed, switched, and identified properly",
+      "notes": "Tests conversation context management"
+    },
+    {
+      "id": "sc016",
+      "name": "All Shared Plugins Load Test",
+      "category": "shared-plugin",
+      "platform": "macos",
+      "difficulty": "easy",
+      "estimatedTime": "5 minutes",
+      "description": "Verify all shared plugins can be loaded simultaneously",
+      "prerequisites": [
+        "Server running",
+        "All shared plugins built (ori-music-project-manager, ori-reaper, ori-mac-os-tools, etc.)"
+      ],
+      "steps": [
+        "Create new agent: 'Multi-Plugin Agent'",
+        "Go to agent settings",
+        "Enable ALL shared plugins one by one",
+        "Save settings after each",
+        "Verify no errors during enabling",
+        "Send message: 'Hello, I have multiple plugins enabled'",
+        "Verify agent responds correctly",
+        "Check server logs for any errors"
+      ],
+      "verification": "Did all plugins load without conflicts?",
+      "expected": "All plugins enabled successfully, no errors, agent functional",
+      "notes": "Tests plugin compatibility and resource usage"
+    }
+  ],
+  "categories": {
+    "core-workflow": "Basic agent creation and chat functionality",
+    "plugin-workflow": "Plugin enablement and tool calling",
+    "plugin-testing": "Plugin-specific testing scenarios",
+    "error-handling": "Error recovery and edge cases",
+    "shared-plugin": "Shared plugins from ../plugins directory"
+  },
+  "platforms": {
+    "all": "Works on all platforms",
+    "macos": "macOS-specific (requires macOS)",
+    "linux": "Linux-specific",
+    "windows": "Windows-specific"
+  },
+  "difficulty": {
+    "easy": "Simple, quick test",
+    "medium": "Requires multiple steps",
+    "hard": "Complex, requires external tools"
+  }
+}

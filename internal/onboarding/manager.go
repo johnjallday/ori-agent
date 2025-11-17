@@ -257,3 +257,27 @@ func (m *Manager) SetMenuBarAutoStart(enabled bool) error {
 	m.state.MenuBar.AutoStartOnLogin = enabled
 	return m.saveUnlocked()
 }
+
+// GetMenuBarPort returns the configured server port (defaults to 8765)
+func (m *Manager) GetMenuBarPort() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.state.MenuBar == nil || m.state.MenuBar.Port == 0 {
+		return 8765 // default port
+	}
+	return m.state.MenuBar.Port
+}
+
+// SetMenuBarPort sets the server port preference
+func (m *Manager) SetMenuBarPort(port int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Initialize MenuBar settings if nil
+	if m.state.MenuBar == nil {
+		m.state.MenuBar = &types.MenuBarSettings{}
+	}
+
+	m.state.MenuBar.Port = port
+	return m.saveUnlocked()
+}
