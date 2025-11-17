@@ -8,7 +8,14 @@
       <span data-icon="plugin" data-icon-size="24" data-icon-class="me-2" style="color: var(--primary-color);"></span>
       {{.Title}}
     </a>
-    <div class="d-flex align-items-center gap-3">
+    <div class="d-flex align-items-center gap-2 ms-4">
+      <a href="/agents.html" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
+      <span style="color: var(--text-muted);">|</span>
+      <a href="/marketplace" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
+      <span style="color: var(--text-muted);">|</span>
+      <a href="/studios" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Studio</a>
+    </div>
+    <div class="d-flex align-items-center gap-3 ms-auto">
       <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="cursor:pointer; padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Click to view agent details">
         <span class="status-indicator status-online"></span>
         <span class="fw-medium">{{.CurrentAgent}}</span>

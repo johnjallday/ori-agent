@@ -30,8 +30,15 @@ jobs:
       - name: Build menubar app
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          GIT_COMMIT="${GITHUB_SHA:0:7}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          LDFLAGS="-X 'github.com/johnjallday/ori-agent/internal/version.Version=$VERSION' \
+                   -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit=$GIT_COMMIT' \
+                   -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$BUILD_DATE'"
+
           echo "Building menubar app for darwin/${{ matrix.arch }}..."
-          CGO_ENABLED=1 go build -o ori-menubar-darwin-${{ matrix.arch }} ./cmd/menubar
+          CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o ori-menubar-darwin-${{ matrix.arch }} ./cmd/menubar
 
       - name: Create .app bundle and DMG
         run: |
@@ -101,6 +108,37 @@ jobs:
           cp "$BINARY" "$APP_BUNDLE/Contents/Resources/ori-menubar"
           chmod +x "$APP_BUNDLE/Contents/Resources/ori-menubar"
 
+          # Code signing (if certificates are available)
+          if [ -n "${{ secrets.DEVELOPER_ID_APPLICATION }}" ]; then
+            echo "Code signing enabled"
+            # Import certificate
+            echo "${{ secrets.DEVELOPER_ID_APPLICATION }}" | base64 --decode > certificate.p12
+            security create-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+            security import certificate.p12 -k build.keychain -P "${{ secrets.P12_PASSWORD }}" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+
+            # Sign the binary
+            /usr/bin/codesign --force --sign "${{ secrets.SIGNING_IDENTITY }}" \
+              --options runtime \
+              --entitlements entitlements.plist \
+              --timestamp \
+              "$APP_BUNDLE/Contents/Resources/ori-menubar"
+
+            # Sign the app bundle
+            /usr/bin/codesign --force --sign "${{ secrets.SIGNING_IDENTITY }}" \
+              --options runtime \
+              --timestamp \
+              "$APP_BUNDLE"
+
+            # Verify signature
+            codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+          else
+            echo "⚠️  Code signing skipped (no certificates configured)"
+            echo "⚠️  Users will see Gatekeeper warning"
+          fi
+
           # Create DMG staging area
           DMG_STAGING="$BUILD_DIR/dmg-staging"
           mkdir -p "$DMG_STAGING"
@@ -150,19 +188,6 @@ jobs:
       - name: Run tests
         run: make test-unit
 
-      - name: Build for multiple platforms
-        run: |
-          # Linux
-          GOOS=linux GOARCH=amd64 go build -o bin/ori-agent-linux-amd64 ./cmd/server
-          GOOS=linux GOARCH=arm64 go build -o bin/ori-agent-linux-arm64 ./cmd/server
-
-          # macOS
-          GOOS=darwin GOARCH=amd64 go build -o bin/ori-agent-darwin-amd64 ./cmd/server
-          GOOS=darwin GOARCH=arm64 go build -o bin/ori-agent-darwin-arm64 ./cmd/server
-
-          # Windows
-          GOOS=windows GOARCH=amd64 go build -o bin/ori-agent-windows-amd64.exe ./cmd/server
-
       - name: Download DMG artifacts
         uses: actions/download-artifact@v4
         with:
@@ -174,11 +199,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/ori-agent-linux-amd64
-            bin/ori-agent-linux-arm64
-            bin/ori-agent-darwin-amd64
-            bin/ori-agent-darwin-arm64
-            bin/ori-agent-windows-amd64.exe
             releases/OriAgent-*-amd64.dmg
             releases/OriAgent-*-arm64.dmg
           draft: false

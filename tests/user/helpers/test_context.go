@@ -166,6 +166,15 @@ func (tc *TestContext) LoadPlugin(pluginName string) *Plugin {
 		tc.T.Fatalf("Invalid plugins response")
 	}
 
+	// Debug: list all available plugins
+	if tc.Verbose {
+		tc.T.Logf("Available plugins from API: %d plugins", len(plugins))
+		for _, p := range plugins {
+			plugin := p.(map[string]interface{})
+			tc.T.Logf("  - %s", plugin["name"])
+		}
+	}
+
 	// Find plugin
 	for _, p := range plugins {
 		plugin := p.(map[string]interface{})
@@ -181,7 +190,7 @@ func (tc *TestContext) LoadPlugin(pluginName string) *Plugin {
 		}
 	}
 
-	tc.T.Fatalf("Plugin not found: %s", pluginName)
+	tc.T.Fatalf("Plugin not found: %s (searched %d plugins)", pluginName, len(plugins))
 	return nil
 }
 
@@ -402,8 +411,13 @@ func (tc *TestContext) cleanupAll() {
 func startTestServer(t *testing.T, ctx context.Context, port string) *exec.Cmd {
 	t.Helper()
 
-	// Try to use built binary first
-	serverBinary := filepath.Join("..", "..", "..", "bin", "ori-agent")
+	// Get absolute paths for project root and server binary
+	projectRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("Failed to get project root path: %v", err)
+	}
+
+	serverBinary := filepath.Join(projectRoot, "bin", "ori-agent")
 	if _, err := os.Stat(serverBinary); os.IsNotExist(err) {
 		t.Fatalf("Server binary not found at %s. Run: make build", serverBinary)
 	}
@@ -414,6 +428,9 @@ func startTestServer(t *testing.T, ctx context.Context, port string) *exec.Cmd {
 		// Add test mode indicator
 		"TEST_MODE=true",
 	)
+
+	// Set working directory to project root so server can find plugins
+	cmd.Dir = projectRoot
 
 	// Always capture output for debugging
 	if os.Getenv("TEST_VERBOSE") == "true" {

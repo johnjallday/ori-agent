@@ -17,6 +17,14 @@ GOVET=$(GO) vet
 GOFMT=$(GO) fmt
 PORT?=8765
 
+# Version information
+VERSION?=$(shell cat VERSION 2>/dev/null || echo "dev")
+GIT_COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS=-X 'github.com/johnjallday/ori-agent/internal/version.Version=$(VERSION)' \
+        -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit=$(GIT_COMMIT)' \
+        -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$(BUILD_DATE)'
+
 # Colors for output
 RED=\033[0;31m
 GREEN=\033[0;32m
@@ -39,12 +47,14 @@ deps: ## Install dependencies
 
 build: ## Build the server binary
 	@echo "$(BLUE)Building server...$(NC)"
-	$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/server
+	@echo "$(BLUE)Version: $(VERSION) | Commit: $(GIT_COMMIT) | Date: $(BUILD_DATE)$(NC)"
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/server
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
 menubar: ## Build the menu bar app
 	@echo "$(BLUE)Building menu bar app...$(NC)"
-	$(GOBUILD) -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
+	@echo "$(BLUE)Version: $(VERSION) | Commit: $(GIT_COMMIT) | Date: $(BUILD_DATE)$(NC)"
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
 
 plugins: ## Build all plugins

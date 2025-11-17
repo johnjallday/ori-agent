@@ -1339,6 +1339,24 @@
       box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
       transform: translateY(-2px);
     }
+
+    /* Navigation Links */
+    .nav-link-item {
+      position: relative;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .nav-link-item:hover {
+      background: var(--bg-secondary) !important;
+      color: var(--primary-color) !important;
+    }
+
+    .nav-link-item:active,
+    .nav-link-item.active {
+      background: var(--bg-tertiary) !important;
+      color: var(--primary-color) !important;
+    }
   </style>
   <script>
     // Global dark mode handler - uses server-side theme management

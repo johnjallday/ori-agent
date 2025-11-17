@@ -1,15 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agents Dashboard - Ori Agent</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/common.css">
     <style>
         body {
-            background: var(--bg-color);
-            color: var(--text-color);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
             padding: 0;
         }
@@ -67,13 +65,13 @@
         }
 
         .btn-secondary {
-            background: var(--bg-secondary, #f8f9fa);
-            color: var(--text-color, #333);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
         }
 
         .btn-secondary:hover {
-            background: var(--border-color, #e0e0e0);
+            background: var(--bg-tertiary);
         }
 
         .stats-grid {
@@ -84,14 +82,14 @@
         }
 
         .stat-card {
-            background: var(--card-bg, white);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 20px;
         }
 
         .stat-label {
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             font-size: 13px;
             margin-bottom: 8px;
         }
@@ -104,7 +102,7 @@
 
         .stat-change {
             font-size: 12px;
-            color: var(--success-color, #28a745);
+            color: var(--success-color);
         }
 
         .controls-bar {
@@ -125,11 +123,11 @@
         .search-box input {
             width: 100%;
             padding: 10px 40px 10px 16px;
-            border: 1px solid var(--border-color, #ddd);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             font-size: 14px;
-            background: var(--card-bg, white);
-            color: var(--text-color, #333);
+            background: var(--bg-primary);
+            color: var(--text-primary);
         }
 
         .search-icon {
@@ -137,7 +135,7 @@
             right: 12px;
             top: 50%;
             transform: translateY(-50%);
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .filters {
@@ -148,11 +146,11 @@
 
         .filter-select {
             padding: 10px 16px;
-            border: 1px solid var(--border-color, #ddd);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             font-size: 14px;
-            background: var(--card-bg, white);
-            color: var(--text-color, #333);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             cursor: pointer;
         }
 
@@ -163,27 +161,27 @@
 
         .view-btn {
             padding: 8px 12px;
-            border: 1px solid var(--border-color, #ddd);
-            background: var(--card-bg, white);
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.2s ease;
         }
 
         .view-btn.active {
-            background: var(--primary-color, #007bff);
+            background: var(--primary-color);
             color: white;
-            border-color: var(--primary-color, #007bff);
+            border-color: var(--primary-color);
         }
 
         .view-btn:hover:not(.active) {
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
         }
 
         /* Table View */
         .agents-table-container {
-            background: var(--card-bg, white);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             overflow: hidden;
         }
@@ -194,24 +192,24 @@
         }
 
         .agents-table th {
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
             padding: 16px;
             text-align: left;
             font-weight: 600;
             font-size: 13px;
-            color: var(--text-muted, #666);
-            border-bottom: 1px solid var(--border-color, #ddd);
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
             cursor: pointer;
             user-select: none;
         }
 
         .agents-table th:hover {
-            background: var(--border-color, #e0e0e0);
+            background: var(--bg-tertiary);
         }
 
         .agents-table td {
             padding: 16px;
-            border-bottom: 1px solid var(--border-color, #ddd);
+            border-bottom: 1px solid var(--border-color);
         }
 
         .agents-table tr:last-child td {
@@ -219,7 +217,7 @@
         }
 
         .agents-table tbody tr:hover {
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
         }
 
         .agent-name-cell {
@@ -251,7 +249,7 @@
 
         .agent-description {
             font-size: 12px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .status-badge {
@@ -266,9 +264,19 @@
             color: #155724;
         }
 
+        .dark-mode .status-active {
+            background: #1e4620;
+            color: #a8e6a3;
+        }
+
         .status-idle {
             background: #fff3cd;
             color: #856404;
+        }
+
+        .dark-mode .status-idle {
+            background: #4d4020;
+            color: #f5d791;
         }
 
         .status-error {
@@ -276,9 +284,19 @@
             color: #721c24;
         }
 
+        .dark-mode .status-error {
+            background: #4a1f23;
+            color: #f5a8ad;
+        }
+
         .status-disabled {
             background: #e2e3e5;
             color: #383d41;
+        }
+
+        .dark-mode .status-disabled {
+            background: #2d3035;
+            color: #9ca3af;
         }
 
         .actions-cell {
@@ -288,16 +306,17 @@
 
         .action-btn {
             padding: 6px 12px;
-            border: 1px solid var(--border-color, #ddd);
+            border: 1px solid var(--border-color);
             background: transparent;
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
             transition: all 0.2s ease;
+            color: var(--text-primary);
         }
 
         .action-btn:hover {
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
         }
 
         .action-btn:disabled {
@@ -306,9 +325,10 @@
         }
 
         .status-select {
-            background: var(--card-bg, white);
-            color: var(--text-color, #333);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             min-width: 120px;
+            border: 1px solid var(--border-color);
         }
 
         .status-select:disabled {
@@ -329,8 +349,8 @@
         }
 
         .agent-card {
-            background: var(--card-bg, white);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 20px;
             transition: all 0.2s ease;
@@ -338,7 +358,7 @@
         }
 
         .agent-card:hover {
-            border-color: var(--primary-color, #007bff);
+            border-color: var(--primary-color);
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
             transform: translateY(-2px);
         }
@@ -378,7 +398,7 @@
             gap: 12px;
             margin-bottom: 16px;
             font-size: 13px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .agent-card-stats {
@@ -386,7 +406,7 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 12px;
             padding-top: 16px;
-            border-top: 1px solid var(--border-color, #ddd);
+            border-top: 1px solid var(--border-color);
         }
 
         .card-stat {
@@ -401,14 +421,14 @@
 
         .card-stat-label {
             font-size: 11px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             text-transform: uppercase;
         }
 
         .agent-card-actions {
             padding-top: 12px;
             margin-top: 12px;
-            border-top: 1px solid var(--border-color, #ddd);
+            border-top: 1px solid var(--border-color);
             display: flex;
             justify-content: center;
         }
@@ -420,7 +440,7 @@
         .loading {
             text-align: center;
             padding: 40px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .empty-state {
@@ -430,11 +450,11 @@
 
         .empty-state h3 {
             margin-bottom: 12px;
-            color: var(--text-color, #333);
+            color: var(--text-primary);
         }
 
         .empty-state p {
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             margin-bottom: 24px;
         }
 
@@ -442,56 +462,11 @@
             margin-left: 8px;
             font-size: 10px;
         }
-        .simple-navbar {
-            background: var(--bg-secondary, #f8f9fa);
-            border-bottom: 1px solid var(--border-color, #ddd);
-            padding: 16px 20px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .navbar-brand {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--text-color, #333);
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 16px;
-            margin-left: auto;
-        }
-
-        .nav-link {
-            padding: 8px 16px;
-            text-decoration: none;
-            color: var(--text-color, #333);
-            border-radius: 6px;
-            transition: background 0.2s;
-        }
-
-        .nav-link:hover {
-            background: var(--border-color, #e0e0e0);
-        }
-
-        .nav-link.active {
-            background: var(--primary-color, #007bff);
-            color: white;
-        }
     </style>
 </head>
-<body>
-    <!-- Simple Navigation -->
-    <nav class="simple-navbar">
-        <div class="navbar-brand">Ori Agent</div>
-        <div class="nav-links">
-            <a href="/" class="nav-link">Chat</a>
-            <a href="/agents-dashboard" class="nav-link active">Agents</a>
-            <a href="/studios" class="nav-link">Workspaces</a>
-            <a href="/settings" class="nav-link">Settings</a>
-        </div>
-    </nav>
+<body class="bg-light">
+    <!-- Navigation Container -->
+    <div id="navbar-container"></div>
 
     <div class="agents-container">
         <div class="page-header">
@@ -591,6 +566,15 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/navbar-component.js"></script>
+    <script src="/js/modules/themeManager.js"></script>
+    <script>
+        // Initialize theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            themeManager.initialize();
+        });
+    </script>
     <script src="/js/agents-dashboard.js"></script>
 </body>
 </html>

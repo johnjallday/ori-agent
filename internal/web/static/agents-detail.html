@@ -4,12 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Details - Ori Agent</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/common.css">
     <style>
         body {
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
             padding: 0;
         }
@@ -26,7 +24,7 @@
         .navbar-brand {
             font-size: 20px;
             font-weight: 600;
-            color: var(--text-color, #333);
+            color: var(--text-primary);
         }
 
         .nav-links {
@@ -38,13 +36,13 @@
         .nav-link {
             padding: 8px 16px;
             text-decoration: none;
-            color: var(--text-color, #333);
+            color: var(--text-primary);
             border-radius: 6px;
             transition: background 0.2s;
         }
 
         .nav-link:hover {
-            background: var(--border-color, #e0e0e0);
+            background: var(--bg-tertiary);
         }
 
         .nav-link.active {
@@ -63,22 +61,22 @@
             align-items: center;
             gap: 8px;
             padding: 8px 16px;
-            background: var(--bg-secondary, #f8f9fa);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             text-decoration: none;
-            color: var(--text-color, #333);
+            color: var(--text-primary);
             margin-bottom: 20px;
             transition: all 0.2s;
         }
 
         .back-button:hover {
-            background: var(--border-color, #e0e0e0);
+            background: var(--bg-tertiary);
         }
 
         .agent-header {
-            background: var(--card-bg, white);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 30px;
             margin-bottom: 24px;
@@ -111,7 +109,7 @@
         }
 
         .agent-description-large {
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             font-size: 16px;
             margin-bottom: 12px;
         }
@@ -153,9 +151,9 @@
         }
 
         .btn-secondary {
-            background: var(--bg-secondary, #f8f9fa);
-            color: var(--text-color, #333);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
         }
 
         .btn-danger {
@@ -187,8 +185,8 @@
         }
 
         .section-card {
-            background: var(--card-bg, white);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 24px;
         }
@@ -198,7 +196,7 @@
             font-weight: 600;
             margin-bottom: 20px;
             padding-bottom: 12px;
-            border-bottom: 1px solid var(--border-color, #ddd);
+            border-bottom: 1px solid var(--border-color);
         }
 
         .stats-grid {
@@ -210,13 +208,13 @@
 
         .stat-box {
             padding: 16px;
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
             border-radius: 8px;
         }
 
         .stat-label {
             font-size: 12px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             margin-bottom: 4px;
             text-transform: uppercase;
         }
@@ -230,7 +228,7 @@
             display: flex;
             justify-content: space-between;
             padding: 12px 0;
-            border-bottom: 1px solid var(--border-color, #ddd);
+            border-bottom: 1px solid var(--border-color);
         }
 
         .info-row:last-child {
@@ -239,7 +237,7 @@
 
         .info-label {
             font-weight: 500;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .info-value {
@@ -257,7 +255,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 12px;
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
             border-radius: 8px;
         }
 
@@ -267,7 +265,7 @@
 
         .plugin-version {
             font-size: 12px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .chart-container {
@@ -285,34 +283,34 @@
 
         .activity-item {
             padding: 12px;
-            background: var(--bg-secondary, #f8f9fa);
+            background: var(--bg-secondary);
             border-radius: 8px;
             font-size: 14px;
         }
 
         .activity-time {
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             font-size: 12px;
             margin-top: 4px;
         }
 
         .empty-message {
             text-align: center;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
             padding: 40px;
         }
 
         .loading {
             text-align: center;
             padding: 40px;
-            color: var(--text-muted, #666);
+            color: var(--text-muted);
         }
 
         .tag {
             display: inline-block;
             padding: 4px 12px;
-            background: var(--bg-secondary, #f8f9fa);
-            border: 1px solid var(--border-color, #ddd);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             font-size: 12px;
             margin-right: 8px;
