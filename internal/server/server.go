@@ -591,11 +591,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
-	mux.HandleFunc("/agents.html", s.serveAgents)
+	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
+	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support
 	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/agents.html", http.StatusFound)
+		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
 	mux.HandleFunc("/studios/", s.serveWorkspaceDashboard) // Dynamic route for /studios/:id
 	mux.HandleFunc("/studios", s.serveWorkspaces)
@@ -1200,7 +1201,7 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
-	data.Title = "Workspaces - Ori Agent"
+	data.Title = "Ori Agent"
 	data.CurrentPage = "workspaces"
 	data.ShowSidebarToggle = false // Workspaces/Studios page doesn't have a sidebar
 
@@ -1343,6 +1344,12 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
+	// Redirect /agents/ to /agents (agents dashboard)
+	if r.URL.Path == "/agents/" {
+		http.Redirect(w, r, "/agents", http.StatusMovedPermanently)
+		return
+	}
+
 	// Serve files from the agents directory
 	// URL format: /agents/<agent-name>/agent_settings.json
 	path := strings.TrimPrefix(r.URL.Path, "/")

@@ -10,7 +10,7 @@
         </svg>
       </a>
       {{else if ne .ShowSidebarToggle false}}
-      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-3" type="button" {{if .SidebarToggleTarget}}data-bs-toggle="offcanvas" data-bs-target="{{.SidebarToggleTarget}}" aria-controls="sidebar"{{end}} title="Toggle Sidebar">
+      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-3" type="button" title="Toggle Sidebar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
         </svg>
@@ -34,7 +34,7 @@
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
       <div class="d-flex align-items-center gap-2 ms-4">
-        <a href="/agents.html" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
+        <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
         <span style="color: var(--text-muted);">|</span>
         <a href="/marketplace" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
         <span style="color: var(--text-muted);">|</span>

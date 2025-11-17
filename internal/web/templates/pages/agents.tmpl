@@ -1,6 +1,16 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="{{.Theme}}">
+<html lang="en">
 {{template "head.tmpl" .}}
+<script>
+// Apply theme immediately to prevent flash
+(function() {
+  const savedTheme = localStorage.getItem('ori-theme') || 'light';
+  document.documentElement.setAttribute('data-bs-theme', savedTheme);
+  if (savedTheme === 'dark') {
+    document.documentElement.classList.add('dark-mode');
+  }
+})();
+</script>
 
 <style>
     body {
