@@ -33,6 +33,11 @@ function createNavbar(activePage = '') {
                 </div>
 
                 <div class="d-flex align-items-center gap-3 ms-auto">
+                    <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);">
+                        <span class="status-indicator status-online"></span>
+                        <span class="fw-medium">Default Agent</span>
+                    </span>
+
                     <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>

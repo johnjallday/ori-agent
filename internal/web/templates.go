@@ -18,6 +18,32 @@ type TemplateData struct {
 	Version      string
 	CurrentPage  string
 	Extra        map[string]interface{} // Additional custom data
+
+	// Navbar configuration fields
+	NavbarClass            string
+	NavbarFixed            bool
+	NavbarPadding          string
+	ShowBackButton         bool
+	BackButtonURL          string
+	BackButtonTitle        string
+	ShowSidebarToggle      bool
+	SidebarToggleId        string
+	SidebarToggleHideOnLg  bool
+	SidebarToggleTarget    string
+	BrandNoDecoration      bool
+	BrandURL               string
+	BrandColor             string
+	BrandIcon              template.HTML
+	UseLegacyIcon          bool
+	BrandText              string
+	ShowNavLinks           bool
+	ShowCurrentAgent       bool
+	CurrentAgentClickable  bool
+	ShowLocationIndicator  bool
+	ShowUpdateNotification bool
+	UpdateButtonText       string
+	ShowRefreshButton      bool
+	DarkModeIconFill       string
 }
 
 // TemplateRenderer handles template rendering
@@ -48,6 +74,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",
 		"templates/pages/index.tmpl",
+		"templates/pages/agents.tmpl",
 		"templates/pages/settings.tmpl",
 		"templates/pages/marketplace.tmpl",
 		"templates/pages/workflows.tmpl",
@@ -75,6 +102,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	}
 
 	tr.templates["index"] = tmpl
+	tr.templates["agents"] = tmpl
 	tr.templates["settings"] = tmpl
 	tr.templates["marketplace"] = tmpl
 	tr.templates["workflows"] = tmpl
@@ -97,14 +125,13 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	}
 
 	var buf strings.Builder
-	// For index and settings, we want to execute their specific templates
+	// For index, we execute base.tmpl which includes all components
+	// For standalone pages (marketplace, settings, workflows, studios, workspace-dashboard, usage, mcp, agents), we execute them directly by their name
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
-	}
-	// Marketplace, settings, workflows, studios, workspace-dashboard, usage, and mcp use their own template names
-	if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" {
-		templateName = name
+	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" || name == "agents" {
+		templateName = name + ".tmpl"
 	}
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
@@ -127,6 +154,12 @@ func GetDefaultData() TemplateData {
 		Model:        "gpt-5-nano",
 		Version:      version.GetVersion(),
 		Extra:        make(map[string]interface{}), // Initialize Extra map
-		//Version: "test",
+
+		// Navbar defaults - enable common features
+		ShowSidebarToggle:      true,
+		SidebarToggleTarget:    "#sidebar",
+		ShowNavLinks:           true,
+		ShowCurrentAgent:       true,
+		ShowUpdateNotification: true,
 	}
 }

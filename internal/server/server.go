@@ -591,7 +591,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
-	mux.HandleFunc("/agents.html", s.serveStaticFile)
+	mux.HandleFunc("/agents.html", s.serveAgents)
 	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -1021,6 +1021,37 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("index", data)
 	if err != nil {
 		log.Printf("Failed to render template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.CurrentPage = "agents"
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("agents", data)
+	if err != nil {
+		log.Printf("Failed to render agents template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
