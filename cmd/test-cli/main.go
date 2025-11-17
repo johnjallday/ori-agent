@@ -390,8 +390,7 @@ func (r *TestRunner) cleanupTestData() {
 
 func (r *TestRunner) printHelp() {
 	fmt.Println(colorCyan + "\n📖 Help" + colorReset)
-	fmt.Println(`
-This CLI tool helps you test ori-agent interactively.
+	fmt.Println(`This CLI tool helps you test ori-agent interactively.
 
 Typical workflow:
   1. Check environment (option 1)
@@ -410,8 +409,7 @@ Test Types:
 Tips:
   - Set OPENAI_API_KEY or ANTHROPIC_API_KEY before testing
   - View logs (option 11) if tests fail
-  - Clean up (option 12) between test runs
-`)
+  - Clean up (option 12) between test runs`)
 }
 
 // Helper functions

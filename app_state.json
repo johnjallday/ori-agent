@@ -14,5 +14,8 @@
     "user_set": false
   },
   "version": "dev",
-  "theme": "dark"
+  "theme": "dark",
+  "menubar": {
+    "auto_start_on_login": true
+  }
 }
