@@ -1,54 +1,99 @@
-<!-- Top Navbar -->
-<nav class="navbar modern-card glassmorphism" style="border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);">
-  <div class="container-fluid">
-    <button class="modern-btn modern-btn-secondary me-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
-      <span data-icon="menu" data-icon-size="16"></span>
-    </button>
-    <a class="navbar-brand fw-bold text-decoration-none" href="/" style="color: var(--text-primary); font-size: 1.25rem; cursor: pointer;">
-      <span data-icon="plugin" data-icon-size="24" data-icon-class="me-2" style="color: var(--primary-color);"></span>
-      {{.Title}}
-    </a>
-    <div class="d-flex align-items-center gap-2 ms-4">
-      <a href="/agents.html" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
-      <span style="color: var(--text-muted);">|</span>
-      <a href="/marketplace" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
-      <span style="color: var(--text-muted);">|</span>
-      <a href="/studios" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Studio</a>
-    </div>
-    <div class="d-flex align-items-center gap-3 ms-auto">
-      <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="cursor:pointer; padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Click to view agent details">
-        <span class="status-indicator status-online"></span>
-        <span class="fw-medium">{{.CurrentAgent}}</span>
-      </span>
-      <!-- Location Indicator -->
-      <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-secondary);">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span class="fw-medium">Loading...</span>
-      </span>
-      <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available">
+<!-- Top Navbar - Flexible component for all pages -->
+<nav class="navbar {{if .NavbarClass}}{{.NavbarClass}}{{else}}modern-card glassmorphism{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" style="{{if .NavbarFixed}}z-index: 1030; backdrop-filter: blur(10px);{{else}}border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);{{end}}">
+  <div class="container-fluid {{if .NavbarPadding}}{{.NavbarPadding}}{{else}}{{if .NavbarFixed}}px-4{{end}}{{end}}">
+    <div class="d-flex align-items-center w-100">
+      <!-- Left: Back button OR Sidebar toggle -->
+      {{if .ShowBackButton}}
+      <a href="{{if .BackButtonURL}}{{.BackButtonURL}}{{else}}/{{end}}" class="modern-btn modern-btn-secondary me-3" title="{{if .BackButtonTitle}}{{.BackButtonTitle}}{{else}}Back to Chat{{end}}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
         </svg>
-        <span>Update Available</span>
-        <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
-          <span class="visually-hidden">New update</span>
+      </a>
+      {{else if ne .ShowSidebarToggle false}}
+      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-3" type="button" {{if .SidebarToggleTarget}}data-bs-toggle="offcanvas" data-bs-target="{{.SidebarToggleTarget}}" aria-controls="sidebar"{{end}} title="Toggle Sidebar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+        </svg>
+      </button>
+      {{end}}
+
+      <!-- Brand -->
+      <a class="navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--primary-color){{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
+        {{if .BrandIcon}}
+        {{.BrandIcon}}
+        {{else if .UseLegacyIcon}}
+        <span data-icon="plugin" data-icon-size="24" data-icon-class="me-2" style="color: var(--primary-color);"></span>
+        {{else}}
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        </svg>
+        {{end}}
+        {{if .BrandText}}{{.BrandText}}{{else}}{{.Title}}{{end}}
+      </a>
+
+      <!-- Center: Navigation Links (optional) -->
+      {{if ne .ShowNavLinks false}}
+      <div class="d-flex align-items-center gap-2 ms-4">
+        <a href="/agents.html" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
+        <span style="color: var(--text-muted);">|</span>
+        <a href="/marketplace" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
+        <span style="color: var(--text-muted);">|</span>
+        <a href="/studios" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Studio</a>
+      </div>
+      {{end}}
+
+      <!-- Right: Agent, Location, Actions, Theme -->
+      <div class="d-flex align-items-center gap-3 ms-auto">
+        <!-- Current Agent Display (optional) -->
+        {{if ne .ShowCurrentAgent false}}
+        <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="{{if .CurrentAgentClickable}}cursor:pointer;{{end}} padding: 0.5rem 1rem; border-radius: var(--radius-lg);" {{if .CurrentAgentClickable}}title="Click to view agent details"{{end}}>
+          <span class="status-indicator status-online"></span>
+          <span class="fw-medium">{{.CurrentAgent}}</span>
         </span>
-      </button>
-      <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Refresh</span>
-      </button>
-      <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>Dark</span>
-      </button>
+        {{end}}
+
+        <!-- Location Indicator (optional) -->
+        {{if .ShowLocationIndicator}}
+        <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--text-secondary);">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="fw-medium">Loading...</span>
+        </span>
+        {{end}}
+
+        <!-- Update Notification Button (optional) -->
+        {{if ne .ShowUpdateNotification false}}
+        <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          </svg>
+          <span>{{if .UpdateButtonText}}{{.UpdateButtonText}}{{else}}Update Available{{end}}</span>
+          <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
+            <span class="visually-hidden">New update</span>
+          </span>
+        </button>
+        {{end}}
+
+        <!-- Refresh Button (optional) -->
+        {{if .ShowRefreshButton}}
+        <button id="refreshAppBtn" class="modern-btn modern-btn-secondary me-2" onclick="refreshApp(true)" style="display: flex; align-items: center; gap: 0.5rem;" title="Refresh all app data">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C13.3256 3 14.5859 3.28125 15.7285 3.78906" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M17 8L21 4L17 4L17 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Refresh</span>
+        </button>
+        {{end}}
+
+        <!-- Dark Mode Toggle (always shown) -->
+        <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="{{if .DarkModeIconFill}}{{.DarkModeIconFill}}{{else}}none{{end}}" xmlns="http://www.w3.org/2000/svg">
+            <path d="{{if .DarkModeIconFill}}M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z{{else}}M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z{{end}}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Dark</span>
+        </button>
+      </div>
     </div>
   </div>
 </nav>

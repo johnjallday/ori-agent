@@ -4,54 +4,7 @@
 
 <body class="bg-light">
   <!-- Navigation -->
-  <nav class="navbar navbar-expand-lg glassmorphism position-fixed w-100 top-0" style="z-index: 1030; backdrop-filter: blur(10px);">
-    <div class="container-fluid px-4">
-      <div class="d-flex align-items-center w-100">
-        <button id="sidebarToggle" class="modern-btn modern-btn-secondary me-3" title="Toggle Sidebar">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-          </svg>
-        </button>
-
-        <a class="navbar-brand fw-bold d-flex align-items-center" href="#" style="color: var(--primary-color);">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-          </svg>
-          {{.Title}}
-        </a>
-
-        <div class="d-flex align-items-center gap-2 ms-4">
-          <a href="/agents.html" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Agents</a>
-          <span style="color: var(--text-muted);">|</span>
-          <a href="/marketplace" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
-          <span style="color: var(--text-muted);">|</span>
-          <a href="/studios" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Studio</a>
-        </div>
-
-        <div class="d-flex align-items-center gap-3 ms-auto">
-          <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="cursor:pointer; padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Click to view agent details">
-            <span class="status-indicator status-online"></span>
-            <span class="fw-medium">{{.CurrentAgent}}</span>
-          </span>
-          <button id="updateNotificationBtn" class="modern-btn modern-btn-primary position-relative" style="display: none; align-items: center; gap: 0.5rem;" onclick="showUpdateModal()" title="Update available">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
-            </svg>
-            <span>Update</span>
-            <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle">
-              <span class="visually-hidden">New update</span>
-            </span>
-          </button>
-          <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 3c-4.97 0-9 4.03-9 9s4.03-9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/>
-            </svg>
-            <span>Dark</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </nav>
+  {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
     {{template "sidebar.tmpl" .}}
