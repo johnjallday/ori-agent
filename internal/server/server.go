@@ -1032,6 +1032,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.CurrentPage = "agents"
+	data.ShowSidebarToggle = false // Agents page doesn't have a sidebar
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -1133,6 +1134,7 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.CurrentPage = "marketplace"
+	data.ShowSidebarToggle = false // Marketplace doesn't have a sidebar
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -1200,6 +1202,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Workspaces - Ori Agent"
 	data.CurrentPage = "workspaces"
+	data.ShowSidebarToggle = false // Workspaces/Studios page doesn't have a sidebar
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
