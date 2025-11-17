@@ -126,11 +126,16 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 
 	var buf strings.Builder
 	// For index, we execute base.tmpl which includes all components
-	// For standalone pages (marketplace, settings, workflows, studios, workspace-dashboard, usage, mcp, agents), we execute them directly by their name
+	// For standalone pages that use {{define}}, we execute them by their defined name (without .tmpl extension)
+	// For agents (which doesn't use {{define}}), we execute the file name with .tmpl
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
-	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" || name == "agents" {
+	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" {
+		// These templates use {{define "name"}}, so execute by defined name
+		templateName = name
+	} else if name == "agents" {
+		// agents.tmpl doesn't use {{define}}, so execute by file name
 		templateName = name + ".tmpl"
 	}
 
