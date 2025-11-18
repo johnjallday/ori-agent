@@ -30,7 +30,9 @@
     --radius-xl: 1rem;
 }
 
-.dark-mode {
+/* Support both .dark-mode class and Bootstrap's data-bs-theme attribute */
+.dark-mode,
+[data-bs-theme="dark"] {
     --bg-primary: #0f172a;
     --bg-secondary: #1e293b;
     --bg-tertiary: #334155;
@@ -59,7 +61,8 @@ body {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
-.dark-mode .glassmorphism {
+.dark-mode .glassmorphism,
+[data-bs-theme="dark"] .glassmorphism {
     background: rgba(15, 23, 42, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -118,11 +121,13 @@ body {
     color: var(--text-primary);
 }
 
-.dark-mode .modern-btn-secondary {
+.dark-mode .modern-btn-secondary,
+[data-bs-theme="dark"] .modern-btn-secondary {
     background: rgba(15, 23, 42, 0.3);
     color: var(--text-primary);
 }
 
-.dark-mode .modern-btn-secondary:hover {
+.dark-mode .modern-btn-secondary:hover,
+[data-bs-theme="dark"] .modern-btn-secondary:hover {
     background: rgba(15, 23, 42, 0.5);
 }
