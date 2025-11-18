@@ -450,7 +450,6 @@ func (r *TestRunner) checkPlugins() (bool, string) {
 		"ori-mac-os-tools",
 		"ori-meta-threads-manager",
 		"ori-agent-doc-builder",
-		"ori-script-runner",
 	}
 	sharedFound := 0
 

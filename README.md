@@ -10,11 +10,11 @@
 Ori Agent supports multiple AI providers, giving you flexibility in choosing your preferred AI model:
 
 ### Cloud Providers
-- **OpenAI** - GPT-4o, GPT-4o-mini, GPT-4-turbo, o1-preview, o1-mini
+- **OpenAI**
   - Requires: `OPENAI_API_KEY`
   - Best for: Production use, latest models, reliable performance
 
-- **Anthropic Claude** - Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku
+- **Anthropic Claude**
   - Requires: `ANTHROPIC_API_KEY`
   - Best for: Long context windows, detailed reasoning
 
@@ -65,6 +65,79 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
    ```
    http://localhost:8765
    ```
+
+## 🔧 Development Tools
+
+### Dependency Management
+
+Ori Agent includes comprehensive dependency management tools to keep your dependencies up-to-date and secure.
+
+#### Quick Commands
+
+```bash
+# Check for available updates
+make deps-check
+
+# Check for security vulnerabilities
+make deps-vuln
+
+# Update all dependencies (interactive)
+make deps-update
+
+# Update patch versions only (safer)
+make deps-update-patch
+
+# Verify dependencies
+make deps-verify
+
+# Clean up go.mod
+make deps-tidy
+```
+
+#### Security Scanning
+
+We use `govulncheck` to scan for known vulnerabilities:
+
+```bash
+# Run security scan
+make deps-vuln
+
+# Install govulncheck manually
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
+```
+
+#### Automated Updates (GitHub)
+
+Dependabot is configured to automatically check for dependency updates weekly:
+- **Schedule**: Every Monday at 9:00 AM
+- **Strategy**: Groups minor and patch updates together
+- **Pull Requests**: Automatically creates PRs for updates
+- Configuration: `.github/dependabot.yml`
+
+#### Advanced Dependency Commands
+
+```bash
+# Show why a dependency is needed
+make deps-why DEP=github.com/example/package
+
+# Generate dependency graph (requires graphviz)
+make deps-graph
+
+# Show outdated dependencies
+make deps-outdated
+```
+
+#### Installing Development Tools
+
+```bash
+# Install all development tools (linter + security scanner)
+make install-tools
+```
+
+This installs:
+- `golangci-lint` - Go linter
+- `govulncheck` - Vulnerability scanner
 
 ## 📄 License
 

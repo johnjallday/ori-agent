@@ -1,0 +1,2 @@
+{"id":"082b28ca-2e4f-4333-9f56-a72af4930625","agent_name":"context-agent-2","event_type":"created","timestamp":"2025-11-17T15:31:13.023453-05:00","details":{"description":"Test agent created at 2025-11-17T15:31:13-05:00","model":"gpt-4o-mini","type":""}}
+{"id":"62125924-d645-4177-8be2-5765c3a38616","agent_name":"context-agent-2","event_type":"created","timestamp":"2025-11-17T19:50:51.047675-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:51-05:00","model":"gpt-4o-mini","type":""}}

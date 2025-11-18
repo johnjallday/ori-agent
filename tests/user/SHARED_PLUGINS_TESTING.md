@@ -11,7 +11,6 @@ The following plugins are located in `../plugins/`:
 3. **ori-mac-os-tools** (macOS) - macOS system utilities and tools
 4. **ori-meta-threads-manager** - Multi-threaded conversation management
 5. **ori-agent-doc-builder** - Documentation generation
-6. **ori-script-runner** - Execute scripts and commands
 
 ## Building Shared Plugins
 
@@ -165,30 +164,6 @@ go test ./tests/user/plugins -run TestMacOSToolsPlugin -v
 
 ---
 
-### Ori-Script-Runner
-
-**Prerequisites:**
-- Plugin built: `../plugins/ori-script-runner/ori-script-runner`
-
-**Quick Test:**
-```bash
-go test ./tests/user/plugins -run TestScriptRunnerPlugin -v
-```
-
-**Manual Test (Scenario sc013):**
-1. Create agent "Script Runner"
-2. Enable `ori-script-runner` plugin
-3. Chat: "Run: echo Hello World"
-4. Chat: "List files in current directory"
-5. Chat: "What is the date?"
-
-**What to verify:**
-- Commands execute successfully
-- Output displayed correctly
-- Error handling for invalid commands
-
----
-
 ### Ori-Agent-Doc-Builder
 
 **Prerequisites:**
@@ -253,7 +228,6 @@ go test ./tests/user/plugins -run TestMetaThreadsManagerPlugin -v
    - ori-mac-os-tools
    - ori-meta-threads-manager
    - ori-agent-doc-builder
-   - ori-script-runner
 3. Verify no errors during enabling
 4. Send test message
 5. Check server logs

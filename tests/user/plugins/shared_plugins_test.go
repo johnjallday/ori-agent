@@ -152,26 +152,6 @@ func TestDocBuilderPlugin(t *testing.T) {
 	t.Log("✓ Doc builder plugin test passed")
 }
 
-// TestScriptRunnerPlugin tests the ori-script-runner plugin
-func TestScriptRunnerPlugin(t *testing.T) {
-	ctx := helpers.NewTestContext(t)
-	defer ctx.Cleanup()
-
-	t.Log("Testing ori-script-runner plugin")
-
-	// Create agent
-	agent := ctx.CreateAgent("script-runner", "gpt-4o-mini")
-
-	// Enable plugin
-	ctx.EnablePlugin(agent, "ori-script-runner")
-
-	t.Run("PluginEnabled", func(t *testing.T) {
-		t.Log("✓ Script runner plugin enabled")
-	})
-
-	t.Log("✓ Script runner plugin test passed")
-}
-
 // TestMultipleSharedPlugins tests using multiple shared plugins on one agent
 func TestMultipleSharedPlugins(t *testing.T) {
 	if runtime.GOOS != "darwin" {

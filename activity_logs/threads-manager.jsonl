@@ -1,0 +1,2 @@
+{"id":"e022b512-39a7-4602-8982-0d3b9d4d45ed","agent_name":"threads-manager","event_type":"created","timestamp":"2025-11-17T15:31:16.225214-05:00","details":{"description":"Test agent created at 2025-11-17T15:31:16-05:00","model":"gpt-4o-mini","type":""}}
+{"id":"00c4a758-3a91-4126-b825-60a907bdecbe","agent_name":"threads-manager","event_type":"created","timestamp":"2025-11-17T19:50:54.240963-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:54-05:00","model":"gpt-4o-mini","type":""}}

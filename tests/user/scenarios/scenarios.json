@@ -292,32 +292,6 @@
       "notes": "Verify responses match actual system state"
     },
     {
-      "id": "sc013",
-      "name": "Ori-Script-Runner Plugin",
-      "category": "shared-plugin",
-      "platform": "all",
-      "difficulty": "medium",
-      "estimatedTime": "6 minutes",
-      "description": "Test script execution capabilities",
-      "prerequisites": [
-        "Server running",
-        "ori-script-runner plugin built"
-      ],
-      "steps": [
-        "Create new agent: 'Script Runner'",
-        "Enable 'ori-script-runner' plugin",
-        "Send message: 'Run a simple echo command: echo Hello World'",
-        "Verify command execution and output",
-        "Send message: 'List files in the current directory'",
-        "Verify file listing output",
-        "Send message: 'What is the date?'",
-        "Verify date command output"
-      ],
-      "verification": "Were scripts executed successfully with correct output?",
-      "expected": "Commands execute, output displayed, no errors",
-      "notes": "Test with safe, read-only commands first"
-    },
-    {
       "id": "sc014",
       "name": "Ori-Agent-Doc-Builder Plugin",
       "category": "shared-plugin",

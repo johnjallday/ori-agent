@@ -1,0 +1,2 @@
+{"id":"596f8a36-5cf9-4590-bc66-57836206959d","agent_name":"reaper-controller","event_type":"created","timestamp":"2025-11-17T15:31:14.957186-05:00","details":{"description":"Test agent created at 2025-11-17T15:31:14-05:00","model":"gpt-4o-mini","type":""}}
+{"id":"4f687460-c0c2-4579-b3de-05905ebdc779","agent_name":"reaper-controller","event_type":"created","timestamp":"2025-11-17T19:50:52.978181-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:52-05:00","model":"gpt-4o-mini","type":""}}

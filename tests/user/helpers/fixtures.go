@@ -86,7 +86,6 @@ func PluginNames() []string {
 		"ori-mac-os-tools",
 		"ori-meta-threads-manager",
 		"ori-agent-doc-builder",
-		"ori-script-runner",
 	}
 }
 
@@ -98,7 +97,6 @@ func SharedPluginNames() []string {
 		"ori-mac-os-tools",
 		"ori-meta-threads-manager",
 		"ori-agent-doc-builder",
-		"ori-script-runner",
 	}
 }
 

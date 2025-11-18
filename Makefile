@@ -214,4 +214,100 @@ dev-setup: deps build plugins ## Initial development setup
 install-tools: ## Install development tools
 	@echo "$(BLUE)Installing development tools...$(NC)"
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "$(GREEN)✓ Tools installed$(NC)"
+
+## Dependency management targets
+
+deps-check: ## Check for available dependency updates
+	@echo "$(BLUE)Checking for dependency updates...$(NC)"
+	@go list -m -u all | grep '\[' || echo "$(GREEN)All dependencies are up to date$(NC)"
+
+deps-check-direct: ## Check for updates (direct dependencies only)
+	@echo "$(BLUE)Checking direct dependencies for updates...$(NC)"
+	@go list -m -u -json all | jq -r 'select(.Update != null and .Indirect != true) | "\(.Path) \(.Version) → [\(.Update.Version)]"' 2>/dev/null || (echo "$(YELLOW)jq not found, showing all updates:$(NC)" && go list -m -u all | grep '\[')
+	@echo ""
+	@echo "$(YELLOW)Note: Indirect dependencies are controlled by their parent packages$(NC)"
+
+deps-update: ## Update all direct dependencies to latest compatible versions
+	@echo "$(BLUE)Updating dependencies...$(NC)"
+	@echo "$(YELLOW)This will update direct dependencies to latest minor/patch versions$(NC)"
+	@echo ""
+	$(GO) get -u ./...
+	$(GO) mod tidy
+	@echo ""
+	@echo "$(GREEN)✓ Dependencies updated$(NC)"
+	@echo "$(YELLOW)Run 'make deps-check' to see remaining indirect dependency updates$(NC)"
+
+deps-update-patch: ## Update dependencies (patch versions only)
+	@echo "$(BLUE)Updating patch versions...$(NC)"
+	$(GO) get -u=patch ./...
+	$(GO) mod tidy
+	@echo "$(GREEN)✓ Patch updates applied$(NC)"
+
+deps-vuln: ## Check for known vulnerabilities
+	@echo "$(BLUE)Checking for vulnerabilities...$(NC)"
+	@if ! command -v govulncheck > /dev/null; then \
+		echo "$(YELLOW)govulncheck not found. Installing...$(NC)"; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	fi
+	@govulncheck ./... || (echo "$(RED)Vulnerabilities found!$(NC)" && exit 1)
+	@echo "$(GREEN)✓ No vulnerabilities found$(NC)"
+
+deps-graph: ## Show dependency graph (requires graphviz)
+	@echo "$(BLUE)Generating dependency graph...$(NC)"
+	@if ! command -v dot > /dev/null; then \
+		echo "$(YELLOW)graphviz not found. Install with: brew install graphviz$(NC)"; \
+		exit 1; \
+	fi
+	@go mod graph | modgraphviz | dot -Tpng -o deps-graph.png
+	@echo "$(GREEN)✓ Dependency graph saved to deps-graph.png$(NC)"
+
+deps-why: ## Explain why a dependency is needed (usage: make deps-why DEP=package-name)
+	@if [ -z "$(DEP)" ]; then \
+		echo "$(RED)Usage: make deps-why DEP=package-name$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Checking why $(DEP) is needed...$(NC)"
+	@go mod why $(DEP)
+
+deps-tidy: ## Clean up go.mod and go.sum
+	@echo "$(BLUE)Tidying dependencies...$(NC)"
+	$(GO) mod tidy
+	@echo "$(GREEN)✓ Dependencies tidied$(NC)"
+
+deps-verify: ## Verify dependencies have expected content
+	@echo "$(BLUE)Verifying dependencies...$(NC)"
+	$(GO) mod verify
+	@echo "$(GREEN)✓ Dependencies verified$(NC)"
+
+deps-outdated: ## Show outdated dependencies in a readable format
+	@echo "$(BLUE)Checking for outdated dependencies...$(NC)"
+	@go list -m -u -json all | go run scripts/parse-deps.go 2>/dev/null || go list -m -u all | grep '\['
+
+deps-security: deps-vuln ## Alias for deps-vuln (run security checks)
+
+deps-summary: ## Show dependency update summary
+	@echo "$(BLUE)Dependency Summary$(NC)"
+	@echo ""
+	@DIRECT_OUTDATED=$$(go list -m -u -json all 2>/dev/null | jq -r 'select(.Update != null and .Indirect != true)' 2>/dev/null | jq -s 'length' 2>/dev/null || echo "0"); \
+	INDIRECT_OUTDATED=$$(go list -m -u -json all 2>/dev/null | jq -r 'select(.Update != null and .Indirect == true)' 2>/dev/null | jq -s 'length' 2>/dev/null || echo "0"); \
+	TOTAL_OUTDATED=$$(go list -m -u all 2>/dev/null | grep -c '\[' || echo "0"); \
+	TOTAL_DEPS=$$(go list -m all 2>/dev/null | wc -l | tr -d ' '); \
+	echo "  Total dependencies: $$TOTAL_DEPS"; \
+	echo "  Dependencies with updates: $$TOTAL_OUTDATED"; \
+	if [ "$$DIRECT_OUTDATED" != "0" ]; then \
+		echo "    - Direct: $(YELLOW)$$DIRECT_OUTDATED$(NC) (can be updated with 'make deps-update')"; \
+	else \
+		echo "    - Direct: $(GREEN)0$(NC) (all up to date!)"; \
+	fi; \
+	if [ "$$INDIRECT_OUTDATED" != "0" ]; then \
+		echo "    - Indirect: $(YELLOW)$$INDIRECT_OUTDATED$(NC) (controlled by parent packages)"; \
+	else \
+		echo "    - Indirect: $(GREEN)0$(NC) (all up to date!)"; \
+	fi
+	@echo ""
+	@echo "$(BLUE)Quick actions:$(NC)"
+	@echo "  make deps-check-direct  - Show direct dependency updates"
+	@echo "  make deps-update        - Update direct dependencies"
+	@echo "  make deps-vuln          - Check for vulnerabilities"
