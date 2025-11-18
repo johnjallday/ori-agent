@@ -367,9 +367,32 @@ PORT=9000 go run ./cmd/server
 - Use structured logging with context
 - Don't panic unless critical
 
-### Git Commits
-- Use descriptive messages in present tense
-- Example: "Add plugin validation on startup" (not "Fixed stuff")
+### Git Workflow
+
+This project follows a feature branch workflow with squash merging.
+
+**Complete workflow documentation**: See `/GIT_WORKFLOW.md` in the project root
+
+**Quick reference for branches**:
+- `feature/` - New functionality
+- `fix/` - Bug fixes
+- `refactor/` - Code restructuring
+- `docs/` - Documentation updates
+- `test/` - Test additions/improvements
+- `chore/` - Maintenance tasks
+
+**Commands**:
+- Always use `git switch` instead of `git checkout`
+- Create branch: `git switch -c feature/descriptive-name`
+- Switch branch: `git switch main`
+
+**Commit message format**: Present tense, descriptive
+- ✅ "Add plugin validation on startup"
+- ✅ "Implement Claude provider cost tracking"
+- ✅ "Fix plugin path resolution for uploaded plugins"
+- ❌ "Fixed stuff"
+- ❌ "WIP"
+- ❌ "Updates"
 
 ## Additional Resources
 
