@@ -219,13 +219,14 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 			// Still show it but mark as unavailable
 			available = false
 			displayName = getProviderDisplayName(name)
+			providerType = "cloud"
+			requiresKey = true
 
 			// Get default models for unregistered providers
+			var defaultModels []string
 			if name == "claude" {
-				providerType = "cloud"
-				requiresKey = true
 				// Hardcode Claude models since provider isn't registered
-				claudeModels := []string{
+				defaultModels = []string{
 					"claude-sonnet-4-5",
 					"claude-sonnet-4",
 					"claude-opus-4-1",
@@ -233,20 +234,33 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 					"claude-3-sonnet-20240229",
 					"claude-3-haiku-20240307",
 				}
-				for _, modelName := range claudeModels {
-					categories := getModelCategories(name, modelName)
-					for _, category := range categories {
-						providerModels = append(providerModels, ProviderModel{
-							Value:    modelName,
-							Label:    modelName,
-							Provider: name,
-							Type:     category,
-						})
-					}
+			} else if name == "openai" {
+				// Hardcode OpenAI models since provider isn't registered
+				defaultModels = []string{
+					"gpt-5-nano",
+					"gpt-4.1-nano",
+					"gpt-5-mini",
+					"gpt-4.1-mini",
+					"gpt-5",
+					"gpt-4.1",
+					"o1-preview",
+					"o1-mini",
 				}
 			} else {
 				// Skip other unregistered providers
 				continue
+			}
+
+			for _, modelName := range defaultModels {
+				categories := getModelCategories(name, modelName)
+				for _, category := range categories {
+					providerModels = append(providerModels, ProviderModel{
+						Value:    modelName,
+						Label:    modelName,
+						Provider: name,
+						Type:     category,
+					})
+				}
 			}
 		} else {
 			// Provider is registered

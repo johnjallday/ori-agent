@@ -96,13 +96,6 @@ if ! go test ./...; then
   exit 1
 fi
 
-# Build cross-platform release binaries
-print_status "Building cross-platform release binaries..."
-if ! ./scripts/build-release.sh; then
-  print_error "Cross-platform build failed. Fix build errors before creating a release."
-  exit 1
-fi
-
 # Update version in VERSION file
 VERSION_FILE="VERSION"
 if [ -f "$VERSION_FILE" ]; then
@@ -154,37 +147,12 @@ $(git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s" | head -20)
 🤖 Release created automatically with create-release.sh"
   fi
 
-  # Upload release assets
-  print_status "Uploading release binaries..."
-  UPLOAD_SUCCESS=true
-
-  # Upload all platform binaries from dist/
-  if [ -d "dist" ]; then
-    for asset in dist/*.tar.gz dist/*.zip; do
-      if [ -f "$asset" ]; then
-        print_status "Uploading $(basename "$asset")..."
-        if ! gh release upload "$VERSION" "$asset"; then
-          print_error "Failed to upload $(basename "$asset")"
-          UPLOAD_SUCCESS=false
-        fi
-      fi
-    done
-  else
-    print_error "dist/ directory not found. Build may have failed."
-    UPLOAD_SUCCESS=false
-  fi
-
   # Create the release
   if gh release create "$VERSION" \
     --title "Ori Agent $VERSION" \
     --notes "$RELEASE_NOTES"; then
     print_success "GitHub release created successfully!"
-
-    if [ "$UPLOAD_SUCCESS" = true ]; then
-      print_success "All release binaries uploaded successfully!"
-    else
-      print_warning "Some binaries failed to upload. Check the release page."
-    fi
+    print_status "GitHub Actions will run tests and finalize the release."
 
     print_status "View release at: $(gh repo view --web --json url -q .url)/releases/tag/$VERSION"
   else

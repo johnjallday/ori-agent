@@ -71,13 +71,12 @@ Triggered automatically when pushing version tags
 3. ✅ Verifies you're on `main` branch (or asks confirmation)
 4. ✅ Pulls latest changes from origin
 5. ✅ Runs all tests (`go test ./...`)
-6. ✅ Builds cross-platform binaries (`./scripts/build-release.sh`)
-7. ✅ Updates `VERSION` file (removes `v` prefix: `v0.0.11` → `0.0.11`)
-8. ✅ Creates commit: `"chore: bump version to v0.0.11"`
-9. ✅ Creates git tag with annotation
-10. ✅ Pushes tag to origin
-11. ✅ (If `gh` CLI installed) Creates GitHub release with generated notes
-12. ✅ (If `gh` CLI installed) Uploads release binaries from `dist/`
+6. ✅ Updates `VERSION` file (removes `v` prefix: `v0.0.11` → `0.0.11`)
+7. ✅ Creates commit: `"chore: bump version to v0.0.11"`
+8. ✅ Creates git tag with annotation
+9. ✅ Pushes tag to origin
+10. ✅ (If `gh` CLI installed) Creates GitHub release with generated notes
+11. ✅ GitHub Actions runs tests and generates release notes
 
 **Requirements:**
 - GitHub CLI (`gh`) installed (optional but recommended)
@@ -113,38 +112,29 @@ git push origin v0.0.11
 
 **Step 3: GitHub Actions Automatically:**
 1. Triggers `.github/workflows/release.yml`
-2. Builds macOS DMG files (both Intel and Apple Silicon)
+2. Runs unit tests
 3. Creates GitHub release
-4. Uploads DMG files:
-   - `OriAgent-{VERSION}-amd64.dmg` (Intel Macs)
-   - `OriAgent-{VERSION}-arm64.dmg` (Apple Silicon)
-5. Auto-generates release notes
-
-**Note:** Only macOS DMG installers are provided in releases. For other platforms, users can build from source using the instructions in the README.
+4. Auto-generates release notes
 
 ---
 
 ## 📦 What Gets Built in a Release
 
 ### GitHub Release Assets
-- `OriAgent-{VERSION}-amd64.dmg` (Intel Macs)
-- `OriAgent-{VERSION}-arm64.dmg` (Apple Silicon)
+GitHub releases contain release notes only (no pre-built binaries).
 
-Each DMG includes:
-- `.app` bundle with launcher script
-- Auto-start on login support
-- Menu bar integration
-- Embedded server binary with version information
+Users can build from source using the instructions in the README:
+```bash
+git clone https://github.com/johnjallday/ori-agent
+cd ori-agent
+make build
+```
 
-### Local Build Script (Optional)
-The `scripts/build-release.sh` script can create cross-platform binaries locally:
-- `ori-agent-linux-amd64.tar.gz`
-- `ori-agent-linux-arm64.tar.gz`
-- `ori-agent-darwin-amd64.tar.gz`
-- `ori-agent-darwin-arm64.tar.gz`
-- `ori-agent-windows-amd64.zip`
-
-These are **not included in GitHub releases** but can be built locally if needed.
+For local development builds, use:
+- `make build` - Build server binary
+- `make menubar` - Build menu bar app (macOS)
+- `make plugins` - Build all plugins
+- `make all` - Build everything
 
 ---
 
@@ -207,13 +197,11 @@ go test -short ./...
 #    - Update VERSION file (0.0.10 → 0.0.11)
 #    - Commit version bump
 #    - Create and push tag
-#    - Build cross-platform binaries
 #    - Create GitHub release (if gh CLI installed)
-#    - Upload binaries
 
 # 6. GitHub Actions will:
-#    - Build macOS DMG files
-#    - Add them to the release
+#    - Run unit tests
+#    - Create release with auto-generated notes
 ```
 
 ---
@@ -274,8 +262,7 @@ gh run list --workflow=release.yml
 2. View logs: `gh run view <run-id>`
 3. Common issues:
    - Missing `GITHUB_TOKEN` (should be automatic)
-   - Build failures (check Go 1.25 compatibility)
-   - DMG build issues (macOS runner problems)
+   - Test failures (fix tests before creating release)
 
 ---
 
@@ -283,7 +270,6 @@ gh run list --workflow=release.yml
 
 - **Version**: `VERSION`
 - **Release Script**: `scripts/create-release.sh`
-- **Build Script**: `scripts/build-release.sh`
 - **CI Workflow**: `.github/workflows/ci.yml`
 - **Release Workflow**: `.github/workflows/release.yml`
 - **Makefile**: `Makefile`

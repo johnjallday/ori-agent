@@ -93,6 +93,13 @@ func (p *OpenAIProvider) DefaultModels() []string {
 
 // fetchAvailableModels fetches the list of available models from OpenAI API
 func (p *OpenAIProvider) fetchAvailableModels(ctx context.Context) ([]string, error) {
+	// Check if client is initialized (zero value check)
+	// The openai.Client is a struct, so we check if it was properly initialized
+	// by checking if the API key is set (which should have been used during client creation)
+	if p.apiKey == "" {
+		return nil, fmt.Errorf("OpenAI client not initialized: no API key")
+	}
+
 	iter := p.client.Models.ListAutoPaging(ctx)
 
 	var modelIDs []string
