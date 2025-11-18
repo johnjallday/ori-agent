@@ -591,6 +591,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
 	mux.HandleFunc("/workflows", s.serveWorkflows)
 	mux.HandleFunc("/mcp", s.serveMCP)
+	mux.HandleFunc("/models", s.serveModels)
 	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
 	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support
 	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
@@ -1033,7 +1034,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.CurrentPage = "agents"
-	data.ShowSidebarToggle = false // Agents page doesn't have a sidebar
+	data.ShowSidebarToggle = true // Enable sidebar toggle
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -1135,7 +1136,7 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.CurrentPage = "marketplace"
-	data.ShowSidebarToggle = false // Marketplace doesn't have a sidebar
+	data.ShowSidebarToggle = true // Enable sidebar toggle
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -1159,6 +1160,34 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
 	if err != nil {
 		log.Printf("Failed to render marketplace template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
+}
+
+func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.Title = "Ori Agent"
+	data.CurrentPage = "models"
+	data.ShowSidebarToggle = true // Enable sidebar toggle
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("models", data)
+	if err != nil {
+		log.Printf("Failed to render models template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -1203,7 +1232,6 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Ori Agent"
 	data.CurrentPage = "workspaces"
-	data.ShowSidebarToggle = false // Workspaces/Studios page doesn't have a sidebar
 
 	// Get theme from app state
 	data.Theme = s.onboardingMgr.GetTheme()
@@ -1247,6 +1275,7 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request)
 	data := web.GetDefaultData()
 	data.Title = "Workspace Dashboard - Ori Agent"
 	data.CurrentPage = "workspaces"
+	data.ShowSidebarToggle = true // Workspace dashboard has a sidebar
 
 	// Add workspace ID to template data
 	data.Extra = map[string]interface{}{

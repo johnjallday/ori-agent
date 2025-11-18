@@ -207,37 +207,77 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, name := range providerNames {
 		provider, err := h.llmFactory.GetProvider(name)
+
+		var providerModels []ProviderModel
+		var displayName string
+		var providerType string
+		var requiresKey bool
+		var available bool
+
 		if err != nil {
-			// Provider not available, skip
-			continue
-		}
+			// Provider not registered (likely missing API key)
+			// Still show it but mark as unavailable
+			available = false
+			displayName = getProviderDisplayName(name)
 
-		caps := provider.Capabilities()
-		models := provider.DefaultModels()
+			// Get default models for unregistered providers
+			if name == "claude" {
+				providerType = "cloud"
+				requiresKey = true
+				// Hardcode Claude models since provider isn't registered
+				claudeModels := []string{
+					"claude-sonnet-4-5",
+					"claude-sonnet-4",
+					"claude-opus-4-1",
+					"claude-3-opus-20240229",
+					"claude-3-sonnet-20240229",
+					"claude-3-haiku-20240307",
+				}
+				for _, modelName := range claudeModels {
+					categories := getModelCategories(name, modelName)
+					for _, category := range categories {
+						providerModels = append(providerModels, ProviderModel{
+							Value:    modelName,
+							Label:    modelName,
+							Provider: name,
+							Type:     category,
+						})
+					}
+				}
+			} else {
+				// Skip other unregistered providers
+				continue
+			}
+		} else {
+			// Provider is registered
+			available = true
+			caps := provider.Capabilities()
+			models := provider.DefaultModels()
+			displayName = getProviderDisplayName(name)
+			providerType = string(provider.Type())
+			requiresKey = caps.RequiresAPIKey
 
-		// Convert models to ProviderModel format with categorization
-		providerModels := make([]ProviderModel, 0, len(models)*2) // Allow for duplicates
-		for _, modelName := range models {
-			// Check if model should appear in multiple categories
-			categories := getModelCategories(name, modelName)
-
-			// Add model for each category it supports
-			for _, category := range categories {
-				providerModels = append(providerModels, ProviderModel{
-					Value:    modelName,
-					Label:    modelName,
-					Provider: name,
-					Type:     category,
-				})
+			// Convert models to ProviderModel format with categorization
+			providerModels = make([]ProviderModel, 0, len(models)*2)
+			for _, modelName := range models {
+				categories := getModelCategories(name, modelName)
+				for _, category := range categories {
+					providerModels = append(providerModels, ProviderModel{
+						Value:    modelName,
+						Label:    modelName,
+						Provider: name,
+						Type:     category,
+					})
+				}
 			}
 		}
 
 		providers = append(providers, ProviderInfo{
-			Name:        provider.Name(),
-			DisplayName: getProviderDisplayName(name),
-			Type:        string(provider.Type()),
-			Available:   true,
-			RequiresKey: caps.RequiresAPIKey,
+			Name:        name,
+			DisplayName: displayName,
+			Type:        providerType,
+			Available:   available,
+			RequiresKey: requiresKey,
 			Models:      providerModels,
 		})
 	}
@@ -315,13 +355,20 @@ func categorizeModel(provider, modelName string) string {
 		// All other OpenAI models default to research tier (expensive)
 		return "research"
 	case "claude":
-		if modelName == "claude-3-haiku-20240307" {
+		// Haiku is the lightweight model for tool calling
+		if strings.Contains(modelName, "haiku") {
 			return "tool-calling"
-		} else if modelName == "claude-3-sonnet-20240229" {
-			return "general"
-		} else {
-			return "research"
 		}
+		// Sonnet 4.5 and 4 are general purpose
+		if modelName == "claude-sonnet-4-5" || modelName == "claude-sonnet-4" {
+			return "general"
+		}
+		// Claude 3 Sonnet is general
+		if modelName == "claude-3-sonnet-20240229" {
+			return "general"
+		}
+		// Opus models are research tier (most capable)
+		return "research"
 	case "ollama":
 		// Categorize Ollama models - use pattern matching for flexibility
 		lowerName := strings.ToLower(modelName)

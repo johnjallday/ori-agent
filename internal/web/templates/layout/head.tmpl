@@ -52,9 +52,52 @@
       --bg-tertiary: #334155;
       --text-primary: #f8fafc;
       --text-secondary: #cbd5e1;
-      --text-muted: #94a3b8;
+      --text-muted: #cbd5e1;
       --border-color: #334155;
       --border-light: #475569;
+    }
+
+    /* Override Bootstrap's text-muted in dark mode */
+    .dark-mode .text-muted {
+      color: #cbd5e1 !important;
+    }
+
+    /* Card styling for marketplace and other components */
+    .card {
+      background: rgba(255, 255, 255, 0.95) !important;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      transition: all 0.2s ease;
+    }
+
+    .card:hover {
+      background: rgba(255, 255, 255, 0.98) !important;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    }
+
+    .dark-mode .card {
+      background: rgba(15, 23, 42, 0.3) !important;
+      backdrop-filter: blur(15px);
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+
+    .dark-mode .card:hover {
+      background: rgba(15, 23, 42, 0.4) !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+    }
+
+    /* Ensure card text is readable in dark mode */
+    .dark-mode .card .card-title,
+    .dark-mode .card .card-text,
+    .dark-mode .card h5,
+    .dark-mode .card p {
+      color: #f8fafc !important;
+    }
+
+    .dark-mode .card .text-muted,
+    .dark-mode .card small {
+      color: #cbd5e1 !important;
     }
 
     * {
@@ -1017,8 +1060,8 @@
     }
 
     .dark-mode .modal-content {
-      background: rgba(15, 23, 42, 0.4) !important;
-      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      background: rgba(15, 23, 42, 0.25) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
     }
 
     .modal-header {
@@ -1028,8 +1071,8 @@
     }
 
     .dark-mode .modal-header {
-      background: rgba(15, 23, 42, 0.3) !important;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+      background: rgba(15, 23, 42, 0.2) !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
     }
 
     /* Enhanced agent/plugin items */

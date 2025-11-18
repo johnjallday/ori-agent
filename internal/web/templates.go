@@ -82,6 +82,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/workspace-dashboard.tmpl",
 		"templates/pages/usage.tmpl",
 		"templates/pages/mcp.tmpl",
+		"templates/pages/models.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -110,6 +111,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["workspace-dashboard"] = tmpl
 	tr.templates["usage"] = tmpl
 	tr.templates["mcp"] = tmpl
+	tr.templates["models"] = tmpl
 	log.Printf("Successfully loaded templates from embedded filesystem")
 
 	return nil
@@ -117,7 +119,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 
 // RenderTemplate renders a template with the given data
 func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (string, error) {
-	log.Printf("Rendering template: %s", name)
 	tmpl, exists := tr.templates[name]
 	if !exists {
 		log.Printf("Template not found: %s", name)
@@ -131,7 +132,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
-	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" {
+	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "usage" || name == "mcp" || name == "models" {
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	} else if name == "agents" {
@@ -141,13 +142,11 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
 	if err != nil {
-		log.Printf("Error executing template: %v", err)
+		log.Printf("Error executing template %s: %v", name, err)
 		return "", err
 	}
 
-	result := buf.String()
-	log.Printf("Template rendered successfully, length: %d", len(result))
-	return result, nil
+	return buf.String(), nil
 }
 
 // GetDefaultData returns default template data

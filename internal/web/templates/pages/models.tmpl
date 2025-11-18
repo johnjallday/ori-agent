@@ -1,0 +1,477 @@
+{{define "models"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Available Models</h1>
+      <p class="text-muted mb-0">Browse all AI models available across different providers</p>
+    </div>
+    <button id="refreshModelsBtn" class="btn btn-outline-primary">
+      <i class="bi bi-arrow-clockwise me-2"></i>Refresh
+    </button>
+  </div>
+
+  <!-- Loading State -->
+  <div id="loadingState" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading models...</span>
+    </div>
+    <p class="text-muted mt-3">Loading available models...</p>
+  </div>
+
+  <!-- Error State -->
+  <div id="errorState" class="alert alert-danger d-none" role="alert">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    <span id="errorMessage">Failed to load models. Please try again.</span>
+  </div>
+
+  <!-- Models Content -->
+  <div id="modelsContent" class="d-none">
+    <!-- Filter Bar -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label for="providerFilter" class="form-label" style="color: var(--text-secondary); font-weight: 500;">Provider</label>
+            <select id="providerFilter" class="form-select">
+              <option value="all">All Providers</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label for="categoryFilter" class="form-label" style="color: var(--text-secondary); font-weight: 500;">Category</label>
+            <select id="categoryFilter" class="form-select">
+              <option value="all">All Categories</option>
+              <option value="tool-calling">Tool Calling</option>
+              <option value="general-purpose">General Purpose</option>
+              <option value="research">Research</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label for="searchFilter" class="form-label" style="color: var(--text-secondary); font-weight: 500;">Search</label>
+            <input type="text" id="searchFilter" class="form-control" placeholder="Search models..." style="color: var(--text-color);">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Provider Sections -->
+    <div id="providersContainer">
+      <!-- Dynamically populated -->
+    </div>
+
+    <!-- No Results -->
+    <div id="noResults" class="text-center py-5 d-none">
+      <i class="bi bi-search" style="font-size: 3rem; color: var(--muted-text);"></i>
+      <p class="text-muted mt-3">No models found matching your filters</p>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Placeholder text styling */
+#searchFilter::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.dark-mode #searchFilter::placeholder {
+  opacity: 0.5;
+}
+
+.provider-section {
+  margin-bottom: 1rem;
+}
+
+.provider-header {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.provider-header:hover {
+  border-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.provider-header .chevron {
+  transition: transform 0.2s ease;
+  transform: rotate(180deg); /* Start pointing up since we're expanded */
+}
+
+.provider-header.collapsed .chevron {
+  transform: rotate(0deg); /* Point down when collapsed */
+}
+
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.provider-badge.cloud {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.provider-badge.local {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
+  opacity: 1;
+}
+
+.models-list.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  margin-top: 0;
+}
+
+.model-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.875rem 1rem;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.model-item:hover {
+  border-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.model-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.model-name {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-color);
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  min-width: 200px;
+}
+
+.model-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.model-tag {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.model-tag.category {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+}
+
+.model-tag.price {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.provider-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.api-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.api-key-status.configured {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+}
+
+.api-key-status.missing {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+</style>
+
+<script>
+let allProviders = [];
+let filteredModels = [];
+
+// Load models on page load
+document.addEventListener('DOMContentLoaded', function() {
+  loadModels();
+
+  // Set up event listeners
+  document.getElementById('refreshModelsBtn').addEventListener('click', loadModels);
+  document.getElementById('providerFilter').addEventListener('change', applyFilters);
+  document.getElementById('categoryFilter').addEventListener('change', applyFilters);
+  document.getElementById('searchFilter').addEventListener('input', applyFilters);
+});
+
+async function loadModels() {
+  const loadingState = document.getElementById('loadingState');
+  const errorState = document.getElementById('errorState');
+  const modelsContent = document.getElementById('modelsContent');
+
+  // Show loading
+  loadingState.classList.remove('d-none');
+  errorState.classList.add('d-none');
+  modelsContent.classList.add('d-none');
+
+  try {
+    const response = await fetch('/api/providers');
+    if (!response.ok) {
+      throw new Error('Failed to fetch providers');
+    }
+
+    const data = await response.json();
+    allProviders = data.providers || [];
+
+    // Populate provider filter
+    populateProviderFilter();
+
+    // Display models
+    applyFilters();
+
+    // Show content
+    loadingState.classList.add('d-none');
+    modelsContent.classList.remove('d-none');
+
+  } catch (error) {
+    console.error('Error loading models:', error);
+    document.getElementById('errorMessage').textContent = error.message;
+    loadingState.classList.add('d-none');
+    errorState.classList.remove('d-none');
+  }
+}
+
+function populateProviderFilter() {
+  const select = document.getElementById('providerFilter');
+
+  // Clear existing options except "All Providers"
+  while (select.options.length > 1) {
+    select.remove(1);
+  }
+
+  // Add provider options
+  allProviders.forEach(provider => {
+    const option = document.createElement('option');
+    option.value = provider.name;
+    option.textContent = provider.display_name;
+    select.appendChild(option);
+  });
+}
+
+function applyFilters() {
+  const providerFilter = document.getElementById('providerFilter').value;
+  const categoryFilter = document.getElementById('categoryFilter').value;
+  const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+
+  const container = document.getElementById('providersContainer');
+  const noResults = document.getElementById('noResults');
+
+  container.innerHTML = '';
+  let hasResults = false;
+
+  allProviders.forEach(provider => {
+    // Filter by provider
+    if (providerFilter !== 'all' && provider.name !== providerFilter) {
+      return;
+    }
+
+    // Filter models
+    let models = provider.models || [];
+
+    // Filter by category
+    if (categoryFilter !== 'all') {
+      models = models.filter(m => m.type === categoryFilter);
+    }
+
+    // Filter by search
+    if (searchFilter) {
+      models = models.filter(m =>
+        m.value.toLowerCase().includes(searchFilter) ||
+        m.label.toLowerCase().includes(searchFilter)
+      );
+    }
+
+    // Skip if no models match
+    if (models.length === 0) {
+      return;
+    }
+
+    hasResults = true;
+
+    // Create provider section
+    const section = createProviderSection(provider, models);
+    container.appendChild(section);
+  });
+
+  // Show/hide no results message
+  if (hasResults) {
+    noResults.classList.add('d-none');
+  } else {
+    noResults.classList.remove('d-none');
+  }
+}
+
+function createProviderSection(provider, models) {
+  const section = document.createElement('div');
+  section.className = 'provider-section';
+
+  // Provider header
+  const header = document.createElement('div');
+  header.className = 'provider-header';
+  header.innerHTML = `
+    <div class="provider-info">
+      <h2 class="h5 mb-0">${provider.display_name}</h2>
+      <span class="provider-badge ${provider.type}">
+        <i class="bi bi-${provider.type === 'cloud' ? 'cloud' : 'laptop'}"></i>
+        ${provider.type}
+      </span>
+      ${provider.requires_key ? `
+        <span class="api-key-status ${provider.available ? 'configured' : 'missing'}">
+          <i class="bi bi-${provider.available ? 'check-circle' : 'exclamation-circle'}"></i>
+          ${provider.available ? 'API Key Configured' : 'API Key Required'}
+        </span>
+      ` : ''}
+    </div>
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <div class="text-muted">
+        ${models.length} model${models.length !== 1 ? 's' : ''}
+      </div>
+      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+        <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+      </svg>
+    </div>
+  `;
+  section.appendChild(header);
+
+  // Models list
+  const list = document.createElement('div');
+  list.className = 'models-list';
+
+  // Group models by unique value (to avoid duplicates from multiple categories)
+  const uniqueModels = new Map();
+  models.forEach(model => {
+    if (!uniqueModels.has(model.value)) {
+      uniqueModels.set(model.value, {
+        ...model,
+        categories: [model.type]
+      });
+    } else {
+      const existing = uniqueModels.get(model.value);
+      if (!existing.categories.includes(model.type)) {
+        existing.categories.push(model.type);
+      }
+    }
+  });
+
+  uniqueModels.forEach(model => {
+    const item = createModelItem(model, provider);
+    list.appendChild(item);
+  });
+
+  section.appendChild(list);
+
+  // Add click handler for accordion
+  header.addEventListener('click', function() {
+    const isCollapsed = list.classList.contains('collapsed');
+
+    if (isCollapsed) {
+      list.classList.remove('collapsed');
+      header.classList.remove('collapsed');
+      list.style.maxHeight = list.scrollHeight + 'px';
+    } else {
+      list.classList.add('collapsed');
+      header.classList.add('collapsed');
+      list.style.maxHeight = '0';
+    }
+  });
+
+  // Start expanded by default - set max-height after a brief delay to allow DOM to settle
+  setTimeout(() => {
+    list.style.maxHeight = list.scrollHeight + 'px';
+  }, 0);
+
+  return section;
+}
+
+function createModelItem(model, provider) {
+  const item = document.createElement('div');
+  item.className = 'model-item';
+
+  // Categories tags
+  const categoryTags = model.categories.map(cat =>
+    `<span class="model-tag category">${cat}</span>`
+  ).join('');
+
+  item.innerHTML = `
+    <div class="model-info">
+      <div class="model-name">${model.label}</div>
+      <div class="model-meta">
+        ${categoryTags}
+      </div>
+    </div>
+  `;
+
+  return item;
+}
+</script>
+
+<!-- Include app.js for sidebar toggle functionality -->
+<script src="/js/app.js?v=1694538177"></script>
+
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
+{{end}}

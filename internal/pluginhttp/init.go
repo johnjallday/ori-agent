@@ -30,11 +30,32 @@ func NewInitHandler(store store.Store, registryManager *registry.Manager, plugin
 func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pluginapi.PluginTool, pluginName string) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// Check if tool is nil
+	if tool == nil {
+		response := map[string]interface{}{
+			"success": false,
+			"message": "Plugin not loaded",
+		}
+		w.WriteHeader(http.StatusOK) // Return 200 with success:false instead of 500
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Check if the tool supports GetDefaultSettings
 	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
 			http.Error(w, "Failed to get default settings", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if default settings is empty (plugin doesn't actually have settings)
+		if defaultSettings == "" {
+			response := map[string]interface{}{
+				"success": false,
+				"message": "Plugin does not provide default settings",
+			}
+			json.NewEncoder(w).Encode(response)
 			return
 		}
 

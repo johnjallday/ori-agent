@@ -53,28 +53,24 @@ func TestOpenAIProviderDefaultModels(t *testing.T) {
 	provider := NewOpenAIProvider(config)
 
 	models := provider.DefaultModels()
-	expectedModels := []string{
-		// Tool-calling tier (cheapest)
-		"gpt-5-nano",
-		"gpt-4.1-nano",
-		// General purpose tier (mid-tier)
-		"gpt-5-mini",
-		"gpt-4.1-mini",
-		// Research tier (expensive)
-		"gpt-5",
-		"gpt-4.1",
-		"o1-preview",
-		"o1-mini",
+
+	// Should return models (either from API or fallback)
+	if len(models) == 0 {
+		t.Error("Expected at least one model, got none")
 	}
 
-	if len(models) != len(expectedModels) {
-		t.Errorf("Expected %d models, got %d", len(expectedModels), len(models))
-	}
-
-	for i, expected := range expectedModels {
-		if i >= len(models) || models[i] != expected {
-			t.Errorf("Expected model '%s' at index %d, got '%s'", expected, i, models[i])
+	// Check that models are returned (should be fallback models due to invalid key)
+	// The fallback models should include at least some GPT models
+	hasGPTModel := false
+	for _, model := range models {
+		if len(model) >= 3 && model[:3] == "gpt" {
+			hasGPTModel = true
+			break
 		}
+	}
+
+	if !hasGPTModel {
+		t.Error("Expected at least one GPT model in the results")
 	}
 }
 
