@@ -32,16 +32,3 @@ updates:
     # ignore:
     #   - dependency-name: "github.com/example/package"
     #     versions: ["1.x"]
-
-  # GitHub Actions updates
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    commit-message:
-      prefix: "ci"

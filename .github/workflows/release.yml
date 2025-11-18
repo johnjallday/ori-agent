@@ -8,7 +8,7 @@ on:
 jobs:
   release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: macos-latest  # macOS runner needed for DMG creation
     permissions:
       contents: write
 
@@ -26,11 +26,11 @@ jobs:
       - name: Run tests
         run: go test -v -short ./...
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

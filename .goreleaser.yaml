@@ -1,0 +1,211 @@
+# GoReleaser Configuration for Ori Agent
+# Automates multi-platform releases with installers for macOS, Windows, and Linux
+# See: https://goreleaser.com
+
+version: 2
+
+# Project metadata
+project_name: ori-agent
+
+# Before hooks - run before the build
+before:
+  hooks:
+    # Install dependencies
+    - go mod tidy
+    # Build plugins (required for complete distribution)
+    - ./scripts/build-plugins.sh
+
+# Build configuration
+builds:
+  # Server binary (main application)
+  - id: server
+    main: ./cmd/server
+    binary: ori-agent
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X 'github.com/johnjallday/ori-agent/internal/version.Version={{.Version}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Exclude invalid combinations
+    ignore:
+      - goos: windows
+        goarch: arm64  # Windows ARM64 support is experimental
+
+  # Menu bar app (macOS only)
+  - id: menubar
+    main: ./cmd/menubar
+    binary: ori-menubar
+    env:
+      - CGO_ENABLED=1  # Required for system tray integration
+    ldflags:
+      - -s -w
+      - -X 'github.com/johnjallday/ori-agent/internal/version.Version={{.Version}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+# Archives - disabled (we only distribute installers, not raw binaries)
+# Users get: DMG (macOS), MSI (Windows), .deb/.rpm (Linux)
+# Note: Binaries are still built and available in dist/ for installer creation
+archives:
+  - id: default
+    format: binary
+    # Don't include any files - just the binaries themselves
+    files:
+      - none*  # This pattern won't match anything, so no extra files are included
+
+# macOS DMG installers - created via custom publisher
+publishers:
+  - name: macos-dmg-amd64
+    ids:
+      - default
+    dir: "{{ dir .ArtifactPath }}"
+    cmd: ./build/macos/create-dmg.sh {{ .Version }} amd64 dist
+    env:
+      - PATH={{ .Env.PATH }}
+    extra_files:
+      - glob: ./dist/ori-menubar_darwin_amd64/*
+      - glob: ./dist/ori-agent_darwin_amd64/*
+
+  - name: macos-dmg-arm64
+    ids:
+      - default
+    dir: "{{ dir .ArtifactPath }}"
+    cmd: ./build/macos/create-dmg.sh {{ .Version }} arm64 dist
+    env:
+      - PATH={{ .Env.PATH }}
+    extra_files:
+      - glob: ./dist/ori-menubar_darwin_arm64/*
+      - glob: ./dist/ori-agent_darwin_arm64/*
+
+# Windows MSI installers - using WiX Toolset
+msi:
+  - id: windows-msi
+    name: "ori-agent-{{ .MsiArch }}"
+    wxs: ./build/windows/ori-agent.wxs
+    # Only build MSI for server binary (not menubar, which is macOS only)
+    ids:
+      - server
+    # WiX variables (passed to candle/light)
+    wix:
+      - name: Platform
+        value: "{{ if eq .Arch \"amd64\" }}x64{{ else }}{{ .Arch }}{{ end }}"
+      - name: Win64
+        value: "{{ if eq .Arch \"amd64\" }}yes{{ else }}no{{ end }}"
+    # Extra files to include in the MSI (optional)
+    # files:
+    #   - README.md
+    #   - LICENSE
+
+# Checksums
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# Snapshots - for testing releases locally
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# Changelog configuration
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'merge conflict'
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance Improvements
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Refactoring
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Dependency Updates
+      regexp: '^.*?(feat|fix)\(deps\)!?:.+$'
+      order: 4
+    - title: Other Changes
+      order: 999
+
+# GitHub Release configuration
+release:
+  github:
+    owner: johnjallday
+    name: ori-agent
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Ori Agent {{ .Tag }}
+
+    Welcome to this new release of **Ori Agent**!
+
+    ### Installation
+
+    **Choose the installer for your platform:**
+
+    - **macOS**:
+      - Apple Silicon (M1/M2/M3): `OriAgent-{{ .Version }}-arm64.dmg`
+      - Intel: `OriAgent-{{ .Version }}-amd64.dmg`
+    - **Windows**: `ori-agent-{{ .Version }}-amd64.msi` _(coming soon)_
+    - **Linux**:
+      - Debian/Ubuntu: `ori-agent_{{ .Version }}_amd64.deb` _(coming soon)_
+      - Red Hat/Fedora: `ori-agent-{{ .Version }}-1.x86_64.rpm` _(coming soon)_
+
+    For detailed installation instructions, see the [documentation](https://github.com/johnjallday/ori-agent#installation).
+  footer: |
+    ---
+
+    **Full Changelog**: https://github.com/johnjallday/ori-agent/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ### Verification
+
+    All binaries are checksummed. Verify downloads with:
+    ```bash
+    sha256sum -c checksums.txt
+    ```
+  name_template: "v{{.Version}}"
+
+# Announce - future feature for announcing releases
+# announce:
+#   skip: true
+
+# Metadata
+metadata:
+  mod_timestamp: '{{ .CommitTimestamp }}'
+
+# Dist directory
+dist: dist
+
+# Git configuration
+git:
+  ignore_tags:
+    - nightly
+
+# Sign artifacts - Phase 4 (code signing)
+# signs:
+#   - artifacts: checksum
