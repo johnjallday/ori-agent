@@ -110,14 +110,17 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 				Metadata:    &meta,
 			}
 
-			// Extract supported OS and arch from platforms
+			// Extract supported OS, arch, and explicit platform combos
 			if len(meta.Platforms) > 0 {
 				osSet := make(map[string]bool)
 				archSet := make(map[string]bool)
+				var platformCombos []string
+
 				for _, platform := range meta.Platforms {
 					osSet[platform.Os] = true
 					for _, arch := range platform.Architectures {
 						archSet[arch] = true
+						platformCombos = append(platformCombos, fmt.Sprintf("%s-%s", platform.Os, arch))
 					}
 				}
 
@@ -130,15 +133,28 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 				for arch := range archSet {
 					entry.SupportedArch = append(entry.SupportedArch, arch)
 				}
+
+				entry.Platforms = platformCombos
 			}
 
 			// Set GitHub repo and download URL if available in repository field
 			if meta.Repository != "" {
-				entry.GitHubRepo = meta.Repository
-				// Construct download URL from repository
-				// Example: https://github.com/user/repo -> https://github.com/user/repo/releases/latest/download/repo
-				repoName := strings.TrimSuffix(filepath.Base(meta.Repository), ".git")
-				entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s", strings.TrimSuffix(meta.Repository, "/"), repoName)
+				// Normalize repository URL (drop trailing slash or .git suffix)
+				repoURL := strings.TrimSuffix(meta.Repository, ".git")
+				repoURL = strings.TrimSuffix(repoURL, "/")
+				if repoURL == "" {
+					repoURL = meta.Repository
+				}
+				entry.GitHubRepo = repoURL
+
+				repoName := strings.TrimSuffix(filepath.Base(repoURL), ".git")
+
+				// Default GitHub release asset pattern supports platform-specific binaries
+				if strings.Contains(repoURL, "github.com") {
+					entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s-{os}-{arch}%s", repoURL, repoName, "{ext}")
+				} else {
+					entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s", repoURL, repoName)
+				}
 			}
 
 			reg.Plugins[i] = entry

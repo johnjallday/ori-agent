@@ -40,8 +40,8 @@ func (d *PluginDownloader) GetPlugin(entry types.PluginRegistryEntry) (string, b
 		return entry.Path, false, nil
 	}
 
-	// If it's a URL plugin, handle downloading/caching
-	if entry.URL != "" {
+	// If it's a remote plugin (URL or DownloadURL), handle downloading/caching
+	if entry.URL != "" || entry.DownloadURL != "" {
 		return d.downloadAndCache(entry)
 	}
 
@@ -102,6 +102,8 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 		downloadURL = strings.ReplaceAll(entry.DownloadURL, "{os}", runtime.GOOS)
 		downloadURL = strings.ReplaceAll(downloadURL, "{arch}", runtime.GOARCH)
 		downloadURL = strings.ReplaceAll(downloadURL, "{version}", entry.Version)
+		downloadURL = strings.ReplaceAll(downloadURL, "{platform}", fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH))
+		downloadURL = strings.ReplaceAll(downloadURL, "{ext}", d.getPlatformExtension())
 	}
 
 	// Download the plugin

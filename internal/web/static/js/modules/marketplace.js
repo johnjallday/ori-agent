@@ -48,14 +48,20 @@ class PluginMarketplace {
             // Load locally installed plugins to mark them as installed
             const installedResp = await fetch('/api/plugins');
             const installedData = await installedResp.json();
-            const installedPluginNames = new Set(
-                (installedData.plugins || []).map(p => p.name)
-            );
+            const installedPluginNames = new Set();
+            (installedData.plugins || []).forEach(plugin => {
+                this.getPluginNameVariants(plugin).forEach(variant => {
+                    if (variant) {
+                        installedPluginNames.add(variant);
+                    }
+                });
+            });
 
             // Mark plugins as installed if they exist locally
             this.installedPlugins = installedPluginNames;
             this.plugins.forEach(plugin => {
-                plugin.installed = installedPluginNames.has(plugin.name);
+                const variants = this.getPluginNameVariants(plugin);
+                plugin.installed = variants.some(variant => installedPluginNames.has(variant));
             });
 
             // Load available updates
@@ -610,9 +616,39 @@ class PluginMarketplace {
             alert(`Error updating ${pluginName}: ${error.message}`);
         }
     }
+
+    // Get possible name variants for matching installed plugins (handles -0.0.x suffixes)
+    getPluginNameVariants(plugin) {
+        const variants = new Set();
+        const addVariant = (name) => {
+            if (!name || typeof name !== 'string') {
+                return;
+            }
+            const normalized = name.toLowerCase();
+            if (!normalized) {
+                return;
+            }
+            variants.add(normalized);
+
+            // Strip trailing version (e.g., "-0.0.8" or "-0.0.8-alpha")
+            const versionStripped = normalized.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+            if (versionStripped && versionStripped !== normalized) {
+                variants.add(versionStripped);
+            }
+        };
+
+        addVariant(plugin.name);
+        if (plugin.metadata?.name) {
+            addVariant(plugin.metadata.name);
+        }
+        if (plugin.definition?.name) {
+            addVariant(plugin.definition.name);
+        }
+
+        return Array.from(variants);
+    }
 }
 
-// Initialize marketplace
 const marketplace = new PluginMarketplace();
 
 document.addEventListener('DOMContentLoaded', () => {
