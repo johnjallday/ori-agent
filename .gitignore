@@ -111,3 +111,5 @@ ori-agent
 server
 settings.json
 app_state.json
+
+.claude-sessions/

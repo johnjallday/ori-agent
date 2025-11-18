@@ -91,24 +91,93 @@ publishers:
       - glob: ./dist/ori-menubar_darwin_arm64/*
       - glob: ./dist/ori-agent_darwin_arm64/*
 
-# Windows MSI installers - using WiX Toolset
-msi:
-  - id: windows-msi
-    name: "ori-agent-{{ .MsiArch }}"
-    wxs: ./build/windows/ori-agent.wxs
-    # Only build MSI for server binary (not menubar, which is macOS only)
-    ids:
-      - server
-    # WiX variables (passed to candle/light)
-    wix:
-      - name: Platform
-        value: "{{ if eq .Arch \"amd64\" }}x64{{ else }}{{ .Arch }}{{ end }}"
-      - name: Win64
-        value: "{{ if eq .Arch \"amd64\" }}yes{{ else }}no{{ end }}"
-    # Extra files to include in the MSI (optional)
-    # files:
-    #   - README.md
-    #   - LICENSE
+# Windows MSI installers - created via custom script on Windows runner
+# Note: MSI creation is handled in GitHub Actions on windows-latest runner
+# See .github/workflows/release.yml for Windows-specific build steps
+
+# Linux packages - .deb and .rpm via nfpm
+nfpms:
+  - id: linux-packages
+    package_name: ori-agent
+    vendor: Ori
+    homepage: https://github.com/johnjallday/ori-agent
+    maintainer: Ori Team <noreply@github.com>
+    description: |
+      Ori Agent - Modular AI Agent Framework
+
+      A plugin-driven framework for building tool-calling AI agents with support
+      for multiple LLM providers (OpenAI, Claude, Ollama) and a flexible plugin system.
+    license: MIT
+
+    # Package formats
+    formats:
+      - deb     # Debian/Ubuntu
+      - rpm     # Red Hat/Fedora/CentOS
+
+    # Binary installation directory
+    bindir: /usr/bin
+
+    # File mappings
+    contents:
+      # Systemd service file
+      - src: build/linux/ori-agent.service
+        dst: /lib/systemd/system/ori-agent.service
+        file_info:
+          mode: 0644
+
+      # Desktop application entry
+      - src: build/linux/ori-agent.desktop
+        dst: /usr/share/applications/ori-agent.desktop
+        file_info:
+          mode: 0644
+
+      # Documentation
+      - src: README.md
+        dst: /usr/share/doc/ori-agent/README.md
+        file_info:
+          mode: 0644
+
+      - src: LICENSE
+        dst: /usr/share/doc/ori-agent/LICENSE
+        file_info:
+          mode: 0644
+
+      # Create empty directories
+      - dst: /var/lib/ori-agent
+        type: dir
+        file_info:
+          mode: 0755
+
+      - dst: /var/log/ori-agent
+        type: dir
+        file_info:
+          mode: 0755
+
+      - dst: /etc/ori-agent
+        type: dir
+        file_info:
+          mode: 0755
+
+    # Scripts
+    scripts:
+      postinstall: build/linux/postinstall.sh
+      preremove: build/linux/preremove.sh
+      postremove: build/linux/postremove.sh
+
+    # Dependencies (optional - most systems have these)
+    # recommends:
+    #   - ca-certificates
+
+    # RPM-specific configuration
+    rpm:
+      compression: lzma
+      group: Development/Tools
+
+    # Debian-specific configuration
+    deb:
+      compression: xz
+      fields:
+        Priority: optional
 
 # Checksums
 checksum:
@@ -171,10 +240,10 @@ release:
     - **macOS**:
       - Apple Silicon (M1/M2/M3): `OriAgent-{{ .Version }}-arm64.dmg`
       - Intel: `OriAgent-{{ .Version }}-amd64.dmg`
-    - **Windows**: `ori-agent-{{ .Version }}-amd64.msi` _(coming soon)_
+    - **Windows**: `ori-agent-x64.msi`
     - **Linux**:
-      - Debian/Ubuntu: `ori-agent_{{ .Version }}_amd64.deb` _(coming soon)_
-      - Red Hat/Fedora: `ori-agent-{{ .Version }}-1.x86_64.rpm` _(coming soon)_
+      - Debian/Ubuntu: `ori-agent_{{ .Version }}_amd64.deb` or `ori-agent_{{ .Version }}_arm64.deb`
+      - Red Hat/Fedora: `ori-agent-{{ .Version }}-1.x86_64.rpm` or `ori-agent-{{ .Version }}-1.aarch64.rpm`
 
     For detailed installation instructions, see the [documentation](https://github.com/johnjallday/ori-agent#installation).
   footer: |
