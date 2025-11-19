@@ -189,7 +189,20 @@ else
 fi
 
 print_success "Release $VERSION created successfully!"
+echo ""
+
+# Switch back to dev branch for continued development
+if git show-ref --verify --quiet refs/heads/dev; then
+  print_status "Switching back to dev branch for continued development..."
+  git checkout dev
+  print_success "Now on dev branch - ready for next features!"
+  echo ""
+fi
+
 print_status "Next steps:"
 print_status "  1. Review the release on GitHub"
 print_status "  2. Add any additional release notes if needed"
-print_status "  3. Update documentation if necessary"
+print_status "  3. Continue development on dev branch"
+echo ""
+print_status "💡 Tip: main branch now represents the released version ($VERSION)"
+print_status "💡 Tip: Continue your daily work on dev branch"
