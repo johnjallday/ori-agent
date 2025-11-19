@@ -91,6 +91,8 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.15</string>
     <key>NSHighResolutionCapable</key>
@@ -104,6 +106,18 @@ PLIST
 # Copy resources
 cp "${BUILD_DIR}/ori-menubar" "${APP_PATH}/Contents/Resources/"
 cp "${BUILD_DIR}/ori-agent" "${APP_PATH}/Contents/Resources/"
+
+# Copy app icon
+if [ -f "${PROJECT_ROOT}/assets/AppIcon.icns" ]; then
+  cp "${PROJECT_ROOT}/assets/AppIcon.icns" "${APP_PATH}/Contents/Resources/"
+  echo "  ✓ App icon copied"
+else
+  echo "  ⚠️  Warning: AppIcon.icns not found, generating..."
+  if [ -f "${PROJECT_ROOT}/scripts/generate-app-icon.sh" ]; then
+    "${PROJECT_ROOT}/scripts/generate-app-icon.sh"
+    cp "${PROJECT_ROOT}/assets/AppIcon.icns" "${APP_PATH}/Contents/Resources/"
+  fi
+fi
 
 # Note: Plugins (example_plugins and uploaded_plugins) are excluded from DMG
 # Users will add their own plugins after installation

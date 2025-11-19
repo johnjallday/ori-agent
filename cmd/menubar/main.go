@@ -82,7 +82,7 @@ func main() {
 func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager) {
 	// Set initial icon and tooltip
 	systray.SetIcon(menubar.GetStoppedIcon())
-	systray.SetTitle("Ori")
+	// systray.SetTitle("Ori") // Removed: Show only icon, no text
 	systray.SetTooltip("Ori Agent - Server Stopped")
 
 	// Create menu items

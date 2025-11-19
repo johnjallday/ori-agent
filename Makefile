@@ -62,6 +62,12 @@ plugins: ## Build all plugins
 	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
 	@echo "$(GREEN)✓ Plugins built$(NC)"
 
+icons: ## Generate menubar and app icons from SVG
+	@echo "$(BLUE)Generating icons...$(NC)"
+	@./scripts/generate-menubar-icons.sh
+	@./scripts/generate-app-icon.sh
+	@echo "$(GREEN)✓ Icons generated$(NC)"
+
 all: deps build menubar plugins ## Build everything (server + menubar + plugins)
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
