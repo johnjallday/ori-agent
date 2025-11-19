@@ -130,12 +130,34 @@ fi
 
 # Check current branch
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "develop" ]; then
+if [ "$CURRENT_BRANCH" = "main" ]; then
   echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH${NC}"
   echo ""
-else
-  echo -e "${YELLOW}⚠️  Git Branch: $CURRENT_BRANCH (not main or develop)${NC}"
+
+  # Check if dev is merged into main
+  if git show-ref --verify --quiet refs/heads/dev; then
+    DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
+    if [ "$DEV_COMMITS" -gt 0 ]; then
+      echo -e "${RED}❌ Warning: dev branch has $DEV_COMMITS commit(s) not in main${NC}"
+      echo -e "${YELLOW}   Merge dev to main with: git merge dev${NC}"
+      echo ""
+      FAILED_CHECKS+=("dev branch not merged to main")
+    else
+      echo -e "${GREEN}✅ dev branch is fully merged into main${NC}"
+      echo ""
+    fi
+  else
+    echo -e "${YELLOW}⚠️  dev branch does not exist${NC}"
+    echo ""
+  fi
+elif [ "$CURRENT_BRANCH" = "dev" ]; then
+  echo -e "${YELLOW}⚠️  Git Branch: $CURRENT_BRANCH (should be on 'main' for releases)${NC}"
   echo ""
+  FAILED_CHECKS+=("Not on main branch")
+else
+  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'main' or 'dev')${NC}"
+  echo ""
+  FAILED_CHECKS+=("Not on main or dev branch")
 fi
 
 # 6. SMOKE TESTS (OPTIONAL)

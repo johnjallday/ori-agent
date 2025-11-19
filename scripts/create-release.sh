@@ -73,15 +73,37 @@ if git tag -l | grep -q "^$VERSION$"; then
   exit 1
 fi
 
-# Make sure we're on main branch
+# ENFORCE main branch for releases
 CURRENT_BRANCH=$(git branch --show-current)
 if [ "$CURRENT_BRANCH" != "main" ]; then
-  print_warning "You're on branch '$CURRENT_BRANCH', not 'main'"
-  read -p "Continue anyway? (y/N): " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    print_error "Release cancelled"
-    exit 1
+  print_error "Releases must be created from 'main' branch"
+  print_error "Current branch: '$CURRENT_BRANCH'"
+  echo ""
+  print_error "To release:"
+  print_error "  1. ./scripts/prepare-release.sh"
+  print_error "  2. ./scripts/pre-release-check.sh $VERSION"
+  print_error "  3. ./scripts/create-release.sh $VERSION"
+  exit 1
+fi
+
+# Check that dev is merged into main
+if git show-ref --verify --quiet refs/heads/dev; then
+  print_status "Checking if dev branch is merged..."
+  DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
+  if [ "$DEV_COMMITS" -gt 0 ]; then
+    print_warning "dev branch has $DEV_COMMITS commit(s) not merged to main"
+    print_warning "You should merge dev to main before releasing:"
+    print_warning "  git merge dev"
+    print_warning "Or run: ./scripts/prepare-release.sh"
+    echo ""
+    read -p "Continue anyway? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      print_error "Release cancelled"
+      exit 1
+    fi
+  else
+    print_success "dev branch is fully merged into main"
   fi
 fi
 
