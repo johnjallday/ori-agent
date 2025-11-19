@@ -99,7 +99,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
   exit 1
 fi
 
-# Update version in VERSION file
+# Update version in VERSION file (do this before creating tag)
 VERSION_FILE="VERSION"
 if [ -f "$VERSION_FILE" ]; then
   print_status "Updating version in VERSION file..."
@@ -129,44 +129,41 @@ git tag -a "$VERSION" -m "Release $VERSION
 print_status "Pushing tag to origin..."
 git push origin "$VERSION"
 
-# Check if GitHub CLI is available for creating release
-if command -v gh >/dev/null 2>&1; then
-  print_status "Creating GitHub release..."
+# Build multi-platform installers and create GitHub release with GoReleaser
+print_status "Building installers for all platforms (macOS, Windows, Linux)..."
 
-  # Generate release notes
-  PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+# Check if GoReleaser is installed
+if ! command -v goreleaser >/dev/null 2>&1; then
+  print_error "GoReleaser not found. Install it with:"
+  print_error "  brew install goreleaser"
+  print_error "  or visit: https://goreleaser.com/install/"
+  exit 1
+fi
 
-  if [ -n "$PREV_TAG" ]; then
-    print_status "Generating release notes since $PREV_TAG..."
-    RELEASE_NOTES="## Changes since $PREV_TAG
+# Run GoReleaser to build all installers and create GitHub release
+print_status "Running GoReleaser (this will build binaries, create installers, and publish to GitHub)..."
+if goreleaser release --clean; then
+  print_success "All platform installers built successfully"
+  print_success "GitHub release created and installers uploaded"
 
-$(git log $PREV_TAG..HEAD --oneline --pretty=format:"- %s" | head -20)
+  # Show what was built
+  print_status "Built installers:"
+  ls -lh dist/*.dmg dist/*.deb dist/*.rpm 2>/dev/null || echo "  (See dist/ directory for all artifacts)"
 
----
-🤖 Release created automatically with create-release.sh"
-  else
-    RELEASE_NOTES="## Release $VERSION
-
-🤖 Release created automatically with create-release.sh"
-  fi
-
-  # Create the release
-  if gh release create "$VERSION" \
-    --title "Ori Agent $VERSION" \
-    --notes "$RELEASE_NOTES"; then
-    print_success "GitHub release created successfully!"
-    print_status "GitHub Actions will run tests and finalize the release."
-
-    print_status "View release at: $(gh repo view --web --json url -q .url)/releases/tag/$VERSION"
-  else
-    print_error "Failed to create GitHub release"
-    print_status "Tag has been created and pushed. You can create the release manually at:"
-    print_status "https://github.com/johnjallday/ori-agent/releases/new?tag=$VERSION"
+  # Verify and show release info
+  if command -v gh >/dev/null 2>&1; then
+    if gh release view "$VERSION" >/dev/null 2>&1; then
+      ASSET_COUNT=$(gh release view "$VERSION" --json assets --jq '.assets | length')
+      print_success "Uploaded $ASSET_COUNT file(s) as release assets"
+      print_status "View release at: $(gh repo view --web --json url -q .url)/releases/tag/$VERSION"
+    fi
   fi
 else
-  print_warning "GitHub CLI (gh) not found. Tag created but no GitHub release."
-  print_status "Create release manually at:"
-  print_status "https://github.com/johnjallday/ori-agent/releases/new?tag=$VERSION"
+  print_error "GoReleaser failed. Check the output above for errors."
+  print_warning "The git tag has been pushed. You may need to delete it if you want to retry:"
+  print_warning "  git tag -d $VERSION"
+  print_warning "  git push origin :refs/tags/$VERSION"
+  exit 1
 fi
 
 print_success "Release $VERSION created successfully!"

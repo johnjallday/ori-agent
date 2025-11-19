@@ -12,8 +12,10 @@ before:
   hooks:
     # Install dependencies
     - go mod tidy
-    # Build plugins (required for complete distribution)
+    # Build internal plugins (required for complete distribution)
     - ./scripts/build-plugins.sh
+    # Build external/shared plugins
+    - ./scripts/build-external-plugins.sh
 
 # Build configuration
 builds:

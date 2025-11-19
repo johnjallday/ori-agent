@@ -58,6 +58,7 @@ plugins/*/*.so
 # Build artifacts
 dist/
 build/
+build-dmg/
 release/
 releases/
 
