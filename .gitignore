@@ -64,6 +64,7 @@ releases/
 # Log files
 *.log
 logs/
+activity_logs/
 
 # Database files
 *.db

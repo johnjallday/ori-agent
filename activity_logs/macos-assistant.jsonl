@@ -1,3 +1,0 @@
-{"id":"c470cf27-11ba-414a-b917-7ebd7303bb00","agent_name":"macos-assistant","event_type":"created","timestamp":"2025-11-17T15:31:15.589341-05:00","details":{"description":"Test agent created at 2025-11-17T15:31:15-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"05922556-adf4-4afb-99d9-9831472fc4ef","agent_name":"macos-assistant","event_type":"created","timestamp":"2025-11-17T19:50:53.610604-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:53-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"6d4580e6-48ae-4aa3-b8cb-0e589445a115","agent_name":"macos-assistant","event_type":"created","timestamp":"2025-11-19T10:09:35.642079-05:00","details":{"description":"Test agent created at 2025-11-19T10:09:35-05:00","model":"gpt-4o-mini","type":""}}

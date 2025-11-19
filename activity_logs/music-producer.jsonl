@@ -1,3 +1,0 @@
-{"id":"7f57bfbd-f0ab-427d-937e-8b9f90b8396b","agent_name":"music-producer","event_type":"created","timestamp":"2025-11-17T15:31:14.321924-05:00","details":{"description":"Test agent created at 2025-11-17T15:31:14-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"e8770d8d-ffbf-43fc-b90f-26ee7f2611aa","agent_name":"music-producer","event_type":"created","timestamp":"2025-11-17T19:50:52.341747-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:52-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"6dd65666-5fb3-45f1-a2a4-0c1470e22f28","agent_name":"music-producer","event_type":"created","timestamp":"2025-11-19T10:09:34.30304-05:00","details":{"description":"Test agent created at 2025-11-19T10:09:34-05:00","model":"gpt-4o-mini","type":""}}

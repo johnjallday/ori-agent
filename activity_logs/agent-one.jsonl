@@ -1,3 +1,0 @@
-{"id":"ee82a5ef-f87f-47cc-a773-a96a972ab6ba","agent_name":"agent-one","event_type":"created","timestamp":"2025-11-17T15:30:56.030587-05:00","details":{"description":"Test agent created at 2025-11-17T15:30:56-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"d8b99942-c7da-452c-bb79-354b51681d3b","agent_name":"agent-one","event_type":"created","timestamp":"2025-11-17T19:50:48.642874-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:48-05:00","model":"gpt-4o-mini","type":""}}
-{"id":"cf368310-2a37-44ea-a6a7-3cd4264d7f61","agent_name":"agent-one","event_type":"created","timestamp":"2025-11-19T10:09:15.835614-05:00","details":{"description":"Test agent created at 2025-11-19T10:09:15-05:00","model":"gpt-4o-mini","type":""}}
