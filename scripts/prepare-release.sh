@@ -77,6 +77,23 @@ git checkout dev
 print_status "Pulling latest from origin/dev..."
 git pull origin dev
 
+# Remind user to run pre-release checks first
+print_warning "⚠️  Have you run pre-release checks on dev branch?"
+print_status "Best practice: Run './scripts/pre-release-check.sh' on dev BEFORE merging"
+echo ""
+read -p "Have you run pre-release checks and all tests passed? (y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  print_warning "Merge cancelled"
+  echo ""
+  print_status "Run pre-release checks first:"
+  print_status "  ./scripts/pre-release-check.sh"
+  echo ""
+  exit 0
+fi
+
+echo ""
+
 # Show what commits will be merged to main
 DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
 if [ "$DEV_COMMITS" -eq 0 ]; then

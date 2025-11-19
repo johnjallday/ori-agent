@@ -130,8 +130,18 @@ fi
 
 # Check current branch
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" = "main" ]; then
+if [ "$CURRENT_BRANCH" = "dev" ]; then
+  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (testing before merge)${NC}"
+  echo ""
+  echo -e "${BLUE}ℹ️  Running pre-release checks on dev branch${NC}"
+  echo -e "${BLUE}   This ensures code is stable before merging to main${NC}"
+  echo ""
+elif [ "$CURRENT_BRANCH" = "main" ]; then
   echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH${NC}"
+  echo ""
+
+  echo -e "${YELLOW}⚠️  You're running checks on main (after merge)${NC}"
+  echo -e "${YELLOW}   Best practice: Run checks on dev first, then merge${NC}"
   echo ""
 
   # Check if dev is merged into main
@@ -139,7 +149,7 @@ if [ "$CURRENT_BRANCH" = "main" ]; then
     DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
     if [ "$DEV_COMMITS" -gt 0 ]; then
       echo -e "${RED}❌ Warning: dev branch has $DEV_COMMITS commit(s) not in main${NC}"
-      echo -e "${YELLOW}   Merge dev to main with: git merge dev${NC}"
+      echo -e "${YELLOW}   Merge dev to main with: ./scripts/prepare-release.sh${NC}"
       echo ""
       FAILED_CHECKS+=("dev branch not merged to main")
     else
@@ -150,14 +160,10 @@ if [ "$CURRENT_BRANCH" = "main" ]; then
     echo -e "${YELLOW}⚠️  dev branch does not exist${NC}"
     echo ""
   fi
-elif [ "$CURRENT_BRANCH" = "dev" ]; then
-  echo -e "${YELLOW}⚠️  Git Branch: $CURRENT_BRANCH (should be on 'main' for releases)${NC}"
-  echo ""
-  FAILED_CHECKS+=("Not on main branch")
 else
-  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'main' or 'dev')${NC}"
+  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'dev' or 'main')${NC}"
   echo ""
-  FAILED_CHECKS+=("Not on main or dev branch")
+  FAILED_CHECKS+=("Not on dev or main branch")
 fi
 
 # 6. SMOKE TESTS (OPTIONAL)
@@ -187,21 +193,49 @@ if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
   echo -e "${GREEN}✅ All checks passed!${NC}"
   echo ""
 
-  if [ -n "$VERSION" ]; then
-    echo "Ready to release $VERSION"
+  # Get current branch to show appropriate next steps
+  CURRENT_BRANCH=$(git branch --show-current)
+
+  if [ "$CURRENT_BRANCH" = "dev" ]; then
+    # Checks passed on dev - ready to merge to main
+    if [ -n "$VERSION" ]; then
+      echo -e "${GREEN}dev branch is ready to release $VERSION${NC}"
+    else
+      echo -e "${GREEN}dev branch is ready to release!${NC}"
+    fi
     echo ""
     echo "Next steps:"
-    echo "  1. git tag $VERSION"
-    echo "  2. git push origin $VERSION"
-    echo "  3. Monitor GitHub Actions: gh run watch"
+    echo "  1. ./scripts/prepare-release.sh"
+    echo "     (Merges dev → main)"
     echo ""
+    if [ -n "$VERSION" ]; then
+      echo "  2. ./scripts/create-release.sh $VERSION"
+      echo "     (Creates release from main)"
+    else
+      echo "  2. ./scripts/create-release.sh v0.0.X"
+      echo "     (Creates release from main)"
+    fi
+    echo ""
+    echo -e "${BLUE}💡 Tip: All checks passed on dev, safe to merge!${NC}"
+    echo ""
+  elif [ "$CURRENT_BRANCH" = "main" ]; then
+    # Checks passed on main - ready to release
+    if [ -n "$VERSION" ]; then
+      echo "Ready to release $VERSION"
+      echo ""
+      echo "Next steps:"
+      echo "  ./scripts/create-release.sh $VERSION"
+      echo ""
+    else
+      echo "Ready to release!"
+      echo ""
+      echo "Next steps:"
+      echo "  ./scripts/create-release.sh v0.0.X"
+      echo ""
+    fi
   else
-    echo "Ready to release!"
-    echo ""
-    echo "Next steps:"
-    echo "  1. Update VERSION file"
-    echo "  2. git tag v0.0.X"
-    echo "  3. git push origin v0.0.X"
+    # Unknown branch
+    echo "Ready to proceed!"
     echo ""
   fi
 
