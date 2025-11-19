@@ -113,5 +113,15 @@ ori-agent
 server
 settings.json
 app_state.json
+location.json
+mcp_registry.json
+mcp_servers.json
 
+# Agent-specific runtime files
+agents/*/agent_settings.json
+agents/*/workspace/
+
+# Session data
 .claude-sessions/
+sessions/
+*.session
