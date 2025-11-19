@@ -65,6 +65,8 @@ plugins: ## Build all plugins
 all: deps build menubar plugins ## Build everything (server + menubar + plugins)
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
+build-all: all ## Alias for 'all' - Build everything
+
 clean: ## Clean build artifacts
 	@echo "$(BLUE)Cleaning build artifacts...$(NC)"
 	rm -rf $(BUILD_DIR)
@@ -287,6 +289,8 @@ deps-outdated: ## Show outdated dependencies in a readable format
 
 deps-security: deps-vuln ## Alias for deps-vuln (run security checks)
 
+security: deps-vuln ## Run security vulnerability scan
+
 deps-summary: ## Show dependency update summary
 	@echo "$(BLUE)Dependency Summary$(NC)"
 	@echo ""
@@ -311,3 +315,27 @@ deps-summary: ## Show dependency update summary
 	@echo "  make deps-check-direct  - Show direct dependency updates"
 	@echo "  make deps-update        - Update direct dependencies"
 	@echo "  make deps-vuln          - Check for vulnerabilities"
+
+## Release targets
+
+pre-release: ## Run pre-release checks (format, lint, vet, security, tests)
+	@echo "$(BLUE)Running pre-release checks...$(NC)"
+	@./scripts/pre-release-check.sh
+	@echo "$(GREEN)✓ Pre-release checks complete$(NC)"
+
+pre-release-full: ## Run complete pre-release checks including smoke tests
+	@echo "$(BLUE)Running complete pre-release checks...$(NC)"
+	@echo "This will run all checks + smoke tests (~15-20 minutes)"
+	@echo ""
+	@read -p "Continue? [y/N]: " -n 1 -r && echo && \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		./scripts/pre-release-check.sh --full; \
+	else \
+		echo "$(YELLOW)Cancelled$(NC)"; \
+		exit 1; \
+	fi
+
+smoke-test: ## Run installer smoke tests
+	@echo "$(BLUE)Running smoke tests...$(NC)"
+	@./scripts/test-all-installers.sh
+	@echo "$(GREEN)✓ Smoke tests complete$(NC)"
