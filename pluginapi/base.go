@@ -23,6 +23,7 @@ type BasePlugin struct {
 	metadata        *PluginMetadata
 	agentContext    AgentContext
 	defaultSettings string
+	pluginConfig    *PluginConfig // Stores parsed plugin.yaml config
 }
 
 // NewBasePlugin creates a new base plugin with version and compatibility info.
@@ -102,4 +103,39 @@ func (b *BasePlugin) SetDefaultSettings(settings string) {
 // Returns empty string if not set via SetDefaultSettings().
 func (b *BasePlugin) GetDefaultSettings() (string, error) {
 	return b.defaultSettings, nil
+}
+
+// SetPluginConfig sets the parsed plugin.yaml configuration.
+// Call this in your plugin's constructor to enable GetConfigFromYAML().
+func (b *BasePlugin) SetPluginConfig(config *PluginConfig) {
+	b.pluginConfig = config
+}
+
+// GetConfigFromYAML returns config variables defined in plugin.yaml.
+// Returns empty slice if no config section exists in plugin.yaml.
+// Template variables ({{USER_HOME}}, {{OS}}, {{ARCH}}) are automatically expanded.
+// Platform-specific defaults are applied based on runtime.GOOS.
+//
+// This method is useful for implementing hybrid config systems where:
+// 1. Simple, static config is defined in plugin.yaml
+// 2. Complex, dynamic logic is added in GetRequiredConfig()
+//
+// Example usage in a plugin:
+//
+//	func (t *myTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+//	    // Start with YAML config
+//	    vars := t.BasePlugin.GetConfigFromYAML()
+//
+//	    // Add dynamic logic
+//	    if needsExtraConfig() {
+//	        vars = append(vars, pluginapi.ConfigVariable{...})
+//	    }
+//
+//	    return vars
+//	}
+func (b *BasePlugin) GetConfigFromYAML() []ConfigVariable {
+	if b.pluginConfig == nil {
+		return []ConfigVariable{}
+	}
+	return b.pluginConfig.ToConfigVariables()
 }

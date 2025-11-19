@@ -6,17 +6,21 @@ This directory contains detailed documentation for Ori Agent.
 
 ### Getting Started
 - [Main README](../README.md) - Project overview and quick start
-- [Testing Guide](../TESTING.md) - Comprehensive testing documentation
 
 ### API & Development
 - [API Reference](./api/API_REFERENCE.md) - HTTP API endpoint documentation
 - [LLM Provider Guide](../internal/llm/README.md) - LLM provider abstraction and implementation
 
-### Testing
-- [Testing Guide](../TESTING.md) - Complete testing guide (main document)
+### Testing & Quality
+- [Smoke Tests Guide](./SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
+- [Testing Installers](./TESTING_INSTALLERS.md) - Manual installer testing guide (VMs, Docker)
 - [Test Cheat Sheet](./testing/TEST_CHEATSHEET.md) - Quick command reference
 - [Testing Setup Summary](./testing/TESTING_SETUP_SUMMARY.md) - Overview of testing infrastructure
 - [Direct Tool Testing](./testing/DIRECT_TOOL_TESTING.md) - Direct tool launch feature testing guide
+
+### Release & Deployment
+- [Release Checklist](./RELEASE_CHECKLIST.md) - Pre-release validation checklist
+- [Dependency Management](./DEPENDENCY_MANAGEMENT.md) - Managing Go dependencies
 
 ### Feature Planning
 - [Agent Output Viewing Plan](./features/AGENT_OUTPUT_VIEWING_PLAN.md) - Implementation plan for viewing agent outputs
@@ -33,6 +37,11 @@ This directory contains detailed documentation for Ori Agent.
 ```
 docs/
 ├── README.md                           # This file
+│
+├── SMOKE_TESTS.md                      # Automated installer smoke testing
+├── TESTING_INSTALLERS.md               # Manual installer testing guide
+├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
+├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
 │
 ├── api/
 │   └── API_REFERENCE.md                # HTTP API documentation
@@ -67,11 +76,11 @@ When adding documentation:
 
 1. **User-facing guides** → `docs/` directory
 2. **API documentation** → `docs/api/`
-3. **Testing documentation** → `docs/testing/`
+3. **Testing documentation** → `docs/testing/` or `docs/` (for major guides)
 4. **Feature planning docs** → `docs/features/`
 5. **UI/design documentation** → `docs/ui/`
 6. **Code-specific docs** → Keep next to the code (e.g., `internal/*/README.md`)
-7. **High-level guides** → Keep in root (e.g., `README.md`, `TESTING.md`, `CLAUDE.md`)
+7. **High-level guides** → Keep in root (e.g., `README.md`, `CLAUDE.md`)
 
 ### Documentation Standards
 

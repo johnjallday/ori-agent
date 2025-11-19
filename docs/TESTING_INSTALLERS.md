@@ -2,6 +2,8 @@
 
 This guide shows how to test all Ori Agent installers (macOS, Windows, Linux) on your MacBook.
 
+> **Note**: For automated smoke testing in CI/CD and local environments, see [SMOKE_TESTS.md](SMOKE_TESTS.md). This guide focuses on manual testing and detailed installer verification.
+
 ## Quick Reference
 
 | Installer | Best Testing Method | Difficulty | Time |

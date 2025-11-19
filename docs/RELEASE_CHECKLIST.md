@@ -455,25 +455,57 @@ This script will:
 
 ## Release Process
 
-Once all checks pass:
+Once all checks pass, you have two options for creating a release:
+
+### Option A: Automated Script (Recommended)
+
+Use the automated release script that handles everything:
 
 ```bash
-# 1. Tag the release
+# Run the automated release script
+./scripts/create-release.sh v0.0.12
+
+# The script will:
+# 1. Validate version format (vX.Y.Z)
+# 2. Check for uncommitted changes
+# 3. Verify you're on main branch
+# 4. Pull latest changes
+# 5. Run all tests
+# 6. Update VERSION file (removes 'v' prefix: v0.0.12 → 0.0.12)
+# 7. Create commit: "chore: bump version to v0.0.12"
+# 8. Create and push git tag
+# 9. Create GitHub release (if gh CLI installed)
+```
+
+**Note**: The VERSION file should contain the version WITHOUT the 'v' prefix (e.g., `0.0.12`, not `v0.0.12`). The script handles this conversion automatically.
+
+### Option B: Manual Process
+
+If you prefer manual control:
+
+```bash
+# 1. Update VERSION file (no 'v' prefix)
+echo "0.0.12" > VERSION
+git add VERSION
+git commit -m "chore: bump version to v0.0.12"
+git push origin main
+
+# 2. Tag the release
 git tag v0.0.12
 git push origin v0.0.12
 
-# 2. Monitor GitHub Actions
+# 3. Monitor GitHub Actions
 gh run watch
 
-# 3. Wait for release workflow to complete
+# 4. Wait for release workflow to complete
 # - Builds all installers
 # - Runs smoke tests
 # - Uploads to GitHub Releases
 
-# 4. Verify release
+# 5. Verify release
 gh release view v0.0.12
 
-# 5. Download and test installers
+# 6. Download and test installers
 gh release download v0.0.12
 ```
 

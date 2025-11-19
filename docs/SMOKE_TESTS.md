@@ -2,6 +2,8 @@
 
 This guide explains how to run smoke tests for Ori Agent installers across all platforms.
 
+> **Note**: For detailed manual installer testing, VM setup, and platform-specific testing strategies, see [TESTING_INSTALLERS.md](TESTING_INSTALLERS.md). This guide focuses on automated smoke testing.
+
 ## What Are Smoke Tests?
 
 **Smoke tests** are lightweight tests that verify the basic functionality of installed software:

@@ -3,6 +3,11 @@ package pluginapi
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"os/user"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 	"gopkg.in/yaml.v3"
@@ -26,6 +31,25 @@ type YAMLRequirements struct {
 	Dependencies  []string `yaml:"dependencies,omitempty"`
 }
 
+// YAMLConfigVariable represents a configuration variable in YAML format
+type YAMLConfigVariable struct {
+	Key              string                 `yaml:"key"`
+	Name             string                 `yaml:"name"`
+	Description      string                 `yaml:"description"`
+	Type             string                 `yaml:"type"`
+	Required         bool                   `yaml:"required"`
+	DefaultValue     interface{}            `yaml:"default_value,omitempty"`
+	Validation       string                 `yaml:"validation,omitempty"`
+	Options          []string               `yaml:"options,omitempty"`
+	Placeholder      string                 `yaml:"placeholder,omitempty"`
+	PlatformDefaults map[string]interface{} `yaml:"platform_defaults,omitempty"`
+}
+
+// YAMLConfig represents the config section in plugin.yaml
+type YAMLConfig struct {
+	Variables []YAMLConfigVariable `yaml:"variables,omitempty"`
+}
+
 // PluginConfig represents the complete plugin configuration from plugin.yaml
 type PluginConfig struct {
 	Name         string           `yaml:"name"`
@@ -36,6 +60,7 @@ type PluginConfig struct {
 	Platforms    []YAMLPlatform   `yaml:"platforms"`
 	Maintainers  []YAMLMaintainer `yaml:"maintainers"`
 	Requirements YAMLRequirements `yaml:"requirements,omitempty"`
+	Config       YAMLConfig       `yaml:"config,omitempty"`
 }
 
 // ReadPluginConfig parses and validates plugin configuration from embedded YAML
@@ -147,4 +172,101 @@ func (c *PluginConfig) ToMetadata() (*PluginMetadata, error) {
 		Platforms:    platforms,
 		Requirements: requirements,
 	}, nil
+}
+
+// ToConfigVariables converts YAMLConfig to a slice of ConfigVariable with template expansion
+func (c *PluginConfig) ToConfigVariables() []ConfigVariable {
+	if len(c.Config.Variables) == 0 {
+		return nil
+	}
+
+	result := make([]ConfigVariable, 0, len(c.Config.Variables))
+	for _, yamlVar := range c.Config.Variables {
+		// Expand templates for default value and placeholder
+		defaultValue := expandTemplates(yamlVar.DefaultValue)
+		placeholder := ""
+		if yamlVar.Placeholder != "" {
+			if expanded := expandTemplates(yamlVar.Placeholder); expanded != nil {
+				if str, ok := expanded.(string); ok {
+					placeholder = str
+				}
+			}
+		}
+
+		configVar := ConfigVariable{
+			Key:          yamlVar.Key,
+			Name:         yamlVar.Name,
+			Description:  yamlVar.Description,
+			Type:         ConfigVariableType(yamlVar.Type),
+			Required:     yamlVar.Required,
+			DefaultValue: defaultValue,
+			Validation:   yamlVar.Validation,
+			Options:      yamlVar.Options,
+			Placeholder:  placeholder,
+		}
+
+		// Apply platform-specific defaults if they exist
+		if len(yamlVar.PlatformDefaults) > 0 {
+			if platformDefault, ok := yamlVar.PlatformDefaults[getCurrentPlatform()]; ok {
+				configVar.DefaultValue = expandTemplates(platformDefault)
+				// Also update placeholder if it was using default
+				if placeholder == "" {
+					if expanded := expandTemplates(platformDefault); expanded != nil {
+						if str, ok := expanded.(string); ok {
+							configVar.Placeholder = str
+						}
+					}
+				}
+			}
+		}
+
+		result = append(result, configVar)
+	}
+
+	return result
+}
+
+// expandTemplates expands template variables in a string or interface{} value
+// Supports: {{USER_HOME}}, {{OS}}, {{ARCH}}, ~ (home directory expansion)
+func expandTemplates(value interface{}) interface{} {
+	strValue, ok := value.(string)
+	if !ok {
+		return value
+	}
+
+	// Get user home directory
+	usr, err := user.Current()
+	homeDir := ""
+	if err == nil {
+		homeDir = usr.HomeDir
+	}
+
+	// Template replacements
+	replacements := map[string]string{
+		"{{USER_HOME}}": homeDir,
+		"{{OS}}":        runtime.GOOS,
+		"{{ARCH}}":      runtime.GOARCH,
+	}
+
+	result := strValue
+	for template, replacement := range replacements {
+		result = strings.ReplaceAll(result, template, replacement)
+	}
+
+	// Expand ~ to home directory (Unix-style)
+	if strings.HasPrefix(result, "~/") && homeDir != "" {
+		result = filepath.Join(homeDir, result[2:])
+	}
+
+	// Expand environment variables like %APPDATA% (Windows-style)
+	if strings.Contains(result, "%") {
+		result = os.ExpandEnv(result)
+	}
+
+	return result
+}
+
+// getCurrentPlatform returns the current platform name (darwin, windows, linux)
+func getCurrentPlatform() string {
+	return runtime.GOOS
 }
