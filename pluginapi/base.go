@@ -1,5 +1,10 @@
 package pluginapi
 
+import (
+	"fmt"
+	"sync"
+)
+
 // BasePlugin provides default implementations for common plugin interfaces.
 // Plugins can embed this struct to avoid implementing boilerplate getter methods.
 //
@@ -23,7 +28,9 @@ type BasePlugin struct {
 	metadata        *PluginMetadata
 	agentContext    AgentContext
 	defaultSettings string
-	pluginConfig    *PluginConfig // Stores parsed plugin.yaml config
+	pluginConfig    *PluginConfig   // Stores parsed plugin.yaml config
+	settingsManager SettingsManager // Lazy-initialized settings manager
+	settingsMu      sync.Mutex      // Mutex for settings initialization
 }
 
 // NewBasePlugin creates a new base plugin with version and compatibility info.
@@ -138,4 +145,86 @@ func (b *BasePlugin) GetConfigFromYAML() []ConfigVariable {
 		return []ConfigVariable{}
 	}
 	return b.pluginConfig.ToConfigVariables()
+}
+
+// Settings returns the settings manager for this plugin.
+// The settings manager is lazily initialized when first accessed.
+// This method is thread-safe and can be called multiple times.
+//
+// Returns nil if the agent context has not been set yet.
+// Call this method only after SetAgentContext has been called.
+//
+// Example usage:
+//
+//	func (t *myTool) Call(ctx context.Context, args string) (string, error) {
+//	    settings := t.Settings()
+//	    if settings == nil {
+//	        return "", fmt.Errorf("plugin not initialized with agent context")
+//	    }
+//
+//	    apiKey, err := settings.GetString("api_key")
+//	    if err != nil {
+//	        return "", err
+//	    }
+//	    // Use apiKey...
+//	}
+func (b *BasePlugin) Settings() SettingsManager {
+	b.settingsMu.Lock()
+	defer b.settingsMu.Unlock()
+
+	// Return existing settings manager if already initialized
+	if b.settingsManager != nil {
+		return b.settingsManager
+	}
+
+	// Cannot initialize without agent context
+	if b.agentContext.AgentDir == "" {
+		return nil
+	}
+
+	// Extract plugin name from metadata or use a default
+	pluginName := "unknown"
+	if b.metadata != nil && b.metadata.Name != "" {
+		pluginName = b.metadata.Name
+	}
+
+	// Lazy initialize the settings manager
+	sm, err := NewSettingsManager(b.agentContext.AgentDir, pluginName)
+	if err != nil {
+		// Log error but return nil - caller should handle this
+		// TODO: Consider adding logging here
+		return nil
+	}
+
+	b.settingsManager = sm
+	return b.settingsManager
+}
+
+// GetToolDefinition returns the tool definition from plugin.yaml if available.
+// This method allows plugins to define their tool interface in YAML instead of code.
+// Returns an error if no tool definition is found in the plugin config.
+//
+// Example usage in a plugin:
+//
+//	func (t *myTool) Definition() pluginapi.Tool {
+//	    // Try to get definition from YAML
+//	    tool, err := t.BasePlugin.GetToolDefinition()
+//	    if err == nil {
+//	        return tool
+//	    }
+//
+//	    // Fallback to code-defined definition
+//	    return pluginapi.NewTool("my-tool", "Does something", map[string]interface{}{...})
+//	}
+func (b *BasePlugin) GetToolDefinition() (Tool, error) {
+	if b.pluginConfig == nil {
+		return Tool{}, fmt.Errorf("plugin config not set")
+	}
+
+	if b.pluginConfig.Tool == nil {
+		return Tool{}, fmt.Errorf("no tool definition in plugin.yaml")
+	}
+
+	// Convert YAML tool definition to pluginapi.Tool
+	return b.pluginConfig.Tool.ToToolDefinition()
 }

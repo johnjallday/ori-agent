@@ -50,17 +50,44 @@ type YAMLConfig struct {
 	Variables []YAMLConfigVariable `yaml:"variables,omitempty"`
 }
 
+// YAMLToolParameter represents a parameter for a tool in YAML format
+type YAMLToolParameter struct {
+	Name        string      `yaml:"name"`
+	Type        string      `yaml:"type"` // string, integer, number, boolean, enum, array, object
+	Description string      `yaml:"description"`
+	Required    bool        `yaml:"required,omitempty"`
+	Default     interface{} `yaml:"default,omitempty"`
+	Enum        []string    `yaml:"enum,omitempty"` // For enum type
+	Items       *struct {
+		Type string `yaml:"type"`
+	} `yaml:"items,omitempty"` // For array type
+	Properties map[string]YAMLToolParameter `yaml:"properties,omitempty"` // For object type
+	Min        *float64                     `yaml:"min,omitempty"`        // For number/integer validation
+	Max        *float64                     `yaml:"max,omitempty"`        // For number/integer validation
+	MinLength  *int                         `yaml:"min_length,omitempty"` // For string validation
+	MaxLength  *int                         `yaml:"max_length,omitempty"` // For string validation
+	Pattern    string                       `yaml:"pattern,omitempty"`    // For string regex validation
+}
+
+// YAMLToolDefinition represents a tool definition in YAML format
+type YAMLToolDefinition struct {
+	Name        string                       `yaml:"name"`
+	Description string                       `yaml:"description"`
+	Parameters  map[string]YAMLToolParameter `yaml:"parameters"`
+}
+
 // PluginConfig represents the complete plugin configuration from plugin.yaml
 type PluginConfig struct {
-	Name         string           `yaml:"name"`
-	Version      string           `yaml:"version"`
-	Description  string           `yaml:"description"`
-	License      string           `yaml:"license"`
-	Repository   string           `yaml:"repository"`
-	Platforms    []YAMLPlatform   `yaml:"platforms"`
-	Maintainers  []YAMLMaintainer `yaml:"maintainers"`
-	Requirements YAMLRequirements `yaml:"requirements,omitempty"`
-	Config       YAMLConfig       `yaml:"config,omitempty"`
+	Name         string              `yaml:"name"`
+	Version      string              `yaml:"version"`
+	Description  string              `yaml:"description"`
+	License      string              `yaml:"license"`
+	Repository   string              `yaml:"repository"`
+	Platforms    []YAMLPlatform      `yaml:"platforms"`
+	Maintainers  []YAMLMaintainer    `yaml:"maintainers"`
+	Requirements YAMLRequirements    `yaml:"requirements,omitempty"`
+	Config       YAMLConfig          `yaml:"config,omitempty"`
+	Tool         *YAMLToolDefinition `yaml:"tool,omitempty"` // Optional tool definition
 }
 
 // ReadPluginConfig parses and validates plugin configuration from embedded YAML
