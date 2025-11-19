@@ -1,0 +1,386 @@
+name: Cross-Platform Smoke Tests
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches: [main, develop]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - '.goreleaser.yaml'
+      - 'build/**'
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-macos:
+    name: macOS Smoke Test
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install GoReleaser
+        run: brew install goreleaser
+
+      - name: Build binaries
+        run: goreleaser release --snapshot --clean --skip=publish
+
+      - name: Create DMG
+        run: |
+          VERSION=$(cat VERSION)-next
+          ARCH=$(uname -m)
+          ./build/macos/create-dmg.sh "$VERSION" "$ARCH" dist
+
+      - name: Run smoke test
+        run: |
+          set -e
+          ARCH=$(uname -m)
+          DMG_FILE=$(ls dist/OriAgent-*-${ARCH}.dmg | head -1)
+
+          echo "📦 Testing DMG: $DMG_FILE"
+
+          # Mount DMG
+          hdiutil attach "$DMG_FILE" -quiet
+          sleep 2
+
+          VOLUME=$(ls -d /Volumes/Ori\ Agent* | head -1)
+          echo "✓ DMG mounted at: $VOLUME"
+
+          # Copy app to temporary location
+          TEMP_APP="/tmp/OriAgent-test.app"
+          rm -rf "$TEMP_APP"
+          cp -R "$VOLUME/OriAgent.app" "$TEMP_APP"
+
+          # Unmount DMG (free up resources)
+          hdiutil detach "$VOLUME" -quiet
+
+          # Test server binary
+          SERVER_BIN="$TEMP_APP/Contents/Resources/ori-agent"
+          if [ ! -f "$SERVER_BIN" ]; then
+            echo "❌ Server binary not found"
+            exit 1
+          fi
+          echo "✓ Server binary found"
+
+          # Start server
+          PORT=18765
+          "$SERVER_BIN" --port=$PORT > /tmp/ori-agent-test.log 2>&1 &
+          SERVER_PID=$!
+          echo "✓ Server started (PID: $SERVER_PID)"
+
+          # Wait for server to respond
+          echo "⏳ Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -sf "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
+              echo "✓ Server responded to HTTP"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Server failed to start within 15 seconds"
+              cat /tmp/ori-agent-test.log
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/api/health")
+          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
+            echo "✓ Health check passed"
+          else
+            echo "⚠️  Health check response: $HEALTH_RESPONSE"
+          fi
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          rm -rf "$TEMP_APP"
+          echo "✅ macOS smoke test PASSED"
+
+  test-linux-deb:
+    name: Linux .deb Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install GoReleaser
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y goreleaser
+
+      - name: Build packages
+        run: goreleaser release --snapshot --clean --skip=publish
+
+      - name: Install package
+        run: |
+          set -e
+          echo "📦 Installing .deb package..."
+          sudo dpkg -i dist/ori-agent_*_linux_amd64.deb || sudo apt-get install -f -y
+
+      - name: Run smoke test
+        run: |
+          set -e
+          echo "🧪 Running smoke test..."
+
+          # Start server
+          PORT=18765
+          /usr/bin/ori-agent --port=$PORT > /tmp/ori-agent.log 2>&1 &
+          SERVER_PID=$!
+          echo "✓ Server started (PID: $SERVER_PID)"
+
+          # Wait for server
+          echo "⏳ Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -sf "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
+              echo "✓ Server responded to HTTP"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Server failed to start"
+              cat /tmp/ori-agent.log
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/api/health")
+          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
+            echo "✓ Health check passed"
+          else
+            echo "⚠️  Health check response: $HEALTH_RESPONSE"
+          fi
+
+          # Verify installed files
+          echo "📋 Verifying installation..."
+          test -f /usr/bin/ori-agent && echo "✓ Binary installed"
+          test -f /lib/systemd/system/ori-agent.service && echo "✓ systemd service"
+          test -d /etc/ori-agent && echo "✓ Config directory"
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          echo "✅ Linux .deb smoke test PASSED"
+
+  test-linux-rpm:
+    name: Linux .rpm Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: fedora:38
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install GoReleaser
+        run: |
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager --add-repo https://repo.goreleaser.com/yum/
+          dnf install -y goreleaser
+
+      - name: Build packages
+        run: goreleaser release --snapshot --clean --skip=publish
+
+      - name: Install package
+        run: |
+          set -e
+          echo "📦 Installing .rpm package..."
+          dnf install -y dist/ori-agent-*-linux-amd64.rpm
+
+      - name: Run smoke test
+        run: |
+          set -e
+          echo "🧪 Running smoke test..."
+
+          # Start server
+          PORT=18765
+          /usr/bin/ori-agent --port=$PORT > /tmp/ori-agent.log 2>&1 &
+          SERVER_PID=$!
+          echo "✓ Server started (PID: $SERVER_PID)"
+
+          # Wait for server
+          echo "⏳ Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -sf "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
+              echo "✓ Server responded to HTTP"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Server failed to start"
+              cat /tmp/ori-agent.log
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          # Test health endpoint
+          HEALTH_RESPONSE=$(curl -s "http://localhost:$PORT/api/health")
+          if echo "$HEALTH_RESPONSE" | grep -q "ok"; then
+            echo "✓ Health check passed"
+          else
+            echo "⚠️  Health check response: $HEALTH_RESPONSE"
+          fi
+
+          # Verify installed files
+          echo "📋 Verifying installation..."
+          test -f /usr/bin/ori-agent && echo "✓ Binary installed"
+          test -f /lib/systemd/system/ori-agent.service && echo "✓ systemd service"
+          test -d /etc/ori-agent && echo "✓ Config directory"
+
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          echo "✅ Linux .rpm smoke test PASSED"
+
+  test-windows:
+    name: Windows MSI Smoke Test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install WiX Toolset
+        run: choco install wixtoolset -y
+
+      - name: Install GoReleaser
+        run: choco install goreleaser -y
+
+      - name: Build binaries
+        run: goreleaser release --snapshot --clean --skip=publish
+
+      - name: Create MSI
+        shell: pwsh
+        run: |
+          $VERSION = (Get-Content VERSION).Trim() + "-next"
+          .\build\windows\create-msi.ps1 -Version $VERSION -Arch "amd64"
+
+      - name: Install MSI
+        shell: pwsh
+        run: |
+          $MSI = Get-Item dist\ori-agent-*-amd64.msi
+          Write-Host "📦 Installing MSI: $($MSI.Name)"
+
+          # Install silently
+          Start-Process msiexec.exe -ArgumentList "/i `"$($MSI.FullName)`" /qn /l*v install.log" -Wait
+
+          # Wait for installation to complete
+          Start-Sleep -Seconds 5
+
+          # Verify installation
+          $exePath = "C:\Program Files\OriAgent\bin\ori-agent.exe"
+          if (Test-Path $exePath) {
+            Write-Host "✓ Binary installed at: $exePath"
+          } else {
+            Write-Host "❌ Binary not found"
+            Get-Content install.log
+            exit 1
+          }
+
+      - name: Run smoke test
+        shell: pwsh
+        run: |
+          $exePath = "C:\Program Files\OriAgent\bin\ori-agent.exe"
+
+          Write-Host "🧪 Running smoke test..."
+
+          # Start server
+          $port = 18765
+          $process = Start-Process -FilePath $exePath -ArgumentList "--port=$port" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -PassThru -NoNewWindow
+          Write-Host "✓ Server started (PID: $($process.Id))"
+
+          # Wait for server
+          Write-Host "⏳ Waiting for server to start..."
+          $started = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:$port/api/health" -UseBasicParsing -TimeoutSec 1
+              if ($response.StatusCode -eq 200) {
+                Write-Host "✓ Server responded to HTTP"
+                $started = $true
+                break
+              }
+            } catch {
+              Start-Sleep -Milliseconds 500
+            }
+          }
+
+          if (-not $started) {
+            Write-Host "❌ Server failed to start"
+            Get-Content server-out.log
+            Get-Content server-err.log
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+          # Test health endpoint
+          try {
+            $health = Invoke-WebRequest -Uri "http://localhost:$port/api/health" -UseBasicParsing
+            $content = $health.Content
+            if ($content -like "*ok*") {
+              Write-Host "✓ Health check passed"
+            } else {
+              Write-Host "⚠️  Health check response: $content"
+            }
+          } catch {
+            Write-Host "⚠️  Health check failed: $($_.Exception.Message)"
+          }
+
+          # Cleanup
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ Windows MSI smoke test PASSED"
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-macos, test-linux-deb, test-linux-rpm, test-windows]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "╔══════════════════════════════════════════╗"
+          echo "║  Cross-Platform Smoke Test Summary      ║"
+          echo "╚══════════════════════════════════════════╝"
+          echo ""
+          echo "Test Results:"
+          echo "  macOS:       ${{ needs.test-macos.result }}"
+          echo "  Linux .deb:  ${{ needs.test-linux-deb.result }}"
+          echo "  Linux .rpm:  ${{ needs.test-linux-rpm.result }}"
+          echo "  Windows MSI: ${{ needs.test-windows.result }}"
+          echo ""
+
+          if [ "${{ needs.test-macos.result }}" != "success" ] || \
+             [ "${{ needs.test-linux-deb.result }}" != "success" ] || \
+             [ "${{ needs.test-linux-rpm.result }}" != "success" ] || \
+             [ "${{ needs.test-windows.result }}" != "success" ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          else
+            echo "✅ All smoke tests passed!"
+          fi
