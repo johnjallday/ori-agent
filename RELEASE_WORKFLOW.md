@@ -27,10 +27,10 @@ dev branch (development) ──test──> main branch (releases)
 
 ```bash
 # Always start from dev
-git checkout dev
+git switch dev
 
 # Create feature branch
-git checkout -b feature/my-feature
+git switch -c feature/my-feature
 
 # Work, test, commit
 go test ./...
@@ -38,7 +38,7 @@ git add .
 git commit -m "feat: add my feature"
 
 # Merge back to dev
-git checkout dev
+git switch dev
 git merge feature/my-feature
 git push origin dev
 
@@ -61,7 +61,7 @@ git branch -d feature/my-feature
 
 ```bash
 # Make sure you're on dev
-git checkout dev
+git switch dev
 
 # Run all quality checks on dev BEFORE merging
 ./scripts/pre-release-check.sh v0.5.0
@@ -172,20 +172,20 @@ Merge these commits to main? (y/N): y
 # PHASE 1: Development (on dev branch)
 # ============================================
 
-git checkout dev
+git switch dev
 
 # Build multiple features
-git checkout -b feature/plugin-marketplace
+git switch -c feature/plugin-marketplace
 # ... work, test ...
-git checkout dev && git merge feature/plugin-marketplace
+git switch dev && git merge feature/plugin-marketplace
 
-git checkout -b feature/api-improvements
+git switch -c feature/api-improvements
 # ... work, test ...
-git checkout dev && git merge feature/api-improvements
+git switch dev && git merge feature/api-improvements
 
-git checkout -b fix/memory-leak
+git switch -c fix/memory-leak
 # ... work, test ...
-git checkout dev && git merge fix/memory-leak
+git switch dev && git merge fix/memory-leak
 
 git push origin dev
 
@@ -213,7 +213,7 @@ git push origin dev
 # ============================================
 
 # You're already on dev!
-git checkout -b feature/next-thing
+git switch -c feature/next-thing
 # ... start v0.6.0 features ...
 ```
 
@@ -248,7 +248,7 @@ git checkout -b feature/next-thing
 
 ```bash
 # Always go back to dev for daily work
-git checkout dev
+git switch dev
 ```
 
 ### "Pre-release checks failed on dev"
@@ -271,14 +271,14 @@ git commit -m "fix: resolve test failures"
 # If main has bad code, you can:
 
 # Option 1: Fix forward (recommended)
-git checkout main
+git switch main
 # ... fix the issue ...
 git add .
 git commit -m "fix: resolve issue"
 git push origin main
 
 # Option 2: Revert (if serious)
-git checkout main
+git switch main
 git revert HEAD
 git push origin main
 ```
@@ -299,10 +299,10 @@ git push origin main
 
 ```bash
 # Daily work (dev)
-git checkout dev
-git checkout -b feature/name
+git switch dev
+git switch -c feature/name
 # ... work ...
-git checkout dev && git merge feature/name
+git switch dev && git merge feature/name
 git push origin dev
 
 # Release (3 commands)

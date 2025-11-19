@@ -54,7 +54,7 @@ fi
 # Check if dev branch exists
 if ! git show-ref --verify --quiet refs/heads/dev; then
   print_error "dev branch does not exist"
-  print_error "Create it with: git checkout -b dev"
+  print_error "Create it with: git switch -c dev"
   exit 1
 fi
 
@@ -72,7 +72,7 @@ echo ""
 
 # Switch to dev and pull latest
 print_status "Switching to dev branch..."
-git checkout dev
+git switch dev
 
 print_status "Pulling latest from origin/dev..."
 git pull origin dev
@@ -99,7 +99,7 @@ DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
 if [ "$DEV_COMMITS" -eq 0 ]; then
   print_success "dev is already merged into main - nothing to do!"
   print_status "Switching back to main..."
-  git checkout main
+  git switch main
   exit 0
 fi
 
@@ -118,7 +118,7 @@ fi
 
 # Switch to main
 print_status "Switching to main branch..."
-git checkout main
+git switch main
 
 # Pull latest main
 print_status "Pulling latest from origin/main..."

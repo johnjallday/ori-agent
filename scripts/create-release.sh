@@ -194,7 +194,7 @@ echo ""
 # Switch back to dev branch for continued development
 if git show-ref --verify --quiet refs/heads/dev; then
   print_status "Switching back to dev branch for continued development..."
-  git checkout dev
+  git switch dev
   print_success "Now on dev branch - ready for next features!"
   echo ""
 fi

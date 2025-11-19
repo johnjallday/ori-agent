@@ -8,14 +8,14 @@
 
 ```bash
 # Always work on dev
-git checkout dev
+git switch dev
 
 # Create feature
-git checkout -b feature/my-feature
+git switch -c feature/my-feature
 # ... code, test, commit ...
 
 # Merge to dev
-git checkout dev
+git switch dev
 git merge feature/my-feature
 git push origin dev
 ```
@@ -30,7 +30,7 @@ git push origin dev
 
 ```bash
 # While on dev branch
-git checkout dev
+git switch dev
 
 # Run all quality checks
 ./scripts/pre-release-check.sh v0.5.0
@@ -106,14 +106,14 @@ Merge these commits to main? (y/N): y
 # ============================================
 # Monday-Thursday: Build features on dev
 # ============================================
-git checkout dev
-git checkout -b feature/plugin-store
+git switch dev
+git switch -c feature/plugin-store
 # ... work ...
-git checkout dev && git merge feature/plugin-store
+git switch dev && git merge feature/plugin-store
 
-git checkout -b feature/api-v2
+git switch -c feature/api-v2
 # ... work ...
-git checkout dev && git merge feature/api-v2
+git switch dev && git merge feature/api-v2
 
 git push origin dev
 
@@ -122,7 +122,7 @@ git push origin dev
 # ============================================
 
 # Step 1: Test on dev (before merge) ⭐
-git checkout dev
+git switch dev
 ./scripts/pre-release-check.sh v0.5.0
 # ✅ All checks passed on dev!
 
@@ -138,7 +138,7 @@ git checkout dev
 # ============================================
 # Continue working (already on dev!)
 # ============================================
-git checkout -b feature/next-thing
+git switch -c feature/next-thing
 ```
 
 ---
@@ -207,7 +207,7 @@ git commit -m "fix: resolve test failures"
 ### "I'm on the wrong branch"
 ```bash
 # Always return to dev
-git checkout dev
+git switch dev
 ```
 
 ### "I forgot which step I'm on"
