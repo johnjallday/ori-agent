@@ -89,10 +89,13 @@ fi
 print_status "Pulling latest changes..."
 git pull origin "$CURRENT_BRANCH"
 
-# Run tests
-print_status "Running tests..."
-if ! go test ./...; then
-  print_error "Tests failed. Fix them before creating a release."
+# Check that pre-release checks were run
+print_status "Verifying pre-release checks were completed..."
+print_warning "Make sure you ran './scripts/pre-release-check.sh' before releasing!"
+read -p "Have you run pre-release-check.sh and all checks passed? (y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  print_error "Please run './scripts/pre-release-check.sh' first to validate the release."
   exit 1
 fi
 

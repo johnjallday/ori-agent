@@ -87,16 +87,24 @@ build_external_plugin() {
 # List of external plugins to build
 # Format: "relative_path:plugin_name"
 EXTERNAL_PLUGINS=(
-  "../plugins/ori-reaper:ori-reaper",
+  "../plugins/ori-reaper:ori-reaper"
   "../plugins/ori-music-project-manager:ori-music-project-manager"
+  "../plugins/ori-mac-os-tools:ori-mac-os-tools"
+  "../plugins/ori-meta-threads-manager:ori-meta-threads-manager"
+  "../plugins/ori-agent-doc-builder:ori-agent-doc-builder"
 )
 
 # Build each external plugin
 built_count=0
+failed_count=0
+failed_plugins=()
 for plugin_spec in "${EXTERNAL_PLUGINS[@]}"; do
   IFS=':' read -r plugin_path plugin_name <<<"$plugin_spec"
   if build_external_plugin "$plugin_path" "$plugin_name"; then
     built_count=$((built_count + 1))
+  else
+    failed_count=$((failed_count + 1))
+    failed_plugins+=("$plugin_name")
   fi
 done
 
@@ -105,6 +113,17 @@ if [ $built_count -gt 0 ]; then
   echo -e "${GREEN}✓ Built $built_count external plugin(s) successfully!${NC}"
   echo -e "${BLUE}External plugin binaries are in: uploaded_plugins/${NC}"
   ls -lh uploaded_plugins/ | grep -E "^-.*ori-" || true
-else
+fi
+
+if [ $failed_count -gt 0 ]; then
+  echo ""
+  echo -e "${RED}✗ Failed to build $failed_count plugin(s):${NC}"
+  for plugin in "${failed_plugins[@]}"; do
+    echo -e "${RED}  - $plugin${NC}"
+  done
+  exit 1
+fi
+
+if [ $built_count -eq 0 ]; then
   echo -e "${YELLOW}No external plugins were built${NC}"
 fi

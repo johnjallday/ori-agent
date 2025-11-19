@@ -1,2 +1,3 @@
 {"id":"0c7dd4ac-5592-4243-8e71-b44fa38e54a8","agent_name":"plugin-test-agent","event_type":"created","timestamp":"2025-11-17T15:30:55.223545-05:00","details":{"description":"Test agent created at 2025-11-17T15:30:55-05:00","model":"gpt-4o-mini","type":""}}
 {"id":"bbe9ae06-0b7d-42ce-a245-461366783dbb","agent_name":"plugin-test-agent","event_type":"created","timestamp":"2025-11-17T19:50:48.020248-05:00","details":{"description":"Test agent created at 2025-11-17T19:50:48-05:00","model":"gpt-4o-mini","type":""}}
+{"id":"927f0d3a-d91a-4899-a8b5-d475913a5f26","agent_name":"plugin-test-agent","event_type":"created","timestamp":"2025-11-19T10:09:15.183357-05:00","details":{"description":"Test agent created at 2025-11-19T10:09:15-05:00","model":"gpt-4o-mini","type":""}}

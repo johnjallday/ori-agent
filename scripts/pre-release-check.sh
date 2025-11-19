@@ -77,14 +77,14 @@ else
   echo ""
 fi
 
-# 2. UNIT TESTS
+# 2. TESTS (ALL)
 echo ""
 echo "════════════════════════════════════════════"
-echo "2. UNIT TESTS"
+echo "2. TESTS (Unit + Integration + E2E + User)"
 echo "════════════════════════════════════════════"
 echo ""
 
-run_check "Unit Tests" "make test-unit" || true
+run_check "All Tests" "go test ./..." || true
 
 # 3. BUILD VERIFICATION
 echo ""
@@ -96,6 +96,7 @@ echo ""
 run_check "Build Server" "go build -o bin/ori-agent ./cmd/server" || true
 run_check "Build Menubar (macOS)" "go build -o bin/ori-menubar ./cmd/menubar 2>/dev/null || echo 'Skipping menubar (not on macOS)'" || true
 run_check "Build Plugins" "./scripts/build-plugins.sh" || true
+run_check "Build External Plugins" "./scripts/build-external-plugins.sh" || true
 
 # 4. DEPENDENCY CHECK
 echo ""
