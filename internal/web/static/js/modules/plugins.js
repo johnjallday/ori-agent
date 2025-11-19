@@ -4,6 +4,10 @@
 // Plugin upload state management
 let uploadListenersSetup = false;
 
+function stripVersionSuffix(name = '') {
+  return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+}
+
 // Check plugin configuration status - automatically detect by checking default-settings endpoint
 async function checkPluginConfigurationStatus(activePluginNames) {
   const configStatus = new Map();
@@ -64,7 +68,12 @@ async function loadPlugins() {
     );
 
     // Filter to only show local plugins in sidebar (those without github_repo)
-    const localPlugins = registry.plugins.filter(plugin => !plugin.github_repo);
+    const localPlugins = registry.plugins
+      .filter(plugin => !plugin.github_repo)
+      .map(plugin => ({
+        ...plugin,
+        displayName: plugin.metadata?.name || stripVersionSuffix(plugin.name || '')
+      }));
 
     // Fetch plugin configuration status for active plugins
     console.log('About to call checkPluginConfigurationStatus with:', activePluginNames);
@@ -121,7 +130,7 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
         <div class="d-flex align-items-center justify-content-between">
           <div>
             <div class="fw-medium d-flex align-items-center" style="color: var(--text-primary);">
-              ${plugin.name}
+              ${plugin.displayName || plugin.name}
               ${isUploaded ? '<span class="badge badge-success ms-2" style="font-size: 0.7em;">Local</span>' : ''}
               ${needsConfig ? '<span class="badge badge-warning ms-2" style="font-size: 0.7em;">Setup Required</span>' : ''}
             </div>

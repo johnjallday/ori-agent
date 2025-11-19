@@ -11,6 +11,7 @@ class PluginMarketplace {
         this.currentPlatform = '';
         this.currentPlatformDisplay = '';
         this.showIncompatible = false; // Track compatibility filter state
+        this.viewMode = localStorage.getItem('marketplaceViewMode') || 'grid';
     }
 
     async init() {
@@ -35,6 +36,7 @@ class PluginMarketplace {
         }
 
         // Render initial view
+        this.updateViewToggleButtons();
         this.render();
     }
 
@@ -43,7 +45,7 @@ class PluginMarketplace {
             // Load all plugins from registry (includes GitHub plugins + local plugins)
             const registryResp = await fetch('/api/plugin-registry');
             const registryData = await registryResp.json();
-            this.plugins = registryData.plugins || [];
+            this.plugins = this.normalizePluginList(registryData.plugins || []);
 
             // Load locally installed plugins to mark them as installed
             const installedResp = await fetch('/api/plugins');
@@ -115,6 +117,14 @@ class PluginMarketplace {
             localStorage.setItem('showIncompatiblePlugins', this.showIncompatible.toString());
             this.render();
         });
+
+        // View mode buttons
+        document.getElementById('gridViewBtn')?.addEventListener('click', () => {
+            this.setViewMode('grid');
+        });
+        document.getElementById('listViewBtn')?.addEventListener('click', () => {
+            this.setViewMode('list');
+        });
     }
 
     // Check if plugin is compatible with current platform
@@ -154,6 +164,34 @@ class PluginMarketplace {
         const archCompatible = plugin.supported_arch.includes(arch) || plugin.supported_arch.includes('all');
 
         return osCompatible && archCompatible;
+    }
+
+    setViewMode(mode) {
+        if (this.viewMode === mode) {
+            return;
+        }
+        this.viewMode = mode;
+        localStorage.setItem('marketplaceViewMode', mode);
+        this.updateViewToggleButtons();
+        this.render();
+    }
+
+    updateViewToggleButtons() {
+        const gridBtn = document.getElementById('gridViewBtn');
+        const listBtn = document.getElementById('listViewBtn');
+        if (!gridBtn || !listBtn) return;
+
+        if (this.viewMode === 'list') {
+            gridBtn.classList.remove('active', 'btn-primary');
+            gridBtn.classList.add('btn-outline-secondary');
+            listBtn.classList.add('active', 'btn-primary');
+            listBtn.classList.remove('btn-outline-secondary');
+        } else {
+            listBtn.classList.remove('active', 'btn-primary');
+            listBtn.classList.add('btn-outline-secondary');
+            gridBtn.classList.add('active', 'btn-primary');
+            gridBtn.classList.remove('btn-outline-secondary');
+        }
     }
 
     // Get platform icon badges for a plugin
@@ -208,6 +246,7 @@ class PluginMarketplace {
     render() {
         const grid = document.getElementById('pluginGrid');
         if (!grid) return;
+        grid.classList.toggle('list-view', this.viewMode === 'list');
 
         // Filter plugins
         let filteredPlugins = this.plugins.filter(plugin => {
@@ -226,9 +265,9 @@ class PluginMarketplace {
             // Category filter
             switch (this.filter) {
                 case 'installed':
-                    return this.installedPlugins.has(plugin.name);
+                    return this.isPluginInstalled(plugin);
                 case 'available':
-                    return !this.installedPlugins.has(plugin.name);
+                    return !this.isPluginInstalled(plugin);
                 case 'updates':
                     return this.updates.some(u => u.plugin_name === plugin.name);
                 default:
@@ -245,129 +284,27 @@ class PluginMarketplace {
                     <p class="mt-3 text-muted">No plugins found</p>
                 </div>
             `;
+            this.updateViewToggleButtons();
             return;
         }
 
         let html = '';
         filteredPlugins.forEach(plugin => {
-            const isInstalled = this.installedPlugins.has(plugin.name);
-            const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
+            const isInstalled = this.isPluginInstalled(plugin);
+            const updateInfo = this.updates.find(u => u.plugin_name === plugin.name);
             const compatibility = this.getCompatibilityIndicator(plugin);
             const platformBadges = this.getPlatformBadges(plugin);
 
-            html += `
-                <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
-                    <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-2">
-                                <h5 class="card-title mb-0">${plugin.name}</h5>
-                                <div class="d-flex flex-column align-items-end gap-1">
-                                    ${isInstalled ? `
-                                        <span class="badge bg-success-subtle text-success">Installed</span>
-                                    ` : ''}
-                                    ${hasUpdate ? `
-                                        <span class="badge bg-warning-subtle text-warning">Update</span>
-                                    ` : ''}
-                                </div>
-                            </div>
-
-                            <p class="card-text text-muted small">${plugin.description || 'No description available'}</p>
-
-                            <!-- Platform badges -->
-                            ${platformBadges ? `
-                                <div class="mb-2">
-                                    ${platformBadges}
-                                </div>
-                            ` : ''}
-
-                            <!-- Compatibility indicator -->
-                            <div class="mb-2">
-                                ${compatibility.badge}
-                            </div>
-
-                            <div class="mt-3">
-                                <div class="d-flex justify-content-between align-items-center small text-muted">
-                                    <span>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                            <path d="M12,17.56L16.07,16.43L16.62,10.33H9.38L9.2,8.3H16.8L17,6.31H7L7.56,12.32H14.45L14.22,14.9L12,15.5L9.78,14.9L9.64,13.24H7.64L7.93,16.43L12,17.56M4.07,3H19.93L18.5,19.2L12,21L5.5,19.2L4.07,3Z"/>
-                                        </svg>
-                                        v${plugin.version || '0.0.0'}
-                                    </span>
-                                    ${hasUpdate ? `
-                                        <span class="text-warning">
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
-                                            </svg>
-                                            v${hasUpdate.latest_version}
-                                        </span>
-                                    ` : ''}
-                                </div>
-
-                                ${plugin.metadata && plugin.metadata.maintainers && plugin.metadata.maintainers.length > 0 ? `
-                                    <div class="mt-2 small text-muted">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                            <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                                        </svg>
-                                        ${plugin.metadata.maintainers.find(m => m.primary)?.name || plugin.metadata.maintainers[0].name}
-                                    </div>
-                                ` : ''}
-
-                                ${plugin.metadata && plugin.metadata.license ? `
-                                    <div class="mt-2 small text-muted">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                            <path d="M9,10H7V16H9V10M13,10H11V16H13V10M17,10H15V16H17V10M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,19H5V5H19V19Z"/>
-                                        </svg>
-                                        ${plugin.metadata.license}
-                                    </div>
-                                ` : ''}
-
-                                ${plugin.supported_os ? `
-                                    <div class="mt-2 small text-muted">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                            <path d="M17,19H7V5H17M17,1H7C5.89,1 5,1.89 5,3V21A2,2 0 0,0 7,23H17A2,2 0 0,0 19,21V3C19,1.89 18.1,1 17,1Z"/>
-                                        </svg>
-                                        ${plugin.supported_os.join(', ')}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        </div>
-                        <div class="card-footer bg-transparent border-top-0">
-                            ${!isInstalled && !compatibility.compatible ? `
-                                <button class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                        <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
-                                    </svg>
-                                    Not Available
-                                </button>
-                            ` : !isInstalled ? `
-                                <button class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                        <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
-                                    </svg>
-                                    Install
-                                </button>
-                            ` : hasUpdate ? `
-                                <button class="btn btn-sm btn-warning w-100" onclick="event.stopPropagation(); marketplace.updatePlugin('${plugin.name}')">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                        <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
-                                    </svg>
-                                    Update
-                                </button>
-                            ` : `
-                                <button class="btn btn-sm btn-outline-secondary w-100" disabled>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                        <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-                                    </svg>
-                                    Installed
-                                </button>
-                            `}
-                        </div>
-                    </div>
-                </div>
-            `;
+            if (this.viewMode === 'list') {
+                html += this.renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges);
+            } else {
+                html += this.renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges);
+            }
         });
 
         grid.innerHTML = html;
+        this.updateViewToggleButtons();
+
     }
 
     showPluginDetails(pluginName) {
@@ -375,7 +312,7 @@ class PluginMarketplace {
         if (!plugin) return;
 
         const modal = new bootstrap.Modal(document.getElementById('pluginDetailsModal'));
-        const isInstalled = this.installedPlugins.has(plugin.name);
+        const isInstalled = this.isPluginInstalled(plugin);
         const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
 
         document.getElementById('pluginDetailsTitle').textContent = plugin.name;
@@ -617,21 +554,96 @@ class PluginMarketplace {
         }
     }
 
+    normalizePluginList(plugins) {
+        const map = new Map();
+        plugins.forEach(plugin => {
+            const key = this.getCanonicalPluginKey(plugin);
+            if (!key) {
+                return;
+            }
+            const existing = map.get(key);
+            if (!existing || this.shouldPreferPlugin(plugin, existing)) {
+                map.set(key, plugin);
+            }
+        });
+        return Array.from(map.values());
+    }
+
+    getCanonicalPluginKey(plugin) {
+        const candidates = [
+            this.extractRepoSlug(plugin.metadata?.repository),
+            this.extractRepoSlug(plugin.github_repo),
+            plugin.metadata?.name,
+            plugin.name,
+            plugin.definition?.name,
+        ];
+
+        const normalizedVariants = [];
+        const seen = new Set();
+        const addVariant = (value) => {
+            if (!value || seen.has(value)) {
+                return;
+            }
+            seen.add(value);
+            normalizedVariants.push(value);
+        };
+
+        for (const candidate of candidates) {
+            const normalized = this.normalizeName(candidate);
+            if (!normalized) {
+                continue;
+            }
+            addVariant(normalized);
+            const base = this.stripVersionSuffix(normalized);
+            if (base) {
+                addVariant(base);
+            }
+        }
+
+        if (normalizedVariants.length === 0) {
+            const variants = this.getPluginNameVariants(plugin);
+            return variants.length > 0 ? variants[0] : null;
+        }
+
+        return normalizedVariants[0];
+    }
+
+    shouldPreferPlugin(candidate, existing) {
+        return this.scorePlugin(candidate) >= this.scorePlugin(existing);
+    }
+
+    scorePlugin(plugin) {
+        let score = 0;
+        if (plugin.metadata?.name) {
+            score += 3;
+        }
+        const normalizedName = this.normalizeName(plugin.name);
+        const baseName = this.stripVersionSuffix(normalizedName);
+        if (plugin.metadata?.name && baseName && plugin.metadata.name.toLowerCase() === baseName) {
+            score += 2;
+        } else if (normalizedName && normalizedName === baseName) {
+            score += 1;
+        }
+        if (plugin.version) {
+            score += 1;
+        }
+        if (plugin.platforms && plugin.platforms.length > 0) {
+            score += 1;
+        }
+        return score;
+    }
+
     // Get possible name variants for matching installed plugins (handles -0.0.x suffixes)
     getPluginNameVariants(plugin) {
         const variants = new Set();
         const addVariant = (name) => {
-            if (!name || typeof name !== 'string') {
-                return;
-            }
-            const normalized = name.toLowerCase();
+            const normalized = this.normalizeName(name);
             if (!normalized) {
                 return;
             }
             variants.add(normalized);
 
-            // Strip trailing version (e.g., "-0.0.8" or "-0.0.8-alpha")
-            const versionStripped = normalized.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+            const versionStripped = this.stripVersionSuffix(normalized);
             if (versionStripped && versionStripped !== normalized) {
                 variants.add(versionStripped);
             }
@@ -646,6 +658,164 @@ class PluginMarketplace {
         }
 
         return Array.from(variants);
+    }
+
+    normalizeName(name) {
+        if (!name || typeof name !== 'string') {
+            return '';
+        }
+        return name.trim().toLowerCase().replace(/_/g, '-');
+    }
+
+    stripVersionSuffix(name) {
+        if (!name) {
+            return '';
+        }
+        const stripped = name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+        return stripped;
+    }
+
+    extractRepoSlug(repoUrl) {
+        if (!repoUrl || typeof repoUrl !== 'string') {
+            return '';
+        }
+        try {
+            const parts = repoUrl.split('/');
+            const slug = parts.filter(Boolean).pop();
+            return slug ? slug.replace(/\.git$/, '') : '';
+        } catch (err) {
+            return '';
+        }
+    }
+
+    isPluginInstalled(plugin) {
+        return this.getPluginNameVariants(plugin).some(variant => this.installedPlugins.has(variant));
+    }
+
+    renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges) {
+        return `
+            <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
+                <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h5 class="card-title mb-0">${plugin.name}</h5>
+                            <div class="d-flex flex-column align-items-end gap-1">
+                                ${isInstalled ? `<span class="badge bg-success-subtle text-success">Installed</span>` : ''}
+                                ${updateInfo ? `<span class="badge bg-warning-subtle text-warning">Update</span>` : ''}
+                            </div>
+                        </div>
+
+                        <p class="card-text text-muted small">${plugin.description || 'No description available'}</p>
+
+                        ${platformBadges ? `<div class="mb-2">${platformBadges}</div>` : ''}
+
+                        <div class="mb-2">
+                            ${compatibility.badge}
+                        </div>
+
+                        <div class="mt-3">
+                            <div class="d-flex justify-content-between align-items-center small text-muted">
+                                <span>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                                        <path d="M12,17.56L16.07,16.43L16.62,10.33H9.38L9.2,8.3H16.8L17,6.31H7L7.56,12.32H14.45L14.22,14.9L12,15.5L9.78,14.9L9.64,13.24H7.64L7.93,16.43L12,17.56M4.07,3H19.93L18.5,19.2L12,21L5.5,19.2L4.07,3Z"/>
+                                    </svg>
+                                    v${plugin.version || '0.0.0'}
+                                </span>
+                                ${updateInfo ? `
+                                    <span class="text-warning">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
+                                        </svg>
+                                        Update available
+                                    </span>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent border-top-0">
+                        ${this.renderActionButton(plugin, isInstalled, updateInfo, compatibility)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges) {
+        return `
+            <div class="col-12 mb-3" data-compatible="${compatibility.compatible}">
+                <div class="card plugin-card list-view-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity:0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
+                    <div class="card-body">
+                        <div class="plugin-info">
+                            <div class="d-flex justify-content-between align-items-start mb-1">
+                                <div>
+                                    <h5 class="card-title mb-1">${plugin.name}</h5>
+                                    <p class="text-muted mb-2 small">${plugin.description || 'No description available'}</p>
+                                </div>
+                                <div class="d-flex flex-column align-items-end gap-1">
+                                    ${isInstalled ? `<span class="badge bg-success-subtle text-success">Installed</span>` : ''}
+                                    ${updateInfo ? `<span class="badge bg-warning-subtle text-warning">Update</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="plugin-metadata">
+                                <span>v${plugin.version || '0.0.0'}</span>
+                                <span>${plugin.metadata?.license || 'Unknown'}</span>
+                                ${platformBadges}
+                            </div>
+                            <div class="mt-2">
+                                ${compatibility.badge}
+                            </div>
+                        </div>
+                        <div class="plugin-actions">
+                            ${this.renderActionButton(plugin, isInstalled, updateInfo, compatibility)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderActionButton(plugin, isInstalled, updateInfo, compatibility) {
+        if (!isInstalled && !compatibility.compatible) {
+            return `
+                <button class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+                    </svg>
+                    Not Available
+                </button>
+            `;
+        }
+
+        if (!isInstalled) {
+            return `
+                <button class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                    </svg>
+                    Install
+                </button>
+            `;
+        }
+
+        if (updateInfo) {
+            return `
+                <button class="btn btn-sm btn-warning w-100" onclick="event.stopPropagation(); marketplace.updatePlugin('${plugin.name}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
+                    </svg>
+                    Update
+                </button>
+            `;
+        }
+
+        return `
+            <button class="btn btn-sm btn-outline-secondary w-100" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+                Installed
+            </button>
+        `;
     }
 }
 
