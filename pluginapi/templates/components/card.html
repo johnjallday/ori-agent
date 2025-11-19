@@ -1,0 +1,120 @@
+<style>
+    .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1.5rem;
+        margin: 2rem 0;
+    }
+
+    .card-item {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        padding: 1.5rem;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .card-item-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: #2d3748;
+    }
+
+    .card-item-description {
+        color: #718096;
+        margin-bottom: 1rem;
+        line-height: 1.5;
+    }
+
+    .card-item-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.875rem;
+        color: #a0aec0;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid #e2e8f0;
+    }
+
+    .card-item-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        background: #edf2f7;
+        color: #4a5568;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin-right: 0.5rem;
+    }
+
+    .card-item-badge.success {
+        background: #c6f6d5;
+        color: #22543d;
+    }
+
+    .card-item-badge.warning {
+        background: #feebc8;
+        color: #7c2d12;
+    }
+
+    .card-item-badge.info {
+        background: #bee3f8;
+        color: #2c5282;
+    }
+
+    .card-item-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+
+    .card-item-actions .btn {
+        flex: 1;
+        text-align: center;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+    }
+
+    @media (max-width: 768px) {
+        .cards-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<!-- Example card usage:
+<div class="cards-grid">
+    {{range .Items}}
+    <div class="card-item searchable-item">
+        <div class="card-item-title">{{.Title}}</div>
+        <div class="card-item-description">{{.Description}}</div>
+        {{if .Badges}}
+        <div>
+            {{range .Badges}}
+            <span class="card-item-badge {{.Class}}">{{.Label}}</span>
+            {{end}}
+        </div>
+        {{end}}
+        {{if .Meta}}
+        <div class="card-item-meta">
+            <span>{{.Meta}}</span>
+        </div>
+        {{end}}
+        {{if .Actions}}
+        <div class="card-item-actions">
+            {{range .Actions}}
+            <a href="{{.URL}}" class="btn {{.Class}}">{{.Label}}</a>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+    {{end}}
+</div>
+-->

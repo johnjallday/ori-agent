@@ -1,0 +1,44 @@
+<div class="search-bar" style="margin-bottom: 2rem;">
+    <style>
+        .search-bar input {
+            width: 100%;
+            padding: 1rem;
+            font-size: 1rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-bar input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-bar input::placeholder {
+            color: #a0aec0;
+        }
+    </style>
+    <input
+        type="text"
+        id="searchInput"
+        placeholder="{{if .Placeholder}}{{.Placeholder}}{{else}}Search...{{end}}"
+        onkeyup="filterItems()"
+    />
+</div>
+
+<script>
+function filterItems() {
+    const input = document.getElementById('searchInput');
+    const filter = input.value.toLowerCase();
+    const items = document.querySelectorAll('.searchable-item');
+
+    items.forEach(item => {
+        const text = item.textContent || item.innerText;
+        if (text.toLowerCase().indexOf(filter) > -1) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+}
+</script>
