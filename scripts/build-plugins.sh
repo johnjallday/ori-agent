@@ -27,13 +27,12 @@ echo -e "${CYAN}Target platform: $TARGET_OS/$TARGET_ARCH${NC}"
 # Build each plugin as RPC executable
 build_plugin() {
   local plugin_dir="$1"
-  local source_file="$2"
-  local output_name="$3"
+  local output_name="$2"
 
   echo -e "${YELLOW}Building RPC plugin: $plugin_dir${NC}"
 
-  if [ ! -f "example_plugins/$plugin_dir/$source_file" ]; then
-    echo -e "${RED}Error: Source file example_plugins/$plugin_dir/$source_file not found${NC}"
+  if [ ! -d "example_plugins/$plugin_dir" ]; then
+    echo -e "${RED}Error: Plugin directory example_plugins/$plugin_dir not found${NC}"
     return 1
   fi
 
@@ -47,8 +46,10 @@ build_plugin() {
     output_path="${output_path}.exe"
   fi
 
-  # Build as regular executable (not -buildmode=plugin)
-  if GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -o "$output_path" "example_plugins/$plugin_dir/$source_file"; then
+  # Build entire package to include generated files (*.go and *_generated.go)
+  # Change to plugin directory and build with "." to include all .go files
+  # Use GOWORK=off to disable workspace mode (plugins have their own go.mod)
+  if (cd "example_plugins/$plugin_dir" && GOWORK=off GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -o "../../$output_path" .); then
     echo -e "${GREEN}✓ Successfully built $output_name -> $output_path${NC}"
   else
     echo -e "${RED}✗ Failed to build $plugin_dir${NC}"
@@ -57,12 +58,14 @@ build_plugin() {
 }
 
 # Build individual plugins
-build_plugin "weather" "weather.go" "weather"
-build_plugin "math" "math.go" "math"
-build_plugin "result-handler" "main.go" "result-handler"
+build_plugin "weather" "weather"
+build_plugin "math" "math"
+build_plugin "result-handler" "result-handler"
+build_plugin "minimal" "minimal"
+build_plugin "webapp" "webapp"
 
 echo ""
 echo -e "${GREEN}All plugins built successfully!${NC}"
 echo -e "${BLUE}Plugin executables in uploaded_plugins/:${NC}"
-ls -lh uploaded_plugins/weather uploaded_plugins/math uploaded_plugins/result-handler 2>/dev/null || true
+ls -lh uploaded_plugins/weather uploaded_plugins/math uploaded_plugins/result-handler uploaded_plugins/minimal uploaded_plugins/webapp 2>/dev/null || true
 echo ""
