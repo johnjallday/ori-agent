@@ -57,6 +57,20 @@ menubar: ## Build the menu bar app
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
 
+plugin-gen: ## Build the plugin code generator
+	@echo "$(BLUE)Building plugin generator...$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/ori-plugin-gen ./cmd/ori-plugin-gen
+	@echo "$(GREEN)✓ Plugin generator built: $(BUILD_DIR)/ori-plugin-gen$(NC)"
+
+generate: plugin-gen ## Generate code for all plugins
+	@echo "$(BLUE)Generating plugin code...$(NC)"
+	@cd example_plugins/weather && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=weather_generated.go
+	@cd example_plugins/math && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=math_generated.go
+	@cd example_plugins/result-handler && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=result_handler_generated.go
+	@cd example_plugins/minimal && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=minimal_generated.go
+	@cd example_plugins/webapp && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=webapp_generated.go
+	@echo "$(GREEN)✓ Code generation complete$(NC)"
+
 plugins: ## Build all plugins
 	@echo "$(BLUE)Building plugins...$(NC)"
 	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
@@ -68,7 +82,7 @@ icons: ## Generate menubar and app icons from SVG
 	@./scripts/generate-app-icon.sh
 	@echo "$(GREEN)✓ Icons generated$(NC)"
 
-all: deps build menubar plugins ## Build everything (server + menubar + plugins)
+all: deps generate build menubar plugins ## Build everything (server + menubar + plugins with code generation)
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
 build-all: all ## Alias for 'all' - Build everything
@@ -80,6 +94,12 @@ clean: ## Clean build artifacts
 	rm -rf build-dmg
 	rm -rf $(PLUGINS_DIR)/*/$(shell basename $(PLUGINS_DIR))
 	@echo "$(GREEN)✓ Clean complete$(NC)"
+
+clean-generated: ## Clean generated plugin code
+	@echo "$(BLUE)Cleaning generated files...$(NC)"
+	rm -f example_plugins/*/*.generated.go
+	rm -f example_plugins/*/*_generated.go
+	@echo "$(GREEN)✓ Generated files cleaned$(NC)"
 
 ## Run targets
 
