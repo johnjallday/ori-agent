@@ -28,6 +28,8 @@ type YAMLMaintainer struct {
 // YAMLRequirements represents plugin dependencies and version requirements (YAML format)
 type YAMLRequirements struct {
 	MinOriVersion string   `yaml:"min_ori_version,omitempty"`
+	MaxOriVersion string   `yaml:"max_ori_version,omitempty"`
+	ApiVersion    string   `yaml:"api_version,omitempty"`
 	Dependencies  []string `yaml:"dependencies,omitempty"`
 }
 

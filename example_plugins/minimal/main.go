@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -182,34 +181,5 @@ func (t *minimalTool) InitializeWithConfig(config map[string]interface{}) error 
 }
 
 func main() {
-	// Parse plugin config from embedded YAML
-	config := pluginapi.ReadPluginConfig(configYAML)
-
-	// Create plugin instance
-	tool := &minimalTool{
-		BasePlugin: pluginapi.NewBasePlugin(
-			"minimal-plugin",
-			config.Version,
-			config.Requirements.MinOriVersion,
-			"",
-			"v1",
-		),
-	}
-
-	// Set plugin config for YAML-based features
-	tool.SetPluginConfig(&config)
-
-	// Set metadata from config
-	if metadata, err := config.ToMetadata(); err == nil {
-		tool.SetMetadata(metadata)
-	}
-
-	// Serve the plugin
-	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: pluginapi.Handshake,
-		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: tool},
-		},
-		GRPCServer: plugin.DefaultGRPCServer,
-	})
+	pluginapi.ServePlugin(&minimalTool{}, configYAML)
 }

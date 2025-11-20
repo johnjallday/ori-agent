@@ -154,6 +154,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 💡 **Feature Requests**: Open an issue with the "enhancement" label
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/ori-agent/discussions)
 
+While this app is very functional, there will be a lot of breaking changes. Feel free to give feedbacks.
+
+## 🛣️Roadmap
+- blockchain integration
+- white paper
+- web3 integration for markets.
+- sqlite to save conversation history (maybe)
+
+
 ---
 
 Made with ❤️ using Go and modern web technologies

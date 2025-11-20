@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/hashicorp/go-plugin"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -92,33 +91,5 @@ func handleDivide(m *mathTool, params *OperationParams) (string, error) {
 // No need for getter methods - BasePlugin provides them all!
 
 func main() {
-	// Parse plugin config from embedded YAML
-	config := pluginapi.ReadPluginConfig(configYAML)
-
-	// Create math tool with base plugin
-	tool := &mathTool{
-		BasePlugin: pluginapi.NewBasePlugin(
-			"math",                            // Plugin name
-			config.Version,                    // Version from config
-			config.Requirements.MinOriVersion, // Min agent version
-			"",                                // Max agent version (no limit)
-			"v1",                              // API version
-		),
-	}
-
-	// Set plugin config for YAML-based features
-	tool.SetPluginConfig(&config)
-
-	// Set metadata from config
-	if metadata, err := config.ToMetadata(); err == nil {
-		tool.SetMetadata(metadata)
-	}
-
-	plugin.Serve(&plugin.ServeConfig{
-		HandshakeConfig: pluginapi.Handshake,
-		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: tool},
-		},
-		GRPCServer: plugin.DefaultGRPCServer,
-	})
+	pluginapi.ServePlugin(&mathTool{}, configYAML)
 }
