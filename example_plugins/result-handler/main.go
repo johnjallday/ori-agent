@@ -18,65 +18,66 @@ var configYAML string
 
 // resultHandlerTool implements pluginapi.Tool for handling chat result actions
 type resultHandlerTool struct {
-	config pluginapi.PluginConfig
+	pluginapi.BasePlugin
+}
+
+// OperationParams holds all possible parameters for operations
+type OperationParams struct {
+	Action  string `json:"action"`
+	Path    string `json:"path"`
+	Context string `json:"context"`
+}
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(t *resultHandlerTool, params *OperationParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+var operationRegistry = map[string]OperationHandler{
+	"open_directory":   handleOpenDirectory,
+	"open_file":        handleOpenFile,
+	"open_url":         handleOpenURL,
+	"reveal_in_finder": handleOpenDirectory, // Same as open_directory
 }
 
 // Ensure compile-time conformance
-var _ pluginapi.PluginTool = resultHandlerTool{}
-var _ pluginapi.VersionedTool = resultHandlerTool{}
-var _ pluginapi.PluginCompatibility = resultHandlerTool{}
-var _ pluginapi.MetadataProvider = resultHandlerTool{}
+var _ pluginapi.PluginTool = (*resultHandlerTool)(nil)
+var _ pluginapi.VersionedTool = (*resultHandlerTool)(nil)
+var _ pluginapi.PluginCompatibility = (*resultHandlerTool)(nil)
+var _ pluginapi.MetadataProvider = (*resultHandlerTool)(nil)
 
-func (t resultHandlerTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
-		Name:        "result_handler",
-		Description: "Handle actions on chat results like opening directories, files, or URLs",
-		Parameters: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"action": map[string]interface{}{
-					"type":        "string",
-					"description": "Action to perform",
-					"enum":        []string{"open_directory", "open_file", "open_url", "reveal_in_finder"},
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path, directory path, or URL to open",
-				},
-				"context": map[string]interface{}{
-					"type":        "string",
-					"description": "Optional context about what triggered this action (e.g., 'reaper_scripts', 'config_file')",
-				},
-			},
-			"required": []string{"action", "path"},
-		},
-	}
-}
+// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 
-func (t resultHandlerTool) Call(ctx context.Context, args string) (string, error) {
-	var params struct {
-		Action  string `json:"action"`
-		Path    string `json:"path"`
-		Context string `json:"context"`
-	}
-
+func (t *resultHandlerTool) Call(ctx context.Context, args string) (string, error) {
+	var params OperationParams
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("failed to parse parameters: %w", err)
 	}
 
-	switch params.Action {
-	case "open_directory", "reveal_in_finder":
-		return t.openDirectory(params.Path, params.Context)
-	case "open_file":
-		return t.openFile(params.Path, params.Context)
-	case "open_url":
-		return t.openURL(params.Path, params.Context)
-	default:
-		return "", fmt.Errorf("unknown action: %s", params.Action)
+	// Look up handler in registry
+	handler, ok := operationRegistry[params.Action]
+	if !ok {
+		return "", fmt.Errorf("unknown action: %s. Valid actions: open_directory, open_file, open_url, reveal_in_finder", params.Action)
 	}
+
+	// Execute the handler
+	return handler(t, &params)
 }
 
-func (t resultHandlerTool) openDirectory(dirPath, context string) (string, error) {
+// Operation handlers
+
+func handleOpenDirectory(t *resultHandlerTool, params *OperationParams) (string, error) {
+	return t.openDirectory(params.Path, params.Context)
+}
+
+func handleOpenFile(t *resultHandlerTool, params *OperationParams) (string, error) {
+	return t.openFile(params.Path, params.Context)
+}
+
+func handleOpenURL(t *resultHandlerTool, params *OperationParams) (string, error) {
+	return t.openURL(params.Path, params.Context)
+}
+
+func (t *resultHandlerTool) openDirectory(dirPath, context string) (string, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -115,7 +116,7 @@ func (t resultHandlerTool) openDirectory(dirPath, context string) (string, error
 	return fmt.Sprintf("📁 Opened directory in %s: %s%s", getFileManagerName(), dirPath, contextMsg), nil
 }
 
-func (t resultHandlerTool) openFile(filePath, context string) (string, error) {
+func (t *resultHandlerTool) openFile(filePath, context string) (string, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -144,7 +145,7 @@ func (t resultHandlerTool) openFile(filePath, context string) (string, error) {
 	return fmt.Sprintf("📄 Opened file: %s%s", filePath, contextMsg), nil
 }
 
-func (t resultHandlerTool) openURL(url, context string) (string, error) {
+func (t *resultHandlerTool) openURL(url, context string) (string, error) {
 	// Ensure URL has a scheme
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "file://") {
 		url = "https://" + url
@@ -191,39 +192,36 @@ func getFileManagerName() string {
 	}
 }
 
-// Version returns the plugin version from config.
-func (t resultHandlerTool) Version() string {
-	return t.config.Version
-}
-
-// MinAgentVersion returns the minimum compatible agent version from config.
-func (t resultHandlerTool) MinAgentVersion() string {
-	return t.config.Requirements.MinOriVersion
-}
-
-// MaxAgentVersion returns the maximum compatible agent version (empty = no limit).
-func (t resultHandlerTool) MaxAgentVersion() string {
-	return ""
-}
-
-// APIVersion returns the API version this plugin implements.
-func (t resultHandlerTool) APIVersion() string {
-	return "v1"
-}
-
-// GetMetadata returns plugin metadata from config.
-func (t resultHandlerTool) GetMetadata() (*pluginapi.PluginMetadata, error) {
-	return t.config.ToMetadata()
-}
+// No need for Version, MinAgentVersion, MaxAgentVersion, APIVersion, GetMetadata
+// BasePlugin provides them all!
 
 func main() {
 	// Parse plugin config from embedded YAML
 	config := pluginapi.ReadPluginConfig(configYAML)
 
+	// Create result handler tool with base plugin
+	tool := &resultHandlerTool{
+		BasePlugin: pluginapi.NewBasePlugin(
+			"result_handler",                  // Plugin name
+			config.Version,                    // Version from config
+			config.Requirements.MinOriVersion, // Min agent version
+			"",                                // Max agent version (no limit)
+			"v1",                              // API version
+		),
+	}
+
+	// Set plugin config for YAML-based features
+	tool.SetPluginConfig(&config)
+
+	// Set metadata from config
+	if metadata, err := config.ToMetadata(); err == nil {
+		tool.SetMetadata(metadata)
+	}
+
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: pluginapi.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"tool": &pluginapi.ToolRPCPlugin{Impl: resultHandlerTool{config: config}},
+			"tool": &pluginapi.ToolRPCPlugin{Impl: tool},
 		},
 		GRPCServer: plugin.DefaultGRPCServer,
 	})

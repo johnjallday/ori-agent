@@ -27,59 +27,65 @@ type mathTool struct {
 	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
-// Definition returns the generic function definition for the math operation.
-func (m *mathTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
-		Name:        "math",
-		Description: "Perform basic math operations: add, subtract, multiply, divide",
-		Parameters: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"operation": map[string]interface{}{
-					"type":        "string",
-					"description": "Operation to perform: add, subtract, multiply, divide",
-					"enum":        []string{"add", "subtract", "multiply", "divide"},
-				},
-				"a": map[string]interface{}{
-					"type":        "number",
-					"description": "First operand",
-				},
-				"b": map[string]interface{}{
-					"type":        "number",
-					"description": "Second operand",
-				},
-			},
-			"required": []string{"operation", "a", "b"},
-		},
-	}
+// OperationParams holds all possible parameters for operations
+type OperationParams struct {
+	Operation string  `json:"operation"`
+	A         float64 `json:"a"`
+	B         float64 `json:"b"`
 }
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(m *mathTool, params *OperationParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+var operationRegistry = map[string]OperationHandler{
+	"add":      handleAdd,
+	"subtract": handleSubtract,
+	"multiply": handleMultiply,
+	"divide":   handleDivide,
+}
+
+// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 
 // Call is invoked with the function arguments and returns the computed result.
 func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
-	var p struct {
-		Operation string  `json:"operation"`
-		A         float64 `json:"a"`
-		B         float64 `json:"b"`
-	}
-	if err := json.Unmarshal([]byte(args), &p); err != nil {
+	var params OperationParams
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", err
 	}
-	var result float64
-	switch p.Operation {
-	case "add":
-		result = p.A + p.B
-	case "subtract":
-		result = p.A - p.B
-	case "multiply":
-		result = p.A * p.B
-	case "divide":
-		if p.B == 0 {
-			return "", errors.New("division by zero")
-		}
-		result = p.A / p.B
-	default:
-		return "", fmt.Errorf("unknown operation %q", p.Operation)
+
+	// Look up handler in registry
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: add, subtract, multiply, divide", params.Operation)
 	}
+
+	// Execute the handler
+	return handler(m, &params)
+}
+
+// Operation handlers
+
+func handleAdd(m *mathTool, params *OperationParams) (string, error) {
+	result := params.A + params.B
+	return fmt.Sprintf("%g", result), nil
+}
+
+func handleSubtract(m *mathTool, params *OperationParams) (string, error) {
+	result := params.A - params.B
+	return fmt.Sprintf("%g", result), nil
+}
+
+func handleMultiply(m *mathTool, params *OperationParams) (string, error) {
+	result := params.A * params.B
+	return fmt.Sprintf("%g", result), nil
+}
+
+func handleDivide(m *mathTool, params *OperationParams) (string, error) {
+	if params.B == 0 {
+		return "", errors.New("division by zero")
+	}
+	result := params.A / params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
@@ -99,6 +105,9 @@ func main() {
 			"v1",                              // API version
 		),
 	}
+
+	// Set plugin config for YAML-based features
+	tool.SetPluginConfig(&config)
 
 	// Set metadata from config
 	if metadata, err := config.ToMetadata(); err == nil {

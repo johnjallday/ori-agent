@@ -26,23 +26,7 @@ type weatherTool struct {
 	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
-// Definition returns the generic function definition for get_weather.
-func (w *weatherTool) Definition() pluginapi.Tool {
-	return pluginapi.Tool{
-		Name:        "get_weather",
-		Description: "Get weather for a given location",
-		Parameters: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"location": map[string]interface{}{
-					"type":        "string",
-					"description": "Location to get weather for",
-				},
-			},
-			"required": []string{"location"},
-		},
-	}
-}
+// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 
 // Call is invoked with the function arguments and returns weather data.
 func (w *weatherTool) Call(ctx context.Context, args string) (string, error) {
@@ -71,6 +55,9 @@ func main() {
 			"v1",                              // API version
 		),
 	}
+
+	// Set plugin config for YAML-based features
+	tool.SetPluginConfig(&config)
 
 	// Set metadata from config
 	if metadata, err := config.ToMetadata(); err == nil {

@@ -19,3 +19,24 @@ platforms:
 requirements:
   min_ori_version: "0.1.0"
   dependencies: []
+
+tool_definition:
+  description: "Handle actions on chat results like opening directories, files, or URLs"
+  parameters:
+    - name: action
+      type: string
+      description: "Action to perform"
+      required: true
+      enum:
+        - open_directory
+        - open_file
+        - open_url
+        - reveal_in_finder
+    - name: path
+      type: string
+      description: "File path, directory path, or URL to open"
+      required: true
+    - name: context
+      type: string
+      description: "Optional context about what triggered this action (e.g., 'reaper_scripts', 'config_file')"
+      required: false

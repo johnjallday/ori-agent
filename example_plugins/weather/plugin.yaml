@@ -19,3 +19,11 @@ platforms:
 requirements:
   min_ori_version: "0.1.0"
   dependencies: []
+
+tool_definition:
+  description: "Get weather for a given location"
+  parameters:
+    - name: location
+      type: string
+      description: "Location to get weather for"
+      required: true
