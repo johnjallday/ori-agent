@@ -1,9 +1,10 @@
 package main
 
+//go:generate ../../bin/ori-plugin-gen -yaml=plugin.yaml -output=weather_generated.go
+
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -12,34 +13,22 @@ import (
 //go:embed plugin.yaml
 var configYAML string
 
-// ensure weatherTool implements pluginapi.PluginTool and optional interfaces
-var (
-	_ pluginapi.PluginTool          = (*weatherTool)(nil)
-	_ pluginapi.VersionedTool       = (*weatherTool)(nil)
-	_ pluginapi.PluginCompatibility = (*weatherTool)(nil)
-	_ pluginapi.MetadataProvider    = (*weatherTool)(nil)
-)
-
-// weatherTool implements pluginapi.Tool for fetching weather.
-type weatherTool struct {
+// get_weatherTool implements pluginapi.Tool for fetching weather.
+// Note: Compile-time interface check is in weather_generated.go
+type get_weatherTool struct {
 	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
+// Note: Call() is auto-generated in weather_generated.go from plugin.yaml
 
-// Call is invoked with the function arguments and returns weather data.
-func (w *weatherTool) Call(ctx context.Context, args string) (string, error) {
-	var p struct {
-		Location string `json:"location"`
-	}
-	if err := json.Unmarshal([]byte(args), &p); err != nil {
-		return "", err
-	}
+// Execute contains the business logic - called by the generated Call() method
+func (w *get_weatherTool) Execute(ctx context.Context, params *GetWeatherParams) (string, error) {
 	// TODO: replace with real API call.
-	result := fmt.Sprintf("Sunny, 25°C in %s", p.Location)
+	result := fmt.Sprintf("Sunny, 25°C in %s", params.Location)
 	return result, nil
 }
 
 func main() {
-	pluginapi.ServePlugin(&weatherTool{}, configYAML)
+	pluginapi.ServePlugin(&get_weatherTool{}, configYAML)
 }

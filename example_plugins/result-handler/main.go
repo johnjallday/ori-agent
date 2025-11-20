@@ -1,9 +1,10 @@
 package main
 
+//go:generate ../../bin/ori-plugin-gen -yaml=plugin.yaml -output=result_handler_generated.go
+
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -15,20 +16,14 @@ import (
 //go:embed plugin.yaml
 var configYAML string
 
-// resultHandlerTool implements pluginapi.Tool for handling chat result actions
-type resultHandlerTool struct {
+// result_handlerTool implements pluginapi.Tool for handling chat result actions
+// Note: Compile-time interface check is in result_handler_generated.go
+type result_handlerTool struct {
 	pluginapi.BasePlugin
 }
 
-// OperationParams holds all possible parameters for operations
-type OperationParams struct {
-	Action  string `json:"action"`
-	Path    string `json:"path"`
-	Context string `json:"context"`
-}
-
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(t *resultHandlerTool, params *OperationParams) (string, error)
+type OperationHandler func(t *result_handlerTool, params *ResultHandlerParams) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 var operationRegistry = map[string]OperationHandler{
@@ -38,20 +33,11 @@ var operationRegistry = map[string]OperationHandler{
 	"reveal_in_finder": handleOpenDirectory, // Same as open_directory
 }
 
-// Ensure compile-time conformance
-var _ pluginapi.PluginTool = (*resultHandlerTool)(nil)
-var _ pluginapi.VersionedTool = (*resultHandlerTool)(nil)
-var _ pluginapi.PluginCompatibility = (*resultHandlerTool)(nil)
-var _ pluginapi.MetadataProvider = (*resultHandlerTool)(nil)
-
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
+// Note: Call() is auto-generated in result_handler_generated.go from plugin.yaml
 
-func (t *resultHandlerTool) Call(ctx context.Context, args string) (string, error) {
-	var params OperationParams
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
-		return "", fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
+// Execute contains the business logic - called by the generated Call() method
+func (t *result_handlerTool) Execute(ctx context.Context, params *ResultHandlerParams) (string, error) {
 	// Look up handler in registry
 	handler, ok := operationRegistry[params.Action]
 	if !ok {
@@ -59,24 +45,24 @@ func (t *resultHandlerTool) Call(ctx context.Context, args string) (string, erro
 	}
 
 	// Execute the handler
-	return handler(t, &params)
+	return handler(t, params)
 }
 
 // Operation handlers
 
-func handleOpenDirectory(t *resultHandlerTool, params *OperationParams) (string, error) {
+func handleOpenDirectory(t *result_handlerTool, params *ResultHandlerParams) (string, error) {
 	return t.openDirectory(params.Path, params.Context)
 }
 
-func handleOpenFile(t *resultHandlerTool, params *OperationParams) (string, error) {
+func handleOpenFile(t *result_handlerTool, params *ResultHandlerParams) (string, error) {
 	return t.openFile(params.Path, params.Context)
 }
 
-func handleOpenURL(t *resultHandlerTool, params *OperationParams) (string, error) {
+func handleOpenURL(t *result_handlerTool, params *ResultHandlerParams) (string, error) {
 	return t.openURL(params.Path, params.Context)
 }
 
-func (t *resultHandlerTool) openDirectory(dirPath, context string) (string, error) {
+func (t *result_handlerTool) openDirectory(dirPath, context string) (string, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -115,7 +101,7 @@ func (t *resultHandlerTool) openDirectory(dirPath, context string) (string, erro
 	return fmt.Sprintf("📁 Opened directory in %s: %s%s", getFileManagerName(), dirPath, contextMsg), nil
 }
 
-func (t *resultHandlerTool) openFile(filePath, context string) (string, error) {
+func (t *result_handlerTool) openFile(filePath, context string) (string, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -144,7 +130,7 @@ func (t *resultHandlerTool) openFile(filePath, context string) (string, error) {
 	return fmt.Sprintf("📄 Opened file: %s%s", filePath, contextMsg), nil
 }
 
-func (t *resultHandlerTool) openURL(url, context string) (string, error) {
+func (t *result_handlerTool) openURL(url, context string) (string, error) {
 	// Ensure URL has a scheme
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "file://") {
 		url = "https://" + url
@@ -191,9 +177,6 @@ func getFileManagerName() string {
 	}
 }
 
-// No need for Version, MinAgentVersion, MaxAgentVersion, APIVersion, GetMetadata
-// BasePlugin provides them all!
-
 func main() {
-	pluginapi.ServePlugin(&resultHandlerTool{}, configYAML)
+	pluginapi.ServePlugin(&result_handlerTool{}, configYAML)
 }

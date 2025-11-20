@@ -1,9 +1,10 @@
 package main
 
+//go:generate ../../bin/ori-plugin-gen -yaml=plugin.yaml -output=math_generated.go
+
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -13,28 +14,14 @@ import (
 //go:embed plugin.yaml
 var configYAML string
 
-// ensure mathTool implements pluginapi.PluginTool and optional interfaces at compile time
-var (
-	_ pluginapi.PluginTool          = (*mathTool)(nil)
-	_ pluginapi.VersionedTool       = (*mathTool)(nil)
-	_ pluginapi.PluginCompatibility = (*mathTool)(nil)
-	_ pluginapi.MetadataProvider    = (*mathTool)(nil)
-)
-
 // mathTool implements pluginapi.Tool for basic arithmetic operations.
+// Note: Compile-time interface check is in math_generated.go
 type mathTool struct {
 	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
-// OperationParams holds all possible parameters for operations
-type OperationParams struct {
-	Operation string  `json:"operation"`
-	A         float64 `json:"a"`
-	B         float64 `json:"b"`
-}
-
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(m *mathTool, params *OperationParams) (string, error)
+type OperationHandler func(m *mathTool, params *MathParams) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 var operationRegistry = map[string]OperationHandler{
@@ -45,14 +32,10 @@ var operationRegistry = map[string]OperationHandler{
 }
 
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
+// Note: Call() is auto-generated in math_generated.go from plugin.yaml
 
-// Call is invoked with the function arguments and returns the computed result.
-func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
-	var params OperationParams
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
-		return "", err
-	}
-
+// Execute contains the business logic - called by the generated Call() method
+func (m *mathTool) Execute(ctx context.Context, params *MathParams) (string, error) {
 	// Look up handler in registry
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
@@ -60,35 +43,33 @@ func (m *mathTool) Call(ctx context.Context, args string) (string, error) {
 	}
 
 	// Execute the handler
-	return handler(m, &params)
+	return handler(m, params)
 }
 
 // Operation handlers
 
-func handleAdd(m *mathTool, params *OperationParams) (string, error) {
+func handleAdd(m *mathTool, params *MathParams) (string, error) {
 	result := params.A + params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleSubtract(m *mathTool, params *OperationParams) (string, error) {
+func handleSubtract(m *mathTool, params *MathParams) (string, error) {
 	result := params.A - params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleMultiply(m *mathTool, params *OperationParams) (string, error) {
+func handleMultiply(m *mathTool, params *MathParams) (string, error) {
 	result := params.A * params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleDivide(m *mathTool, params *OperationParams) (string, error) {
+func handleDivide(m *mathTool, params *MathParams) (string, error) {
 	if params.B == 0 {
 		return "", errors.New("division by zero")
 	}
 	result := params.A / params.B
 	return fmt.Sprintf("%g", result), nil
 }
-
-// No need for getter methods - BasePlugin provides them all!
 
 func main() {
 	pluginapi.ServePlugin(&mathTool{}, configYAML)

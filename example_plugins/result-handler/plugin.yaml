@@ -1,4 +1,4 @@
-name: result_handler
+name: result-handler
 version: 0.0.1
 description: Handle actions on chat results like opening directories, files, or URLs
 license: MIT
