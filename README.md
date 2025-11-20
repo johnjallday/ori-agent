@@ -65,8 +65,73 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
    ```
    http://localhost:8765
    ```
+
+## 🔌 Plugin Development
+
+Ori Agent uses a plugin system that lets you extend functionality with custom tools. Build plugins as standalone executables that communicate via gRPC.
+
+### Plugin Optimization APIs (New!)
+
+We've introduced three powerful APIs that dramatically simplify plugin development:
+
+#### 1. **YAML-Based Tool Definitions** (70% less code!)
+Define parameters in `plugin.yaml` instead of code:
+
+```yaml
+tool_definition:
+  description: "Your tool description"
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: [create, list, delete]
+    - name: count
+      type: integer
+      min: 1
+      max: 100
 ```
 
+```go
+func (t *MyTool) Definition() pluginapi.Tool {
+    tool, _ := t.GetToolDefinition()  // Auto-loads from plugin.yaml
+    return tool
+}
+```
+
+#### 2. **Settings API**
+Simple, thread-safe key-value storage for plugin configuration:
+
+```go
+sm := t.Settings()
+sm.Set("api_key", "sk-123")
+apiKey, _ := sm.GetString("api_key")
+```
+
+#### 3. **Template Rendering API**
+Serve beautiful web pages with Go templates:
+
+```go
+//go:embed templates
+var templatesFS embed.FS
+
+html, err := pluginapi.RenderTemplate(templatesFS, "templates/page.html", data)
+```
+
+### Getting Started with Plugins
+
+- **Documentation**: See [PLUGIN_OPTIMIZATION_GUIDE.md](PLUGIN_OPTIMIZATION_GUIDE.md) for complete migration guide
+- **Examples**: Check out `example_plugins/minimal/` and `example_plugins/webapp/`
+- **Reference**: See [CLAUDE.md](CLAUDE.md) for detailed plugin development patterns
+
+### Building a Plugin
+
+```bash
+cd example_plugins/minimal
+go build -o minimal-plugin main.go
+cp minimal-plugin ../../uploaded_plugins/
+```
+
+Restart Ori Agent, and your plugin will be automatically loaded!
 
 #### Installing Development Tools
 
