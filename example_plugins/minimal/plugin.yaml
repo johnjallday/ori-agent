@@ -1,0 +1,70 @@
+name: minimal-plugin
+version: 1.0.0
+description: Minimal example plugin demonstrating YAML-based configuration
+license: MIT
+repository: https://github.com/example/minimal-plugin
+
+maintainers:
+  - name: Example Team
+    email: team@example.com
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
+
+requirements:
+  min_ori_version: "0.0.9"
+  dependencies: []
+
+config:
+  variables:
+    - key: api_endpoint
+      name: API Endpoint
+      description: The API endpoint URL to connect to
+      type: string
+      required: true
+      default_value: "https://api.example.com"
+      placeholder: "https://api.example.com"
+
+    - key: timeout_seconds
+      name: Timeout (seconds)
+      description: Request timeout in seconds
+      type: int
+      required: false
+      default_value: "30"
+      placeholder: "30"
+
+    - key: debug_mode
+      name: Debug Mode
+      description: Enable debug logging
+      type: bool
+      required: false
+      default_value: "false"
+
+tool_definition:
+  description: "Minimal example tool demonstrating YAML-based configuration. Supports echo and status operations."
+  parameters:
+    - name: operation
+      type: string
+      description: "Operation to perform: echo (returns input) or status (returns plugin status)"
+      required: true
+      enum:
+        - echo
+        - status
+
+    - name: message
+      type: string
+      description: "Message to echo (required for echo operation)"
+      required: false
+
+    - name: count
+      type: integer
+      description: "Number of times to repeat the message (for echo operation)"
+      required: false
+      min: 1
+      max: 10
+      default: 1

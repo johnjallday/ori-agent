@@ -1,0 +1,54 @@
+name: webapp-plugin
+version: 1.0.0
+description: Example plugin demonstrating web page templates and the Template Rendering API
+license: MIT
+repository: https://github.com/example/webapp-plugin
+
+maintainers:
+  - name: Example Team
+    email: team@example.com
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
+
+requirements:
+  min_ori_version: "0.0.9"
+  dependencies: []
+
+config:
+  variables:
+    - key: items_per_page
+      name: Items Per Page
+      description: Number of items to display per page
+      type: int
+      required: false
+      default_value: "10"
+      placeholder: "10"
+
+tool_definition:
+  description: "Example tool with web interface. Manages a simple list of items."
+  parameters:
+    - name: operation
+      type: string
+      description: "Operation to perform"
+      required: true
+      enum:
+        - add_item
+        - list_items
+        - delete_item
+        - open_dashboard
+
+    - name: item_name
+      type: string
+      description: "Name of the item (for add_item and delete_item operations)"
+      required: false
+
+    - name: item_description
+      type: string
+      description: "Description of the item (for add_item operation)"
+      required: false

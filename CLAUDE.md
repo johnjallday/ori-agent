@@ -225,6 +225,70 @@ go build -o math math.go  # NOT -buildmode=plugin
 # Plugin automatically uses gRPC for communication with server
 ```
 
+### Plugin Optimization APIs (Recommended)
+
+**New in 2024**: Ori Agent now provides optimization APIs that dramatically simplify plugin development:
+
+**1. YAML-Based Tool Definitions**
+Define tool parameters in `plugin.yaml` instead of code (70% less code):
+
+```yaml
+# plugin.yaml
+tool_definition:
+  description: "Your tool description"
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: [create, list, delete]
+    - name: count
+      type: integer
+      min: 1
+      max: 100
+```
+
+```go
+// Simplified Definition() method
+func (t *MyTool) Definition() pluginapi.Tool {
+    tool, _ := t.GetToolDefinition()  // Reads from plugin.yaml
+    return tool
+}
+```
+
+**2. Settings API**
+Simple key-value storage for plugin configuration:
+
+```go
+// Store settings
+sm := t.Settings()
+sm.Set("api_key", "sk-123")
+sm.Set("max_retries", 5)
+
+// Retrieve settings (type-safe)
+apiKey, _ := sm.GetString("api_key")
+retries, _ := sm.GetInt("max_retries")
+```
+
+**3. Template Rendering API**
+Serve web pages with Go templates:
+
+```go
+//go:embed templates
+var templatesFS embed.FS
+
+html, err := pluginapi.RenderTemplate(templatesFS, "templates/page.html", data)
+```
+
+**Benefits**:
+- 70-90% reduction in boilerplate code
+- Thread-safe settings with atomic writes
+- Automatic XSS protection in templates
+- Clean separation of concerns
+
+**Documentation**: See `PLUGIN_OPTIMIZATION_GUIDE.md` for complete migration guide.
+
+**Examples**: See `example_plugins/minimal/` and `example_plugins/webapp/` for working examples.
+
 ### Plugin Locations
 
 1. `plugins/` - Built-in plugins (math, weather, result-handler)

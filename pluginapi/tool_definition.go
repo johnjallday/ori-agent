@@ -90,6 +90,9 @@ func buildParameterSchema(name string, param YAMLToolParameter) (map[string]inte
 		if param.Default != nil {
 			schema["default"] = param.Default
 		}
+		if len(param.Enum) > 0 {
+			schema["enum"] = param.Enum
+		}
 		if param.MinLength != nil {
 			schema["minLength"] = *param.MinLength
 		}
