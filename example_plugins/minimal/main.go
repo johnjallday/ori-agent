@@ -1,9 +1,10 @@
 package main
 
+//go:generate ../../bin/ori-plugin-gen -yaml=plugin.yaml -output=minimal_generated.go
+
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -13,20 +14,14 @@ import (
 //go:embed plugin.yaml
 var configYAML string
 
-// minimalTool demonstrates the optimized plugin development experience
-type minimalTool struct {
+// minimal_pluginTool demonstrates the optimized plugin development experience
+// Note: Compile-time interface check is in minimal_generated.go
+type minimal_pluginTool struct {
 	pluginapi.BasePlugin
 }
 
-// OperationParams holds all possible parameters for operations
-type OperationParams struct {
-	Operation string `json:"operation"`
-	Message   string `json:"message"`
-	Count     int    `json:"count"`
-}
-
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(t *minimalTool, params *OperationParams) (string, error)
+type OperationHandler func(t *minimal_pluginTool, params *MinimalPluginParams) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 var operationRegistry = map[string]OperationHandler{
@@ -34,21 +29,16 @@ var operationRegistry = map[string]OperationHandler{
 	"status": handleStatus,
 }
 
-// Ensure compile-time interface conformance
-var _ pluginapi.PluginTool = (*minimalTool)(nil)
-var _ pluginapi.VersionedTool = (*minimalTool)(nil)
-var _ pluginapi.AgentAwareTool = (*minimalTool)(nil)
-var _ pluginapi.InitializationProvider = (*minimalTool)(nil)
+// Ensure compile-time interface conformance for optional interfaces
+var _ pluginapi.VersionedTool = (*minimal_pluginTool)(nil)
+var _ pluginapi.AgentAwareTool = (*minimal_pluginTool)(nil)
+var _ pluginapi.InitializationProvider = (*minimal_pluginTool)(nil)
 
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
+// Note: Call() is auto-generated in minimal_generated.go from plugin.yaml
 
-// Call executes the tool with the given arguments
-func (t *minimalTool) Call(ctx context.Context, args string) (string, error) {
-	var params OperationParams
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
+// Execute contains the business logic - called by the generated Call() method
+func (t *minimal_pluginTool) Execute(ctx context.Context, params *MinimalPluginParams) (string, error) {
 	// Look up handler in registry
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
@@ -56,21 +46,21 @@ func (t *minimalTool) Call(ctx context.Context, args string) (string, error) {
 	}
 
 	// Execute the handler
-	return handler(t, &params)
+	return handler(t, params)
 }
 
 // Operation handlers
 
-func handleEcho(t *minimalTool, params *OperationParams) (string, error) {
+func handleEcho(t *minimal_pluginTool, params *MinimalPluginParams) (string, error) {
 	return t.handleEcho(params.Message, params.Count)
 }
 
-func handleStatus(t *minimalTool, params *OperationParams) (string, error) {
+func handleStatus(t *minimal_pluginTool, params *MinimalPluginParams) (string, error) {
 	return t.handleStatus()
 }
 
 // handleEcho demonstrates using the Settings API
-func (t *minimalTool) handleEcho(message string, count int) (string, error) {
+func (t *minimal_pluginTool) handleEcho(message string, count int) (string, error) {
 	if message == "" {
 		return "", fmt.Errorf("message is required for echo operation")
 	}
@@ -97,7 +87,7 @@ func (t *minimalTool) handleEcho(message string, count int) (string, error) {
 }
 
 // handleStatus demonstrates reading from Settings API
-func (t *minimalTool) handleStatus() (string, error) {
+func (t *minimal_pluginTool) handleStatus() (string, error) {
 	sm := t.Settings()
 	if sm == nil {
 		return "Settings API not available (no agent context)", nil
@@ -131,12 +121,12 @@ Recent Activity:`, apiEndpoint, timeoutSeconds, debugMode, len(allSettings))
 }
 
 // GetRequiredConfig returns configuration requirements from plugin.yaml
-func (t *minimalTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+func (t *minimal_pluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
 	return t.GetConfigFromYAML()
 }
 
 // ValidateConfig validates the provided configuration
-func (t *minimalTool) ValidateConfig(config map[string]interface{}) error {
+func (t *minimal_pluginTool) ValidateConfig(config map[string]interface{}) error {
 	// api_endpoint is required
 	endpoint, ok := config["api_endpoint"].(string)
 	if !ok || endpoint == "" {
@@ -164,7 +154,7 @@ func (t *minimalTool) ValidateConfig(config map[string]interface{}) error {
 }
 
 // InitializeWithConfig stores the configuration using Settings API
-func (t *minimalTool) InitializeWithConfig(config map[string]interface{}) error {
+func (t *minimal_pluginTool) InitializeWithConfig(config map[string]interface{}) error {
 	sm := t.Settings()
 	if sm == nil {
 		return fmt.Errorf("settings manager not available")
@@ -181,5 +171,5 @@ func (t *minimalTool) InitializeWithConfig(config map[string]interface{}) error 
 }
 
 func main() {
-	pluginapi.ServePlugin(&minimalTool{}, configYAML)
+	pluginapi.ServePlugin(&minimal_pluginTool{}, configYAML)
 }

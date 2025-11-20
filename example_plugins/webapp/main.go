@@ -1,5 +1,7 @@
 package main
 
+//go:generate ../../bin/ori-plugin-gen -yaml=plugin.yaml -output=webapp_generated.go
+
 import (
 	"context"
 	"embed"
@@ -21,20 +23,14 @@ type Item struct {
 	Description string `json:"description"`
 }
 
-// webappTool demonstrates web page templates and the Template Rendering API
-type webappTool struct {
+// webapp_pluginTool demonstrates web page templates and the Template Rendering API
+// Note: Compile-time interface check is in webapp_generated.go
+type webapp_pluginTool struct {
 	pluginapi.BasePlugin
 }
 
-// OperationParams holds all possible parameters for operations
-type OperationParams struct {
-	Operation       string `json:"operation"`
-	ItemName        string `json:"item_name"`
-	ItemDescription string `json:"item_description"`
-}
-
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(t *webappTool, params *OperationParams) (string, error)
+type OperationHandler func(t *webapp_pluginTool, params *WebappPluginParams) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 var operationRegistry = map[string]OperationHandler{
@@ -44,22 +40,17 @@ var operationRegistry = map[string]OperationHandler{
 	"open_dashboard": handleOpenDashboard,
 }
 
-// Ensure compile-time interface conformance
-var _ pluginapi.PluginTool = (*webappTool)(nil)
-var _ pluginapi.VersionedTool = (*webappTool)(nil)
-var _ pluginapi.AgentAwareTool = (*webappTool)(nil)
-var _ pluginapi.InitializationProvider = (*webappTool)(nil)
-var _ pluginapi.WebPageProvider = (*webappTool)(nil)
+// Ensure compile-time interface conformance for optional interfaces
+var _ pluginapi.VersionedTool = (*webapp_pluginTool)(nil)
+var _ pluginapi.AgentAwareTool = (*webapp_pluginTool)(nil)
+var _ pluginapi.InitializationProvider = (*webapp_pluginTool)(nil)
+var _ pluginapi.WebPageProvider = (*webapp_pluginTool)(nil)
 
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
+// Note: Call() is auto-generated in webapp_generated.go from plugin.yaml
 
-// Call executes the tool with the given arguments
-func (t *webappTool) Call(ctx context.Context, args string) (string, error) {
-	var params OperationParams
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
-	}
-
+// Execute contains the business logic - called by the generated Call() method
+func (t *webapp_pluginTool) Execute(ctx context.Context, params *WebappPluginParams) (string, error) {
 	// Look up handler in registry
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
@@ -67,29 +58,29 @@ func (t *webappTool) Call(ctx context.Context, args string) (string, error) {
 	}
 
 	// Execute the handler
-	return handler(t, &params)
+	return handler(t, params)
 }
 
 // Operation handlers
 
-func handleAddItem(t *webappTool, params *OperationParams) (string, error) {
+func handleAddItem(t *webapp_pluginTool, params *WebappPluginParams) (string, error) {
 	return t.addItem(params.ItemName, params.ItemDescription)
 }
 
-func handleListItems(t *webappTool, params *OperationParams) (string, error) {
+func handleListItems(t *webapp_pluginTool, params *WebappPluginParams) (string, error) {
 	return t.listItems()
 }
 
-func handleDeleteItem(t *webappTool, params *OperationParams) (string, error) {
+func handleDeleteItem(t *webapp_pluginTool, params *WebappPluginParams) (string, error) {
 	return t.deleteItem(params.ItemName)
 }
 
-func handleOpenDashboard(t *webappTool, params *OperationParams) (string, error) {
+func handleOpenDashboard(t *webapp_pluginTool, params *WebappPluginParams) (string, error) {
 	return t.openDashboard()
 }
 
 // addItem adds a new item to the list
-func (t *webappTool) addItem(name, description string) (string, error) {
+func (t *webapp_pluginTool) addItem(name, description string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("item_name is required")
 	}
@@ -117,7 +108,7 @@ func (t *webappTool) addItem(name, description string) (string, error) {
 }
 
 // listItems returns a list of all items
-func (t *webappTool) listItems() (string, error) {
+func (t *webapp_pluginTool) listItems() (string, error) {
 	items := t.getItems()
 
 	if len(items) == 0 {
@@ -137,7 +128,7 @@ func (t *webappTool) listItems() (string, error) {
 }
 
 // deleteItem removes an item from the list
-func (t *webappTool) deleteItem(name string) (string, error) {
+func (t *webapp_pluginTool) deleteItem(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("item_name is required")
 	}
@@ -166,12 +157,12 @@ func (t *webappTool) deleteItem(name string) (string, error) {
 }
 
 // openDashboard returns the URL to the web dashboard
-func (t *webappTool) openDashboard() (string, error) {
+func (t *webapp_pluginTool) openDashboard() (string, error) {
 	return "🌐 Open the dashboard at:\nhttp://localhost:8080/api/plugins/webapp-plugin/pages/dashboard", nil
 }
 
 // getItems retrieves items from settings
-func (t *webappTool) getItems() []Item {
+func (t *webapp_pluginTool) getItems() []Item {
 	sm := t.Settings()
 	if sm == nil {
 		return []Item{}
@@ -191,7 +182,7 @@ func (t *webappTool) getItems() []Item {
 }
 
 // saveItems stores items to settings
-func (t *webappTool) saveItems(items []Item) error {
+func (t *webapp_pluginTool) saveItems(items []Item) error {
 	sm := t.Settings()
 	if sm == nil {
 		return fmt.Errorf("settings not available")
@@ -206,12 +197,12 @@ func (t *webappTool) saveItems(items []Item) error {
 }
 
 // GetWebPages returns the list of available web pages
-func (t *webappTool) GetWebPages() []string {
+func (t *webapp_pluginTool) GetWebPages() []string {
 	return []string{"dashboard"}
 }
 
 // ServeWebPage serves the requested web page using template rendering
-func (t *webappTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
+func (t *webapp_pluginTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
 	if path != "dashboard" {
 		return "", "", fmt.Errorf("page not found: %s", path)
 	}
@@ -248,12 +239,12 @@ func (t *webappTool) ServeWebPage(path string, query map[string]string) (string,
 }
 
 // GetRequiredConfig returns configuration requirements
-func (t *webappTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+func (t *webapp_pluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
 	return t.GetConfigFromYAML()
 }
 
 // ValidateConfig validates the provided configuration
-func (t *webappTool) ValidateConfig(config map[string]interface{}) error {
+func (t *webapp_pluginTool) ValidateConfig(config map[string]interface{}) error {
 	if itemsPerPage, ok := config["items_per_page"]; ok {
 		var ipp int
 		switch v := itemsPerPage.(type) {
@@ -274,7 +265,7 @@ func (t *webappTool) ValidateConfig(config map[string]interface{}) error {
 }
 
 // InitializeWithConfig stores the configuration
-func (t *webappTool) InitializeWithConfig(config map[string]interface{}) error {
+func (t *webapp_pluginTool) InitializeWithConfig(config map[string]interface{}) error {
 	sm := t.Settings()
 	if sm == nil {
 		return fmt.Errorf("settings manager not available")
@@ -290,5 +281,5 @@ func (t *webappTool) InitializeWithConfig(config map[string]interface{}) error {
 }
 
 func main() {
-	pluginapi.ServePlugin(&webappTool{}, configYAML)
+	pluginapi.ServePlugin(&webapp_pluginTool{}, configYAML)
 }
