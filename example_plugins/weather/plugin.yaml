@@ -17,7 +17,7 @@ platforms:
     architectures: [amd64]
 
 requirements:
-  min_ori_version: "0.1.0"
+  min_ori_version: "0.0.1"
   api_version: "v1"
   dependencies: []
 
