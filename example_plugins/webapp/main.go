@@ -27,6 +27,24 @@ type webappTool struct {
 	pluginapi.BasePlugin
 }
 
+// OperationParams holds all possible parameters for operations
+type OperationParams struct {
+	Operation       string `json:"operation"`
+	ItemName        string `json:"item_name"`
+	ItemDescription string `json:"item_description"`
+}
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(t *webappTool, params *OperationParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+var operationRegistry = map[string]OperationHandler{
+	"add_item":       handleAddItem,
+	"list_items":     handleListItems,
+	"delete_item":    handleDeleteItem,
+	"open_dashboard": handleOpenDashboard,
+}
+
 // Ensure compile-time interface conformance
 var _ pluginapi.PluginTool = (*webappTool)(nil)
 var _ pluginapi.VersionedTool = (*webappTool)(nil)
@@ -34,43 +52,41 @@ var _ pluginapi.AgentAwareTool = (*webappTool)(nil)
 var _ pluginapi.InitializationProvider = (*webappTool)(nil)
 var _ pluginapi.WebPageProvider = (*webappTool)(nil)
 
-// Definition returns the tool definition from plugin.yaml
-func (t *webappTool) Definition() pluginapi.Tool {
-	tool, err := t.GetToolDefinition()
-	if err != nil {
-		return pluginapi.Tool{
-			Name:        "webapp-plugin",
-			Description: "Example web app plugin",
-			Parameters:  map[string]interface{}{},
-		}
-	}
-	return tool
-}
+// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 
 // Call executes the tool with the given arguments
 func (t *webappTool) Call(ctx context.Context, args string) (string, error) {
-	var params struct {
-		Operation       string `json:"operation"`
-		ItemName        string `json:"item_name"`
-		ItemDescription string `json:"item_description"`
-	}
-
+	var params OperationParams
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	switch params.Operation {
-	case "add_item":
-		return t.addItem(params.ItemName, params.ItemDescription)
-	case "list_items":
-		return t.listItems()
-	case "delete_item":
-		return t.deleteItem(params.ItemName)
-	case "open_dashboard":
-		return t.openDashboard()
-	default:
-		return "", fmt.Errorf("unknown operation: %s", params.Operation)
+	// Look up handler in registry
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: add_item, list_items, delete_item, open_dashboard", params.Operation)
 	}
+
+	// Execute the handler
+	return handler(t, &params)
+}
+
+// Operation handlers
+
+func handleAddItem(t *webappTool, params *OperationParams) (string, error) {
+	return t.addItem(params.ItemName, params.ItemDescription)
+}
+
+func handleListItems(t *webappTool, params *OperationParams) (string, error) {
+	return t.listItems()
+}
+
+func handleDeleteItem(t *webappTool, params *OperationParams) (string, error) {
+	return t.deleteItem(params.ItemName)
+}
+
+func handleOpenDashboard(t *webappTool, params *OperationParams) (string, error) {
+	return t.openDashboard()
 }
 
 // addItem adds a new item to the list

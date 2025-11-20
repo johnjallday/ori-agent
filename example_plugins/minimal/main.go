@@ -19,47 +19,55 @@ type minimalTool struct {
 	pluginapi.BasePlugin
 }
 
+// OperationParams holds all possible parameters for operations
+type OperationParams struct {
+	Operation string `json:"operation"`
+	Message   string `json:"message"`
+	Count     int    `json:"count"`
+}
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(t *minimalTool, params *OperationParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+var operationRegistry = map[string]OperationHandler{
+	"echo":   handleEcho,
+	"status": handleStatus,
+}
+
 // Ensure compile-time interface conformance
 var _ pluginapi.PluginTool = (*minimalTool)(nil)
 var _ pluginapi.VersionedTool = (*minimalTool)(nil)
 var _ pluginapi.AgentAwareTool = (*minimalTool)(nil)
 var _ pluginapi.InitializationProvider = (*minimalTool)(nil)
 
-// Definition returns the tool definition from plugin.yaml
-// This is simplified - no manual parameter building!
-func (t *minimalTool) Definition() pluginapi.Tool {
-	tool, err := t.GetToolDefinition()
-	if err != nil {
-		// Fallback to basic definition if YAML parsing fails
-		return pluginapi.Tool{
-			Name:        "minimal-plugin",
-			Description: "Minimal example plugin",
-			Parameters:  map[string]interface{}{},
-		}
-	}
-	return tool
-}
+// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 
 // Call executes the tool with the given arguments
 func (t *minimalTool) Call(ctx context.Context, args string) (string, error) {
-	var params struct {
-		Operation string `json:"operation"`
-		Message   string `json:"message"`
-		Count     int    `json:"count"`
-	}
-
+	var params OperationParams
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	switch params.Operation {
-	case "echo":
-		return t.handleEcho(params.Message, params.Count)
-	case "status":
-		return t.handleStatus()
-	default:
-		return "", fmt.Errorf("unknown operation: %s", params.Operation)
+	// Look up handler in registry
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: echo, status", params.Operation)
 	}
+
+	// Execute the handler
+	return handler(t, &params)
+}
+
+// Operation handlers
+
+func handleEcho(t *minimalTool, params *OperationParams) (string, error) {
+	return t.handleEcho(params.Message, params.Count)
+}
+
+func handleStatus(t *minimalTool, params *OperationParams) (string, error) {
+	return t.handleStatus()
 }
 
 // handleEcho demonstrates using the Settings API
