@@ -40,14 +40,9 @@ var operationRegistry = map[string]OperationHandler{
 	"open_dashboard": handleOpenDashboard,
 }
 
-// Ensure compile-time interface conformance for optional interfaces
-var _ pluginapi.VersionedTool = (*webapp_pluginTool)(nil)
-var _ pluginapi.AgentAwareTool = (*webapp_pluginTool)(nil)
-var _ pluginapi.InitializationProvider = (*webapp_pluginTool)(nil)
-var _ pluginapi.WebPageProvider = (*webapp_pluginTool)(nil)
-
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 // Note: Call() is auto-generated in webapp_generated.go from plugin.yaml
+// Note: Compile-time PluginTool check is in webapp_generated.go
 
 // Execute contains the business logic - called by the generated Call() method
 func (t *webapp_pluginTool) Execute(ctx context.Context, params *WebappPluginParams) (string, error) {

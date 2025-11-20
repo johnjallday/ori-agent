@@ -29,13 +29,9 @@ var operationRegistry = map[string]OperationHandler{
 	"status": handleStatus,
 }
 
-// Ensure compile-time interface conformance for optional interfaces
-var _ pluginapi.VersionedTool = (*minimal_pluginTool)(nil)
-var _ pluginapi.AgentAwareTool = (*minimal_pluginTool)(nil)
-var _ pluginapi.InitializationProvider = (*minimal_pluginTool)(nil)
-
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 // Note: Call() is auto-generated in minimal_generated.go from plugin.yaml
+// Note: Compile-time PluginTool check is in minimal_generated.go
 
 // Execute contains the business logic - called by the generated Call() method
 func (t *minimal_pluginTool) Execute(ctx context.Context, params *MinimalPluginParams) (string, error) {
