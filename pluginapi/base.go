@@ -228,3 +228,41 @@ func (b *BasePlugin) GetToolDefinition() (Tool, error) {
 	// Convert YAML tool definition to pluginapi.Tool
 	return b.pluginConfig.Tool.ToToolDefinition()
 }
+
+// Definition returns the tool definition, automatically reading from plugin.yaml.
+// This is a default implementation that plugins can inherit without needing to override.
+// The tool definition is read from plugin.yaml's tool_definition section.
+//
+// If plugin.yaml is not available or parsing fails, returns a basic fallback definition
+// using the plugin's metadata (name and description from plugin.yaml).
+//
+// Plugins only need to override this method if they require custom definition logic
+// beyond what's specified in plugin.yaml.
+//
+// Implements PluginTool interface.
+func (b *BasePlugin) Definition() Tool {
+	// Try to get definition from plugin.yaml
+	tool, err := b.GetToolDefinition()
+	if err == nil {
+		return tool
+	}
+
+	// Fallback: use metadata if available
+	name := "unknown-plugin"
+	description := "Plugin integration"
+
+	if b.metadata != nil {
+		if b.metadata.Name != "" {
+			name = b.metadata.Name
+		}
+		if b.metadata.Description != "" {
+			description = b.metadata.Description
+		}
+	}
+
+	return Tool{
+		Name:        name,
+		Description: description,
+		Parameters:  map[string]interface{}{},
+	}
+}
