@@ -73,9 +73,9 @@ type YAMLToolParameter struct {
 
 // YAMLToolDefinition represents a tool definition in YAML format
 type YAMLToolDefinition struct {
-	Name        string                       `yaml:"name"`
-	Description string                       `yaml:"description"`
-	Parameters  map[string]YAMLToolParameter `yaml:"parameters"`
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description"`
+	Parameters  []YAMLToolParameter `yaml:"parameters"` // Array format: - name: foo ...
 }
 
 // PluginConfig represents the complete plugin configuration from plugin.yaml
@@ -89,7 +89,7 @@ type PluginConfig struct {
 	Maintainers  []YAMLMaintainer    `yaml:"maintainers"`
 	Requirements YAMLRequirements    `yaml:"requirements,omitempty"`
 	Config       YAMLConfig          `yaml:"config,omitempty"`
-	Tool         *YAMLToolDefinition `yaml:"tool,omitempty"` // Optional tool definition
+	Tool         *YAMLToolDefinition `yaml:"tool_definition,omitempty"` // Optional tool definition
 }
 
 // ReadPluginConfig parses and validates plugin configuration from embedded YAML

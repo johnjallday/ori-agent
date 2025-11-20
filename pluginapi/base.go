@@ -225,6 +225,11 @@ func (b *BasePlugin) GetToolDefinition() (Tool, error) {
 		return Tool{}, fmt.Errorf("no tool definition in plugin.yaml")
 	}
 
+	// If tool name is not specified, use the plugin name
+	if b.pluginConfig.Tool.Name == "" {
+		b.pluginConfig.Tool.Name = b.pluginConfig.Name
+	}
+
 	// Convert YAML tool definition to pluginapi.Tool
 	return b.pluginConfig.Tool.ToToolDefinition()
 }

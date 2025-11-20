@@ -39,7 +39,13 @@ func (y *YAMLToolDefinition) ToToolDefinition() (Tool, error) {
 	properties := make(map[string]interface{})
 	var required []string
 
-	for paramName, param := range y.Parameters {
+	for _, param := range y.Parameters {
+		// Get parameter name
+		paramName := param.Name
+		if paramName == "" {
+			return Tool{}, fmt.Errorf("parameter name is required")
+		}
+
 		// Build parameter schema
 		paramSchema, err := buildParameterSchema(paramName, param)
 		if err != nil {
@@ -239,8 +245,11 @@ func ValidateYAMLToolDefinition(toolDef *YAMLToolDefinition) error {
 	}
 
 	// Validate each parameter
-	for paramName, param := range toolDef.Parameters {
-		if err := validateParameter(paramName, param, ""); err != nil {
+	for _, param := range toolDef.Parameters {
+		if param.Name == "" {
+			return fmt.Errorf("parameter name is required")
+		}
+		if err := validateParameter(param.Name, param, ""); err != nil {
 			return err
 		}
 	}

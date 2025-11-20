@@ -305,7 +305,9 @@ func New() (*Server, error) {
 				log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
 			}
 
+			// Refresh the definition from the reloaded plugin to ensure parameters are up-to-date
 			lp.Tool = tool
+			lp.Definition = tool.Definition()
 			ag.Plugins[key] = lp
 		}
 
