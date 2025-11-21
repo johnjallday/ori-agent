@@ -1,21 +1,23 @@
 {
   "onboarding": {
-    "completed": false,
-    "current_step": 0,
-    "steps_completed": [],
-    "skipped_at": "2025-10-23T09:32:51.427273-04:00",
-    "completed_at": "0001-01-01T00:00:00Z"
+    "completed": true,
+    "current_step": 5,
+    "steps_completed": [
+      "step-0",
+      "step-1",
+      "step-2",
+      "step-3",
+      "step-4"
+    ],
+    "skipped_at": "0001-01-01T00:00:00Z",
+    "completed_at": "2025-11-20T18:42:18.471755-05:00"
   },
   "device": {
     "type": "laptop",
     "os": "darwin",
-    "arch": "amd64",
+    "arch": "arm64",
     "detected": true,
     "user_set": false
   },
-  "version": "dev",
-  "theme": "dark",
-  "menubar": {
-    "auto_start_on_login": true
-  }
+  "version": "dev"
 }

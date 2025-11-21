@@ -481,7 +481,8 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		h.store.SetAgent(agentName, ag)
 
 		json.NewEncoder(w).Encode(map[string]any{
-			"response": finalResp.Content,
+			"response":  finalResp.Content,
+			"toolCalls": toolResults,
 		})
 		return
 	}
@@ -881,6 +882,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		strings.Contains(ag.Settings.Model, "mixtral") ||
 		strings.Contains(ag.Settings.Model, "phi") ||
 		strings.Contains(ag.Settings.Model, "qwen") ||
+		strings.Contains(ag.Settings.Model, "granite") ||
 		strings.Contains(ag.Settings.Model, "codellama") ||
 		strings.Contains(ag.Settings.Model, "orca") ||
 		strings.Contains(ag.Settings.Model, "vicuna") ||

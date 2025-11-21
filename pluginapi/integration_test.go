@@ -8,6 +8,11 @@ import (
 //go:embed test_templates
 var integrationTemplatesFS embed.FS
 
+// Helper function for creating float pointers
+func floatPtr(f float64) *float64 {
+	return &f
+}
+
 // TestPluginOptimizationAPIs_Integration tests the complete flow of using
 // Settings API, YAML Tool Definitions, and Template Rendering together
 func TestPluginOptimizationAPIs_Integration(t *testing.T) {
@@ -24,19 +29,22 @@ func TestPluginOptimizationAPIs_Integration(t *testing.T) {
 		Tool: &YAMLToolDefinition{
 			Name:        "test-tool",
 			Description: "A test tool for integration testing",
-			Parameters: map[string]YAMLToolParameter{
-				"operation": {
+			Parameters: []YAMLToolParameter{
+				{
+					Name:        "operation",
 					Type:        "string",
 					Description: "The operation to perform",
 					Required:    true,
 					Enum:        []string{"create", "list", "delete"},
 				},
-				"name": {
+				{
+					Name:        "name",
 					Type:        "string",
 					Description: "Name of the resource",
 					Required:    false,
 				},
-				"count": {
+				{
+					Name:        "count",
 					Type:        "integer",
 					Description: "Number of items",
 					Required:    false,
@@ -263,19 +271,22 @@ func TestRealWorldScenario_MusicPlugin(t *testing.T) {
 		Tool: &YAMLToolDefinition{
 			Name:        "music-manager",
 			Description: "Manage music projects",
-			Parameters: map[string]YAMLToolParameter{
-				"operation": {
+			Parameters: []YAMLToolParameter{
+				{
+					Name:        "operation",
 					Type:        "string",
 					Description: "Operation to perform",
 					Required:    true,
 					Enum:        []string{"create", "list", "open", "delete"},
 				},
-				"name": {
+				{
+					Name:        "name",
 					Type:        "string",
 					Description: "Project name",
 					Required:    false,
 				},
-				"bpm": {
+				{
+					Name:        "bpm",
 					Type:        "integer",
 					Description: "Beats per minute",
 					Required:    false,
@@ -338,8 +349,8 @@ func TestConcurrentAPIUsage(t *testing.T) {
 		Tool: &YAMLToolDefinition{
 			Name:        "concurrent-tool",
 			Description: "Test tool",
-			Parameters: map[string]YAMLToolParameter{
-				"param1": {Type: "string", Description: "Test", Required: true},
+			Parameters: []YAMLToolParameter{
+				{Name: "param1", Type: "string", Description: "Test", Required: true},
 			},
 		},
 	}

@@ -38,9 +38,12 @@ func NewTestContext(t *testing.T) *TestContext {
 		t.Skip("Skipping user test in short mode")
 	}
 
-	// Check for API key
-	if os.Getenv("OPENAI_API_KEY") == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("No API key set - set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+	// Check for API key or Ollama
+	useOllama := os.Getenv("USE_OLLAMA") == "true" || os.Getenv("OLLAMA_HOST") != ""
+	hasAPIKey := os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("ANTHROPIC_API_KEY") != ""
+
+	if !useOllama && !hasAPIKey {
+		t.Skip("No LLM provider configured - set OPENAI_API_KEY, ANTHROPIC_API_KEY, or USE_OLLAMA=true")
 	}
 
 	// Create temp directory for test artifacts
@@ -247,7 +250,7 @@ func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 	tc.T.Helper()
 
 	chatData := map[string]interface{}{
-		"message":    message,
+		"question":   message, // API expects "question" not "message"
 		"agent_name": agent.Name,
 	}
 
@@ -289,7 +292,12 @@ func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 	tc.T.Helper()
 
-	toolCalls, ok := resp.Response["tool_calls"].([]interface{})
+	// Try both "toolCalls" (new format) and "tool_calls" (legacy format)
+	toolCalls, ok := resp.Response["toolCalls"].([]interface{})
+	if !ok {
+		toolCalls, ok = resp.Response["tool_calls"].([]interface{})
+	}
+
 	if !ok || len(toolCalls) == 0 {
 		tc.T.Errorf("Expected tool call for '%s', but no tools were called", toolName)
 		return
@@ -297,7 +305,12 @@ func (tc *TestContext) AssertToolCalled(resp *ChatResponse, toolName string) {
 
 	for _, call := range toolCalls {
 		callMap := call.(map[string]interface{})
-		if callMap["name"] == toolName {
+		// Check both "name" (OpenAI format) and "function" (Ollama format)
+		name := callMap["name"]
+		if name == nil {
+			name = callMap["function"]
+		}
+		if name == toolName {
 			if tc.Verbose {
 				tc.T.Logf("✓ Tool called: %s", toolName)
 			}
@@ -376,6 +389,10 @@ type ChatResponse struct {
 // Private helpers
 
 func (tc *TestContext) detectProvider() string {
+	// Priority order: Ollama (local) > OpenAI > Claude
+	if os.Getenv("USE_OLLAMA") == "true" || os.Getenv("OLLAMA_HOST") != "" {
+		return "ollama"
+	}
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return "openai"
 	}

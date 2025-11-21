@@ -1,8 +1,0 @@
-{
-  "feature/agent-studio": {
-    "session_id": "4ae3b31c-276c-491f-8b9d-cb715c18ef42",
-    "title": "agent studio",
-    "initial_query": "when creating workspace, I'm not sure why we need parent agent. can we remove them?",
-    "created_at": "2025-11-07T03:26:25Z"
-  }
-}

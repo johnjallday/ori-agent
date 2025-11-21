@@ -60,7 +60,7 @@ func ServePlugin(tool PluginTool, configYAML string) {
 	}
 
 	// Use reflection to inject BasePlugin into the tool struct
-	if err := injectBasePlugin(tool, base); err != nil {
+	if err := injectBasePlugin(tool, &base); err != nil {
 		panic(fmt.Sprintf("ServePlugin failed: %v", err))
 	}
 
@@ -75,7 +75,7 @@ func ServePlugin(tool PluginTool, configYAML string) {
 }
 
 // injectBasePlugin uses reflection to find and set the embedded BasePlugin field
-func injectBasePlugin(tool PluginTool, base BasePlugin) error {
+func injectBasePlugin(tool PluginTool, base *BasePlugin) error {
 	toolValue := reflect.ValueOf(tool)
 
 	// Ensure tool is a pointer
@@ -102,8 +102,9 @@ func injectBasePlugin(tool PluginTool, base BasePlugin) error {
 				return fmt.Errorf("cannot set BasePlugin field in %T (field is unexported)", tool)
 			}
 
-			// Set the BasePlugin field
-			fieldValue.Set(reflect.ValueOf(base))
+			// Set the BasePlugin field by copying pointer's element
+			baseValue := reflect.ValueOf(base).Elem()
+			fieldValue.Set(baseValue)
 			return nil
 		}
 	}

@@ -1,7 +1,11 @@
 # 🦆 Ori Agent
 
-![Version](https://img.shields.io/badge/Version-v0.0.10-blue)
+<!-- AUTO:VERSION -->
+![Version](https://img.shields.io/badge/Version-v0.0.11-blue)
+<!-- AUTO:VERSION_END -->
+<!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25-00add8)
+<!-- AUTO:GO_VERSION_END -->
 
 **Ori Agent** is a platform that lets you create customizable AI assistants that can use tools to get things done. Think of it like ChatGPT, but you can add your own custom tools (called plugins) to make it do specific tasks like checking weather, doing calculations, or controlling other software on your computer. Each AI assistant you create can have its own set of tools and settings.
 
@@ -132,6 +136,18 @@ cp minimal-plugin ../../uploaded_plugins/
 ```
 
 Restart Ori Agent, and your plugin will be automatically loaded!
+
+### Available Plugins
+
+<!-- AUTO:PLUGINS -->
+| Plugin | Description | Type |
+|--------|-------------|------|
+| math | Perform basic math operations: add, subtract, multiply, divide | Example |
+| minimal | Minimal example tool demonstrating YAML-based configuration. Supports echo and status operations. | Example |
+| result-handler | Handle actions on chat results like opening directories, files, or URLs | Example |
+| weather | Get weather for a given location | Example |
+| webapp | Example tool with web interface. Manages a simple list of items. | Example |
+<!-- AUTO:PLUGINS_END -->
 
 #### Installing Development Tools
 

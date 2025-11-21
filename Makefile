@@ -101,6 +101,33 @@ clean-generated: ## Clean generated plugin code
 	rm -f example_plugins/*/*_generated.go
 	@echo "$(GREEN)✓ Generated files cleaned$(NC)"
 
+clean-state: ## Delete all configuration and state files (fresh start)
+	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
+	@echo "$(YELLOW)You will need to reconfigure the app from scratch.$(NC)"
+	@echo ""
+	@read -p "Are you sure? [y/N]: " -n 1 -r && echo && \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "$(BLUE)Cleaning state files...$(NC)"; \
+		rm -rf agents/; \
+		rm -rf workspaces/; \
+		rm -rf sessions/; \
+		rm -rf uploaded_plugins/; \
+		rm -f settings.json; \
+		rm -f agents.json; \
+		rm -f local_plugin_registry.json; \
+		rm -f plugin_registry_cache.json; \
+		rm -f app_state.json; \
+		rm -f mcp_registry.json; \
+		rm -f locations.json; \
+		rm -f .feature-sessions.json; \
+		echo "$(GREEN)✓ All state files cleaned - app will start fresh$(NC)"; \
+	else \
+		echo "$(YELLOW)Cancelled$(NC)"; \
+		exit 1; \
+	fi
+
+reset: clean-state ## Alias for clean-state (fresh start)
+
 ## Run targets
 
 check-env: ## Check required environment variables
@@ -172,12 +199,17 @@ test-all: test test-e2e ## Run all tests including E2E
 
 test-user: build plugins ## Run user workflow tests
 	@echo "$(BLUE)Running user tests...$(NC)"
-	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ]; then \
-		echo "$(YELLOW)Skipping user tests (no API key set)$(NC)"; \
+	@if [ -z "$$OPENAI_API_KEY" ] && [ -z "$$ANTHROPIC_API_KEY" ] && [ "$$USE_OLLAMA" != "true" ]; then \
+		echo "$(YELLOW)Skipping user tests (no LLM provider configured)$(NC)"; \
+		echo "$(YELLOW)Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or USE_OLLAMA=true$(NC)"; \
 	else \
-		$(GOTEST) -v -timeout 5m ./tests/user/...; \
+		$(GOTEST) -p 1 -v -timeout 5m ./tests/user/...; \
 		echo "$(GREEN)✓ User tests passed$(NC)"; \
 	fi
+
+test-ollama: ## Run user tests with Ollama (local LLM)
+	@echo "$(BLUE)Running tests with Ollama...$(NC)"
+	@./scripts/test-with-ollama.sh
 
 test-cli: build ## Build and run interactive testing CLI
 	@echo "$(BLUE)Building test CLI...$(NC)"

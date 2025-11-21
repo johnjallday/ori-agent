@@ -1,20 +1,39 @@
 package plugins
 
 import (
+	"flag"
+	"os"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/tests/user/helpers"
 )
+
+var testModel = flag.String("model", "", "LLM model to use for tests (default: auto-detect)")
+
+func getTestModel() string {
+	// Priority: flag > env var > auto-detect
+	if testModel != nil && *testModel != "" {
+		return *testModel
+	}
+	if model := os.Getenv("OLLAMA_MODEL"); model != "" {
+		return model
+	}
+	if os.Getenv("USE_OLLAMA") == "true" {
+		return "granite4"
+	}
+	return "gpt-4o-mini"
+}
 
 // TestMathPluginIntegration tests the math plugin end-to-end
 func TestMathPluginIntegration(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	t.Log("Testing math plugin integration")
+	model := getTestModel()
+	t.Logf("Testing math plugin integration (model: %s)", model)
 
 	// Create agent
-	agent := ctx.CreateAgent("math-test-agent", "gpt-4o-mini")
+	agent := ctx.CreateAgent("math-test-agent", model)
 
 	// Enable math plugin
 	ctx.EnablePlugin(agent, "math")
@@ -48,10 +67,11 @@ func TestWeatherPluginIntegration(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	t.Log("Testing weather plugin integration")
+	model := getTestModel()
+	t.Logf("Testing weather plugin integration (model: %s)", model)
 
 	// Create agent
-	agent := ctx.CreateAgent("weather-test-agent", "gpt-4o-mini")
+	agent := ctx.CreateAgent("weather-test-agent", model)
 
 	// Enable weather plugin
 	ctx.EnablePlugin(agent, "weather")
@@ -86,10 +106,11 @@ func TestMultiplePluginsOnAgent(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	t.Log("Testing multiple plugins on one agent")
+	model := getTestModel()
+	t.Logf("Testing multiple plugins on one agent (model: %s)", model)
 
 	// Create agent
-	agent := ctx.CreateAgent("multi-plugin-agent", "gpt-4o-mini")
+	agent := ctx.CreateAgent("multi-plugin-agent", model)
 
 	// Enable multiple plugins
 	ctx.EnablePlugin(agent, "math")
@@ -118,10 +139,11 @@ func TestPluginConfigurationPersistence(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	t.Log("Testing plugin configuration persistence")
+	model := getTestModel()
+	t.Logf("Testing plugin configuration persistence (model: %s)", model)
 
 	// Create agent and enable plugin
-	agent := ctx.CreateAgent("config-test-agent", "gpt-4o-mini")
+	agent := ctx.CreateAgent("config-test-agent", model)
 	ctx.EnablePlugin(agent, "math")
 
 	// TODO: Test that configuration persists across server restarts
@@ -135,11 +157,12 @@ func TestAgentAwarePluginContext(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	t.Log("Testing agent-aware plugin context")
+	model := getTestModel()
+	t.Logf("Testing agent-aware plugin context (model: %s)", model)
 
 	// Create two agents with same plugin
-	agent1 := ctx.CreateAgent("context-agent-1", "gpt-4o-mini")
-	agent2 := ctx.CreateAgent("context-agent-2", "gpt-4o-mini")
+	agent1 := ctx.CreateAgent("context-agent-1", model)
+	agent2 := ctx.CreateAgent("context-agent-2", model)
 
 	ctx.EnablePlugin(agent1, "math")
 	ctx.EnablePlugin(agent2, "math")
