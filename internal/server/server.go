@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -588,6 +589,15 @@ func New() (*Server, error) {
 // Handler returns the configured HTTP handler with all routes
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	// Health check endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			log.Printf("Failed to encode health response: %v", err)
+		}
+	})
+
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/marketplace", s.serveMarketplace)
@@ -1003,6 +1013,12 @@ func (s *Server) corsHandler(next http.Handler) http.Handler {
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
+	// Only handle root path, not other paths
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
 	data := web.GetDefaultData()
 	data.CurrentPage = "index"
 
@@ -1030,7 +1046,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
@@ -1062,7 +1080,9 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
@@ -1101,7 +1121,9 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
@@ -1132,7 +1154,9 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
@@ -1167,7 +1191,9 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
@@ -1195,7 +1221,9 @@ func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -1227,7 +1255,9 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
@@ -1259,7 +1289,9 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request) {
@@ -1308,7 +1340,9 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
@@ -1340,7 +1374,9 @@ func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
@@ -1371,7 +1407,11 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 
-	w.Write(content)
+	if _, err := w.Write(content); err != nil {
+
+		log.Printf("Failed to write response: %v", err)
+
+	}
 }
 
 func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
@@ -1408,7 +1448,11 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 
-	w.Write(content)
+	if _, err := w.Write(content); err != nil {
+
+		log.Printf("Failed to write response: %v", err)
+
+	}
 }
 
 // truncateString truncates a string to a maximum length with ellipsis

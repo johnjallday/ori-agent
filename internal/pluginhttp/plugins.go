@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -298,7 +299,9 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +387,9 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		"show_config_modal": showConfigModal,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
@@ -681,7 +686,9 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
@@ -750,7 +757,9 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // isPluginInstalled checks if a plugin binary exists in the uploaded_plugins directory

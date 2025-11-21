@@ -13,7 +13,6 @@ type TaskScheduler struct {
 	eventBus       *EventBus
 	pollInterval   time.Duration
 
-	mu       sync.RWMutex
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 }

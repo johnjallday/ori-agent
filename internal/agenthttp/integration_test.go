@@ -350,7 +350,7 @@ func TestDashboardListFiltering(t *testing.T) {
 		}
 
 		// Force save to disk
-		ts.store.Save()
+		_ = ts.store.Save()
 
 		rr := ts.doRequest(t, http.MethodGet, "/api/agents/dashboard/list?status=active", nil)
 		assertStatus(t, rr, http.StatusOK)

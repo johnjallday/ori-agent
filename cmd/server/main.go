@@ -18,6 +18,7 @@ func main() {
 	// Define command-line flags
 	port := flag.Int("port", 8765, "Port to run server on")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
+	noBrowser := flag.Bool("no-browser", false, "Don't open browser on startup")
 	flag.Parse()
 
 	// Set verbose mode globally
@@ -46,13 +47,16 @@ func main() {
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	log.Printf("Listening on %s", url)
 
-	// Launch browser in background after a short delay
-	go func() {
-		time.Sleep(500 * time.Millisecond) // Wait for server to start
-		if err := openBrowser(url); err != nil {
-			log.Printf("Failed to open browser: %v", err)
-		}
-	}()
+	// Launch browser in background after a short delay (unless disabled)
+	// Skip if --no-browser flag is set or NO_BROWSER env var is set
+	if !*noBrowser && os.Getenv("NO_BROWSER") == "" {
+		go func() {
+			time.Sleep(500 * time.Millisecond) // Wait for server to start
+			if err := openBrowser(url); err != nil {
+				log.Printf("Failed to open browser: %v", err)
+			}
+		}()
+	}
 
 	log.Fatal(srv.HTTPServer(addr).ListenAndServe())
 }

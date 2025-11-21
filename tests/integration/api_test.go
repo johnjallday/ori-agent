@@ -239,26 +239,26 @@ func startTestServer(t *testing.T) *testutil.TestServer {
 		switch r.URL.Path {
 		case "/health":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		case "/api/agents":
 			if r.Method == "GET" {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode([]map[string]interface{}{})
+				_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
 			} else if r.Method == "POST" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 				var agent map[string]interface{}
-				json.NewDecoder(r.Body).Decode(&agent)
-				json.NewEncoder(w).Encode(agent)
+				_ = json.NewDecoder(r.Body).Decode(&agent)
+				_ = json.NewEncoder(w).Encode(agent)
 			}
 		case "/api/plugins":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"plugins": []interface{}{},
 			})
 		case "/api/settings":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"theme": "light",
 			})
 		default:

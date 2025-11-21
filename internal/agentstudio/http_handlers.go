@@ -103,13 +103,15 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	// Return created studio
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":      studio.ID,
 		"name":    studio.Name,
 		"agents":  studio.Agents,
 		"status":  studio.Status,
 		"message": "Studio created successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // ExecuteMission handles POST /api/studios/:id/mission
@@ -166,11 +168,13 @@ func (h *HTTPHandler) ExecuteMission(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Mission execution started",
 		"mission": req.Mission,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetStudio handles GET /api/studios/:id
@@ -199,7 +203,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":                 studio.ID,
 		"name":               studio.Name,
 		"description":        studio.Description,
@@ -213,7 +217,9 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"layout":             studio.Layout,
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // ListStudios handles GET /api/studios
@@ -252,10 +258,12 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 
 	// Return studios
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"studios": studios,
 		"count":   len(studios),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetStudioEvents handles GET /api/studios/:id/events (Server-Sent Events)
@@ -377,11 +385,13 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Agent added successfully",
 		"agent":   req.AgentName,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // RemoveAgent handles DELETE /api/studios/:id/agents/:agent_name
@@ -436,11 +446,13 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Agent removed successfully",
 		"agent":   agentName,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // CreateTaskRequest represents the request to create a task
@@ -529,12 +541,14 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task created successfully",
 		"task_id": task.ID,
 		"task":    task,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // DeleteTask handles DELETE /api/studios/:id/tasks/:task_id
@@ -590,11 +604,13 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task deleted successfully",
 		"task_id": taskID,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // ExecuteTaskManually handles POST /api/studios/:id/tasks/:task_id/execute
@@ -648,9 +664,11 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task execution started",
 		"task_id": taskID,
 		"studio":  studioID,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

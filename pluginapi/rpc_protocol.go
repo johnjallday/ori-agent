@@ -232,7 +232,7 @@ func (c *grpcClient) GetDefaultSettings() (string, error) {
 }
 
 func (c *grpcClient) SetAgentContext(ctx AgentContext) {
-	c.client.SetAgentContext(context.Background(), &AgentContextRequest{
+	_, _ = c.client.SetAgentContext(context.Background(), &AgentContextRequest{
 		Name:         ctx.Name,
 		ConfigPath:   ctx.ConfigPath,
 		SettingsPath: ctx.SettingsPath,
@@ -251,7 +251,7 @@ func (c *grpcClient) GetRequiredConfig() []ConfigVariable {
 	for i, protoVar := range resp.ConfigVars {
 		var defaultValue interface{}
 		if protoVar.DefaultValueJson != "" {
-			json.Unmarshal([]byte(protoVar.DefaultValueJson), &defaultValue)
+			_ = json.Unmarshal([]byte(protoVar.DefaultValueJson), &defaultValue) // Use zero value on error
 		}
 
 		configVars[i] = ConfigVariable{

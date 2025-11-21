@@ -15,19 +15,17 @@ var _ fyne.Theme = (*GlassmorphismTheme)(nil)
 // Glass color palette - semi-transparent with blur effect simulation
 var (
 	// Background colors with transparency
-	glassBackground     = color.NRGBA{R: 20, G: 25, B: 40, A: 240}   // Dark blue-gray base
-	glassCardBackground = color.NRGBA{R: 255, G: 255, B: 255, A: 25} // Semi-transparent white
-	glassSurfaceHigh    = color.NRGBA{R: 255, G: 255, B: 255, A: 40} // Lighter glass
-	glassSurfaceMid     = color.NRGBA{R: 255, G: 255, B: 255, A: 20} // Medium glass
-	glassSurfaceLow     = color.NRGBA{R: 255, G: 255, B: 255, A: 10} // Subtle glass
+	glassBackground  = color.NRGBA{R: 20, G: 25, B: 40, A: 240}   // Dark blue-gray base
+	glassSurfaceHigh = color.NRGBA{R: 255, G: 255, B: 255, A: 40} // Lighter glass
+	glassSurfaceMid  = color.NRGBA{R: 255, G: 255, B: 255, A: 20} // Medium glass
+	glassSurfaceLow  = color.NRGBA{R: 255, G: 255, B: 255, A: 10} // Subtle glass
 
 	// Accent colors
-	glassAccent    = color.NRGBA{R: 100, G: 200, B: 255, A: 200} // Bright blue
-	glassPrimary   = color.NRGBA{R: 120, G: 180, B: 255, A: 255} // Primary blue
-	glassSecondary = color.NRGBA{R: 200, G: 150, B: 255, A: 180} // Purple accent
-	glassSuccess   = color.NRGBA{R: 100, G: 255, B: 150, A: 200} // Green
-	glassWarning   = color.NRGBA{R: 255, G: 200, B: 100, A: 200} // Orange
-	glassError     = color.NRGBA{R: 255, G: 120, B: 120, A: 200} // Red
+	glassAccent  = color.NRGBA{R: 100, G: 200, B: 255, A: 200} // Bright blue
+	glassPrimary = color.NRGBA{R: 120, G: 180, B: 255, A: 255} // Primary blue
+	glassSuccess = color.NRGBA{R: 100, G: 255, B: 150, A: 200} // Green
+	glassWarning = color.NRGBA{R: 255, G: 200, B: 100, A: 200} // Orange
+	glassError   = color.NRGBA{R: 255, G: 120, B: 120, A: 200} // Red
 
 	// Text colors
 	glassTextPrimary   = color.NRGBA{R: 255, G: 255, B: 255, A: 240} // White text

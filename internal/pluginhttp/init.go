@@ -3,6 +3,7 @@ package pluginhttp
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -37,7 +38,9 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 			"message": "Plugin not loaded",
 		}
 		w.WriteHeader(http.StatusOK) // Return 200 with success:false instead of 500
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -55,7 +58,9 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 				"success": false,
 				"message": "Plugin does not provide default settings",
 			}
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				log.Printf("Failed to encode response: %v", err)
+			}
 			return
 		}
 
@@ -71,14 +76,18 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 			"success":          true,
 			"default_settings": settings,
 		}
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 	} else {
 		// Plugin doesn't support default settings
 		response := map[string]interface{}{
 			"success": false,
 			"message": "Plugin does not support default settings",
 		}
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 	}
 }
 
@@ -236,7 +245,9 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 				"current_values":          currentValues,
 			}
 			fmt.Printf("✅ Sending config response: %+v\n", response)
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				log.Printf("Failed to encode response: %v", err)
+			}
 			return
 		}
 		if err != nil {
@@ -257,7 +268,11 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 				"current_values":          currentValues,
 			}
 
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+
+				log.Printf("Failed to encode response: %v", err)
+
+			}
 			return
 		}
 	}
@@ -271,7 +286,11 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 		"message":                 "Plugin configuration found in settings file",
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+
+		log.Printf("Failed to encode response: %v", err)
+
+	}
 }
 
 func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.Request, tool pluginapi.PluginTool, pluginName, agentName string) {
@@ -280,10 +299,12 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 	// Parse configuration from request body first
 	var configData map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Invalid JSON in request body: " + err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -292,28 +313,34 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 	// Check if plugin implements InitializationProvider (modern plugins)
 	initProvider, ok := tool.(pluginapi.InitializationProvider)
 	if !ok {
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Plugin does not support automatic initialization",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	// Validate configuration
 	if err := initProvider.ValidateConfig(configData); err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Configuration validation failed: " + err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	// Initialize plugin with configuration
 	if err := initProvider.InitializeWithConfig(configData); err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Plugin initialization failed: " + err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -329,10 +356,12 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 		agentAware.SetAgentContext(agentContext)
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Plugin initialized successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // PluginExecuteHandler directly executes plugin function calls
@@ -388,10 +417,12 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 
 	// Return the result
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"result":  result,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // PluginInitStatusHandler checks filesystem for settings files
@@ -417,10 +448,12 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 	// Get active plugins for current agent
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "current agent not found",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -448,5 +481,9 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 		"uninitialized_plugins":   uninitializedPlugins,
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+
+		log.Printf("Failed to encode response: %v", err)
+
+	}
 }

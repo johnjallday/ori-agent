@@ -136,7 +136,7 @@ func (t *StdioTransport) Close() error {
 
 	// Wait for process to exit (with timeout handled by context)
 	if t.cmd != nil && t.cmd.Process != nil {
-		t.cmd.Wait()
+		_ = t.cmd.Wait() // Ignore error, process already dead
 	}
 
 	// Close remaining pipes

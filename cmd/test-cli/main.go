@@ -242,7 +242,7 @@ func (r *TestRunner) stopServer() {
 	output, err := cmd.Output()
 	if err == nil && len(output) > 0 {
 		pid := strings.TrimSpace(string(output))
-		exec.Command("kill", pid).Run()
+		_ = exec.Command("kill", pid).Run()
 		fmt.Println(colorGreen + "✓ Server stopped" + colorReset)
 		r.serverRunning = false
 	} else {
@@ -329,10 +329,7 @@ func (r *TestRunner) interactiveChat() {
 	}
 
 	agentName := r.prompt("Agent name")
-	model := r.prompt("Model (default: gpt-4o-mini)")
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
+	_ = r.prompt("Model (default: gpt-4o-mini)") // Model selection not yet implemented
 
 	fmt.Printf("\n%sCreating agent '%s'...%s\n", colorCyan, agentName, colorReset)
 	// TODO: Create agent via API
@@ -364,7 +361,7 @@ func (r *TestRunner) viewLogs() {
 	cmd := exec.Command("tail", "-n", "20", "test-server.log")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Run()
+	_ = cmd.Run()
 }
 
 func (r *TestRunner) cleanupTestData() {

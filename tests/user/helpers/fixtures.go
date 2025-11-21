@@ -2,24 +2,20 @@ package helpers
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
 // Test fixture helpers for generating test data
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // RandomAgentName generates a random agent name for testing
 func RandomAgentName() string {
 	prefixes := []string{"test", "demo", "sample", "trial", "dev"}
 	suffixes := []string{"agent", "bot", "assistant", "helper", "ai"}
 
-	prefix := prefixes[rand.Intn(len(prefixes))]
-	suffix := suffixes[rand.Intn(len(suffixes))]
-	id := rand.Intn(9999)
+	prefix := prefixes[rand.IntN(len(prefixes))]
+	suffix := suffixes[rand.IntN(len(suffixes))]
+	id := rand.IntN(9999)
 
 	return fmt.Sprintf("%s-%s-%d", prefix, suffix, id)
 }
@@ -31,7 +27,7 @@ func RandomModel() string {
 		"gpt-4o",
 		"gpt-3.5-turbo",
 	}
-	return models[rand.Intn(len(models))]
+	return models[rand.IntN(len(models))]
 }
 
 // SampleChatMessages returns a set of sample chat messages for testing

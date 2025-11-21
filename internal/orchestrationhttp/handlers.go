@@ -2273,7 +2273,12 @@ func (h *Handler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Reque
 		if enable {
 			action = "enabled"
 		}
-		log.Printf("✅ %s scheduled task %s", strings.Title(action), id)
+		// Capitalize first letter manually (strings.Title is deprecated)
+		capitalizedAction := action
+		if len(action) > 0 {
+			capitalizedAction = string(action[0]-32) + action[1:]
+		}
+		log.Printf("✅ %s scheduled task %s", capitalizedAction, id)
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":        true,
@@ -2645,8 +2650,10 @@ func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Layout saved successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

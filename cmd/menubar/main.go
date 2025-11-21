@@ -71,7 +71,7 @@ func main() {
 		ctx := context.Background()
 		if controller.GetStatus() == menubar.StatusRunning {
 			log.Println("Stopping server before exit...")
-			controller.StopServer(ctx)
+			_ = controller.StopServer(ctx) // Best effort stop on exit
 		}
 	}
 
@@ -200,7 +200,7 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 				ctx := context.Background()
 				if controller.GetStatus() == menubar.StatusRunning {
 					log.Println("Stopping server before quit...")
-					controller.StopServer(ctx)
+					_ = controller.StopServer(ctx) // Ignore error on exit
 				}
 
 				systray.Quit()

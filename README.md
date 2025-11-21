@@ -1,7 +1,7 @@
 # 🦆 Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.11-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.12-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25-00add8)

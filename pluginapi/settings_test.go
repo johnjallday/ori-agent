@@ -96,7 +96,7 @@ func TestSettingsManager_TypedGetters(t *testing.T) {
 	}
 
 	// Test string
-	sm.Set("string_key", "hello")
+	_ = sm.Set("string_key", "hello")
 	strVal, err := sm.GetString("string_key")
 	if err != nil {
 		t.Errorf("failed to get string: %v", err)
@@ -106,7 +106,7 @@ func TestSettingsManager_TypedGetters(t *testing.T) {
 	}
 
 	// Test int (JSON unmarshals as float64)
-	sm.Set("int_key", 42.0)
+	_ = sm.Set("int_key", 42.0)
 	intVal, err := sm.GetInt("int_key")
 	if err != nil {
 		t.Errorf("failed to get int: %v", err)
@@ -116,7 +116,7 @@ func TestSettingsManager_TypedGetters(t *testing.T) {
 	}
 
 	// Test bool
-	sm.Set("bool_key", true)
+	_ = sm.Set("bool_key", true)
 	boolVal, err := sm.GetBool("bool_key")
 	if err != nil {
 		t.Errorf("failed to get bool: %v", err)
@@ -126,7 +126,7 @@ func TestSettingsManager_TypedGetters(t *testing.T) {
 	}
 
 	// Test float
-	sm.Set("float_key", 3.14)
+	_ = sm.Set("float_key", 3.14)
 	floatVal, err := sm.GetFloat("float_key")
 	if err != nil {
 		t.Errorf("failed to get float: %v", err)
@@ -144,7 +144,7 @@ func TestSettingsManager_TypeErrors(t *testing.T) {
 	}
 
 	// Set a string value
-	sm.Set("string_key", "not-a-number")
+	_ = sm.Set("string_key", "not-a-number")
 
 	// Try to get it as int (should error)
 	_, err = sm.GetInt("string_key")
@@ -167,7 +167,7 @@ func TestSettingsManager_Delete(t *testing.T) {
 	}
 
 	// Set a value
-	sm.Set("key1", "value1")
+	_ = sm.Set("key1", "value1")
 
 	// Verify it exists
 	val, _ := sm.Get("key1")
@@ -196,9 +196,9 @@ func TestSettingsManager_GetAll(t *testing.T) {
 	}
 
 	// Set multiple values
-	sm.Set("key1", "value1")
-	sm.Set("key2", 42.0)
-	sm.Set("key3", true)
+	_ = sm.Set("key1", "value1")
+	_ = sm.Set("key2", 42.0)
+	_ = sm.Set("key3", true)
 
 	// Get all settings
 	all, err := sm.GetAll()
@@ -230,7 +230,7 @@ func TestSettingsManager_Persistence(t *testing.T) {
 		t.Fatalf("failed to create settings manager: %v", err)
 	}
 
-	sm1.Set("persistent_key", "persistent_value")
+	_ = sm1.Set("persistent_key", "persistent_value")
 
 	// Create second manager (should load existing settings)
 	sm2, err := NewSettingsManager(tempDir, "test-plugin")
@@ -256,7 +256,7 @@ func TestSettingsManager_AtomicWrite(t *testing.T) {
 	}
 
 	// Set a value (triggers save)
-	sm.Set("key1", "value1")
+	_ = sm.Set("key1", "value1")
 
 	// Check that the file exists
 	filePath := filepath.Join(tempDir, "plugins", "test-plugin", "settings.json")
@@ -289,7 +289,7 @@ func TestSettingsManager_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				key := "key" + string(rune(id))
-				sm.Set(key, id*iterations+j)
+				_ = sm.Set(key, id*iterations+j)
 			}
 		}(i)
 	}
@@ -301,7 +301,7 @@ func TestSettingsManager_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				key := "key" + string(rune(id))
-				sm.Get(key)
+				_, _ = sm.Get(key)
 			}
 		}(i)
 	}
@@ -323,11 +323,11 @@ func TestSettingsManager_ConcurrentAccess(t *testing.T) {
 func TestSettingsManager_LoadError(t *testing.T) {
 	tempDir := t.TempDir()
 	pluginDir := filepath.Join(tempDir, "plugins", "test-plugin")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 
 	// Write invalid JSON
 	settingsPath := filepath.Join(pluginDir, "settings.json")
-	os.WriteFile(settingsPath, []byte("invalid json{{{"), 0644)
+	_ = os.WriteFile(settingsPath, []byte("invalid json{{{"), 0644)
 
 	// Try to create settings manager (should fail to load)
 	_, err := NewSettingsManager(tempDir, "test-plugin")

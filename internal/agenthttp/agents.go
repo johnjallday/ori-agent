@@ -166,10 +166,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Agent '" + req.Name + "' created successfully",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodPut:
 		name := r.URL.Query().Get("name")
@@ -275,10 +277,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"message": "Agent metadata updated successfully",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")

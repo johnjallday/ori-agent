@@ -113,10 +113,12 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 
 	// Check if update is needed
 	if currentVersion == registryEntry.Version {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"message": fmt.Sprintf("Plugin %s is already at version %s", pluginName, currentVersion),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -129,7 +131,9 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // HandleListBackups lists all plugin backups
@@ -147,10 +151,12 @@ func (h *Handler) HandleListBackups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"backups": backups,
 		"count":   len(backups),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // HandleCleanBackups cleans old plugin backups
@@ -182,11 +188,13 @@ func (h *Handler) HandleCleanBackups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"removed": removed,
 		"message": fmt.Sprintf("Removed %d old backup(s)", removed),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // HandleRollbackPlugin rolls back a plugin to a previous backup
@@ -256,10 +264,12 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ Rolled back %s to backup: %s", pluginName, req.BackupPath)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Successfully rolled back %s", pluginName),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // HandleCheckUpdates checks for available updates for all plugins
@@ -325,8 +335,10 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"updates": updates,
 		"count":   len(updates),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

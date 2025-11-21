@@ -579,7 +579,7 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
 			// Success! Cache it for offline use
 			if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
-				os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
+				_ = os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
 			}
 			onlineReg = githubReg
 			fmt.Println("plugin registry loaded from GitHub")

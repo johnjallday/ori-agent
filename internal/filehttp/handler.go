@@ -3,6 +3,7 @@ package filehttp
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/fileparser"
@@ -37,30 +38,38 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode base64 content
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
-		json.NewEncoder(w).Encode(ParseFileResponse{
+		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to decode file content: " + err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	// Validate file size
 	if err := fileparser.ValidateFileSize(int64(len(data))); err != nil {
-		json.NewEncoder(w).Encode(ParseFileResponse{
+		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	// Parse file
 	text, err := fileparser.ParseFile(req.Filename, data)
 	if err != nil {
-		json.NewEncoder(w).Encode(ParseFileResponse{
+		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to parse file: " + err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
-	json.NewEncoder(w).Encode(ParseFileResponse{
+	if err := json.NewEncoder(w).Encode(ParseFileResponse{
 		Text: text,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

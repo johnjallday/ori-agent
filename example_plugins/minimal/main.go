@@ -67,8 +67,8 @@ func (t *minimal_pluginTool) handleEcho(message string, count int) (string, erro
 		debugMode, _ := sm.GetBool("debug_mode")
 		if debugMode {
 			// Store some debug information
-			sm.Set("last_operation", "echo")
-			sm.Set("last_message", message)
+			_ = sm.Set("last_operation", "echo")
+			_ = sm.Set("last_message", message)
 		}
 	}
 

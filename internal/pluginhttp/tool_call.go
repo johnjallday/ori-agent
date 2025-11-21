@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -34,10 +35,12 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 
 	var req ToolCallRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		json.NewEncoder(w).Encode(ToolCallResponse{
+		if err := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Invalid request: %v", err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -49,10 +52,12 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 
 	agent, ok := h.State.GetAgent(current)
 	if !ok {
-		json.NewEncoder(w).Encode(ToolCallResponse{
+		if err := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   "Current agent not found",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -63,10 +68,12 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 	// Find the plugin using normalized name
 	plugin, exists := agent.Plugins[pluginName]
 	if !exists || plugin.Tool == nil {
-		json.NewEncoder(w).Encode(ToolCallResponse{
+		if err := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Plugin %q not found or not loaded", pluginName),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -74,10 +81,12 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 	req.Args["operation"] = req.Operation
 	argsJSON, err := json.Marshal(req.Args)
 	if err != nil {
-		json.NewEncoder(w).Encode(ToolCallResponse{
+		if err := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to marshal arguments: %v", err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -100,16 +109,20 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err != nil {
-		json.NewEncoder(w).Encode(ToolCallResponse{
+		if err := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Tool call failed: %v", err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	// Success
-	json.NewEncoder(w).Encode(ToolCallResponse{
+	if err := json.NewEncoder(w).Encode(ToolCallResponse{
 		Success: true,
 		Result:  result,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

@@ -2,6 +2,7 @@ package locationhttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -36,7 +37,9 @@ func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetZones handles GET /api/location/zones
@@ -49,7 +52,9 @@ func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 	zones := h.manager.GetZones()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(zones)
+	if err := json.NewEncoder(w).Encode(zones); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // CreateZone handles POST /api/location/zones
@@ -84,7 +89,9 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(zone)
+	if err := json.NewEncoder(w).Encode(zone); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // UpdateZone handles PUT /api/location/zones/:id
@@ -130,7 +137,9 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(zone)
+	if err := json.NewEncoder(w).Encode(zone); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // DeleteZone handles DELETE /api/location/zones/:id
@@ -195,5 +204,7 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

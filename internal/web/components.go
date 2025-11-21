@@ -1,6 +1,7 @@
 package web
 
 import (
+	"log"
 	"net/http"
 )
 
@@ -25,10 +26,8 @@ type ComponentHandler struct {
 // NewComponentHandler creates a new component handler
 func NewComponentHandler() *ComponentHandler {
 	renderer := NewComponentRenderer()
-	// Load all components at startup
-	if err := renderer.LoadAllComponents(); err != nil {
-		// Log error but don't fail - components will be loaded on-demand
-	}
+	// Load all components at startup - errors are non-fatal, components load on-demand
+	_ = renderer.LoadAllComponents()
 
 	return &ComponentHandler{
 		renderer: renderer,
@@ -61,7 +60,9 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 
 	// Set content type
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(content))
+	if _, err := w.Write([]byte(content)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 // RenderPage renders a complete page using components
@@ -95,7 +96,11 @@ func (ch *ComponentHandler) ListComponents(w http.ResponseWriter, r *http.Reques
 		joinStrings(components, `","`) +
 		`"]}`
 
-	w.Write([]byte(response))
+	if _, err := w.Write([]byte(response)); err != nil {
+
+		log.Printf("Failed to write response: %v", err)
+
+	}
 }
 
 // Helper function to join strings (avoiding external dependencies)

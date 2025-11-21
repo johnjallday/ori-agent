@@ -261,12 +261,8 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		tools = make([]ollamaTool, len(req.Tools))
 		for i, tool := range req.Tools {
 			tools[i] = ollamaTool{
-				Type: "function",
-				Function: ollamaFunctionDef{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters:  tool.Parameters,
-				},
+				Type:     "function",
+				Function: ollamaFunctionDef(tool),
 			}
 		}
 	}
@@ -373,7 +369,7 @@ func (r *ollamaStreamReader) Next() (*StreamChunk, error) {
 		// For now, just handle the first tool call
 		tc := chunk.Message.ToolCalls[0]
 		streamChunk.ToolCall = &ToolCall{
-			ID:        fmt.Sprintf("call_0"),
+			ID:        "call_0",
 			Name:      tc.Function.Name,
 			Arguments: string(tc.Function.Arguments),
 		}
@@ -447,12 +443,8 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 		tools = make([]ollamaTool, len(req.Tools))
 		for i, tool := range req.Tools {
 			tools[i] = ollamaTool{
-				Type: "function",
-				Function: ollamaFunctionDef{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters:  tool.Parameters,
-				},
+				Type:     "function",
+				Function: ollamaFunctionDef(tool),
 			}
 		}
 	}

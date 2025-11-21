@@ -2,6 +2,7 @@ package pluginhttp
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -81,7 +82,9 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Write content
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(content))
+	if _, err := w.Write([]byte(content)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 // ListPages returns available pages for a plugin
@@ -111,7 +114,9 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		// Plugin doesn't provide web pages, return empty list
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"pages":[]}`))
+		if _, err := w.Write([]byte(`{"pages":[]}`)); err != nil {
+			log.Printf("Failed to write response: %v", err)
+		}
 		return
 	}
 
@@ -121,7 +126,9 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	// Return as JSON
 	w.Header().Set("Content-Type", "application/json")
 	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(quoteStrings(pages), ","))
-	w.Write([]byte(response))
+	if _, err := w.Write([]byte(response)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }
 
 // Helper function to quote strings for JSON

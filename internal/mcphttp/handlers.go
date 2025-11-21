@@ -44,7 +44,9 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // AddServerHandler adds a new MCP server
@@ -76,7 +78,9 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // RemoveServerHandler removes an MCP server
@@ -110,7 +114,9 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // EnableServerHandler enables an MCP server for the current agent
@@ -155,7 +161,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if status == mcp.StatusError || status == mcp.StatusStopped {
 		// Stop first if in error state to clean up
 		if status == mcp.StatusError {
-			h.registry.StopServer(serverName) // Ignore error, might already be stopped
+			_ = h.registry.StopServer(serverName) // Ignore error, might already be stopped
 		}
 
 		// Start the server
@@ -173,7 +179,9 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // DisableServerHandler disables an MCP server for the current agent
@@ -207,7 +215,9 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetServerToolsHandler lists tools available from a specific server
@@ -235,10 +245,12 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 	tools := server.GetTools()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"server": serverName,
 		"tools":  tools,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetServerStatusHandler gets status for a specific server
@@ -264,10 +276,12 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"server": serverName,
 		"status": status,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // TestConnectionHandler tests connection to an MCP server
@@ -301,10 +315,12 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 	if status == mcp.StatusStopped {
 		if err := server.Start(); err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
 				"error":   fmt.Sprintf("Failed to start server: %v", err),
-			})
+			}); err != nil {
+				log.Printf("Failed to encode response: %v", err)
+			}
 			return
 		}
 		wasStarted = true
@@ -315,15 +331,17 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Stop if we started it just for testing
 	if wasStarted {
-		server.Stop()
+		_ = server.Stop() // Ignore error, server was just for testing
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":    true,
 		"tool_count": len(tools),
 		"message":    "Connection successful",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // RetryConnectionHandler manually retries a failed server connection
@@ -357,7 +375,9 @@ func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Server restart initiated"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Server restart initiated"}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // ImportServersHandler imports MCP server configurations from uploaded JSON/YAML
@@ -398,7 +418,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	for _, serverConfig := range config.Servers {
 		// Validate required fields
 		if serverConfig.Name == "" || serverConfig.Command == "" {
-			errors = append(errors, fmt.Sprintf("Server missing required fields (name or command)"))
+			errors = append(errors, "Server missing required fields (name or command)")
 			continue
 		}
 
@@ -418,10 +438,12 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"added":  added,
 		"errors": errors,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetMarketplaceServersHandler returns available MCP servers from marketplace
@@ -492,7 +514,9 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"servers": marketplaceServers,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

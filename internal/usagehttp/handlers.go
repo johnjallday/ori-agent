@@ -2,6 +2,7 @@ package usagehttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -26,7 +27,9 @@ func (h *Handler) GetAllTimeStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetAllTimeStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetTodayStats returns today's usage statistics
@@ -35,7 +38,9 @@ func (h *Handler) GetTodayStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetTodayStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetThisMonthStats returns this month's usage statistics
@@ -44,7 +49,9 @@ func (h *Handler) GetThisMonthStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetThisMonthStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetCustomRangeStats returns usage statistics for a custom time range
@@ -74,7 +81,9 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetStats(start, end)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetPricingModels returns all pricing models
@@ -83,9 +92,11 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 	models := h.costTracker.GetPricingModels()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"pricing_models": models,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // UpdatePricingModel updates a pricing model
@@ -105,10 +116,12 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	h.costTracker.UpdatePricingModel(model)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Pricing model updated successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // GetSummary returns a quick summary of usage stats
@@ -140,5 +153,7 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	if err := json.NewEncoder(w).Encode(summary); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

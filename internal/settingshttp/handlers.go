@@ -2,6 +2,7 @@ package settingshttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -297,9 +298,11 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"providers": providers,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // getModelCategories returns all categories a model should appear in

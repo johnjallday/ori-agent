@@ -23,7 +23,7 @@ type PluginDownloader struct {
 // NewDownloader creates a new plugin downloader with a cache directory
 func NewDownloader(cacheDir string) *PluginDownloader {
 	// Ensure cache directory exists
-	os.MkdirAll(cacheDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755) // Ignore error, will fail later if needed
 
 	return &PluginDownloader{
 		CacheDir: cacheDir,

@@ -393,10 +393,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "method not allowed",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -406,20 +408,24 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
 	if strings.TrimSpace(req.Name) == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "name required",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -428,10 +434,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -447,10 +455,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if pluginEntry == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "plugin not found in registry",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -472,7 +482,9 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		}
 
 		log.Printf("Plugin download blocked: %s not compatible with %s", req.Name, currentPlatform)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -480,10 +492,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if pluginEntry.DownloadURL == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "plugin does not have a download URL",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -492,10 +506,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to create upload directory: %v", err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -504,10 +520,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to get plugin %s: %v", pluginEntry.Name, err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -529,10 +547,12 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := copyFile(downloadedPath, filePath); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to persist plugin: %v", err),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -548,12 +568,14 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"success":  true,
 		"message":  fmt.Sprintf("Plugin %s downloaded successfully", pluginEntry.Name),
 		"filename": filename,
 		"path":     filePath,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 func copyFile(src, dst string) (err error) {
@@ -589,10 +611,12 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	if r.Method != http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "method not allowed",
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -601,10 +625,12 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
-		})
+		}); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 		return
 	}
 
@@ -639,9 +665,11 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"success":      true,
 		"updatesCount": len(updates),
 		"updates":      updates,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

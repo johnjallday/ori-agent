@@ -89,7 +89,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	result, err := o.executeWorkflow(ctx, ws, task, agents)
 	if err != nil {
 		ws.SetStatus(agentstudio.StatusFailed)
-		o.workspaceStore.Save(ws)
+		_ = o.workspaceStore.Save(ws) // Best effort save
 		return &CollaborativeResult{
 			WorkspaceID: ws.ID,
 			FinalOutput: "",
@@ -102,7 +102,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 
 	// 4. Mark workspace as completed
 	ws.SetStatus(agentstudio.StatusCompleted)
-	o.workspaceStore.Save(ws)
+	_ = o.workspaceStore.Save(ws) // Best effort save
 
 	result.WorkspaceID = ws.ID
 	result.Duration = time.Since(startTime)

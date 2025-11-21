@@ -59,18 +59,22 @@ echo ""
 run_check "Format Check" "make fmt" || true
 run_check "Go Vet" "make vet" || true
 
-# Check if golangci-lint is installed
+# Check if golangci-lint is installed (check PATH and ~/go/bin)
 if command -v golangci-lint &> /dev/null; then
   run_check "Lint Check" "make lint" || true
+elif [ -x "$HOME/go/bin/golangci-lint" ]; then
+  run_check "Lint Check" "$HOME/go/bin/golangci-lint run ./..." || true
 else
   echo -e "${YELLOW}⚠️  Lint Check: SKIPPED (golangci-lint not installed)${NC}"
   echo -e "${YELLOW}   Install with: make install-tools${NC}"
   echo ""
 fi
 
-# Check if govulncheck is installed
+# Check if govulncheck is installed (check PATH and ~/go/bin)
 if command -v govulncheck &> /dev/null; then
   run_check "Security Scan" "make security" || true
+elif [ -x "$HOME/go/bin/govulncheck" ]; then
+  run_check "Security Scan" "$HOME/go/bin/govulncheck ./..." || true
 else
   echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (govulncheck not installed)${NC}"
   echo -e "${YELLOW}   Install with: make install-tools${NC}"
@@ -84,7 +88,7 @@ echo "2. TESTS (Unit + Integration + E2E + User)"
 echo "════════════════════════════════════════════"
 echo ""
 
-run_check "All Tests" "go test ./..." || true
+run_check "All Tests" "go test -p 1 ./..." || true
 
 # 3. BUILD VERIFICATION
 echo ""

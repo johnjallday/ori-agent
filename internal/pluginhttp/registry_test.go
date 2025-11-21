@@ -66,7 +66,7 @@ func setupTestRegistry(t *testing.T, plugins []types.PluginRegistryEntry) *regis
 
 	// Restore working directory after test
 	t.Cleanup(func() {
-		os.Chdir(originalWd)
+		_ = os.Chdir(originalWd)
 	})
 
 	// Write test registry to cache file (this is what the Manager will load)

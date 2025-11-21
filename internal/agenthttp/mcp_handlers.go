@@ -97,10 +97,12 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"agent":   agentName,
 		"servers": servers,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // EnableAgentMCPServerHandler enables an MCP server for a specific agent
@@ -154,10 +156,12 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	log.Printf("✅ Enabled MCP server '%s' for agent '%s'", serverName, agentName)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("MCP server '%s' enabled for agent '%s'", serverName, agentName),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // DisableAgentMCPServerHandler disables an MCP server for a specific agent
@@ -195,10 +199,12 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	log.Printf("✅ Disabled MCP server '%s' for agent '%s'", serverName, agentName)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("MCP server '%s' disabled for agent '%s'", serverName, agentName),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // getServerDescription returns a human-readable description for known MCP servers

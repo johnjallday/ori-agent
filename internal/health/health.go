@@ -137,7 +137,7 @@ func (c *Checker) CheckPlugin(name string, tool pluginapi.PluginTool) CheckResul
 		result.Health.Status = "unhealthy"
 		result.Health.Compatible = false
 		result.Health.Errors = append(result.Health.Errors, reason)
-		result.Health.Recommendation = fmt.Sprintf("Update plugin to a compatible version")
+		result.Health.Recommendation = "Update plugin to a compatible version"
 	}
 
 	// Check API version compatibility
@@ -215,11 +215,9 @@ func (c *Checker) CheckPlugin(name string, tool pluginapi.PluginTool) CheckResul
 
 // checkFunctionality performs basic functionality tests
 func (c *Checker) checkFunctionality(tool pluginapi.PluginTool) CompatibilityCheck {
-	// Test Definition() call
+	// Test Definition() call - recover from panics
 	defer func() {
-		if r := recover(); r != nil {
-			// Plugin panicked
-		}
+		_ = recover() // Silently recover if plugin panics during Definition()
 	}()
 
 	def := tool.Definition()
@@ -237,9 +235,7 @@ func (c *Checker) checkFunctionality(tool pluginapi.PluginTool) CompatibilityChe
 
 	_, err := tool.Call(ctx, "{}")
 	// We expect an error (invalid args), but no panic
-	if err == nil {
-		// This is fine - plugin accepted empty args
-	}
+	_ = err // Error is expected for empty args, but we don't fail the check
 
 	return CompatibilityCheck{
 		Type:    "functionality",

@@ -191,10 +191,8 @@ func (r *Runner) runByCategory() {
 	}
 
 	i := 1
-	categoryList := []string{}
 	for cat, count := range categories {
 		fmt.Printf("  %d. %s (%d scenarios)\n", i, cat, count)
-		categoryList = append(categoryList, cat)
 		i++
 	}
 
@@ -365,7 +363,7 @@ func (r *Runner) exportReport() {
 	}
 
 	// Create reports directory
-	os.MkdirAll("../reports", 0755)
+	_ = os.MkdirAll("../reports", 0755)
 
 	filename := fmt.Sprintf("../reports/scenario-%s.json", time.Now().Format("2006-01-02-15-04"))
 	file, err := os.Create(filename)

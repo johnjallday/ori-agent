@@ -119,8 +119,8 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	var prompt strings.Builder
 
-	prompt.WriteString(fmt.Sprintf("# Task Assignment\n\n"))
-	prompt.WriteString(fmt.Sprintf("You have been assigned a task in a collaborative studio.\n\n"))
+	prompt.WriteString("# Task Assignment\n\n")
+	prompt.WriteString("You have been assigned a task in a collaborative studio.\n\n")
 	prompt.WriteString(fmt.Sprintf("**Task ID**: %s\n", task.ID))
 	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
 	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))

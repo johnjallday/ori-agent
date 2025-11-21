@@ -6,7 +6,7 @@ import (
 )
 
 //go:embed test_templates
-var integrationTemplatesFS embed.FS
+var _ embed.FS // Embedded for documentation/reference only
 
 // Helper function for creating float pointers
 func floatPtr(f float64) *float64 {
@@ -239,7 +239,7 @@ func TestPluginOptimizationAPIs_Integration(t *testing.T) {
 		}
 
 		// 3. Plugin stores configuration
-		sm.Set("resource_count", 42.0)
+		_ = sm.Set("resource_count", 42.0)
 
 		// 4. Verify settings persistence
 		resourceCount, _ := sm.GetInt("resource_count")
@@ -307,9 +307,9 @@ func TestRealWorldScenario_MusicPlugin(t *testing.T) {
 
 	// Store plugin-specific settings
 	sm := bp.Settings()
-	sm.Set("project_dir", "/Users/test/Music/Projects")
-	sm.Set("template_dir", "/Users/test/Music/Templates")
-	sm.Set("default_bpm", 120.0)
+	_ = sm.Set("project_dir", "/Users/test/Music/Projects")
+	_ = sm.Set("template_dir", "/Users/test/Music/Templates")
+	_ = sm.Set("default_bpm", 120.0)
 
 	// Get tool definition
 	tool, err := bp.GetToolDefinition()
@@ -370,7 +370,7 @@ func TestConcurrentAPIUsage(t *testing.T) {
 		go func(id int) {
 			// Settings API
 			sm := bp.Settings()
-			sm.Set("key"+string(rune(id)), id)
+			_ = sm.Set("key"+string(rune(id)), id)
 
 			// Tool Definition API
 			tool, err := bp.GetToolDefinition()

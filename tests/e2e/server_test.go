@@ -73,8 +73,12 @@ func TestHealthCheck(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
 	}
 
+	// Read body for debugging
+	body, _ := io.ReadAll(resp.Body)
+	t.Logf("Health check response body: %s", string(body))
+
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -140,13 +144,19 @@ func TestAgentLifecycle(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var agents []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+	var response map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode agents: %v", err)
 	}
 
+	agentsList, ok := response["agents"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected 'agents' array in response, got: %v", response)
+	}
+
 	found := false
-	for _, agent := range agents {
+	for _, a := range agentsList {
+		agent := a.(map[string]interface{})
 		if agent["name"] == "e2e-test-agent" {
 			found = true
 			break
@@ -157,11 +167,11 @@ func TestAgentLifecycle(t *testing.T) {
 		t.Error("Created agent not found in list")
 	}
 
-	t.Logf("✓ Agent found in list (total: %d)", len(agents))
+	t.Logf("✓ Agent found in list (total: %d)", len(agentsList))
 
 	// 3. Delete agent
 	t.Log("Deleting agent...")
-	req, _ := http.NewRequest("DELETE", baseURL+"/api/agents/e2e-test-agent", nil)
+	req, _ := http.NewRequest("DELETE", baseURL+"/api/agents?name=e2e-test-agent", nil)
 	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to delete agent: %v", err)
@@ -335,8 +345,8 @@ func startServer(t *testing.T, ctx context.Context) *exec.Cmd {
 
 func stopServer(cmd *exec.Cmd) {
 	if cmd != nil && cmd.Process != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}
 }
 

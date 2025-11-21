@@ -100,7 +100,7 @@ func NewCostTracker(dataDir string) *CostTracker {
 	ct.initializePricingModels()
 
 	// Load existing records
-	ct.loadRecords()
+	_ = ct.loadRecords() // Ignore error on init, will retry later
 
 	return ct
 }
@@ -208,7 +208,7 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 	copy(recordsCopy, ct.records)
 
 	// Save asynchronously with copied data
-	go ct.saveRecordsCopy(recordsCopy)
+	go func() { _ = ct.saveRecordsCopy(recordsCopy) }() // Async save, ignore errors
 
 	return nil
 }
@@ -369,14 +369,6 @@ func (ct *CostTracker) saveRecordsCopy(records []UsageRecord) error {
 	}
 
 	return nil
-}
-
-// saveRecords saves records to disk (synchronous, requires lock)
-func (ct *CostTracker) saveRecords() error {
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
-
-	return ct.saveRecordsCopy(ct.records)
 }
 
 // loadRecords loads records from disk

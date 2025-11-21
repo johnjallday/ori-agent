@@ -56,7 +56,7 @@ func (c *GRPCClient) Version() string {
 
 // SetAgentContext provides agent information to the plugin (implements AgentAwareTool)
 func (c *GRPCClient) SetAgentContext(ctx pluginapi.AgentContext) {
-	c.client.SetAgentContext(context.Background(), &pluginapi.AgentContextRequest{
+	_, _ = c.client.SetAgentContext(context.Background(), &pluginapi.AgentContextRequest{
 		Name:         ctx.Name,
 		ConfigPath:   ctx.ConfigPath,
 		SettingsPath: ctx.SettingsPath,

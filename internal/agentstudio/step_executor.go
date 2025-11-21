@@ -140,8 +140,8 @@ func (se *StepExecutor) processWorkflow(ws *Workspace, workflowID string) {
 		workflow.Status = WorkflowStatusInProgress
 		now := time.Now()
 		workflow.StartedAt = &now
-		ws.UpdateWorkflow(*workflow)
-		se.workspaceStore.Save(ws)
+		_ = ws.UpdateWorkflow(*workflow) // Best effort update
+		_ = se.workspaceStore.Save(ws)   // Best effort save
 	}
 
 	// Update step statuses based on dependencies
@@ -217,8 +217,8 @@ func (se *StepExecutor) updateStepStatuses(ws *Workspace, workflow *Workflow) {
 	}
 
 	if changed {
-		ws.UpdateWorkflow(*workflow)
-		se.workspaceStore.Save(ws)
+		_ = ws.UpdateWorkflow(*workflow) // Best effort update
+		_ = se.workspaceStore.Save(ws)   // Best effort save
 	}
 }
 
@@ -364,8 +364,8 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		}
 	}
 
-	ws.UpdateWorkflow(*workflow)
-	se.workspaceStore.Save(ws)
+	_ = ws.UpdateWorkflow(*workflow) // Best effort update
+	_ = se.workspaceStore.Save(ws)   // Best effort save
 
 	// Execute asynchronously
 	se.wg.Add(1)
@@ -441,8 +441,8 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 			}
 		}
 
-		ws.UpdateWorkflow(*workflow)
-		se.workspaceStore.Save(ws)
+		_ = ws.UpdateWorkflow(*workflow) // Best effort update
+		_ = se.workspaceStore.Save(ws)   // Best effort save
 	}()
 }
 
@@ -536,7 +536,7 @@ func (se *StepExecutor) checkWorkflowCompletion(ws *Workspace, workflow *Workflo
 			log.Printf("✅ Workflow %s (%s) completed successfully", workflow.ID, workflow.Name)
 		}
 
-		ws.UpdateWorkflow(*workflow)
-		se.workspaceStore.Save(ws)
+		_ = ws.UpdateWorkflow(*workflow) // Best effort update
+		_ = se.workspaceStore.Save(ws)   // Best effort save
 	}
 }

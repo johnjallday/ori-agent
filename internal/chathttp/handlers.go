@@ -123,7 +123,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Get Claude provider
 	provider, err := h.llmFactory.GetProvider("claude")
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: Claude provider not available: %v", err),
 		})
 		return
@@ -154,7 +154,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		MaxTokens:   4000,
 	})
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		})
 		return
@@ -197,7 +197,6 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 			if !found {
 				result = fmt.Sprintf("❌ Error: Tool %q not found", name)
-				err = fmt.Errorf("tool not found")
 				log.Printf("Tool %s not found", name)
 			} else {
 				// Execute tool with timeout (30s for operations like API calls)
@@ -344,8 +343,8 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
 	log.Printf("Claude chat response in %s", time.Since(start))
-	h.store.SetAgent(agentName, ag)
-	json.NewEncoder(w).Encode(map[string]any{"response": text})
+	_ = h.store.SetAgent(agentName, ag)
+	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
@@ -356,7 +355,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Get Ollama provider
 	provider, err := h.llmFactory.GetProvider("ollama")
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: Ollama provider not available: %v", err),
 		})
 		return
@@ -387,7 +386,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		MaxTokens:   4000,
 	})
 	if err != nil {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		})
 		return
@@ -469,7 +468,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		})
 		if err != nil {
 			log.Printf("❌ Error getting final response from LLM: %v", err)
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response": fmt.Sprintf("❌ **Error**: %v", err),
 			})
 			return
@@ -478,9 +477,9 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		log.Printf("📥 Final response from LLM: %s", finalResp.Content)
 
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
-		h.store.SetAgent(agentName, ag)
+		_ = h.store.SetAgent(agentName, ag)
 
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response":  finalResp.Content,
 			"toolCalls": toolResults,
 		})
@@ -489,8 +488,8 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// No tool calls - direct response
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
-	h.store.SetAgent(agentName, ag)
-	json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
+	_ = h.store.SetAgent(agentName, ag)
+	_ = json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
 }
 
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
@@ -581,7 +580,7 @@ func (h *Handler) generateInitializationPrompt(uninitializedPlugins []map[string
 
 	if len(uninitializedPlugins) == 1 {
 		plugin := uninitializedPlugins[0]
-		prompt.WriteString(fmt.Sprintf("🔧 **Plugin Setup Required**\n\n"))
+		prompt.WriteString("🔧 **Plugin Setup Required**\n\n")
 		prompt.WriteString(fmt.Sprintf("The **%s** plugin needs to be configured before you can use it.\n\n", plugin["name"]))
 		prompt.WriteString(fmt.Sprintf("**Description:** %s\n\n", plugin["description"]))
 
@@ -594,7 +593,7 @@ func (h *Handler) generateInitializationPrompt(uninitializedPlugins []map[string
 
 		prompt.WriteString("\n**Please click the 'Configure Plugin' button to set up this plugin.**")
 	} else {
-		prompt.WriteString(fmt.Sprintf("🔧 **Plugin Setup Required**\n\n"))
+		prompt.WriteString("🔧 **Plugin Setup Required**\n\n")
 		prompt.WriteString(fmt.Sprintf("You have %d plugins that need to be configured before you can use them:\n\n", len(uninitializedPlugins)))
 
 		for i, plugin := range uninitializedPlugins {
@@ -692,7 +691,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		cmd, err := parseDirectToolCommand(q)
 		if err != nil {
 			// Return parsing error as response
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
 				"direct_tool_call": true,
 				"success":          false,
@@ -721,7 +720,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Return formatted response
 		response := formatDirectToolResponse(result)
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
 
@@ -746,7 +745,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	uninitializedPlugins := h.checkUninitializedPlugins(ag)
 	if len(uninitializedPlugins) > 0 {
 		initPrompt := h.generateInitializationPrompt(uninitializedPlugins)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response":                initPrompt,
 			"requires_initialization": true,
 			"uninitialized_plugins":   uninitializedPlugins,
@@ -777,7 +776,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Return orchestration result
 			log.Printf("✅ Orchestration completed successfully")
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response":     result.FinalOutput,
 				"orchestrated": true,
 				"studio_id":    result.WorkspaceID,
@@ -918,7 +917,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse := map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		}
-		json.NewEncoder(w).Encode(errorResponse)
+		_ = json.NewEncoder(w).Encode(errorResponse)
 		return
 	}
 	if resp == nil || len(resp.Choices) == 0 {

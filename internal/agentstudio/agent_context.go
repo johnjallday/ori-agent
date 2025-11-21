@@ -179,7 +179,7 @@ func (ac *AgentContext) GetTasksSummary() (string, error) {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("## Your Tasks\n\n"))
+	sb.WriteString("## Your Tasks\n\n")
 	sb.WriteString(fmt.Sprintf("**Total**: %d | **Pending**: %d | **In Progress**: %d | **Completed**: %d | **Failed**: %d\n\n",
 		len(allTasks), len(pendingTasks), inProgress, completed, failed))
 

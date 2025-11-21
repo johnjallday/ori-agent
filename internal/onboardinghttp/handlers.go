@@ -2,6 +2,7 @@ package onboardinghttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -53,7 +54,9 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // CompleteStep marks a step as completed and advances to the next step
@@ -93,7 +96,9 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // Skip marks onboarding as skipped
@@ -110,7 +115,9 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // Complete marks onboarding as completed
@@ -127,7 +134,9 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // Reset resets onboarding state (useful for testing)
@@ -144,7 +153,9 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // ThemeResponse represents the theme response
@@ -172,7 +183,9 @@ func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // SetTheme sets the theme preference
@@ -199,10 +212,10 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := ThemeResponse{
-		Theme: req.Theme,
-	}
+	response := ThemeResponse(req)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }

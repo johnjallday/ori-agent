@@ -65,7 +65,7 @@ func NewTestContext(t *testing.T) *TestContext {
 	// Wait for server to be ready with longer timeout
 	if err := waitForServer(serverURL, 15*time.Second); err != nil {
 		if serverCmd.Process != nil {
-			serverCmd.Process.Kill()
+			_ = serverCmd.Process.Kill()
 		}
 		os.RemoveAll(tempDir)
 		t.Fatalf("Server failed to start: %v", err)
@@ -407,13 +407,13 @@ func (tc *TestContext) cleanupAll() {
 	for _, agentName := range tc.CreatedAgents {
 		url := fmt.Sprintf("%s/api/agents/%s", tc.ServerURL, agentName)
 		req, _ := http.NewRequest("DELETE", url, nil)
-		tc.Client.Do(req)
+		_, _ = tc.Client.Do(req)
 	}
 
 	// Stop server
 	if tc.ServerCmd != nil && tc.ServerCmd.Process != nil {
-		tc.ServerCmd.Process.Kill()
-		tc.ServerCmd.Wait()
+		_ = tc.ServerCmd.Process.Kill()
+		_ = tc.ServerCmd.Wait()
 	}
 
 	// Remove temp directory
@@ -444,6 +444,8 @@ func startTestServer(t *testing.T, ctx context.Context, port string) *exec.Cmd {
 		fmt.Sprintf("PORT=%s", port),
 		// Add test mode indicator
 		"TEST_MODE=true",
+		// Don't open browser during tests
+		"NO_BROWSER=true",
 	)
 
 	// Set working directory to project root so server can find plugins
