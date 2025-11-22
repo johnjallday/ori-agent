@@ -153,6 +153,23 @@ func (p *OllamaProvider) fetchAvailableModels() ([]string, error) {
 	return models, nil
 }
 
+// HasModel checks if a specific model is available in Ollama
+func (p *OllamaProvider) HasModel(modelName string) bool {
+	models, err := p.fetchAvailableModels()
+	if err != nil {
+		return false
+	}
+
+	// Check for exact match
+	for _, m := range models {
+		if m == modelName {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ollamaMessage represents a message in Ollama format
 type ollamaMessage struct {
 	Role      string           `json:"role"`
