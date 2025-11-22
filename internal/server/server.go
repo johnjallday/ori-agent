@@ -212,7 +212,9 @@ func New() (*Server, error) {
 	// Load zones from file
 	zones, err := location.LoadZones(locationZonesPath)
 	if err != nil {
-		log.Printf("Warning: failed to load location zones: %v", err)
+		if verbose {
+			log.Printf("Warning: failed to load location zones: %v", err)
+		}
 		zones = []location.Zone{}
 	}
 	if verbose {
@@ -252,7 +254,9 @@ func New() (*Server, error) {
 	// refresh local plugin registry from uploaded_plugins directory
 	// This rebuilds the registry from scratch, ensuring all metadata is current
 	if err := s.registryManager.RefreshLocalRegistry(); err != nil {
-		log.Printf("Warning: failed to refresh local plugin registry: %v", err)
+		if verbose {
+			log.Printf("Warning: failed to refresh local plugin registry: %v", err)
+		}
 	}
 
 	// init update manager
@@ -326,7 +330,9 @@ func New() (*Server, error) {
 			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath, currentLocation)
 
 			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
-				log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
+				if verbose {
+					log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
+				}
 			}
 
 			// Refresh the definition from the reloaded plugin to ensure parameters are up-to-date
@@ -477,18 +483,24 @@ func New() (*Server, error) {
 	s.mcpRegistry = mcp.NewRegistry()
 	s.mcpConfigManager = mcp.NewConfigManager(".")
 	if err := s.mcpConfigManager.InitializeDefaultServers(); err != nil {
-		log.Printf("Warning: failed to initialize default MCP servers: %v", err)
+		if verbose {
+			log.Printf("Warning: failed to initialize default MCP servers: %v", err)
+		}
 	}
 
 	// Load global MCP configuration
 	mcpGlobalConfig, err := s.mcpConfigManager.LoadGlobalConfig()
 	if err != nil {
-		log.Printf("Warning: failed to load MCP global config: %v", err)
+		if verbose {
+			log.Printf("Warning: failed to load MCP global config: %v", err)
+		}
 	} else {
 		// Add all configured servers to registry
 		for _, serverConfig := range mcpGlobalConfig.Servers {
 			if err := s.mcpRegistry.AddServer(serverConfig); err != nil {
-				log.Printf("Warning: failed to add MCP server %s to registry: %v", serverConfig.Name, err)
+				if verbose {
+					log.Printf("Warning: failed to add MCP server %s to registry: %v", serverConfig.Name, err)
+				}
 			}
 		}
 		if verbose {
@@ -615,7 +627,9 @@ func New() (*Server, error) {
 	}
 	templateManager := templates.NewTemplateManager(templatesDir)
 	if err := templateManager.LoadTemplates(); err != nil {
-		log.Printf("⚠️  Warning: failed to load workflow templates: %v", err)
+		if verbose {
+			log.Printf("⚠️  Warning: failed to load workflow templates: %v", err)
+		}
 	} else if verbose {
 		log.Printf("✅ Loaded %d workflow templates", len(templateManager.ListTemplates()))
 	}
