@@ -59,22 +59,32 @@ builds:
       - amd64
       - arm64
 
-# Archives - disabled (we only distribute installers, not raw binaries)
-# Users get: DMG (macOS), MSI (Windows), .deb/.rpm (Linux)
-# Note: Binaries are still built and available in dist/ for installer creation
+# Archives - Only distribute installers (professional appearance)
+# Distribution strategy:
+#   - macOS: DMG installers only (no standalone binaries)
+#   - Windows: .exe for now (MSI coming soon)
+#   - Linux: .deb/.rpm packages only (no standalone binaries)
+#   - Menubar app: Bundled in macOS DMG (no separate binary)
 archives:
-  - id: default
+  # Temporary: Windows .exe until MSI installer is ready
+  - id: windows-only
+    builds:
+      - server
     format: binary
-    # Don't include any files - just the binaries themselves
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - none*  # This pattern won't match anything, so no extra files are included
+      - none*
+    # Only include Windows
+    meta: true
+    filter:
+      goos:
+        - windows
 
 # macOS DMG installers - created via custom publisher
 publishers:
   - name: macos-dmg-amd64
     ids:
       - default
-    dir: "{{ dir .ArtifactPath }}"
     cmd: ./build/macos/create-dmg.sh {{ .Version }} amd64 dist
     env:
       - PATH={{ .Env.PATH }}
@@ -85,7 +95,6 @@ publishers:
   - name: macos-dmg-arm64
     ids:
       - default
-    dir: "{{ dir .ArtifactPath }}"
     cmd: ./build/macos/create-dmg.sh {{ .Version }} arm64 dist
     env:
       - PATH={{ .Env.PATH }}
@@ -242,10 +251,14 @@ release:
     - **macOS**:
       - Apple Silicon (M1/M2/M3): `OriAgent-{{ .Version }}-arm64.dmg`
       - Intel: `OriAgent-{{ .Version }}-amd64.dmg`
-    - **Windows**: `ori-agent-x64.msi`
+
+    - **Windows**:
+      - `ori-agent_{{ .Version }}_windows_amd64.exe` (standalone binary)
+      - MSI installer coming soon!
+
     - **Linux**:
-      - Debian/Ubuntu: `ori-agent_{{ .Version }}_amd64.deb` or `ori-agent_{{ .Version }}_arm64.deb`
-      - Red Hat/Fedora: `ori-agent-{{ .Version }}-1.x86_64.rpm` or `ori-agent-{{ .Version }}-1.aarch64.rpm`
+      - **Debian/Ubuntu**: `ori-agent_{{ .Version }}_amd64.deb` or `ori-agent_{{ .Version }}_arm64.deb`
+      - **Red Hat/Fedora/CentOS**: `ori-agent_{{ .Version }}_amd64.rpm` or `ori-agent_{{ .Version }}_arm64.rpm`
 
     For detailed installation instructions, see the [documentation](https://github.com/johnjallday/ori-agent#installation).
   footer: |
