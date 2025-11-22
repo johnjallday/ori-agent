@@ -196,9 +196,6 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 					logger.Verbosef("✅ Plugin implements InitializationProvider!")
 					settingVariables = initProvider.GetRequiredConfig()
 					logger.Verbosef("✅ Got %d setting variables", len(settingVariables))
-					for i, sv := range settingVariables {
-						fmt.Printf("  [%d] %s (%s): %s", i, sv.Key, sv.Type, sv.Description)
-					}
 					requiresSettings = len(settingVariables) > 0
 				} else {
 					logger.Verbosef("❌ Plugin does NOT implement InitializationProvider (type: %T)", tool)

@@ -592,9 +592,7 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 	if len(onlineReg.Plugins) == 0 {
 		// 3) Try cached version (use if fresh enough or as offline fallback)
 		if b, err := os.ReadFile(m.cachePath); err == nil {
-			if err := json.Unmarshal(b, &onlineReg); err == nil {
-				fmt.Println("plugin registry loaded from cache")
-			} else {
+			if err := json.Unmarshal(b, &onlineReg); err != nil {
 				fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
 			}
 		}
