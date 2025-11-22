@@ -79,6 +79,16 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			continue
 		}
 
+		// Set default status for agents that don't have one (migration for existing agents)
+		if ag.Status == "" {
+			ag.Status = types.AgentStatusIdle
+		}
+
+		// Initialize statistics for agents that don't have them (migration for existing agents)
+		if ag.Statistics == nil {
+			ag.InitializeStatistics()
+		}
+
 		// Apply status filter
 		if statusFilter != "" && string(ag.Status) != statusFilter {
 			continue
@@ -155,6 +165,16 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	if !ok || ag == nil {
 		http.Error(w, "Agent not found", http.StatusNotFound)
 		return
+	}
+
+	// Set default status for agents that don't have one (migration for existing agents)
+	if ag.Status == "" {
+		ag.Status = types.AgentStatusIdle
+	}
+
+	// Initialize statistics for agents that don't have them (migration for existing agents)
+	if ag.Statistics == nil {
+		ag.InitializeStatistics()
 	}
 
 	// Build plugin info list
