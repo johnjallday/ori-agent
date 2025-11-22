@@ -875,21 +875,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if this is an Ollama model - route to Ollama provider
-	if (strings.Contains(ag.Settings.Model, "llama") ||
-		strings.Contains(ag.Settings.Model, "mistral") ||
-		strings.Contains(ag.Settings.Model, "mixtral") ||
-		strings.Contains(ag.Settings.Model, "phi") ||
-		strings.Contains(ag.Settings.Model, "qwen") ||
-		strings.Contains(ag.Settings.Model, "granite") ||
-		strings.Contains(ag.Settings.Model, "codellama") ||
-		strings.Contains(ag.Settings.Model, "orca") ||
-		strings.Contains(ag.Settings.Model, "vicuna") ||
-		strings.Contains(ag.Settings.Model, "neural-chat") ||
-		strings.Contains(ag.Settings.Model, "starling")) && h.llmFactory != nil {
-		// Use Ollama provider
-		h.handleOllamaChat(w, r, ag, q, tools, current, base)
-		return
+	// Check if Ollama has this model - route to Ollama provider (dynamic detection)
+	if h.llmFactory != nil {
+		if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
+			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
+				if ollamaProv.HasModel(ag.Settings.Model) {
+					log.Printf("🎯 Model '%s' found in Ollama, routing to Ollama provider", ag.Settings.Model)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base)
+					return
+				}
+			}
+		}
 	}
 
 	// Convert llm.Tool to OpenAI format
