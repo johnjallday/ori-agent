@@ -430,7 +430,7 @@
   <script src="js/modules/studio-realtime.js"></script>
   <script src="js/modules/message-timeline.js"></script>
   <script src="js/modules/studio-dashboard.js"></script>
-  <script src="js/modules/agent-canvas.js"></script>
+  <script type="module" src="js/modules/agent-canvas.js"></script>
 
   <style>
     .status-indicator {
@@ -468,6 +468,14 @@
     // Auto-refresh workspaces every 10 seconds
     let workspaceRefreshInterval = null;
 
+    // Server connection state management
+    let isServerConnected = true;
+    let consecutiveFailures = 0;
+    let retryDelay = 5000; // Start with 5 seconds
+    const MAX_RETRY_DELAY = 60000; // Max 60 seconds between retries
+    const MAX_CONSECUTIVE_FAILURES = 3; // After 3 failures, show offline notification
+    let serverOfflineNotification = null;
+
     // Load workspaces and agents on page load
     document.addEventListener('DOMContentLoaded', function() {
       loadWorkspaces();
@@ -496,32 +504,202 @@
       }
 
       // Enable auto-refresh
-      workspaceRefreshInterval = setInterval(() => {
-        loadWorkspaces();
-      }, 10000); // Refresh every 10 seconds
+      startWorkspacePolling();
     });
 
     // Clean up on page unload
     window.addEventListener('beforeunload', () => {
+      stopWorkspacePolling();
+    });
+
+    function startWorkspacePolling() {
       if (workspaceRefreshInterval) {
         clearInterval(workspaceRefreshInterval);
       }
-    });
+      workspaceRefreshInterval = setInterval(() => {
+        loadWorkspaces();
+      }, 10000); // Refresh every 10 seconds
+    }
+
+    function stopWorkspacePolling() {
+      if (workspaceRefreshInterval) {
+        clearInterval(workspaceRefreshInterval);
+        workspaceRefreshInterval = null;
+      }
+    }
+
+    function showServerOfflineNotification() {
+      // Remove existing notification if any
+      hideServerOfflineNotification();
+
+      // Create notification banner
+      const notification = document.createElement('div');
+      notification.id = 'server-offline-notification';
+      notification.style.cssText = `
+        position: fixed;
+        top: 70px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #dc3545;
+        color: white;
+        padding: 16px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: slideDown 0.3s ease;
+      `;
+
+      notification.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+        </svg>
+        <span><strong>Server Offline</strong> - Unable to connect to the server. Retrying automatically...</span>
+        <button onclick="manualRetryConnection()" style="
+          background: rgba(255,255,255,0.2);
+          border: 1px solid rgba(255,255,255,0.3);
+          color: white;
+          padding: 6px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+          margin-left: 12px;
+        ">Retry Now</button>
+      `;
+
+      // Add animation
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+      `;
+      document.head.appendChild(style);
+
+      document.body.appendChild(notification);
+      serverOfflineNotification = notification;
+    }
+
+    function hideServerOfflineNotification() {
+      if (serverOfflineNotification) {
+        serverOfflineNotification.remove();
+        serverOfflineNotification = null;
+      }
+    }
+
+    function handleConnectionFailure() {
+      consecutiveFailures++;
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        // Stop regular polling
+        stopWorkspacePolling();
+
+        // Show offline notification
+        showServerOfflineNotification();
+        isServerConnected = false;
+
+        // Implement exponential backoff for retries
+        retryDelay = Math.min(retryDelay * 1.5, MAX_RETRY_DELAY);
+
+        console.log(`Server appears offline. Will retry in ${retryDelay/1000} seconds...`);
+
+        // Schedule retry with exponential backoff
+        setTimeout(() => {
+          loadWorkspaces();
+        }, retryDelay);
+      }
+    }
+
+    function handleConnectionSuccess() {
+      if (!isServerConnected) {
+        // Server is back online
+        console.log('Server connection restored');
+        hideServerOfflineNotification();
+
+        // Resume normal polling
+        startWorkspacePolling();
+      }
+
+      // Reset failure tracking
+      consecutiveFailures = 0;
+      retryDelay = 5000;
+      isServerConnected = true;
+    }
+
+    window.manualRetryConnection = async function() {
+      console.log('Manual retry triggered');
+      hideServerOfflineNotification();
+
+      // Show loading state
+      const grid = document.getElementById('workspaces-grid');
+      grid.innerHTML = `
+        <div class="col-12 text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Reconnecting...</span>
+          </div>
+          <p class="mt-3" style="color: var(--text-muted);">Attempting to reconnect...</p>
+        </div>
+      `;
+
+      await loadWorkspaces();
+    };
 
     async function loadWorkspaces() {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       try {
-        const response = await fetch('/api/orchestration/workspace');
+        const response = await fetch('/api/orchestration/workspace', {
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
         const data = await response.json();
 
         if (data.error) {
-          showError('Failed to load workspaces: ' + data.error);
+          console.error('Server error:', data.error);
+          handleConnectionFailure();
           return;
         }
 
+        // Connection successful
+        handleConnectionSuccess();
         renderWorkspaces(data.workspaces || []);
+
       } catch (error) {
+        clearTimeout(timeoutId); // Clear timeout even on error
+
+        // Silently ignore abort errors if server is connected (these are just timeouts)
+        if (error.name === 'AbortError' && isServerConnected) {
+          console.warn('Request timed out, but server appears online');
+          return;
+        }
+
         console.error('Error loading workspaces:', error);
-        showError('Failed to load workspaces');
+
+        // Check if it's a network error (server offline)
+        if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          handleConnectionFailure();
+        } else {
+          // Other errors (not connection-related) - still try to show something
+          if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+            consecutiveFailures++;
+          }
+        }
       }
     }
 

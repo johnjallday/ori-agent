@@ -1,3 +1,5 @@
+import { AgentCanvasForms } from './agent-canvas-forms.js';
+
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
  * Displays agents as nodes with tasks flowing between them
@@ -65,7 +67,9 @@ class AgentCanvas {
 
     // Create task mode state
     this.createTaskMode = false;
-    this.createTaskFormVisible = false;
+
+    // Initialize forms module
+    this.forms = new AgentCanvasForms(this);
 
     // Timeline panel state
     this.timelineVisible = false;
@@ -105,9 +109,52 @@ class AgentCanvas {
   }
 
   onKeyDown(e) {
-    // ESC key - cancel connection/assignment modes
+    // Handle text input when description field is focused
+    if (this.forms.createTaskDescriptionFocused) {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        // ESC closes the entire form when description is focused
+        e.preventDefault();
+        this.forms.hideCreateTaskForm();
+        return;
+      } else if (e.key === 'Enter') {
+        // Finish typing, unfocus field
+        this.forms.createTaskDescriptionFocused = false;
+        this.canvas.style.cursor = 'default';
+        this.draw();
+        return;
+      } else if (e.key === 'Backspace') {
+        // Remove last character
+        e.preventDefault();
+        if (!this.forms.createTaskDescription) {
+          this.forms.createTaskDescription = '';
+        }
+        this.forms.createTaskDescription = this.forms.createTaskDescription.slice(0, -1);
+        this.draw();
+        return;
+      } else if (e.key.length === 1) {
+        // Add character to description
+        e.preventDefault();
+        if (!this.forms.createTaskDescription) {
+          this.forms.createTaskDescription = '';
+        }
+        this.forms.createTaskDescription += e.key;
+        this.draw();
+        return;
+      }
+      return; // Consume all other keys when focused
+    }
+
+    // ESC key - close forms or cancel connection/assignment modes
     if (e.key === 'Escape' || e.key === 'Esc') {
-      if (this.connectionMode) {
+      if (this.forms.addAgentFormVisible) {
+        // Close the add agent form
+        e.preventDefault();
+        this.forms.hideAddAgentForm();
+      } else if (this.forms.createTaskFormVisible) {
+        // Close the create task form
+        e.preventDefault();
+        this.forms.hideCreateTaskForm();
+      } else if (this.connectionMode) {
         this.connectionMode = false;
         this.connectionSourceTask = null;
         this.canvas.style.cursor = 'grab';
@@ -848,13 +895,11 @@ class AgentCanvas {
       this.drawAssignmentLine();
     }
 
-    // Draw create task form
-    if (this.createTaskFormVisible) {
-      this.drawCreateTaskForm();
-    }
-
     // Draw create task button (always visible)
     this.drawCreateTaskButton();
+
+    // Draw add agent button (always visible)
+    this.drawAddAgentButton();
 
     // Draw timeline panel (fixed position)
     if (this.timelinePanelWidth > 0) {
@@ -869,6 +914,17 @@ class AgentCanvas {
 
     // Draw save layout button (always visible)
     this.drawSaveLayoutButton();
+
+    // Draw modals/forms on top of everything (except notifications)
+    // Draw create task form
+    if (this.forms.createTaskFormVisible) {
+      this.forms.drawCreateTaskForm();
+    }
+
+    // Draw add agent form
+    if (this.forms.addAgentFormVisible) {
+      this.forms.drawAddAgentForm();
+    }
 
     // Draw toast notifications (always on top)
     this.drawNotifications();
@@ -2688,10 +2744,22 @@ class AgentCanvas {
       }
     }
 
-    // Otherwise, zoom the canvas
+    // Otherwise, zoom the canvas relative to mouse position
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    this.scale *= delta;
-    this.scale = Math.max(0.5, Math.min(2, this.scale));
+    const oldScale = this.scale;
+    const newScale = Math.max(0.5, Math.min(2, oldScale * delta));
+
+    // Calculate the point in canvas coordinates before zoom
+    const canvasX = (mouseX - this.offsetX) / oldScale;
+    const canvasY = (mouseY - this.offsetY) / oldScale;
+
+    // Update scale
+    this.scale = newScale;
+
+    // Adjust offset so the point under the mouse stays in the same screen position
+    this.offsetX = mouseX - canvasX * newScale;
+    this.offsetY = mouseY - canvasY * newScale;
+
     this.draw();
   }
 
@@ -2704,46 +2772,85 @@ class AgentCanvas {
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
 
-    // Check for clicks on create task form (highest priority when visible)
-    if (this.createTaskFormVisible) {
+    // Check for clicks on add agent form (highest priority when visible)
+    if (this.forms.addAgentFormVisible) {
       // Check close button
-      if (this.createTaskCloseButtonBounds) {
-        const btn = this.createTaskCloseButtonBounds;
+      if (this.forms.addAgentCloseButtonBounds) {
+        const btn = this.forms.addAgentCloseButtonBounds;
         if (screenX >= btn.x && screenX <= btn.x + btn.width &&
             screenY >= btn.y && screenY <= btn.y + btn.height) {
-          this.hideCreateTaskForm();
-          return;
-        }
-      }
-
-      // Check cancel button
-      if (this.createTaskCancelButtonBounds) {
-        const btn = this.createTaskCancelButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
-          this.hideCreateTaskForm();
+          this.forms.hideAddAgentForm();
           return;
         }
       }
 
       // Check submit button
-      if (this.createTaskSubmitButtonBounds) {
-        const btn = this.createTaskSubmitButtonBounds;
+      if (this.forms.addAgentSubmitButtonBounds) {
+        const btn = this.forms.addAgentSubmitButtonBounds;
         if (screenX >= btn.x && screenX <= btn.x + btn.width &&
             screenY >= btn.y && screenY <= btn.y + btn.height) {
-          this.submitCreateTaskForm();
+          this.forms.submitAddAgentForm();
+          return;
+        }
+      }
+
+      // Check agent selection buttons
+      if (this.forms.agentAddSelectionBounds) {
+        for (const bounds of this.forms.agentAddSelectionBounds) {
+          if (bounds && screenX >= bounds.x && screenX <= bounds.x + bounds.width &&
+              screenY >= bounds.y && screenY <= bounds.y + bounds.height) {
+            this.forms.selectedAgentToAdd = bounds.agentName;
+            this.draw();
+            return;
+          }
+        }
+      }
+
+      // Click outside form - close it
+      if (this.forms.addAgentFormBounds) {
+        const form = this.forms.addAgentFormBounds;
+        if (screenX < form.x || screenX > form.x + form.width ||
+            screenY < form.y || screenY > form.y + form.height) {
+          this.forms.hideAddAgentForm();
+          return;
+        }
+      }
+
+      // Click inside form but not on any interactive element - do nothing
+      return;
+    }
+
+    // Check for clicks on create task form (highest priority when visible)
+    if (this.forms.createTaskFormVisible) {
+      // Check close button
+      if (this.forms.createTaskCloseButtonBounds) {
+        const btn = this.forms.createTaskCloseButtonBounds;
+        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+            screenY >= btn.y && screenY <= btn.y + btn.height) {
+          this.forms.hideCreateTaskForm();
+          return;
+        }
+      }
+
+
+      // Check submit button
+      if (this.forms.createTaskSubmitButtonBounds) {
+        const btn = this.forms.createTaskSubmitButtonBounds;
+        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+            screenY >= btn.y && screenY <= btn.y + btn.height) {
+          this.forms.submitCreateTaskForm();
           return;
         }
       }
 
       // Check checkbox
-      if (this.createTaskCheckboxBounds) {
-        const cb = this.createTaskCheckboxBounds;
+      if (this.forms.createTaskCheckboxBounds) {
+        const cb = this.forms.createTaskCheckboxBounds;
         if (screenX >= cb.x && screenX <= cb.x + cb.width &&
             screenY >= cb.y && screenY <= cb.y + cb.height) {
-          this.createTaskAssignToAgent = !this.createTaskAssignToAgent;
-          if (!this.createTaskAssignToAgent) {
-            this.selectedAgentForTask = null;
+          this.forms.createTaskAssignToAgent = !this.forms.createTaskAssignToAgent;
+          if (!this.forms.createTaskAssignToAgent) {
+            this.forms.selectedAgentForTask = null;
           }
           this.draw();
           return;
@@ -2751,37 +2858,40 @@ class AgentCanvas {
       }
 
       // Check agent selection buttons
-      if (this.createTaskAssignToAgent && this.agentSelectionBounds) {
-        for (const bounds of this.agentSelectionBounds) {
+      if (this.forms.createTaskAssignToAgent && this.forms.agentSelectionBounds) {
+        for (const bounds of this.forms.agentSelectionBounds) {
           if (bounds && screenX >= bounds.x && screenX <= bounds.x + bounds.width &&
               screenY >= bounds.y && screenY <= bounds.y + bounds.height) {
-            this.selectedAgentForTask = bounds.agentName;
+            this.forms.selectedAgentForTask = bounds.agentName;
             this.draw();
             return;
           }
         }
       }
 
-      // Check description field - show browser prompt for text input
-      if (this.createTaskDescriptionBounds) {
-        const input = this.createTaskDescriptionBounds;
+      // Check description field - enable direct typing
+      if (this.forms.createTaskDescriptionBounds) {
+        const input = this.forms.createTaskDescriptionBounds;
         if (screenX >= input.x && screenX <= input.x + input.width &&
             screenY >= input.y && screenY <= input.y + input.height) {
-          const description = prompt('Enter task description:', this.createTaskDescription || '');
-          if (description !== null) {
-            this.createTaskDescription = description;
-            this.draw();
-          }
+          this.forms.createTaskDescriptionFocused = true;
+          this.canvas.style.cursor = 'text';
+          this.draw();
           return;
+        } else if (this.forms.createTaskDescriptionFocused) {
+          // Clicked somewhere else in the form, unfocus description field
+          this.forms.createTaskDescriptionFocused = false;
+          this.canvas.style.cursor = 'default';
+          this.draw();
         }
       }
 
       // Click outside form - close it
-      if (this.createTaskFormBounds) {
-        const form = this.createTaskFormBounds;
+      if (this.forms.createTaskFormBounds) {
+        const form = this.forms.createTaskFormBounds;
         if (screenX < form.x || screenX > form.x + form.width ||
             screenY < form.y || screenY > form.y + form.height) {
-          this.hideCreateTaskForm();
+          this.forms.hideCreateTaskForm();
           return;
         }
       }
@@ -2795,7 +2905,17 @@ class AgentCanvas {
       const btn = this.createTaskButtonBounds;
       if (screenX >= btn.x && screenX <= btn.x + btn.width &&
           screenY >= btn.y && screenY <= btn.y + btn.height) {
-        this.showCreateTaskForm();
+        this.forms.showCreateTaskForm();
+        return;
+      }
+    }
+
+    // Check for click on "Add Agent" button
+    if (this.addAgentButtonBounds) {
+      const btn = this.addAgentButtonBounds;
+      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
+          screenY >= btn.y && screenY <= btn.y + btn.height) {
+        this.forms.showAddAgentForm();
         return;
       }
     }
@@ -3656,6 +3776,45 @@ class AgentCanvas {
   }
 
   /**
+   * Draw the floating "Add Agent" button to the left of Create Task button
+   */
+  drawAddAgentButton() {
+    const buttonWidth = 130;
+    const buttonHeight = 40;
+    const buttonX = this.width - 140 - 20 - buttonWidth - 10; // Left of Create Task button
+    const buttonY = 20;
+
+    // Store button bounds for click detection
+    this.addAgentButtonBounds = {
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight
+    };
+
+    // Draw button background
+    this.ctx.fillStyle = '#10b981'; // Green color for add agent
+    this.ctx.strokeStyle = '#059669';
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowOffsetY = 2;
+    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.shadowColor = 'transparent';
+
+    // Button text
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 14px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('+ Add Agent', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2);
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'alphabetic';
+  }
+
+  /**
    * Draw toast notifications
    */
   drawNotifications() {
@@ -4073,331 +4232,6 @@ class AgentCanvas {
         return `Agent ${event.data.agent} is now idle`;
       default:
         return event.type.replace('.', ' ').replace(/_/g, ' ');
-    }
-  }
-
-  /**
-   * Draw the create task form modal
-   */
-  drawCreateTaskForm() {
-    const formWidth = 400;
-    const formHeight = 420;
-    const formX = (this.width - formWidth) / 2;
-    const formY = (this.height - formHeight) / 2;
-
-    // Semi-transparent backdrop
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    this.ctx.fillRect(0, 0, this.width, this.height);
-
-    // Form background
-    this.ctx.save();
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.strokeStyle = '#3b82f6';
-    this.ctx.lineWidth = 3;
-    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-    this.ctx.shadowBlur = 20;
-    this.roundRect(formX, formY, formWidth, formHeight, 12);
-    this.ctx.fill();
-    this.ctx.stroke();
-    this.ctx.shadowColor = 'transparent';
-
-    // Store form bounds for interaction
-    this.createTaskFormBounds = {
-      x: formX,
-      y: formY,
-      width: formWidth,
-      height: formHeight
-    };
-
-    const padding = 20;
-    let currentY = formY + padding;
-
-    // Title
-    this.ctx.fillStyle = '#1f2937';
-    this.ctx.font = 'bold 20px system-ui';
-    this.ctx.fillText('Create New Task', formX + padding, currentY + 20);
-    currentY += 50;
-
-    // Close button
-    this.ctx.fillStyle = '#6b7280';
-    this.ctx.font = 'bold 24px system-ui';
-    this.ctx.textAlign = 'right';
-    this.ctx.fillText('×', formX + formWidth - padding, formY + padding + 20);
-    this.ctx.textAlign = 'left';
-
-    // Store close button bounds
-    this.createTaskCloseButtonBounds = {
-      x: formX + formWidth - padding - 30,
-      y: formY + padding,
-      width: 30,
-      height: 30
-    };
-
-    // Note about canvas-based forms
-    this.ctx.fillStyle = '#6b7280';
-    this.ctx.font = '12px system-ui';
-    const noteText = 'Note: Please use the dashboard below to create tasks with more options.';
-    const noteLines = this.wrapText(noteText, formWidth - padding * 2);
-    noteLines.forEach((line, i) => {
-      this.ctx.fillText(line, formX + padding, currentY + i * 16);
-    });
-    currentY += noteLines.length * 16 + 20;
-
-    // Quick task section
-    this.ctx.fillStyle = '#1f2937';
-    this.ctx.font = 'bold 14px system-ui';
-    this.ctx.fillText('Quick Task (Unassigned)', formX + padding, currentY);
-    currentY += 25;
-
-    this.ctx.fillStyle = '#6b7280';
-    this.ctx.font = '12px system-ui';
-    this.ctx.fillText('Creates a task without assigning to a specific agent.', formX + padding, currentY);
-    currentY += 25;
-
-    // Description field label
-    this.ctx.fillStyle = '#4b5563';
-    this.ctx.font = 'bold 12px system-ui';
-    this.ctx.fillText('Task Description:', formX + padding, currentY);
-    currentY += 20;
-
-    // Description field background
-    const inputHeight = 80;
-    this.ctx.fillStyle = '#f3f4f6';
-    this.ctx.strokeStyle = '#d1d5db';
-    this.ctx.lineWidth = 1;
-    this.roundRect(formX + padding, currentY, formWidth - padding * 2, inputHeight, 6);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    // Placeholder text (if no description entered yet)
-    if (!this.createTaskDescription || this.createTaskDescription.trim() === '') {
-      this.ctx.fillStyle = '#9ca3af';
-      this.ctx.font = 'italic 12px system-ui';
-      this.ctx.fillText('Enter task description...', formX + padding + 10, currentY + 20);
-    } else {
-      // Show entered text
-      this.ctx.fillStyle = '#1f2937';
-      this.ctx.font = '12px system-ui';
-      const descLines = this.wrapText(this.createTaskDescription, formWidth - padding * 2 - 20);
-      descLines.slice(0, 5).forEach((line, i) => {
-        this.ctx.fillText(line, formX + padding + 10, currentY + 18 + i * 15);
-      });
-    }
-
-    // Store description input bounds
-    this.createTaskDescriptionBounds = {
-      x: formX + padding,
-      y: currentY,
-      width: formWidth - padding * 2,
-      height: inputHeight
-    };
-    currentY += inputHeight + 20;
-
-    // Assign to agent checkbox section
-    this.ctx.fillStyle = '#4b5563';
-    this.ctx.font = 'bold 12px system-ui';
-
-    // Checkbox
-    const checkboxSize = 16;
-    const checkboxX = formX + padding;
-    const checkboxY = currentY;
-
-    this.ctx.strokeStyle = '#d1d5db';
-    this.ctx.lineWidth = 2;
-    this.ctx.strokeRect(checkboxX, checkboxY, checkboxSize, checkboxSize);
-
-    if (this.createTaskAssignToAgent) {
-      // Draw checkmark
-      this.ctx.fillStyle = '#3b82f6';
-      this.ctx.fillRect(checkboxX + 2, checkboxY + 2, checkboxSize - 4, checkboxSize - 4);
-    }
-
-    // Store checkbox bounds
-    this.createTaskCheckboxBounds = {
-      x: checkboxX,
-      y: checkboxY,
-      width: checkboxSize,
-      height: checkboxSize
-    };
-
-    this.ctx.fillStyle = '#4b5563';
-    this.ctx.fillText('Assign to specific agent', checkboxX + checkboxSize + 10, checkboxY + 12);
-    currentY += 30;
-
-    // Agent selection (if checkbox is checked)
-    if (this.createTaskAssignToAgent && this.agents && this.agents.length > 0) {
-      this.ctx.fillStyle = '#4b5563';
-      this.ctx.font = '11px system-ui';
-      this.ctx.fillText('Select agent:', formX + padding, currentY);
-      currentY += 18;
-
-      // Draw agent selection buttons
-      const agentButtonHeight = 30;
-      this.agents.forEach((agent, index) => {
-        const isSelected = this.selectedAgentForTask === agent.name;
-
-        this.ctx.fillStyle = isSelected ? '#3b82f6' : '#f3f4f6';
-        this.ctx.strokeStyle = isSelected ? '#1e40af' : '#d1d5db';
-        this.ctx.lineWidth = 2;
-        this.roundRect(formX + padding, currentY, formWidth - padding * 2, agentButtonHeight, 6);
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        this.ctx.fillStyle = isSelected ? '#ffffff' : '#1f2937';
-        this.ctx.font = '12px system-ui';
-        this.ctx.fillText(agent.name, formX + padding + 10, currentY + 19);
-
-        // Store agent button bounds
-        if (!this.agentSelectionBounds) this.agentSelectionBounds = [];
-        this.agentSelectionBounds[index] = {
-          x: formX + padding,
-          y: currentY,
-          width: formWidth - padding * 2,
-          height: agentButtonHeight,
-          agentName: agent.name
-        };
-
-        currentY += agentButtonHeight + 5;
-      });
-      currentY += 10;
-    }
-
-    // Create button
-    const buttonWidth = 120;
-    const buttonHeight = 36;
-    const buttonX = formX + formWidth - padding - buttonWidth - 100;
-    const buttonY = formY + formHeight - padding - buttonHeight - 10;
-
-    this.ctx.fillStyle = '#3b82f6';
-    this.ctx.strokeStyle = '#1e40af';
-    this.ctx.lineWidth = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 13px system-ui';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('Create Task', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2 + 1);
-    this.ctx.textAlign = 'left';
-
-    // Store create button bounds
-    this.createTaskSubmitButtonBounds = {
-      x: buttonX,
-      y: buttonY,
-      width: buttonWidth,
-      height: buttonHeight
-    };
-
-    // Cancel button
-    const cancelButtonX = buttonX + buttonWidth + 10;
-    this.ctx.fillStyle = '#6b7280';
-    this.ctx.strokeStyle = '#4b5563';
-    this.roundRect(cancelButtonX, buttonY, buttonWidth, buttonHeight, 8);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('Cancel', cancelButtonX + buttonWidth / 2, buttonY + buttonHeight / 2 + 1);
-    this.ctx.textAlign = 'left';
-
-    // Store cancel button bounds
-    this.createTaskCancelButtonBounds = {
-      x: cancelButtonX,
-      y: buttonY,
-      width: buttonWidth,
-      height: buttonHeight
-    };
-
-    this.ctx.restore();
-  }
-
-  /**
-   * Show the create task form
-   */
-  showCreateTaskForm() {
-    this.createTaskFormVisible = true;
-    this.createTaskDescription = '';
-    this.createTaskAssignToAgent = false;
-    this.selectedAgentForTask = null;
-    this.agentSelectionBounds = [];
-    this.draw();
-  }
-
-  /**
-   * Hide the create task form
-   */
-  hideCreateTaskForm() {
-    this.createTaskFormVisible = false;
-    this.createTaskDescription = '';
-    this.createTaskAssignToAgent = false;
-    this.selectedAgentForTask = null;
-    this.agentSelectionBounds = [];
-    this.draw();
-  }
-
-  /**
-   * Submit the create task form
-   */
-  async submitCreateTaskForm() {
-    if (!this.createTaskDescription || this.createTaskDescription.trim() === '') {
-      alert('Please enter a task description');
-      return;
-    }
-
-    // Verify we have a workspace ID
-    if (!this.studioId) {
-      alert('Error: Workspace ID not found. Please refresh the page and try again.');
-      console.error('Canvas studioId is not set:', this.studioId);
-      return;
-    }
-
-    const requestBody = {
-      studio_id: this.studioId,  // Backend expects 'studio_id', not 'workspace_id'
-      from: 'user',
-      description: this.createTaskDescription.trim(),
-      priority: 0,
-    };
-
-    // Add 'to' field if agent is selected, otherwise use "unassigned"
-    if (this.createTaskAssignToAgent && this.selectedAgentForTask) {
-      requestBody.to = this.selectedAgentForTask;
-    } else {
-      // For unassigned tasks, use "unassigned" (allowed as special value in backend)
-      requestBody.to = 'unassigned';
-    }
-
-    console.log('Creating task with request body:', requestBody);
-
-    try {
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to create task');
-      }
-
-      const result = await response.json();
-      console.log('✅ Task created:', result);
-
-      // Hide form
-      this.hideCreateTaskForm();
-
-      // Reload studio data to show new task
-      await this.init();
-
-      // Show success message
-      alert(`✅ Task created successfully!`);
-    } catch (error) {
-      console.error('❌ Error creating task:', error);
-      alert('Failed to create task: ' + error.message);
     }
   }
 
