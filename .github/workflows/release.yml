@@ -6,17 +6,24 @@ on:
       - 'v*.*.*'
 
 jobs:
+  # Main release job - builds binaries, DMG, .deb, .rpm
   release:
-    name: Create Release
+    name: Create Release (macOS/Linux)
     runs-on: macos-latest  # macOS runner needed for DMG creation
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -32,5 +39,52 @@ jobs:
           distribution: goreleaser
           version: '~> v2'
           args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Windows MSI build job
+  build-msi:
+    name: Build Windows MSI
+    runs-on: windows-latest
+    needs: release  # Wait for main release to create the GitHub release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install WiX Toolset
+        run: |
+          choco install wixtoolset -y
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Windows binaries
+        run: |
+          $version = "${{ needs.release.outputs.version }}"
+          $env:CGO_ENABLED = "0"
+
+          # Create dist structure expected by create-msi.ps1
+          New-Item -ItemType Directory -Path "dist\server_windows_amd64" -Force
+
+          # Build with version information
+          go build -ldflags="-s -w -X 'github.com/johnjallday/ori-agent/internal/version.Version=$version'" -o dist\server_windows_amd64\ori-agent.exe .\cmd\server
+
+      - name: Create MSI installer
+        run: |
+          $version = "${{ needs.release.outputs.version }}".TrimStart('v')
+          .\build\windows\create-msi.ps1 -Version $version -Arch amd64 -DistDir dist
+
+      - name: Upload MSI to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/ori-agent-*.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

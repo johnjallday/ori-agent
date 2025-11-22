@@ -62,11 +62,11 @@ builds:
 # Archives - Only distribute installers (professional appearance)
 # Distribution strategy:
 #   - macOS: DMG installers only (no standalone binaries)
-#   - Windows: .exe for now (MSI coming soon)
+#   - Windows: MSI installer (built via GitHub Actions) + .exe binary
 #   - Linux: .deb/.rpm packages only (no standalone binaries)
 #   - Menubar app: Bundled in macOS DMG (no separate binary)
 archives:
-  # Temporary: Windows .exe until MSI installer is ready
+  # Windows .exe binary (MSI installer built separately in GitHub Actions)
   - id: windows-only
     builds:
       - server
@@ -253,8 +253,8 @@ release:
       - Intel: `OriAgent-{{ .Version }}-amd64.dmg`
 
     - **Windows**:
+      - `ori-agent-{{ .Version }}-amd64.msi` (recommended - full installer)
       - `ori-agent_{{ .Version }}_windows_amd64.exe` (standalone binary)
-      - MSI installer coming soon!
 
     - **Linux**:
       - **Debian/Ubuntu**: `ori-agent_{{ .Version }}_amd64.deb` or `ori-agent_{{ .Version }}_arm64.deb`
