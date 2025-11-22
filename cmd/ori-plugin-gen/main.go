@@ -28,19 +28,53 @@ type YAMLToolDefinition struct {
 	Parameters  []YAMLToolParameter `yaml:"parameters"`
 }
 
+// Maintainer represents a plugin maintainer
+type Maintainer struct {
+	Name  string `yaml:"name"`
+	Email string `yaml:"email"`
+}
+
+// Requirements represents plugin requirements
+type Requirements struct {
+	MinOriVersion string   `yaml:"min_ori_version"`
+	Dependencies  []string `yaml:"dependencies"`
+}
+
+// ConfigVariable represents a configuration variable
+type ConfigVariable struct {
+	Key          string `yaml:"key"`
+	Name         string `yaml:"name"`
+	Description  string `yaml:"description"`
+	Type         string `yaml:"type"`
+	Required     bool   `yaml:"required"`
+	DefaultValue string `yaml:"default_value"`
+}
+
+// PluginConfigSection represents the config section
+type PluginConfigSection struct {
+	Variables []ConfigVariable `yaml:"variables"`
+}
+
 // PluginConfig minimal representation
 type PluginConfig struct {
-	Name string              `yaml:"name"`
-	Tool *YAMLToolDefinition `yaml:"tool_definition,omitempty"`
+	Name         string               `yaml:"name"`
+	Version      string               `yaml:"version"`
+	License      string               `yaml:"license"`
+	Repository   string               `yaml:"repository"`
+	Maintainers  []Maintainer         `yaml:"maintainers"`
+	Requirements *Requirements        `yaml:"requirements,omitempty"`
+	Config       *PluginConfigSection `yaml:"config,omitempty"`
+	Tool         *YAMLToolDefinition  `yaml:"tool_definition,omitempty"`
 }
 
 // TemplateData holds data for code generation template
 type TemplateData struct {
-	PackageName  string
-	ToolName     string
-	ParamsStruct string
-	Fields       []FieldInfo
-	Validations  []ValidationInfo
+	PackageName        string
+	ToolName           string
+	ParamsStruct       string
+	Fields             []FieldInfo
+	Validations        []ValidationInfo
+	OptionalInterfaces []string // Optional interfaces to generate checks for
 }
 
 type FieldInfo struct {
@@ -111,6 +145,36 @@ func main() {
 	fmt.Printf("✓ Generated %s from %s\n", outputFile, *yamlFile)
 }
 
+// detectOptionalInterfaces determines which optional interfaces to generate based on plugin.yaml
+func detectOptionalInterfaces(config *PluginConfig) []string {
+	var interfaces []string
+
+	// VersionedTool: if version is specified
+	if config.Version != "" {
+		interfaces = append(interfaces, "pluginapi.VersionedTool")
+	}
+
+	// MetadataProvider: if maintainers, license, or repository are specified
+	if len(config.Maintainers) > 0 || config.License != "" || config.Repository != "" {
+		interfaces = append(interfaces, "pluginapi.MetadataProvider")
+	}
+
+	// PluginCompatibility: if min_ori_version is specified
+	if config.Requirements != nil && config.Requirements.MinOriVersion != "" {
+		interfaces = append(interfaces, "pluginapi.PluginCompatibility")
+	}
+
+	// InitializationProvider: if config variables are specified
+	if config.Config != nil && len(config.Config.Variables) > 0 {
+		interfaces = append(interfaces, "pluginapi.InitializationProvider")
+	}
+
+	// Note: AgentAwareTool and WebPageProvider require manual implementation
+	// and cannot be auto-detected from YAML, so they're not included here
+
+	return interfaces
+}
+
 func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	// Build template data
 	toolName := strings.ReplaceAll(config.Name, "-", "_")
@@ -143,12 +207,16 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 		}
 	}
 
+	// Detect optional interfaces based on plugin.yaml content
+	optionalInterfaces := detectOptionalInterfaces(config)
+
 	tmplData := TemplateData{
-		PackageName:  pkgName,
-		ToolName:     toolName,
-		ParamsStruct: paramsStruct,
-		Fields:       fields,
-		Validations:  validations,
+		PackageName:        pkgName,
+		ToolName:           toolName,
+		ParamsStruct:       paramsStruct,
+		Fields:             fields,
+		Validations:        validations,
+		OptionalInterfaces: optionalInterfaces,
 	}
 
 	// Execute template
@@ -214,8 +282,17 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ pluginapi.PluginTool = (*{{.ToolName}}Tool)(nil)
+{{- if .OptionalInterfaces}}
+
+// Optional interface checks (auto-detected from plugin.yaml)
+var (
+{{- range .OptionalInterfaces}}
+	_ {{.}} = (*{{$.ToolName}}Tool)(nil)
+{{- end}}
+)
+{{- end}}
 
 // {{.ParamsStruct}} represents the parameters for this plugin
 type {{.ParamsStruct}} struct {

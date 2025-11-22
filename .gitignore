@@ -125,3 +125,5 @@ agents/*/workspace/
 .claude-sessions/
 sessions/
 *.session
+
+tasks/
