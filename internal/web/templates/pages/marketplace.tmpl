@@ -180,6 +180,13 @@
     <script src="js/modules/agents.js"></script>
     <script src="js/modules/plugins.js"></script>
     <script src="js/modules/sidebar.js"></script>
+    <script src="js/modules/themeManager.js"></script>
+    <script>
+        // Initialize theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            themeManager.initialize();
+        });
+    </script>
     <script src="js/modules/marketplace.js"></script>
 </body>
 </html>

@@ -467,6 +467,13 @@ function createModelItem(model, provider) {
 
 <!-- Include app.js for sidebar toggle functionality -->
 <script src="/js/app.js?v=1694538177"></script>
+<script src="/js/modules/themeManager.js"></script>
+<script>
+  // Initialize theme on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    themeManager.initialize();
+  });
+</script>
 
       </div>
     </div>

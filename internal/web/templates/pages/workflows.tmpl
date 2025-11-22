@@ -446,6 +446,13 @@
       }
     });
   </script>
+  <script src="/js/modules/themeManager.js"></script>
+  <script>
+    // Initialize theme on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
 </body>
 </html>
 {{end}}
