@@ -130,12 +130,15 @@ func New() (*Server, error) {
 	s.llmFactory = llm.NewFactory()
 
 	// Register OpenAI provider only if API key is available
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if apiKey != "" {
 		openaiProvider := llm.NewOpenAIProvider(llm.ProviderConfig{
 			APIKey: apiKey,
 		})
 		s.llmFactory.Register("openai", openaiProvider)
-		log.Printf("✅ OpenAI provider registered")
+		if verbose {
+			log.Printf("✅ OpenAI provider registered")
+		}
 	}
 
 	// Register Claude provider if API key is available
@@ -145,7 +148,9 @@ func New() (*Server, error) {
 			APIKey: claudeAPIKey,
 		})
 		s.llmFactory.Register("claude", claudeProvider)
-		log.Printf("Claude provider registered")
+		if verbose {
+			log.Printf("Claude provider registered")
+		}
 	}
 
 	// Register Ollama provider (always available, no API key required)
@@ -157,7 +162,9 @@ func New() (*Server, error) {
 		BaseURL: ollamaBaseURL,
 	})
 	s.llmFactory.Register("ollama", ollamaProvider)
-	log.Printf("Ollama provider registered (base URL: %s)", ollamaBaseURL)
+	if verbose {
+		log.Printf("Ollama provider registered (base URL: %s)", ollamaBaseURL)
+	}
 
 	// init store (persists agents/plugins/settings; not messages)
 	s.agentStorePath = "agents.json"
@@ -166,7 +173,9 @@ func New() (*Server, error) {
 	} else if abs, err := filepath.Abs(s.agentStorePath); err == nil {
 		s.agentStorePath = abs
 	}
-	log.Printf("Using agent store: %s", s.agentStorePath)
+	if verbose {
+		log.Printf("Using agent store: %s", s.agentStorePath)
+	}
 
 	var err error
 	s.st, err = store.NewFileStore(s.agentStorePath, defaultConf)
@@ -184,7 +193,7 @@ func New() (*Server, error) {
 		log.Printf("⚠️  Failed to initialize activity logger: %v", err)
 		// Continue without activity logging
 		s.activityLogger = nil
-	} else {
+	} else if verbose {
 		log.Printf("✅ Activity logger initialized: %s", activityLogDir)
 	}
 
@@ -196,7 +205,9 @@ func New() (*Server, error) {
 	if abs, err := filepath.Abs(locationZonesPath); err == nil {
 		locationZonesPath = abs
 	}
-	log.Printf("Using location zones file: %s", locationZonesPath)
+	if verbose {
+		log.Printf("Using location zones file: %s", locationZonesPath)
+	}
 
 	// Load zones from file
 	zones, err := location.LoadZones(locationZonesPath)
@@ -204,7 +215,9 @@ func New() (*Server, error) {
 		log.Printf("Warning: failed to load location zones: %v", err)
 		zones = []location.Zone{}
 	}
-	log.Printf("📍 Loaded %d location zones", len(zones))
+	if verbose {
+		log.Printf("📍 Loaded %d location zones", len(zones))
+	}
 
 	// Create detectors
 	manualDetector := location.NewManualDetector()
@@ -220,7 +233,9 @@ func New() (*Server, error) {
 	// Start location detection loop
 	ctx := context.Background()
 	s.locationManager.Start(ctx, 60*time.Second)
-	log.Printf("📍 Location manager initialized and detection started")
+	if verbose {
+		log.Printf("📍 Location manager initialized and detection started")
+	}
 
 	// init plugin downloader
 	pluginCacheDir := "plugin_cache"
@@ -229,7 +244,9 @@ func New() (*Server, error) {
 	} else if abs, err := filepath.Abs(pluginCacheDir); err == nil {
 		pluginCacheDir = abs
 	}
-	log.Printf("Using plugin cache: %s", pluginCacheDir)
+	if verbose {
+		log.Printf("Using plugin cache: %s", pluginCacheDir)
+	}
 	s.pluginDownloader = plugindownloader.NewDownloader(pluginCacheDir)
 
 	// refresh local plugin registry from uploaded_plugins directory
@@ -271,23 +288,29 @@ func New() (*Server, error) {
 			healthResult := s.healthManager.CheckAndCachePlugin(key, tool)
 			if !healthResult.Health.Compatible {
 				if healthResult.Health.Status == "unhealthy" {
-					log.Printf("❌ Plugin %s is UNHEALTHY", key)
-					for _, err := range healthResult.Health.Errors {
-						log.Printf("   Error: %s", err)
-					}
-					if healthResult.Health.Recommendation != "" {
-						log.Printf("   💡 Recommendation: %s", healthResult.Health.Recommendation)
+					if verbose {
+						log.Printf("❌ Plugin %s is UNHEALTHY", key)
+						for _, err := range healthResult.Health.Errors {
+							log.Printf("   Error: %s", err)
+						}
+						if healthResult.Health.Recommendation != "" {
+							log.Printf("   💡 Recommendation: %s", healthResult.Health.Recommendation)
+						}
 					}
 					unhealthySummary = append(unhealthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 				} else {
-					log.Printf("⚠️  Plugin %s is DEGRADED", key)
-					for _, warn := range healthResult.Health.Warnings {
-						log.Printf("   Warning: %s", warn)
+					if verbose {
+						log.Printf("⚠️  Plugin %s is DEGRADED", key)
+						for _, warn := range healthResult.Health.Warnings {
+							log.Printf("   Warning: %s", warn)
+						}
 					}
 					degradedSummary = append(degradedSummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 				}
 			} else {
-				log.Printf("✅ Plugin %s v%s health check passed", key, healthResult.Health.Version)
+				if verbose {
+					log.Printf("✅ Plugin %s v%s health check passed", key, healthResult.Health.Version)
+				}
 				healthySummary = append(healthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 			}
 
@@ -322,7 +345,7 @@ func New() (*Server, error) {
 	}
 
 	// Print health summary
-	if len(healthySummary) > 0 || len(degradedSummary) > 0 || len(unhealthySummary) > 0 {
+	if verbose && (len(healthySummary) > 0 || len(degradedSummary) > 0 || len(unhealthySummary) > 0) {
 		log.Println("")
 		log.Println("╔════════════════════════════════════════════════════════════════════════════════╗")
 		log.Println("║  🏥 Plugin Health Summary                                                      ║")
@@ -382,7 +405,9 @@ func New() (*Server, error) {
 	}
 
 	// Health check all uploaded plugins (not just agent-loaded ones)
-	log.Println("Running initial health checks for all uploaded plugins...")
+	if verbose {
+		log.Println("Running initial health checks for all uploaded plugins...")
+	}
 	localReg, err := s.registryManager.LoadLocal()
 	if err == nil {
 		for _, pluginEntry := range localReg.Plugins {
@@ -394,16 +419,20 @@ func New() (*Server, error) {
 			// Load and health check this plugin
 			tool, err := pluginloader.LoadPluginRPC(pluginEntry.Path)
 			if err != nil {
-				log.Printf("Warning: could not load plugin %s for initial health check: %v", pluginEntry.Name, err)
+				if verbose {
+					log.Printf("Warning: could not load plugin %s for initial health check: %v", pluginEntry.Name, err)
+				}
 				continue
 			}
 
 			// Run health check and cache the result
 			healthResult := s.healthManager.CheckAndCachePlugin(pluginEntry.Name, tool)
-			if healthResult.Health.Compatible {
-				log.Printf("✅ Plugin %s v%s health check passed", pluginEntry.Name, healthResult.Health.Version)
-			} else {
-				log.Printf("⚠️  Plugin %s v%s health check issues: %v", pluginEntry.Name, healthResult.Health.Version, healthResult.Health.Warnings)
+			if verbose {
+				if healthResult.Health.Compatible {
+					log.Printf("✅ Plugin %s v%s health check passed", pluginEntry.Name, healthResult.Health.Version)
+				} else {
+					log.Printf("⚠️  Plugin %s v%s health check issues: %v", pluginEntry.Name, healthResult.Health.Version, healthResult.Health.Warnings)
+				}
 			}
 		}
 	}
@@ -440,7 +469,9 @@ func New() (*Server, error) {
 	// initialize cost tracker
 	usageDataDir := filepath.Join(os.Getenv("HOME"), ".ori-agent", "usage_data")
 	s.costTracker = llm.NewCostTracker(usageDataDir)
-	log.Printf("💰 Cost tracker initialized: %s", usageDataDir)
+	if verbose {
+		log.Printf("💰 Cost tracker initialized: %s", usageDataDir)
+	}
 
 	// initialize MCP system
 	s.mcpRegistry = mcp.NewRegistry()
@@ -460,7 +491,9 @@ func New() (*Server, error) {
 				log.Printf("Warning: failed to add MCP server %s to registry: %v", serverConfig.Name, err)
 			}
 		}
-		log.Printf("🔌 MCP system initialized with %d configured servers", len(mcpGlobalConfig.Servers))
+		if verbose {
+			log.Printf("🔌 MCP system initialized with %d configured servers", len(mcpGlobalConfig.Servers))
+		}
 	}
 
 	// initialize HTTP handlers
@@ -501,7 +534,9 @@ func New() (*Server, error) {
 	} else if abs, err := filepath.Abs(workspaceDir); err == nil {
 		workspaceDir = abs
 	}
-	log.Printf("Using workspace directory: %s", workspaceDir)
+	if verbose {
+		log.Printf("Using workspace directory: %s", workspaceDir)
+	}
 
 	s.workspaceStore, err = agentstudio.NewFileStore(workspaceDir)
 	if err != nil {
@@ -510,11 +545,15 @@ func New() (*Server, error) {
 
 	// initialize event bus for real-time updates
 	s.eventBus = agentstudio.DefaultEventBus()
-	log.Println("✅ Event bus initialized")
+	if verbose {
+		log.Println("✅ Event bus initialized")
+	}
 
 	// initialize notification service
 	s.notificationService = agentstudio.NewNotificationService(s.eventBus, 500) // Keep last 500 notifications
-	log.Println("✅ Notification service initialized")
+	if verbose {
+		log.Println("✅ Notification service initialized")
+	}
 
 	// initialize agent communicator
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
@@ -557,11 +596,15 @@ func New() (*Server, error) {
 	// Create LLM adapter with default provider (openai or first available)
 	llmAdapter := agentstudio.NewLLMFactoryAdapter(s.llmFactory, "openai")
 	s.studioOrchestrator = agentstudio.NewOrchestrator(s.workspaceStore, llmAdapter, s.eventBus)
-	log.Println("✅ Agent Studio orchestrator initialized")
+	if verbose {
+		log.Println("✅ Agent Studio orchestrator initialized")
+	}
 
 	// initialize studio HTTP handler
 	s.studioHandler = agentstudio.NewHTTPHandler(s.workspaceStore, s.studioOrchestrator)
-	log.Println("✅ Agent Studio HTTP handler initialized")
+	if verbose {
+		log.Println("✅ Agent Studio HTTP handler initialized")
+	}
 
 	// initialize template manager
 	templatesDir := "workflow_templates"
@@ -573,7 +616,7 @@ func New() (*Server, error) {
 	templateManager := templates.NewTemplateManager(templatesDir)
 	if err := templateManager.LoadTemplates(); err != nil {
 		log.Printf("⚠️  Warning: failed to load workflow templates: %v", err)
-	} else {
+	} else if verbose {
 		log.Printf("✅ Loaded %d workflow templates", len(templateManager.ListTemplates()))
 	}
 
@@ -582,6 +625,11 @@ func New() (*Server, error) {
 
 	// inject orchestrator into chat handler
 	s.chatHandler.SetOrchestrator(orch)
+
+	// Log server ready message
+	if !verbose {
+		log.Printf("✅ Server initialized successfully")
+	}
 
 	return s, nil
 }
