@@ -157,8 +157,11 @@
     </div>
   </div>
 
-  <!-- Load sidebar script to populate agents -->
-  <script src="js/modules/sidebar.js"></script>
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/themeManager.js"></script>
 
   <script>
     let usageData = null;
@@ -344,12 +347,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       loadUsageData();
       loadDetailedStats();
-    });
-  </script>
-  <script src="/js/modules/themeManager.js"></script>
-  <script>
-    // Initialize theme on page load
-    document.addEventListener('DOMContentLoaded', function() {
+      // Initialize theme
       themeManager.initialize();
     });
   </script>
