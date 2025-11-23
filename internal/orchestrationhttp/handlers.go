@@ -27,6 +27,9 @@ type Handler struct {
 	eventBus            *agentstudio.EventBus
 	notificationService *agentstudio.NotificationService
 	taskHandler         agentstudio.TaskHandler
+
+	// Sub-handlers for modular organization
+	workspaceHandler *WorkspaceHandler
 }
 
 // NewHandler creates a new orchestration handler
@@ -41,6 +44,9 @@ func NewHandler(agentStore store.Store, workspaceStore agentstudio.Store) *Handl
 // SetEventBus sets the event bus instance
 func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	h.eventBus = eb
+
+	// Initialize sub-handlers that require eventBus
+	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb)
 }
 
 // SetNotificationService sets the notification service instance
@@ -64,22 +70,9 @@ func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
 }
 
 // WorkspaceHandler handles workspace CRUD operations
-// GET: List all workspaces or get workspace by ID
-// POST: Create new workspace
-// DELETE: Delete workspace
+// Delegates to WorkspaceHandler for modular organization
 func (h *Handler) WorkspaceHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		h.handleGetWorkspace(w, r)
-	case http.MethodPost:
-		h.handleCreateWorkspace(w, r)
-	case http.MethodDelete:
-		h.handleDeleteWorkspace(w, r)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+	h.workspaceHandler.WorkspaceHandler(w, r)
 }
 
 // handleGetWorkspace retrieves workspace(s)
@@ -235,19 +228,9 @@ func (h *Handler) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) 
 }
 
 // WorkspaceAgentsHandler handles adding/removing agents from workspace
-// POST: Add agent to workspace
-// DELETE: Remove agent from workspace
+// Delegates to WorkspaceHandler for modular organization
 func (h *Handler) WorkspaceAgentsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodPost:
-		h.handleAddAgentToWorkspace(w, r)
-	case http.MethodDelete:
-		h.handleRemoveAgentFromWorkspace(w, r)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+	h.workspaceHandler.WorkspaceAgentsHandler(w, r)
 }
 
 // handleAddAgentToWorkspace adds an agent to a workspace
@@ -2588,70 +2571,8 @@ func (h *Handler) sendWorkspaceProgressUpdate(w http.ResponseWriter, flusher htt
 }
 
 // SaveLayoutHandler handles saving canvas layout positions
+// SaveLayoutHandler saves workspace canvas layout
+// Delegates to WorkspaceHandler for modular organization
 func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		WorkspaceID    string                          `json:"workspace_id"`
-		TaskPositions  map[string]agentstudio.Position `json:"task_positions"`
-		AgentPositions map[string]agentstudio.Position `json:"agent_positions"`
-		Scale          float64                         `json:"scale"`
-		OffsetX        float64                         `json:"offset_x"`
-		OffsetY        float64                         `json:"offset_y"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Get workspace
-	ws, err := h.workspaceStore.Get(req.WorkspaceID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusNotFound)
-		return
-	}
-
-	// Update layout
-	if ws.Layout == nil {
-		ws.Layout = &agentstudio.CanvasLayout{}
-	}
-
-	ws.Layout.TaskPositions = req.TaskPositions
-	ws.Layout.AgentPositions = req.AgentPositions
-	ws.Layout.Scale = req.Scale
-	ws.Layout.OffsetX = req.OffsetX
-	ws.Layout.OffsetY = req.OffsetY
-
-	// Save workspace
-	if err := h.workspaceStore.Save(ws); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save workspace: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, scale: %.2f)",
-		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), req.Scale)
-
-	// Broadcast workspace update event to notify all connected clients
-	h.eventBus.Publish(agentstudio.Event{
-		WorkspaceID: req.WorkspaceID,
-		Type:        agentstudio.EventWorkspaceUpdated,
-		Timestamp:   time.Now(),
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Layout saved successfully",
-	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
-	}
+	h.workspaceHandler.SaveLayoutHandler(w, r)
 }
