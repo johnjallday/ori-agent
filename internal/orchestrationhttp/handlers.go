@@ -14,7 +14,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // Handler manages orchestration-related HTTP endpoints
@@ -29,7 +28,10 @@ type Handler struct {
 	taskHandler         agentstudio.TaskHandler
 
 	// Sub-handlers for modular organization
-	workspaceHandler *WorkspaceHandler
+	workspaceHandler    *WorkspaceHandler
+	messageHandler      *MessageHandler
+	capabilitiesHandler *CapabilitiesHandler
+	templateHandler     *TemplateHandler
 }
 
 // NewHandler creates a new orchestration handler
@@ -47,6 +49,9 @@ func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 
 	// Initialize sub-handlers that require eventBus
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb)
+	h.messageHandler = NewMessageHandler(h.workspaceStore, eb)
+	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, eb)
+	h.initializeTemplateHandler()
 }
 
 // SetNotificationService sets the notification service instance
@@ -62,11 +67,20 @@ func (h *Handler) SetTaskHandler(th agentstudio.TaskHandler) {
 // SetOrchestrator sets the orchestrator instance
 func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
 	h.orchestrator = orch
+	h.initializeTemplateHandler()
 }
 
 // SetTemplateManager sets the template manager instance
 func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
 	h.templateManager = tm
+	h.initializeTemplateHandler()
+}
+
+// initializeTemplateHandler initializes the template handler if all dependencies are available
+func (h *Handler) initializeTemplateHandler() {
+	if h.templateManager != nil && h.orchestrator != nil && h.eventBus != nil && h.templateHandler == nil {
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+	}
 }
 
 // WorkspaceHandler handles workspace CRUD operations
@@ -370,249 +384,21 @@ func (h *Handler) handleRemoveAgentFromWorkspace(w http.ResponseWriter, r *http.
 }
 
 // MessagesHandler handles workspace message operations
-// GET: Retrieve messages from workspace
-// POST: Send message to workspace
+// Delegates to MessageHandler for modular organization
 func (h *Handler) MessagesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	wsID := r.URL.Query().Get("studio_id")
-	if wsID == "" {
-		http.Error(w, "workspace_id parameter required", http.StatusBadRequest)
-		return
-	}
-
-	// Get workspace
-	ws, err := h.workspaceStore.Get(wsID)
-	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", wsID, err)
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		h.handleGetMessages(w, r, ws)
-	case http.MethodPost:
-		h.handleSendMessage(w, r, ws)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-// handleGetMessages retrieves messages from workspace
-func (h *Handler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
-	agentName := r.URL.Query().Get("agent")
-	sinceStr := r.URL.Query().Get("since")
-
-	var messages []agentstudio.AgentMessage
-
-	if sinceStr != "" {
-		// Get messages since timestamp
-		since, err := time.Parse(time.RFC3339, sinceStr)
-		if err != nil {
-			http.Error(w, "Invalid since timestamp format (use RFC3339)", http.StatusBadRequest)
-			return
-		}
-		messages = ws.GetMessagesSince(since)
-	} else if agentName != "" {
-		// Get messages for specific agent
-		messages = ws.GetMessagesForAgent(agentName)
-	} else {
-		// Get all messages (direct field access through getter method)
-		messages = ws.GetMessagesSince(time.Time{}) // epoch time returns all messages
-	}
-
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"messages": messages,
-		"count":    len(messages),
-	})
-}
-
-// handleSendMessage sends a message to workspace
-func (h *Handler) handleSendMessage(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
-	var msg agentstudio.AgentMessage
-
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		log.Printf("❌ Error decoding message: %v", err)
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if msg.From == "" {
-		http.Error(w, "from field is required", http.StatusBadRequest)
-		return
-	}
-	if msg.Content == "" {
-		http.Error(w, "content field is required", http.StatusBadRequest)
-		return
-	}
-
-	// Add message to workspace
-	if err := ws.AddMessage(msg); err != nil {
-		log.Printf("❌ Error adding message to workspace: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Save updated workspace
-	if err := h.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Error saving workspace after adding message: %v", err)
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("✅ Added message from %s to workspace %s", msg.From, ws.ID)
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"message_id": msg.ID,
-		"timestamp":  msg.Timestamp,
-	})
+	h.messageHandler.MessagesHandler(w, r)
 }
 
 // AgentCapabilitiesHandler handles agent capability management
-// GET: Get agent capabilities
-// PUT: Update agent capabilities
+// Delegates to CapabilitiesHandler for modular organization
 func (h *Handler) AgentCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	agentName := r.URL.Query().Get("name")
-	if agentName == "" {
-		http.Error(w, "name parameter required", http.StatusBadRequest)
-		return
-	}
-
-	agent, ok := h.agentStore.GetAgent(agentName)
-	if !ok {
-		http.Error(w, "agent not found", http.StatusNotFound)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"agent":        agentName,
-			"role":         agent.Role,
-			"capabilities": agent.Capabilities,
-		})
-
-	case http.MethodPut:
-		var req struct {
-			Role         string   `json:"role"`
-			Capabilities []string `json:"capabilities"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Update agent role and capabilities
-		if req.Role != "" {
-			agent.Role = types.AgentRole(req.Role)
-		}
-		if req.Capabilities != nil {
-			agent.Capabilities = req.Capabilities
-		}
-
-		if err := h.agentStore.SetAgent(agentName, agent); err != nil {
-			log.Printf("❌ Error updating agent capabilities: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("✅ Updated agent %s capabilities and role", agentName)
-
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"agent":   agentName,
-		})
-
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+	h.capabilitiesHandler.AgentCapabilitiesHandler(w, r)
 }
 
 // DelegateHandler handles task delegation between agents
-// POST: Delegate a task to another agent
+// Delegates to CapabilitiesHandler for modular organization
 func (h *Handler) DelegateHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		WorkspaceID string                 `json:"studio_id"`
-		From        string                 `json:"from"`
-		To          string                 `json:"to"`
-		Description string                 `json:"description"`
-		Priority    int                    `json:"priority"`
-		Context     map[string]interface{} `json:"context"`
-		Timeout     int                    `json:"timeout"` // timeout in seconds
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
-		return
-	}
-	if req.From == "" {
-		http.Error(w, "from is required", http.StatusBadRequest)
-		return
-	}
-	if req.To == "" {
-		http.Error(w, "to is required", http.StatusBadRequest)
-		return
-	}
-	if req.Description == "" {
-		http.Error(w, "description is required", http.StatusBadRequest)
-		return
-	}
-
-	// Default priority to 3 (medium) if not specified
-	if req.Priority == 0 {
-		req.Priority = 3
-	}
-
-	// Convert timeout from seconds to duration
-	timeout := time.Duration(req.Timeout) * time.Second
-	if req.Timeout == 0 {
-		timeout = 5 * time.Minute // Default timeout
-	}
-
-	// Delegate task
-	task, err := h.communicator.DelegateTask(agentcomm.DelegationRequest{
-		WorkspaceID: req.WorkspaceID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Context:     req.Context,
-		Timeout:     timeout,
-	})
-
-	if err != nil {
-		log.Printf("❌ Failed to delegate task: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(agentcomm.DelegationResponse{
-		TaskID:    task.ID,
-		Status:    string(task.Status),
-		CreatedAt: task.CreatedAt,
-	})
+	h.capabilitiesHandler.DelegateHandler(w, r)
 }
 
 // TasksHandler handles task queries
@@ -1302,152 +1088,15 @@ func (h *Handler) sendWorkspaceStatus(w http.ResponseWriter, flusher http.Flushe
 }
 
 // TemplatesHandler handles workflow template operations
-// GET: List all templates or get specific template by ID
-// POST: Create new custom template
-// DELETE: Delete custom template
+// Delegates to TemplateHandler for modular organization
 func (h *Handler) TemplatesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if h.templateManager == nil {
-		http.Error(w, "template manager not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		h.handleGetTemplates(w, r)
-	case http.MethodPost:
-		h.handleCreateTemplate(w, r)
-	case http.MethodDelete:
-		h.handleDeleteTemplate(w, r)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-}
-
-// handleGetTemplates retrieves workflow templates
-func (h *Handler) handleGetTemplates(w http.ResponseWriter, r *http.Request) {
-	templateID := r.URL.Query().Get("id")
-	category := r.URL.Query().Get("category")
-
-	if templateID != "" {
-		// Get specific template
-		template, err := h.templateManager.GetTemplate(templateID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(template)
-		return
-	}
-
-	// List templates
-	var templateList []*templates.WorkflowTemplate
-	if category != "" {
-		templateList = h.templateManager.ListTemplatesByCategory(category)
-	} else {
-		templateList = h.templateManager.ListTemplates()
-	}
-
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"templates": templateList,
-		"count":     len(templateList),
-	})
-}
-
-// handleCreateTemplate creates a new custom workflow template
-func (h *Handler) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
-	var template templates.WorkflowTemplate
-	if err := json.NewDecoder(r.Body).Decode(&template); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Save template
-	if err := h.templateManager.SaveTemplate(&template); err != nil {
-		log.Printf("❌ Failed to save template: %v", err)
-		http.Error(w, fmt.Sprintf("failed to save template: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("✅ Created workflow template: %s", template.ID)
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(template)
-}
-
-// handleDeleteTemplate deletes a custom workflow template
-func (h *Handler) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
-	templateID := r.URL.Query().Get("id")
-	if templateID == "" {
-		http.Error(w, "template id required", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.templateManager.DeleteTemplate(templateID); err != nil {
-		log.Printf("❌ Failed to delete template %s: %v", templateID, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("🗑️  Deleted workflow template: %s", templateID)
-	w.WriteHeader(http.StatusNoContent)
+	h.templateHandler.TemplatesHandler(w, r)
 }
 
 // InstantiateTemplateHandler handles instantiating a workflow from a template
-// POST: Create workflow instance from template with parameters
+// Delegates to TemplateHandler for modular organization
 func (h *Handler) InstantiateTemplateHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	if h.templateManager == nil {
-		http.Error(w, "template manager not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	var req struct {
-		TemplateID string                 `json:"template_id"`
-		Parameters map[string]interface{} `json:"parameters"`
-		AgentName  string                 `json:"agent_name"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Instantiate template
-	instance, err := h.templateManager.InstantiateTemplate(req.TemplateID, req.Parameters)
-	if err != nil {
-		log.Printf("❌ Failed to instantiate template %s: %v", req.TemplateID, err)
-		http.Error(w, fmt.Sprintf("failed to instantiate template: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Create collaborative task from instance
-	task := orchestration.CollaborativeTask{
-		Goal:          fmt.Sprintf("Execute workflow: %s", instance.TemplateName),
-		RequiredRoles: instance.RequiredRoles,
-		Context:       instance.Parameters,
-		MaxDuration:   30 * time.Minute,
-	}
-
-	// Execute collaborative task
-	result, err := h.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
-	if err != nil {
-		log.Printf("❌ Failed to execute collaborative task: %v", err)
-		http.Error(w, fmt.Sprintf("failed to execute workflow: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("✅ Instantiated and executed workflow from template: %s", req.TemplateID)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"instance": instance,
-		"result":   result,
-	})
+	h.templateHandler.InstantiateTemplateHandler(w, r)
 }
 
 // NotificationsHandler handles notification operations
