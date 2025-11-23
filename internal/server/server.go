@@ -821,6 +821,7 @@ func (s *Server) Handler() http.Handler {
 	// Device endpoints
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
+	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
 
 	// Usage and cost tracking endpoints
 	mux.HandleFunc("/api/usage/stats/all", s.usageHandler.GetAllTimeStats)

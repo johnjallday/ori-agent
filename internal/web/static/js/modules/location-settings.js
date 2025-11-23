@@ -113,6 +113,12 @@ class LocationSettingsManager {
       saveZoneBtn.addEventListener('click', () => this.saveZone());
     }
 
+    // Detect WiFi button
+    const detectWiFiBtn = document.getElementById('detectWiFiBtn');
+    if (detectWiFiBtn) {
+      detectWiFiBtn.addEventListener('click', () => this.detectCurrentWiFi());
+    }
+
     // Modal close handler - reset form
     const modal = document.getElementById('locationZoneModal');
     if (modal) {
@@ -152,6 +158,47 @@ class LocationSettingsManager {
     document.getElementById('zoneNameInput').value = '';
     document.getElementById('zoneDescriptionInput').value = '';
     document.getElementById('zoneSSIDInput').value = '';
+  }
+
+  // Detect current WiFi SSID
+  async detectCurrentWiFi() {
+    const detectBtn = document.getElementById('detectWiFiBtn');
+    const ssidInput = document.getElementById('zoneSSIDInput');
+
+    if (!detectBtn || !ssidInput) return;
+
+    // Save original button content
+    const originalHTML = detectBtn.innerHTML;
+
+    // Show loading state
+    detectBtn.disabled = true;
+    detectBtn.innerHTML = `
+      <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+      <span class="d-none d-md-inline">Detecting...</span>
+    `;
+
+    try {
+      const response = await fetch('/api/device/wifi/current');
+      if (!response.ok) {
+        throw new Error('Failed to detect WiFi');
+      }
+
+      const data = await response.json();
+
+      if (data.ssid && data.ssid.trim() !== '') {
+        // Populate the SSID field with detected network
+        ssidInput.value = data.ssid;
+        ssidInput.focus();
+      }
+      // If SSID is empty, silently fail (user just types manually)
+    } catch (error) {
+      console.error('Error detecting WiFi:', error);
+      // Silent failure - user can manually enter SSID
+    } finally {
+      // Restore button state
+      detectBtn.disabled = false;
+      detectBtn.innerHTML = originalHTML;
+    }
   }
 
   // Save zone (create or update)
