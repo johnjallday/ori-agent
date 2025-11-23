@@ -1316,6 +1316,9 @@
       window.agentCanvas = new AgentCanvas('agent-canvas', studioId);
       window.agentCanvas.init();
 
+      // Load saved background color
+      loadCanvasBackground();
+
       // Set up event listeners for canvas clicks
       window.agentCanvas.onAgentClick = showAgentDetails;
       window.agentCanvas.onTaskClick = showTaskDetails;
@@ -2012,6 +2015,25 @@
       if (window.agentCanvas) {
         window.agentCanvas.backgroundColor = color;
         window.agentCanvas.draw();
+        // Save to localStorage
+        localStorage.setItem('canvas-bg-color', color);
+      }
+    }
+
+    // Load saved background color on page load
+    function loadCanvasBackground() {
+      const savedColor = localStorage.getItem('canvas-bg-color');
+      if (savedColor) {
+        // Update the color picker
+        const colorPicker = document.getElementById('canvas-bg-color');
+        if (colorPicker) {
+          colorPicker.value = savedColor;
+        }
+        // Apply to canvas if it exists
+        if (window.agentCanvas) {
+          window.agentCanvas.backgroundColor = savedColor;
+          window.agentCanvas.draw();
+        }
       }
     }
 
