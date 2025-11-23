@@ -11,32 +11,6 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 
-// ---- Dark Mode (Bootstrap + custom) ----
-function applyTheme(isDark) {
-  // Bootstrap theming
-  document.documentElement.setAttribute('data-bs-theme', isDark ? 'dark' : 'light');
-  // Your extra overrides
-  document.documentElement.classList.toggle('dark-mode', isDark);
-  // Persist
-  localStorage.setItem('darkMode', String(isDark));
-}
-
-// Setup dark mode functionality
-function setupDarkMode() {
-  // Init theme from storage (default light)
-  const storedDark = localStorage.getItem('darkMode') === 'true';
-  applyTheme(storedDark);
-
-  // Toggle button
-  const darkModeToggle = document.getElementById('darkModeToggle');
-  if (darkModeToggle) {
-    darkModeToggle.addEventListener('click', () => {
-      const next = !(localStorage.getItem('darkMode') === 'true');
-      applyTheme(next);
-    });
-  }
-}
-
 // ---- Agent Display Functionality ----
 
 // Refresh agent display in navbar
@@ -804,9 +778,6 @@ function setupSidebarToggle() {
 
 // Initialize application
 async function initializeApp() {
-  // Set up dark mode functionality
-  setupDarkMode();
-
   // Set up chat functionality
   setupChat();
 
