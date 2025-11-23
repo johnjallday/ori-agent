@@ -2462,7 +2462,6 @@ func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	log.Printf("🔄 Starting progress SSE stream for workspace %s", workspaceID)
 
 	// If no event bus, return error
 	if h.eventBus == nil {
@@ -2494,7 +2493,6 @@ func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("⏹  Progress SSE stream closed for workspace %s", workspaceID)
 			return
 
 		case event := <-eventChan:
