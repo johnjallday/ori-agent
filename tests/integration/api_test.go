@@ -84,7 +84,7 @@ func TestCreateAgentEndpoint(t *testing.T) {
 	agentData := map[string]interface{}{
 		"name":        "test-agent",
 		"description": "Test agent for integration testing",
-		"model":       "gpt-4o-mini",
+		"model":       "gpt-4o",
 		"provider":    "openai",
 	}
 

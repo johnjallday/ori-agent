@@ -264,7 +264,7 @@ func TestOpenAIProviderIntegration(t *testing.T) {
 	provider := NewOpenAIProvider(ProviderConfig{APIKey: apiKey})
 
 	req := ChatRequest{
-		Model: "gpt-4o-mini",
+		Model: "gpt-4o",
 		Messages: []Message{
 			NewUserMessage("Say 'test successful' and nothing else"),
 		},

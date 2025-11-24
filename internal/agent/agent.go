@@ -22,7 +22,7 @@ var TypeModels = map[string][]string{
 	TypeGeneral: {
 		"gpt-5-mini",
 		"gpt-4.1-mini",
-		"gpt-4o-mini",
+		"gpt-4o",
 		"claude-3-sonnet-20240229",
 	},
 	TypeResearch: {

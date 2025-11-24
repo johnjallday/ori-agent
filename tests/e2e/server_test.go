@@ -113,7 +113,7 @@ func TestAgentLifecycle(t *testing.T) {
 	agentData := map[string]interface{}{
 		"name":        "e2e-test-agent",
 		"description": "Agent for E2E testing",
-		"model":       "gpt-4o-mini",
+		"model":       "gpt-4o",
 		"provider":    "openai",
 	}
 

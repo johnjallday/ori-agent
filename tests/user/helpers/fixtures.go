@@ -23,9 +23,9 @@ func RandomAgentName() string {
 // RandomModel returns a random test-appropriate model
 func RandomModel() string {
 	models := []string{
-		"gpt-4o-mini",
-		"gpt-4o",
-		"gpt-3.5-turbo",
+		"granite4",
+		"granite4",
+		"qwen2.5",
 	}
 	return models[rand.IntN(len(models))]
 }
@@ -120,19 +120,19 @@ func AgentConfigurations() []struct {
 	}{
 		{
 			Name:        "math-helper",
-			Model:       "gpt-4o-mini",
+			Model:       "granite4",
 			Description: "An agent specialized in mathematics",
 			Plugins:     []string{"math"},
 		},
 		{
 			Name:        "weather-bot",
-			Model:       "gpt-4o-mini",
+			Model:       "granite4",
 			Description: "An agent for weather information",
 			Plugins:     []string{"weather"},
 		},
 		{
 			Name:        "multi-tool",
-			Model:       "gpt-4o",
+			Model:       "granite4",
 			Description: "An agent with multiple capabilities",
 			Plugins:     []string{"math", "weather"},
 		},

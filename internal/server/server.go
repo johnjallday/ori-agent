@@ -120,6 +120,9 @@ func New() (*Server, error) {
 	if apiKey == "" {
 		log.Printf("⚠️  OPENAI_API_KEY not set - OpenAI provider will be unavailable")
 		log.Printf("   You can configure it later in the Settings page")
+	} else {
+		// Debug logging
+		log.Printf("✅ OpenAI API key configured (length: %d, starts with: %s)", len(apiKey), apiKey[:min(10, len(apiKey))])
 	}
 
 	// Initialize OpenAI client factory (deprecated - will be replaced by LLM factory)

@@ -149,7 +149,7 @@ func (p *OpenAIProvider) getFallbackModels() []string {
 	return []string{
 		// Tool-calling tier (cheapest)
 		"gpt-5-nano",
-		"gpt-4.1-nano",
+		"gpt-4o",
 		// General purpose tier (mid-tier)
 		"gpt-5-mini",
 		"gpt-4.1-mini",
@@ -168,7 +168,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	// Build OpenAI request parameters
 	params := openai.ChatCompletionNewParams{
-		Model:    req.Model,
+		Model:    openai.ChatModel(req.Model), // Convert string to ChatModel type
 		Messages: messages,
 	}
 

@@ -32,7 +32,7 @@ func TestProviderIntegration(t *testing.T) {
 		defer cancel()
 
 		req := ChatRequest{
-			Model: "gpt-4o-mini",
+			Model: "gpt-4o",
 			Messages: []Message{
 				NewUserMessage("Say 'Hello World' and nothing else"),
 			},
@@ -71,7 +71,7 @@ func TestProviderIntegration(t *testing.T) {
 		defer cancel()
 
 		req := ChatRequest{
-			Model:        "gpt-4o-mini",
+			Model:        "gpt-4o",
 			SystemPrompt: "You are a helpful assistant that responds in exactly 3 words.",
 			Messages: []Message{
 				NewUserMessage("What is the capital of France?"),
@@ -118,7 +118,7 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		req := ChatRequest{
-			Model: "gpt-4o-mini",
+			Model: "gpt-4o",
 			Messages: []Message{
 				NewUserMessage("What is 15 multiplied by 7? Use the calculator tool."),
 			},
@@ -177,7 +177,7 @@ func TestProviderIntegration(t *testing.T) {
 		}
 
 		resp1, err := retrievedProvider.Chat(ctx, ChatRequest{
-			Model:       "gpt-4o-mini",
+			Model:       "gpt-4o",
 			Messages:    messages,
 			Temperature: 0.0,
 		})
@@ -194,7 +194,7 @@ func TestProviderIntegration(t *testing.T) {
 		messages = append(messages, NewUserMessage("What is my name?"))
 
 		resp2, err := retrievedProvider.Chat(ctx, ChatRequest{
-			Model:       "gpt-4o-mini",
+			Model:       "gpt-4o",
 			Messages:    messages,
 			Temperature: 0.0,
 		})

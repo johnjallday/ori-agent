@@ -61,9 +61,53 @@ run_check "Go Vet" "make vet" || true
 
 # Check if golangci-lint is installed (check PATH and ~/go/bin)
 if command -v golangci-lint &> /dev/null; then
-  run_check "Lint Check" "make lint" || true
+  run_check "Lint Check" "make lint" || {
+    # Lint check failed - offer to auto-fix
+    echo -e "${YELLOW}💡 Tip: Automated lint fixing is available${NC}"
+    echo ""
+    read -p "Run automated lint fixer? [y/N]: " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      echo ""
+      if [ -f "./scripts/fix-all-lint.sh" ]; then
+        ./scripts/fix-all-lint.sh
+        echo ""
+        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
+        echo ""
+        # Re-run lint check after fixes
+        if run_check "Lint Check (after fixes)" "make lint"; then
+          # Remove the original failure from FAILED_CHECKS
+          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
+        fi
+      else
+        echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
+      fi
+    fi
+  }
 elif [ -x "$HOME/go/bin/golangci-lint" ]; then
-  run_check "Lint Check" "$HOME/go/bin/golangci-lint run ./..." || true
+  run_check "Lint Check" "$HOME/go/bin/golangci-lint run ./..." || {
+    # Lint check failed - offer to auto-fix
+    echo -e "${YELLOW}💡 Tip: Automated lint fixing is available${NC}"
+    echo ""
+    read -p "Run automated lint fixer? [y/N]: " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      echo ""
+      if [ -f "./scripts/fix-all-lint.sh" ]; then
+        ./scripts/fix-all-lint.sh
+        echo ""
+        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
+        echo ""
+        # Re-run lint check after fixes
+        if run_check "Lint Check (after fixes)" "$HOME/go/bin/golangci-lint run ./..."; then
+          # Remove the original failure from FAILED_CHECKS
+          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
+        fi
+      else
+        echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
+      fi
+    fi
+  }
 else
   echo -e "${YELLOW}⚠️  Lint Check: SKIPPED (golangci-lint not installed)${NC}"
   echo -e "${YELLOW}   Install with: make install-tools${NC}"
@@ -88,7 +132,29 @@ echo "2. TESTS (Unit + Integration + E2E + User)"
 echo "════════════════════════════════════════════"
 echo ""
 
-run_check "All Tests" "go test -p 1 ./..." || true
+run_check "All Tests" "go test -p 1 ./..." || {
+  # Tests failed - offer diagnostic tool
+  echo -e "${YELLOW}💡 Tip: Test diagnostic tool is available${NC}"
+  echo ""
+  read -p "Run test diagnostics and auto-fix? [y/N]: " -n 1 -r
+  echo ""
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    if [ -f "./scripts/diagnose-test-failures.sh" ]; then
+      ./scripts/diagnose-test-failures.sh
+      echo ""
+      echo -e "${BLUE}Re-running tests after fixes...${NC}"
+      echo ""
+      # Re-run tests after fixes
+      if run_check "All Tests (after fixes)" "go test -p 1 ./..."; then
+        # Remove the original failure from FAILED_CHECKS
+        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
+      fi
+    else
+      echo -e "${RED}❌ diagnose-test-failures.sh not found in ./scripts/${NC}"
+    fi
+  fi
+}
 
 # 3. BUILD VERIFICATION
 echo ""

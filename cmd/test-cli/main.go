@@ -329,7 +329,7 @@ func (r *TestRunner) interactiveChat() {
 	}
 
 	agentName := r.prompt("Agent name")
-	_ = r.prompt("Model (default: gpt-4o-mini)") // Model selection not yet implemented
+	_ = r.prompt("Model (default: gpt-4o)") // Model selection not yet implemented
 
 	fmt.Printf("\n%sCreating agent '%s'...%s\n", colorCyan, agentName, colorReset)
 	// TODO: Create agent via API

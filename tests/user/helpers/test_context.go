@@ -220,6 +220,22 @@ func (tc *TestContext) EnablePlugin(agent *Agent, pluginName string) {
 		return
 	}
 
+	// Switch to the agent first (since plugin API uses current agent)
+	switchURL := fmt.Sprintf("%s/api/agents?name=%s", tc.ServerURL, agent.Name)
+	switchReq, err := http.NewRequest("PUT", switchURL, nil)
+	if err != nil {
+		tc.T.Fatalf("Failed to create switch request: %v", err)
+	}
+	switchResp, err := tc.Client.Do(switchReq)
+	if err != nil {
+		tc.T.Fatalf("Failed to switch agent: %v", err)
+	}
+	defer switchResp.Body.Close()
+	if switchResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(switchResp.Body)
+		tc.T.Fatalf("Failed to switch agent (status %d): %s", switchResp.StatusCode, body)
+	}
+
 	// Load plugin for agent via POST /api/plugins with form data
 	formData := fmt.Sprintf("name=%s&path=%s", pluginName, pluginPath)
 

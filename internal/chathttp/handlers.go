@@ -619,8 +619,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question string         `json:"question"`
-		Files    []UploadedFile `json:"files,omitempty"`
+		Question  string         `json:"question"`
+		AgentName string         `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files     []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -730,16 +731,26 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(base, 45*time.Second)
 	defer cancel()
 
-	// Load agent - for single agent stores, use the current agent name stored in the config
-	names, current := h.store.ListAgents()
-	if current == "" && len(names) > 0 {
-		current = names[0] // fallback to first available agent
+	// Load agent - use agent_name from request if provided, otherwise use current agent
+	var current string
+	if req.AgentName != "" {
+		current = req.AgentName
+	} else {
+		// Fallback to current agent from store
+		names, cur := h.store.ListAgents()
+		current = cur
+		if current == "" && len(names) > 0 {
+			current = names[0] // fallback to first available agent
+		}
 	}
+
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("agent '%s' not found", current), http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("DEBUG: Agent '%s' has %d MCP servers: %v", current, len(ag.MCPServers), ag.MCPServers)
 
 	// Check for uninitialized plugins before proceeding with chat
 	uninitializedPlugins := h.checkUninitializedPlugins(ag)
@@ -900,7 +911,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:       ag.Settings.Model,
+		Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
 		Temperature: openai.Float(ag.Settings.Temperature),
 		Messages:    ag.Messages,
 		Tools:       openaiTools,
@@ -947,7 +958,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		defer fbCancel()
 
 		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
-			Model:       ag.Settings.Model,
+			Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
 				openai.SystemMessage("Answer directly in plain text. Do not call any tools."),
@@ -1088,7 +1099,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Ask model again with tool output, with guidance to focus on the tool result
 		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			Model:       ag.Settings.Model,
+			Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
 			Temperature: openai.Float(ag.Settings.Temperature),
 			Messages: append(ag.Messages,
 				openai.SystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."),

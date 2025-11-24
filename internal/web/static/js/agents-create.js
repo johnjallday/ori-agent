@@ -6,10 +6,10 @@ let selectedTags = [];
 // Model options by provider
 const modelsByProvider = {
     openai: [
-        { value: 'gpt-4o', label: 'GPT-4o' },
-        { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+        { value: 'gpt-4o', label: 'GPT-4o (Recommended)' },
         { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-        { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+        { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+        { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (if available)' }
     ],
     claude: [
         { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },

@@ -18,10 +18,9 @@ func getTestModel() string {
 	if model := os.Getenv("OLLAMA_MODEL"); model != "" {
 		return model
 	}
-	if os.Getenv("USE_OLLAMA") == "true" {
-		return "granite4"
-	}
-	return "gpt-4o-mini"
+	// Default to Ollama (free local inference)
+	// Use OpenAI by setting OPENAI_MODEL env var or --model flag
+	return "granite4"
 }
 
 // TestMathPluginIntegration tests the math plugin end-to-end
