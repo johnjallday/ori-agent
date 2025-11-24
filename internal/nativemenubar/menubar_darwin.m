@@ -13,7 +13,8 @@ static NSMutableDictionary *menuItems = nil;
 void initStatusBar() {
     if (statusItem != nil) return;
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    // Check if we're already on the main thread to avoid deadlock
+    if ([NSThread isMainThread]) {
         @autoreleasepool {
             NSStatusBar *statusBar = [NSStatusBar systemStatusBar];
             statusItem = [statusBar statusItemWithLength:NSSquareStatusItemLength];
@@ -25,7 +26,21 @@ void initStatusBar() {
 
             menuItems = [[NSMutableDictionary alloc] init];
         }
-    });
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            @autoreleasepool {
+                NSStatusBar *statusBar = [NSStatusBar systemStatusBar];
+                statusItem = [statusBar statusItemWithLength:NSSquareStatusItemLength];
+                [statusItem retain];
+
+                menu = [[NSMenu alloc] init];
+                [menu setAutoenablesItems:NO];
+                statusItem.menu = menu;
+
+                menuItems = [[NSMutableDictionary alloc] init];
+            }
+        });
+    }
 }
 
 // Set the status bar icon from PNG data
