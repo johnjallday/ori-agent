@@ -58,6 +58,8 @@ plugins/*/*.so
 # Build artifacts
 dist/
 build/
+!build/macos/
+!build/linux/
 build-dmg/
 release/
 releases/
