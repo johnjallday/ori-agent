@@ -62,19 +62,33 @@ builds:
 # Archives - Only distribute installers (professional appearance)
 # Distribution strategy:
 #   - macOS: DMG installers only (no standalone binaries)
-#   - Windows: MSI installer (built via GitHub Actions) + .exe binary
+#   - Windows: MSI installer (built via GitHub Actions) + standalone binary
 #   - Linux: .deb/.rpm packages only (no standalone binaries)
 #   - Menubar app: Bundled in macOS DMG (no separate binary)
 archives:
-  # Windows .exe binary (MSI installer built separately in GitHub Actions)
-  - id: windows-only
+  - id: default
     builds:
       - server
-    format: binary
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: zip
+    format_overrides:
+      - goos: windows
+        format: zip
+      - goos: linux
+        format: tar.gz
+      - goos: darwin
+        format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
     files:
-      - none*
-    meta: true
+      - LICENSE
+      - README.md
+      - example_plugins/**/*
+      - plugins/**/*
 
 # macOS DMG installers - created via custom publisher
 publishers:
