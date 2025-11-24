@@ -74,11 +74,7 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - none*
-    # Only include Windows
     meta: true
-    filter:
-      goos:
-        - windows
 
 # macOS DMG installers - created via custom publisher
 publishers:
