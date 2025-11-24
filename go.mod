@@ -4,7 +4,6 @@ go 1.25.3
 
 require (
 	fyne.io/fyne/v2 v2.7.1
-	fyne.io/systray v1.11.1-0.20250603113521-ca66a66d8b58
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anthropics/anthropic-sdk-go v1.18.1
 	github.com/google/uuid v1.6.0
@@ -25,7 +24,6 @@ require (
 	github.com/go-gl/gl v0.0.0-20231021071112-07e5d0ea2e71 // indirect
 	github.com/go-text/render v0.2.0 // indirect
 	github.com/go-text/typesetting v0.3.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
