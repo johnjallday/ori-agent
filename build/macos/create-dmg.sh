@@ -92,7 +92,7 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>
-    <false/>
+    <true/>
 </dict>
 </plist>
 PLIST
