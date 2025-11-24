@@ -62,7 +62,8 @@ cd "$DATA_DIR"
 
 # Launch the menu bar app
 # The menu bar app provides a UI to start/stop the server
-exec "$RESOURCES_DIR/ori-menubar" > ~/Library/Logs/ori-menubar.log 2>&1
+# Note: We don't redirect stdout/stderr here because systray apps need direct terminal access
+exec "$RESOURCES_DIR/ori-menubar"
 LAUNCHER
 
 chmod +x "${APP_PATH}/Contents/MacOS/OriAgent"
