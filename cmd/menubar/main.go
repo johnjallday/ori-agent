@@ -17,6 +17,10 @@ import (
 )
 
 func main() {
+	// Lock main goroutine to main OS thread for Cocoa
+	// This is REQUIRED for macOS NSApplication to work properly
+	runtime.LockOSThread()
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Ori Agent Menu Bar App (Native)...")
 

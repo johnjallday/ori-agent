@@ -50,10 +50,13 @@ void setIcon(const void *data, int length) {
 void setTooltip(const char *tooltip) {
     if (statusItem == nil) return;
 
+    NSString *str = tooltip ? [NSString stringWithUTF8String:tooltip] : nil;
+    [str retain];
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            NSString *str = [NSString stringWithUTF8String:tooltip];
             statusItem.button.toolTip = str;
+            [str release];
         }
     });
 }
@@ -72,15 +75,22 @@ void setTooltip(const char *tooltip) {
 
 // Add a menu item
 int addMenuItem(const char *title, const char *tooltip, int itemId) {
+    // Copy strings immediately since Go may free them after this function returns
+    NSString *titleStr = title ? [NSString stringWithUTF8String:title] : @"";
+    NSString *tooltipStr = (tooltip && strlen(tooltip) > 0) ? [NSString stringWithUTF8String:tooltip] : nil;
+
+    // Retain strings for use in async block
+    [titleStr retain];
+    if (tooltipStr) [tooltipStr retain];
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            NSString *titleStr = [NSString stringWithUTF8String:title];
             NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:titleStr
                                                           action:@selector(handleClick:)
                                                    keyEquivalent:@""];
 
-            if (tooltip != NULL && strlen(tooltip) > 0) {
-                item.toolTip = [NSString stringWithUTF8String:tooltip];
+            if (tooltipStr) {
+                item.toolTip = tooltipStr;
             }
 
             MenuItemTarget *target = [[MenuItemTarget alloc] init];
@@ -89,6 +99,10 @@ int addMenuItem(const char *title, const char *tooltip, int itemId) {
 
             [menu addItem:item];
             [menuItems setObject:item forKey:@(itemId)];
+
+            // Release retained strings
+            [titleStr release];
+            if (tooltipStr) [tooltipStr release];
         }
     });
 
@@ -118,12 +132,16 @@ void setMenuItemEnabled(int itemId, int enabled) {
 
 // Update menu item title
 void setMenuItemTitle(int itemId, const char *title) {
+    NSString *titleStr = title ? [NSString stringWithUTF8String:title] : @"";
+    [titleStr retain];
+
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
             NSMenuItem *item = [menuItems objectForKey:@(itemId)];
             if (item != nil) {
-                item.title = [NSString stringWithUTF8String:title];
+                item.title = titleStr;
             }
+            [titleStr release];
         }
     });
 }
