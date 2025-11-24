@@ -173,11 +173,24 @@ void setMenuItemChecked(int itemId, int checked) {
     });
 }
 
+// Callback from Go
+extern void goReadyCallback();
+
 // Run the app loop
 void run() {
     @autoreleasepool {
-        [NSApplication sharedApplication];
-        [NSApp run];
+        NSApplication *app = [NSApplication sharedApplication];
+
+        // Set up notification to call Go callback when app is ready
+        [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidFinishLaunchingNotification
+                                                          object:app
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            // Call Go callback on main thread
+            goReadyCallback();
+        }];
+
+        [app run];
     }
 }
 

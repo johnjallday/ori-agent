@@ -158,15 +158,8 @@ func (mb *MenuBar) Run(onReady, onExit func()) {
 	// Start click handler in goroutine
 	go mb.handleClicks()
 
-	// Call onReady after a short delay to ensure menu is set up
-	if onReady != nil {
-		go func() {
-			// Give time for menu to initialize
-			onReady()
-		}()
-	}
-
 	// Run the NSApp main loop (this blocks)
+	// onReady will be called via goReadyCallback when app finishes launching
 	C.run()
 
 	// Cleanup
@@ -197,6 +190,13 @@ func (mb *MenuBar) handleClicks() {
 func goClickCallback(itemID C.int) {
 	if globalMenuBar != nil {
 		globalMenuBar.clickChan <- int(itemID)
+	}
+}
+
+//export goReadyCallback
+func goReadyCallback() {
+	if globalMenuBar != nil && globalMenuBar.onReady != nil {
+		go globalMenuBar.onReady()
 	}
 }
 
