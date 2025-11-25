@@ -22,8 +22,8 @@ goreleaser release --snapshot --clean --skip=publish
 # Create DMGs manually (publishers are skipped in snapshot mode)
 echo ""
 echo "🔨 Creating macOS DMGs..."
-./build/macos/create-dmg.sh "$VERSION" amd64 dist > /dev/null 2>&1
-./build/macos/create-dmg.sh "$VERSION" arm64 dist > /dev/null 2>&1
+./build/macos/create-dmg.sh "$VERSION" darwin amd64 dist > /dev/null 2>&1
+./build/macos/create-dmg.sh "$VERSION" darwin arm64 dist > /dev/null 2>&1
 echo "✅ DMGs created"
 
 echo ""

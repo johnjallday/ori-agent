@@ -53,7 +53,7 @@ This script:
 goreleaser release --snapshot --clean --skip=publish
 VERSION=$(cat VERSION)-next
 ARCH=$(uname -m)
-./build/macos/create-dmg.sh "$VERSION" "$ARCH" dist
+./build/macos/create-dmg.sh "$VERSION" darwin "$ARCH" dist
 
 # 2. Install
 open dist/OriAgent-*-$ARCH.dmg

@@ -1,18 +1,35 @@
 #!/bin/bash
 # Automated DMG creator for GoReleaser
 # This script is called by GoReleaser to create macOS DMG installers
-# Usage: ./build/macos/create-dmg.sh <version> <architecture> <dist-dir>
+# Usage: ./build/macos/create-dmg.sh <version> <os> <architecture> <dist-dir>
 
 set -e
 
 VERSION=$1
-ARCH=$2
-DIST_DIR=${3:-"dist"}
+OS=$2
+ARCH=$3
+DIST_DIR=${4:-"dist"}
 
-if [ -z "$VERSION" ] || [ -z "$ARCH" ]; then
-    echo "Usage: $0 <version> <architecture> <dist-dir>"
-    echo "Example: $0 0.0.11 amd64 dist"
+if [ -z "$VERSION" ] || [ -z "$OS" ] || [ -z "$ARCH" ]; then
+    echo "Usage: $0 <version> <os> <architecture> <dist-dir>"
+    echo "Example: $0 0.0.11 darwin amd64 dist"
     exit 1
+fi
+
+# Only build DMGs for macOS artifacts (GoReleaser invokes publishers for every artifact)
+if [ "$OS" != "darwin" ]; then
+    echo "ℹ️  Skipping DMG creation - current artifact OS is ${OS} (requires darwin)"
+    exit 0
+fi
+
+# Normalize architecture strings for manual invocations (e.g., x86_64 -> amd64)
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+fi
+
+if [ -n "$TARGET_ARCH" ] && [ "$ARCH" != "$TARGET_ARCH" ]; then
+    echo "ℹ️  Skipping DMG creation - artifact arch ${ARCH} does not match target ${TARGET_ARCH}"
+    exit 0
 fi
 
 # Check if this is a macOS build by looking for the menubar binary

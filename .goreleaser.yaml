@@ -85,9 +85,10 @@ publishers:
   - name: macos-dmg-amd64
     ids:
       - default
-    cmd: ./build/macos/create-dmg.sh {{ .Version }} amd64 dist
+    cmd: ./build/macos/create-dmg.sh {{ .Version }} {{ .Os }} {{ .Arch }} dist
     env:
       - PATH={{ .Env.PATH }}
+      - TARGET_ARCH=amd64
     extra_files:
       - glob: ./dist/ori-menubar_darwin_amd64/*
       - glob: ./dist/ori-agent_darwin_amd64/*
@@ -95,9 +96,10 @@ publishers:
   - name: macos-dmg-arm64
     ids:
       - default
-    cmd: ./build/macos/create-dmg.sh {{ .Version }} arm64 dist
+    cmd: ./build/macos/create-dmg.sh {{ .Version }} {{ .Os }} {{ .Arch }} dist
     env:
       - PATH={{ .Env.PATH }}
+      - TARGET_ARCH=arm64
     extra_files:
       - glob: ./dist/ori-menubar_darwin_arm64/*
       - glob: ./dist/ori-agent_darwin_arm64/*
