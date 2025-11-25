@@ -121,12 +121,19 @@ fi
 # Copy binaries from dist directory
 echo "📦 Copying binaries..."
 
+# Ensure Resources directory exists before copying binaries
+mkdir -p "${APP_PATH}/Contents/Resources"
+
 # GoReleaser creates directories with version suffixes like _v1 or _v8.0
 # Find the menubar binary
 MENUBAR_PATH=$(find "${DIST_DIR}" -path "*/menubar_darwin_${ARCH}*/ori-menubar" -type f | head -1)
 if [ -f "$MENUBAR_PATH" ]; then
-    cp "$MENUBAR_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied menubar from: $MENUBAR_PATH"
+    if cp "$MENUBAR_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied menubar from: $MENUBAR_PATH"
+    else
+        echo "❌ Error: Failed to copy ori-menubar"
+        exit 1
+    fi
 else
     echo "❌ Error: ori-menubar binary not found for architecture ${ARCH}"
     echo "  Searched in: ${DIST_DIR}/menubar_darwin_${ARCH}*/"
@@ -136,8 +143,13 @@ fi
 # Find the server binary
 SERVER_PATH=$(find "${DIST_DIR}" -path "*/server_darwin_${ARCH}*/ori-agent" -type f | head -1)
 if [ -f "$SERVER_PATH" ]; then
-    cp "$SERVER_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied server from: $SERVER_PATH"
+    if cp "$SERVER_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied server from: $SERVER_PATH"
+    else
+        echo "❌ Error: Failed to copy ori-agent"
+        ls -la "${APP_PATH}/Contents/Resources/" || true
+        exit 1
+    fi
 else
     echo "❌ Error: ori-agent binary not found for architecture ${ARCH}"
     echo "  Searched in: ${DIST_DIR}/server_darwin_${ARCH}*/"
