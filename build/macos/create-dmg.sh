@@ -36,6 +36,17 @@ echo "=========================================================="
 echo "🧹 Cleaning up..."
 rm -rf "${BUILD_DIR}"
 rm -f "${DIST_DIR}/${DMG_NAME}"  # Remove any existing DMG
+
+# Extra safety: ensure no leftover files
+sleep 0.1  # Brief pause to ensure filesystem sync
+
+# Verify cleanup succeeded
+if [ -d "${BUILD_DIR}" ]; then
+    echo "⚠️  Warning: ${BUILD_DIR} still exists after cleanup, forcing removal..."
+    rm -rf "${BUILD_DIR}"
+    sleep 0.2
+fi
+
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${DIST_DIR}"
 
@@ -177,6 +188,7 @@ echo "✓ All binaries present in .app bundle"
 echo ""
 echo "🎨 Preparing DMG contents..."
 DMG_STAGING="${BUILD_DIR}/dmg-staging"
+rm -rf "${DMG_STAGING}"  # Remove any existing staging area
 mkdir -p "${DMG_STAGING}"
 
 # Copy app to staging (use ditto for better macOS compatibility)
