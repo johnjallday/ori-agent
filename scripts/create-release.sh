@@ -172,6 +172,24 @@ if goreleaser release --clean; then
   print_status "Built installers:"
   ls -lh dist/*.dmg dist/*.deb dist/*.rpm 2>/dev/null || echo "  (See dist/ directory for all artifacts)"
 
+  # Ensure DMGs are uploaded (GoReleaser sometimes skips when publishers are custom)
+  SHORT_VERSION="${VERSION#v}"
+  DMG_AMD64="dist/OriAgent-${SHORT_VERSION}-amd64.dmg"
+  DMG_ARM64="dist/OriAgent-${SHORT_VERSION}-arm64.dmg"
+  if command -v gh >/dev/null 2>&1; then
+    DMG_UPLOAD_LIST=()
+    [ -f "$DMG_AMD64" ] && DMG_UPLOAD_LIST+=("$DMG_AMD64")
+    [ -f "$DMG_ARM64" ] && DMG_UPLOAD_LIST+=("$DMG_ARM64")
+    if [ "${#DMG_UPLOAD_LIST[@]}" -gt 0 ]; then
+      print_status "Uploading DMGs to release assets (gh)..."
+      gh release upload "$VERSION" "${DMG_UPLOAD_LIST[@]}" --clobber || print_warning "DMG upload via gh failed"
+    else
+      print_warning "DMG files not found in dist/; skipping DMG upload"
+    fi
+  else
+    print_warning "gh CLI not found; skipping DMG upload"
+  fi
+
   # Verify and show release info
   if command -v gh >/dev/null 2>&1; then
     if gh release view "$VERSION" >/dev/null 2>&1; then
