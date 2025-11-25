@@ -6,6 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.7.1
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anthropics/anthropic-sdk-go v1.18.1
+	github.com/getlantern/systray v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
@@ -27,7 +28,6 @@ require (
 	github.com/getlantern/hex v0.0.0-20190417191902-c6586a6fe0b7 // indirect
 	github.com/getlantern/hidden v0.0.0-20190325191715-f02dbb02be55 // indirect
 	github.com/getlantern/ops v0.0.0-20190325191751-d70cb0d6f85f // indirect
-	github.com/getlantern/systray v1.2.2 // indirect
 	github.com/go-gl/gl v0.0.0-20231021071112-07e5d0ea2e71 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/go-text/render v0.2.0 // indirect

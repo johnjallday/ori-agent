@@ -195,7 +195,29 @@ echo "════════════════════════�
 echo ""
 
 run_check "Go Mod Verify" "go mod verify" || true
-run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || true
+run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || {
+  # Go mod tidy failed - offer to auto-fix
+  echo -e "${YELLOW}💡 Tip: Automated go.mod fix is available${NC}"
+  echo ""
+  read -p "Run automated go.mod fixer? [y/N]: " -n 1 -r
+  echo ""
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    if [ -f "./scripts/fix-go-mod.sh" ]; then
+      ./scripts/fix-go-mod.sh
+      echo ""
+      echo -e "${BLUE}Re-running Go Mod Tidy check after fixes...${NC}"
+      echo ""
+      # Re-run go mod tidy check after fixes
+      if run_check "Go Mod Tidy (after fixes)" "go mod tidy && git diff --exit-code go.mod go.sum"; then
+        # Remove the original failure from FAILED_CHECKS
+        FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Mod Tidy/}")
+      fi
+    else
+      echo -e "${RED}❌ fix-go-mod.sh not found in ./scripts/${NC}"
+    fi
+  fi
+}
 
 # 5. UPDATE README
 echo ""
