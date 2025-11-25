@@ -232,8 +232,7 @@ git branch --show-current
 
 ## Documentation
 
-- **Quick reference:** `RELEASE_QUICKSTART.md` (this file)
-- **Detailed guide:** `RELEASE_WORKFLOW.md`
+- **Release guide:** `RELEASE_QUICKSTART.md` (this file)
 - **Scripts:**
   - `scripts/pre-release-check.sh` - Validate code quality
   - `scripts/prepare-release.sh` - Merge dev → main
@@ -257,4 +256,4 @@ git branch --show-current
 
 ---
 
-**Questions?** See `RELEASE_WORKFLOW.md` for complete details.
+**Questions?** See the scripts in `scripts/` or run them with `--help`.

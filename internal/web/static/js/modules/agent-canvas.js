@@ -3408,7 +3408,7 @@ class AgentCanvas {
       const updatedInputs = [...currentInputs, this.connectionSourceTask.id];
 
       // Update task via API
-      const response = await fetch('/api/orchestration/tasks/update', {
+      const response = await fetch('/api/orchestration/tasks', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

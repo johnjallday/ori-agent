@@ -65,10 +65,14 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 		llm.NewUserMessage(prompt),
 	}
 
-	// Add system prompt if available
-	if ag.Settings.SystemPrompt != "" {
-		messages = append([]llm.Message{llm.NewSystemMessage(ag.Settings.SystemPrompt)}, messages...)
-	}
+	// Use a task-specific system prompt that's more conservative about tool use
+	// The agent's system prompt may encourage aggressive tool use which is inappropriate for workspace tasks
+	taskSystemPrompt := "You are a helpful AI assistant completing a task in a collaborative workspace. "
+	taskSystemPrompt += "You have access to tools, but only use them when they are clearly necessary to complete the specific task. "
+	taskSystemPrompt += "For simple questions, greetings, or informational requests, respond naturally without calling tools. "
+	taskSystemPrompt += "Be thoughtful and precise in your responses."
+
+	messages = append([]llm.Message{llm.NewSystemMessage(taskSystemPrompt)}, messages...)
 
 	// Convert tools (plugins) to LLM format
 	tools := h.convertPluginsToTools(ag)
@@ -115,6 +119,78 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	return resp.Content, nil
 }
 
+// substitutePlaceholders replaces placeholders like {result}, {input}, {result1}, {result2} in task description
+func (h *LLMTaskHandler) substitutePlaceholders(task Task) string {
+	description := task.Description
+
+	// Get input task results from context
+	inputTaskResults, hasInputResults := task.Context["input_task_results"]
+	if !hasInputResults {
+		return description // No substitution needed if no input results
+	}
+
+	resultsMap, ok := inputTaskResults.(map[string]string)
+	if !ok || len(resultsMap) == 0 {
+		return description
+	}
+
+	// Extract actual result values (strip "Tool Results:" prefix if present)
+	var resultValues []string
+	for _, result := range resultsMap {
+		cleanResult := h.cleanToolResult(result)
+		if cleanResult != "" {
+			resultValues = append(resultValues, cleanResult)
+		}
+	}
+
+	if len(resultValues) == 0 {
+		return description
+	}
+
+	// Replace placeholders
+	// {result} or {input} - use the first result (or combined if multiple)
+	if strings.Contains(description, "{result}") || strings.Contains(description, "{input}") {
+		combinedResult := strings.Join(resultValues, ", ")
+		description = strings.ReplaceAll(description, "{result}", combinedResult)
+		description = strings.ReplaceAll(description, "{input}", combinedResult)
+	}
+
+	// {result1}, {result2}, etc. - use specific results by index
+	for i, result := range resultValues {
+		placeholder := fmt.Sprintf("{result%d}", i+1)
+		description = strings.ReplaceAll(description, placeholder, result)
+	}
+
+	return description
+}
+
+// cleanToolResult extracts the actual result from tool output format
+func (h *LLMTaskHandler) cleanToolResult(result string) string {
+	// Remove "Tool Results:" prefix and clean up
+	result = strings.TrimSpace(result)
+
+	// If it starts with "Tool Results:", extract the actual result
+	if strings.HasPrefix(result, "Tool Results:") {
+		lines := strings.Split(result, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			// Look for lines like "- tool_name: actual_result"
+			if strings.HasPrefix(line, "-") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					actualResult := strings.TrimSpace(parts[1])
+					if actualResult != "" {
+						return actualResult
+					}
+				}
+			}
+		}
+	}
+
+	// If not in tool format, return as-is
+	return result
+}
+
 // buildTaskPrompt creates a prompt for the task
 func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	var prompt strings.Builder
@@ -125,7 +201,9 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	prompt.WriteString(fmt.Sprintf("**From**: %s\n", task.From))
 	prompt.WriteString(fmt.Sprintf("**Priority**: %d/5\n\n", task.Priority))
 
-	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", task.Description))
+	// Process task description with placeholder substitution
+	processedDescription := h.substitutePlaceholders(task)
+	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
 
 	// Handle input task results specially for better formatting
 	inputTaskResults, hasInputResults := task.Context["input_task_results"]
@@ -159,7 +237,9 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	}
 
 	prompt.WriteString("Please complete this task to the best of your ability. ")
-	prompt.WriteString("Use any available tools if needed. ")
+	prompt.WriteString("**Important**: Only use tools when they are explicitly necessary to complete the task. ")
+	prompt.WriteString("For informational requests, meta-commands (like /tools, /help), or simple questions, ")
+	prompt.WriteString("respond directly without calling tools. ")
 	prompt.WriteString("Provide a clear, concise response with your findings or results.")
 
 	return prompt.String()
@@ -217,27 +297,21 @@ func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, 
 	}
 }
 
-// getProviderForModel determines which LLM provider to use
+// getProviderForModel determines which LLM provider to use (dynamic detection)
 func (h *LLMTaskHandler) getProviderForModel(model string) string {
-	modelLower := strings.ToLower(model)
-
-	// Check for Claude models
-	if strings.Contains(modelLower, "claude") {
+	// Check for Claude models (prefix-based)
+	if strings.HasPrefix(model, "claude-") {
 		return "claude"
 	}
 
-	// Check for Ollama models
-	if strings.Contains(modelLower, "llama") ||
-		strings.Contains(modelLower, "mistral") ||
-		strings.Contains(modelLower, "mixtral") ||
-		strings.Contains(modelLower, "phi") ||
-		strings.Contains(modelLower, "qwen") ||
-		strings.Contains(modelLower, "codellama") ||
-		strings.Contains(modelLower, "orca") ||
-		strings.Contains(modelLower, "vicuna") ||
-		strings.Contains(modelLower, "neural-chat") ||
-		strings.Contains(modelLower, "starling") {
-		return "ollama"
+	// Check if Ollama has this model (dynamic detection)
+	if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
+		if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
+			if ollamaProv.HasModel(model) {
+				log.Printf("🎯 Model '%s' found in Ollama, using Ollama provider", model)
+				return "ollama"
+			}
+		}
 	}
 
 	// Default to OpenAI
