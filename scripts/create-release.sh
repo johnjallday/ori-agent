@@ -141,16 +141,6 @@ else
   git commit -m "chore: create VERSION file with version $VERSION"
 fi
 
-# Create git tag
-print_status "Creating git tag $VERSION..."
-git tag -a "$VERSION" -m "Release $VERSION
-
-🚀 Generated with create-release.sh"
-
-# Push the tag
-print_status "Pushing tag to origin..."
-git push origin "$VERSION"
-
 # Build multi-platform installers and create GitHub release with GoReleaser
 print_status "Building installers for all platforms (macOS, Windows, Linux)..."
 
@@ -183,10 +173,15 @@ if command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-# Delete remote tag if it exists (we'll recreate it)
+# Delete remote and local tags if they exist (we'll recreate them)
 if git ls-remote --tags origin | grep -q "refs/tags/$VERSION$"; then
   print_warning "Remote tag $VERSION exists, deleting..."
   git push origin ":refs/tags/$VERSION" 2>/dev/null || true
+fi
+
+if git tag -l | grep -q "^$VERSION$"; then
+  print_warning "Local tag $VERSION exists, deleting..."
+  git tag -d "$VERSION" 2>/dev/null || true
 fi
 
 # Clean up local build artifacts
@@ -196,6 +191,16 @@ rm -rf .goreleaser 2>/dev/null || true
 
 print_success "Cleanup complete, ready for fresh build"
 echo ""
+
+# Create git tag AFTER cleanup
+print_status "Creating git tag $VERSION..."
+git tag -a "$VERSION" -m "Release $VERSION
+
+🚀 Generated with create-release.sh"
+
+# Push the tag
+print_status "Pushing tag to origin..."
+git push origin "$VERSION"
 
 # Run GoReleaser to build all installers and create GitHub release
 print_status "Running GoReleaser (this will build binaries, create installers, and publish to GitHub)..."
