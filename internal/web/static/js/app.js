@@ -11,6 +11,74 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 
+// ---- Chat Persistence (localStorage) ----
+
+// Save chat messages to localStorage for current agent
+function saveChatToLocalStorage() {
+  if (!currentAgent) return;
+
+  try {
+    const storageKey = `ori_chat_${currentAgent}`;
+    localStorage.setItem(storageKey, JSON.stringify(chatMessages));
+  } catch (error) {
+    console.error('Failed to save chat history:', error);
+  }
+}
+
+// Load chat messages from localStorage for current agent
+function loadChatFromLocalStorage() {
+  if (!currentAgent) return;
+
+  try {
+    const storageKey = `ori_chat_${currentAgent}`;
+    const stored = localStorage.getItem(storageKey);
+
+    if (stored) {
+      chatMessages = JSON.parse(stored);
+      // Restore messages to UI
+      restoreChatMessages();
+    }
+  } catch (error) {
+    console.error('Failed to load chat history:', error);
+    chatMessages = [];
+  }
+}
+
+// Restore chat messages to the UI
+function restoreChatMessages() {
+  const chatArea = document.getElementById('chatArea');
+  if (!chatArea) return;
+
+  // Clear existing messages in UI
+  chatArea.innerHTML = '';
+
+  // Re-render all stored messages
+  chatMessages.forEach(msg => {
+    appendMessageToUI(msg.content, msg.isUser);
+  });
+}
+
+// Clear chat history for current agent
+function clearChatHistory() {
+  if (!currentAgent) return;
+
+  try {
+    const storageKey = `ori_chat_${currentAgent}`;
+    localStorage.removeItem(storageKey);
+    chatMessages = [];
+
+    // Clear UI
+    const chatArea = document.getElementById('chatArea');
+    if (chatArea) {
+      chatArea.innerHTML = '';
+    }
+
+    console.log('Chat history cleared');
+  } catch (error) {
+    console.error('Failed to clear chat history:', error);
+  }
+}
+
 // ---- Agent Display Functionality ----
 
 // Refresh agent display in navbar
@@ -23,6 +91,15 @@ async function refreshAgentDisplay() {
 
       if (currentAgentElement && data.current) {
         currentAgentElement.textContent = data.current;
+
+        // Update current agent and load chat history when agent changes
+        const previousAgent = currentAgent;
+        currentAgent = data.current;
+
+        // Load chat history if agent changed
+        if (previousAgent !== currentAgent) {
+          loadChatFromLocalStorage();
+        }
       }
     }
   } catch (error) {
@@ -391,18 +468,18 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Add message to chat area
-function addMessageToChat(message, isUser = false, isError = false) {
+// Internal function: Add message to UI only (used by restore function)
+function appendMessageToUI(message, isUser = false, isError = false) {
   const chatArea = document.getElementById('chatArea');
   if (!chatArea) return;
 
   const messageDiv = document.createElement('div');
   messageDiv.className = `message-container mb-3 ${isUser ? 'user-message' : 'assistant-message'}`;
-  
+
   const messageContent = document.createElement('div');
   messageContent.className = `modern-card p-3 ${isUser ? 'ms-auto' : 'me-auto'}`;
   messageContent.style.maxWidth = '85%';
-  
+
   if (isError) {
     messageContent.style.background = 'var(--danger-color)';
     messageContent.style.color = 'white';
@@ -431,16 +508,25 @@ function addMessageToChat(message, isUser = false, isError = false) {
 
   messageDiv.appendChild(messageContent);
   chatArea.appendChild(messageDiv);
-  
+
   // Scroll to bottom
   chatArea.scrollTop = chatArea.scrollHeight;
-  
-  // Store message
+}
+
+// Public function: Add message and persist to localStorage
+function addMessageToChat(message, isUser = false, isError = false) {
+  // Add to UI
+  appendMessageToUI(message, isUser, isError);
+
+  // Store message in memory
   chatMessages.push({
     content: message,
     isUser: isUser,
     timestamp: new Date().toISOString()
   });
+
+  // Persist to localStorage
+  saveChatToLocalStorage();
 }
 
 // Show typing indicator
@@ -678,12 +764,22 @@ function setupChat() {
     enterToSend.addEventListener('change', () => {
       localStorage.setItem('enterToSend', enterToSend.checked);
     });
-    
+
     // Load saved preference
     const savedEnterToSend = localStorage.getItem('enterToSend');
     if (savedEnterToSend !== null) {
       enterToSend.checked = savedEnterToSend === 'true';
     }
+  }
+
+  // Clear chat button
+  const clearChatBtn = document.getElementById('clearChatBtn');
+  if (clearChatBtn) {
+    clearChatBtn.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear the chat history? This cannot be undone.')) {
+        clearChatHistory();
+      }
+    });
   }
 
   console.log('Chat functionality initialized');
@@ -783,6 +879,9 @@ async function initializeApp() {
 
   // Set up sidebar toggle functionality
   setupSidebarToggle();
+
+  // Load current agent and restore chat history
+  await refreshAgentDisplay();
 
   // Initialize onboarding for first-time users
   try {

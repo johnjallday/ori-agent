@@ -20,6 +20,16 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Ori Agent Menu Bar App (systray)...")
 
+	// Change to proper user data directory for macOS
+	dataDir := os.Getenv("HOME") + "/Library/Application Support/OriAgent"
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+	if err := os.Chdir(dataDir); err != nil {
+		log.Fatalf("Failed to change to data directory: %v", err)
+	}
+	log.Printf("Working directory: %s", dataDir)
+
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
