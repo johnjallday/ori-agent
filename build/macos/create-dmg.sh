@@ -103,11 +103,18 @@ PLIST
 # Copy app icon
 echo "🎨 Copying app icon..."
 ICON_PATH="assets/AppIcon.icns"
+
+# Ensure Resources directory exists
+mkdir -p "${APP_PATH}/Contents/Resources"
+
 if [ -f "$ICON_PATH" ]; then
-    cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied icon from: $ICON_PATH"
+    if cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied icon from: $ICON_PATH"
+    else
+        echo "  ❌ Failed to copy icon (non-fatal, continuing without icon)"
+    fi
 else
-    echo "⚠️  Warning: AppIcon.icns not found at $ICON_PATH"
+    echo "  ⚠️  Warning: AppIcon.icns not found at $ICON_PATH (continuing without icon)"
 fi
 
 # Copy binaries from dist directory
