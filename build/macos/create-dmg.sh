@@ -27,6 +27,7 @@ if [ "$ARCH" = "x86_64" ]; then
     ARCH="amd64"
 fi
 
+# Optional guard so only the matching arch publisher runs (set via TARGET_ARCH env)
 if [ -n "$TARGET_ARCH" ] && [ "$ARCH" != "$TARGET_ARCH" ]; then
     echo "ℹ️  Skipping DMG creation - artifact arch ${ARCH} does not match target ${TARGET_ARCH}"
     exit 0
@@ -52,16 +53,12 @@ echo "=========================================================="
 # Clean up previous builds
 echo "🧹 Cleaning up..."
 rm -rf "${BUILD_DIR}"
-rm -f "${DIST_DIR}/${DMG_NAME}"  # Remove any existing DMG
+rm -f "${DIST_DIR}/${DMG_NAME}"
+sleep 0.1  # brief pause to avoid FS race on rapid reruns
 
 # Extra safety: ensure no leftover files
-sleep 0.1  # Brief pause to ensure filesystem sync
-
-# Verify cleanup succeeded
 if [ -d "${BUILD_DIR}" ]; then
-    echo "⚠️  Warning: ${BUILD_DIR} still exists after cleanup, forcing removal..."
     rm -rf "${BUILD_DIR}"
-    sleep 0.2
 fi
 
 mkdir -p "${BUILD_DIR}"
@@ -132,10 +129,7 @@ PLIST
 # Copy app icon
 echo "🎨 Copying app icon..."
 ICON_PATH="assets/AppIcon.icns"
-
-# Ensure Resources directory exists
 mkdir -p "${APP_PATH}/Contents/Resources"
-
 if [ -f "$ICON_PATH" ]; then
     if cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"; then
         echo "  ✓ Copied icon from: $ICON_PATH"

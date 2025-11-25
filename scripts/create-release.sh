@@ -141,6 +141,16 @@ else
   git commit -m "chore: create VERSION file with version $VERSION"
 fi
 
+# Create git tag
+print_status "Creating git tag $VERSION..."
+git tag -a "$VERSION" -m "Release $VERSION
+
+🚀 Generated with create-release.sh"
+
+# Push the tag
+print_status "Pushing tag to origin..."
+git push origin "$VERSION"
+
 # Build multi-platform installers and create GitHub release with GoReleaser
 print_status "Building installers for all platforms (macOS, Windows, Linux)..."
 
@@ -151,56 +161,6 @@ if ! command -v goreleaser >/dev/null 2>&1; then
   print_error "  or visit: https://goreleaser.com/install/"
   exit 1
 fi
-
-# Clean up any existing releases and build artifacts for this version
-print_status "Cleaning up any existing releases and build artifacts..."
-
-# Check if gh CLI is available for release cleanup
-if command -v gh >/dev/null 2>&1; then
-  # Delete any existing GitHub releases (draft or published) for this version
-  if gh release view "$VERSION" >/dev/null 2>&1; then
-    print_warning "Found existing GitHub release $VERSION, deleting..."
-    gh release delete "$VERSION" --yes 2>/dev/null || true
-  fi
-
-  # Also check for untagged releases that might be related
-  UNTAGGED_RELEASES=$(gh release list --json tagName,isDraft --jq '.[] | select(.isDraft == true and .tagName == "'"$VERSION"'") | .tagName' 2>/dev/null || echo "")
-  if [ -n "$UNTAGGED_RELEASES" ]; then
-    print_warning "Found untagged draft releases, cleaning up..."
-    echo "$UNTAGGED_RELEASES" | while read -r tag; do
-      gh release delete "$tag" --yes 2>/dev/null || true
-    done
-  fi
-fi
-
-# Delete remote and local tags if they exist (we'll recreate them)
-if git ls-remote --tags origin | grep -q "refs/tags/$VERSION$"; then
-  print_warning "Remote tag $VERSION exists, deleting..."
-  git push origin ":refs/tags/$VERSION" 2>/dev/null || true
-fi
-
-if git tag -l | grep -q "^$VERSION$"; then
-  print_warning "Local tag $VERSION exists, deleting..."
-  git tag -d "$VERSION" 2>/dev/null || true
-fi
-
-# Clean up local build artifacts
-print_status "Cleaning up local build artifacts..."
-rm -rf dist/ build-dmg-* 2>/dev/null || true
-rm -rf .goreleaser 2>/dev/null || true
-
-print_success "Cleanup complete, ready for fresh build"
-echo ""
-
-# Create git tag AFTER cleanup
-print_status "Creating git tag $VERSION..."
-git tag -a "$VERSION" -m "Release $VERSION
-
-🚀 Generated with create-release.sh"
-
-# Push the tag
-print_status "Pushing tag to origin..."
-git push origin "$VERSION"
 
 # Run GoReleaser to build all installers and create GitHub release
 print_status "Running GoReleaser (this will build binaries, create installers, and publish to GitHub)..."
