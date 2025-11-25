@@ -250,7 +250,38 @@ else
   echo "Modified files:"
   git status --short
   echo ""
-  FAILED_CHECKS+=("Git Status - uncommitted changes")
+
+  # Check what types of changes exist
+  # Exclude VERSION and README.md from this check (will be auto-committed at the end)
+  NON_VERSION_CHANGES=$(git status --porcelain | grep -v "VERSION\|README.md" | wc -l | tr -d ' ')
+
+  if [ "$NON_VERSION_CHANGES" -eq 0 ]; then
+    # Only VERSION/README changes (will be auto-committed after all checks pass)
+    echo -e "${BLUE}💡 Note: Only VERSION/README.md changes detected${NC}"
+    if [ -n "$VERSION" ]; then
+      echo -e "${BLUE}   These will be auto-committed after all checks pass.${NC}"
+    else
+      echo -e "${BLUE}   Run with version argument to auto-commit: ./scripts/pre-release-check.sh v0.X.Y${NC}"
+    fi
+    echo ""
+  else
+    # Check if only script files + VERSION/README changed
+    NON_SCRIPT_CHANGES=$(git status --porcelain | grep -v "scripts/" | grep -v "VERSION\|README.md" | grep -v "^??" | wc -l | tr -d ' ')
+    SCRIPT_CHANGES=$(git status --porcelain | grep "scripts/" | wc -l | tr -d ' ')
+
+    if [ "$NON_SCRIPT_CHANGES" -eq 0 ] && [ "$SCRIPT_CHANGES" -gt 0 ]; then
+      # Only script changes (+ possibly VERSION/README) - this is OK during development
+      echo -e "${BLUE}💡 Note: Only script changes detected (normal during script development)${NC}"
+      echo -e "${BLUE}   These are the scripts you're currently working on.${NC}"
+      if [ -n "$VERSION" ]; then
+        echo -e "${BLUE}   VERSION/README will be auto-committed after all checks pass.${NC}"
+      fi
+      echo ""
+    else
+      # Other changes exist - mark as failed
+      FAILED_CHECKS+=("Git Status - uncommitted changes")
+    fi
+  fi
 fi
 
 # Check current branch
@@ -317,6 +348,29 @@ echo ""
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
   echo -e "${GREEN}✅ All checks passed!${NC}"
   echo ""
+
+  # Commit VERSION and README changes if a version was specified and all checks passed
+  if [ -n "$VERSION" ]; then
+    if ! git diff --quiet VERSION README.md 2>/dev/null; then
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo -e "${BLUE}[AUTO-COMMIT]${NC} All checks passed! Committing version bump..."
+      echo ""
+      git add VERSION README.md 2>/dev/null || true
+      if git commit -m "chore: bump version to $VERSION" --no-verify; then
+        echo ""
+        echo -e "${GREEN}✅ Version files committed successfully${NC}"
+        echo -e "${GREEN}   Commit: chore: bump version to $VERSION${NC}"
+        echo -e "${GREEN}   Files: VERSION, README.md${NC}"
+        echo ""
+      else
+        echo ""
+        echo -e "${RED}❌ Failed to commit version bump${NC}"
+        echo ""
+      fi
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+    fi
+  fi
 
   # Get current branch to show appropriate next steps
   CURRENT_BRANCH=$(git branch --show-current)
