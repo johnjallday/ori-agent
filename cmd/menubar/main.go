@@ -11,14 +11,14 @@ import (
 	"strings"
 	"syscall"
 
-	"fyne.io/systray"
+	"github.com/getlantern/systray"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("Starting Ori Agent Menu Bar App...")
+	log.Println("Starting Ori Agent Menu Bar App (systray)...")
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -59,10 +59,10 @@ func main() {
 		systray.Quit()
 	}()
 
-	// Run the systray app
+	// Run systray
 	onReady := func() {
 		log.Println("Systray ready, setting up menu...")
-		setupMenu(controller, settingsMgr, launchAgentMgr)
+		setupMenuSystray(controller, settingsMgr, launchAgentMgr)
 	}
 
 	onExit := func() {
@@ -76,13 +76,12 @@ func main() {
 	}
 
 	systray.Run(onReady, onExit)
-	log.Println("Menu bar app exited")
+	log.Println("Systray app exited")
 }
 
-func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager) {
+func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager) {
 	// Set initial icon and tooltip
 	systray.SetIcon(menubar.GetStoppedIcon())
-	// systray.SetTitle("Ori") // Removed: Show only icon, no text
 	systray.SetTooltip("Ori Agent - Server Stopped")
 
 	// Create menu items
@@ -91,45 +90,46 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 
 	systray.AddSeparator()
 
+	// Start/Stop Server
 	startItem := systray.AddMenuItem("Start Server", "Start the Ori Agent server")
 	stopItem := systray.AddMenuItem("Stop Server", "Stop the Ori Agent server")
 	stopItem.Disable()
 
+	// Open Browser
 	openBrowserItem := systray.AddMenuItem("Open Browser", "Open Ori Agent in browser")
 	openBrowserItem.Disable()
 
 	systray.AddSeparator()
 
-	// Settings submenu
-	settingsMenu := systray.AddMenuItem("Settings", "Application Settings")
-
-	// Check if auto-start is currently enabled
+	// Auto-start toggle
 	autoStartEnabled := false
 	if settingsMgr != nil && launchAgentMgr != nil {
 		autoStartEnabled = settingsMgr.GetAutoStartEnabled()
 	}
-	autoStartItem := settingsMenu.AddSubMenuItemCheckbox("Auto-start on Login", "Launch Ori Agent on system startup", autoStartEnabled)
 
-	// Disable auto-start if manager is not available
+	autoStartItem := systray.AddMenuItemCheckbox("Auto-start on Login", "Launch Ori Agent on system startup", autoStartEnabled)
 	if launchAgentMgr == nil {
 		autoStartItem.Disable()
 	}
 
 	// Port configuration
 	currentPort := controller.GetPort()
-	portItem := settingsMenu.AddSubMenuItem(fmt.Sprintf("Port: %d", currentPort), "Change server port")
+	portItem := systray.AddMenuItem(fmt.Sprintf("Port: %d", currentPort), "Change server port")
 
 	systray.AddSeparator()
 
+	// About
 	aboutItem := systray.AddMenuItem("About Ori Agent", "About this application")
+
+	// Quit
 	quitItem := systray.AddMenuItem("Quit", "Quit Ori Agent")
 
 	// Watch for status changes
 	controller.WatchStatus(func(status menubar.ServerStatus) {
-		updateMenuForStatus(status, controller, statusItem, startItem, stopItem, openBrowserItem)
+		updateMenuForStatusSystray(status, controller, statusItem, startItem, stopItem, openBrowserItem)
 	})
 
-	// Handle menu item clicks
+	// Handle menu item clicks in goroutines
 	go func() {
 		for {
 			select {
@@ -187,11 +187,11 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 
 			case <-portItem.ClickedCh:
 				log.Println("Port configuration clicked")
-				handlePortConfiguration(controller, settingsMgr, portItem)
+				handlePortConfigurationSystray(controller, settingsMgr, portItem)
 
 			case <-aboutItem.ClickedCh:
 				log.Println("About clicked")
-				// TODO: Show about dialog (could use notification for now)
+				showNotification("About Ori Agent", "Ori Agent - AI Agent Framework\\nVersion 0.0.13")
 
 			case <-quitItem.ClickedCh:
 				log.Println("Quit clicked")
@@ -210,7 +210,7 @@ func setupMenu(controller *menubar.Controller, settingsMgr *menubar.SettingsMana
 	}()
 }
 
-func updateMenuForStatus(status menubar.ServerStatus, controller *menubar.Controller, statusItem, startItem, stopItem, openBrowserItem *systray.MenuItem) {
+func updateMenuForStatusSystray(status menubar.ServerStatus, controller *menubar.Controller, statusItem, startItem, stopItem, openBrowserItem *systray.MenuItem) {
 	log.Printf("Status changed to: %s", status.String())
 
 	switch status {
@@ -286,7 +286,7 @@ func openBrowser(port int) {
 	}
 }
 
-func handlePortConfiguration(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, portItem *systray.MenuItem) {
+func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, portItem *systray.MenuItem) {
 	// Check if server is running
 	if controller.GetStatus() != menubar.StatusStopped {
 		log.Println("Cannot change port while server is running")
