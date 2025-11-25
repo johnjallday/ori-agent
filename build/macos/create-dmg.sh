@@ -94,9 +94,21 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
     <true/>
     <key>LSUIElement</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 </dict>
 </plist>
 PLIST
+
+# Copy app icon
+echo "🎨 Copying app icon..."
+ICON_PATH="assets/AppIcon.icns"
+if [ -f "$ICON_PATH" ]; then
+    cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"
+    echo "  ✓ Copied icon from: $ICON_PATH"
+else
+    echo "⚠️  Warning: AppIcon.icns not found at $ICON_PATH"
+fi
 
 # Copy binaries from dist directory
 echo "📦 Copying binaries..."
