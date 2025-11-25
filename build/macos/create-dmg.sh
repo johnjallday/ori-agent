@@ -146,14 +146,30 @@ fi
 
 echo "✅ .app bundle created"
 
+# Verify binaries exist in .app bundle before proceeding
+echo ""
+echo "🔍 Verifying .app bundle contents..."
+if [ ! -f "${APP_PATH}/Contents/Resources/ori-menubar" ]; then
+    echo "❌ Error: ori-menubar not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/Resources/" || true
+    exit 1
+fi
+if [ ! -f "${APP_PATH}/Contents/Resources/ori-agent" ]; then
+    echo "❌ Error: ori-agent not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/Resources/" || true
+    exit 1
+fi
+echo "✓ All binaries present in .app bundle"
+
 # Step 2: Create DMG staging area
 echo ""
 echo "🎨 Preparing DMG contents..."
 DMG_STAGING="${BUILD_DIR}/dmg-staging"
 mkdir -p "${DMG_STAGING}"
 
-# Copy app to staging
-cp -R "${APP_PATH}" "${DMG_STAGING}/"
+# Copy app to staging (use ditto for better macOS compatibility)
+echo "📋 Copying .app to staging area..."
+ditto "${APP_PATH}" "${DMG_STAGING}/OriAgent.app"
 
 # Create Applications symlink (remove if exists)
 rm -f "${DMG_STAGING}/Applications"
