@@ -1,0 +1,33 @@
+[Unit]
+Description=Ori Agent - Modular AI Agent Framework
+Documentation=https://github.com/johnjallday/ori-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ori-agent
+Group=ori-agent
+WorkingDirectory=/var/lib/ori-agent
+ExecStart=/usr/bin/ori-agent
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ori-agent /var/log/ori-agent
+
+# Environment
+Environment="PORT=8765"
+EnvironmentFile=-/etc/ori-agent/environment
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ori-agent
+
+[Install]
+WantedBy=multi-user.target

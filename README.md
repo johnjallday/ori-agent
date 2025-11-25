@@ -36,6 +36,39 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 
 ### Installation
 
+#### Option 1: macOS DMG Installer (Recommended for macOS)
+
+1. **Download the DMG** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest):
+   - **Apple Silicon (M1/M2/M3)**: `OriAgent-{version}-arm64.dmg`
+   - **Intel Macs**: `OriAgent-{version}-amd64.dmg`
+
+2. **Open the DMG** and drag `OriAgent.app` to Applications
+
+3. **Handle macOS Security Warning**
+
+   When first opening OriAgent, you may see: *"Apple cannot verify OriAgent is free of malware"*
+
+   This is normal for unsigned apps. To open safely:
+
+   **Method 1 (Easy):**
+   - Right-click `OriAgent.app` → Select "Open"
+   - Click "Open" in the security dialog
+
+   **Method 2 (Terminal):**
+   ```bash
+   xattr -cr /Applications/OriAgent.app
+   open /Applications/OriAgent.app
+   ```
+
+4. **Configure your API key** through the Settings panel in the app, or export it:
+   ```bash
+   export OPENAI_API_KEY="your-api-key"
+   ```
+
+5. **Access the interface** at `http://localhost:8765`
+
+#### Option 2: Build from Source
+
 1. **Clone the repository**
    ```bash
    git clone https://github.com/johnjallday/ori-agent.git
@@ -69,6 +102,50 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
    ```
    http://localhost:8765
    ```
+
+#### Option 3: Linux Package Installer
+
+1. **Download the package** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest):
+
+   **Debian/Ubuntu:**
+   ```bash
+   # Download .deb file
+   wget https://github.com/johnjallday/ori-agent/releases/latest/download/ori-agent_{version}_amd64.deb
+
+   # Install
+   sudo dpkg -i ori-agent_{version}_amd64.deb
+   ```
+
+   **Red Hat/Fedora/CentOS:**
+   ```bash
+   # Download .rpm file
+   wget https://github.com/johnjallday/ori-agent/releases/latest/download/ori-agent_{version}_amd64.rpm
+
+   # Install
+   sudo rpm -i ori-agent_{version}_amd64.rpm
+   ```
+
+2. **Configure API key** via environment variable or `/etc/ori-agent/settings.json`
+
+3. **Start the service**:
+   ```bash
+   sudo systemctl start ori-agent
+   sudo systemctl enable ori-agent  # Auto-start on boot
+   ```
+
+4. **Access the interface** at `http://localhost:8765`
+
+#### Option 4: Windows Archive
+
+1. **Download** `ori-agent_{version}_windows_x86_64.tar.gz` from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest)
+
+2. **Extract** the archive to a folder (e.g., `C:\Program Files\OriAgent`)
+
+3. **Set API key** via Environment Variables or create `settings.json` in the same folder
+
+4. **Run** `ori-agent.exe`
+
+5. **Access the interface** at `http://localhost:8765`
 
 ## 🔌 Plugin Development
 

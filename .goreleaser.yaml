@@ -59,31 +59,21 @@ builds:
       - amd64
       - arm64
 
-# Archives - Only distribute installers (professional appearance)
-# Distribution strategy:
-#   - macOS: DMG installers only (no standalone binaries)
-#   - Windows: MSI installer (built via GitHub Actions) + standalone binary
-#   - Linux: .deb/.rpm packages only (no standalone binaries)
-#   - Menubar app: Bundled in macOS DMG (no separate binary)
+# Archives configuration
+# Note: Archives are created for all platforms, but the main distribution
+# happens through platform-specific installers (DMG, MSI, deb/rpm)
+# Only archive the server binary (menubar is bundled separately in DMG)
 archives:
   - id: default
-    builds:
+    ids:
       - server
-    format: zip
-    format_overrides:
-      - goos: windows
-        format: zip
-      - goos: linux
-        format: tar.gz
-      - goos: darwin
-        format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
       {{- .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    wrap_in_directory: true
     files:
       - LICENSE
       - README.md

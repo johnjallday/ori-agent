@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Ori Agent
+GenericName=AI Agent Framework
+Comment=Modular AI Agent Framework with Plugin Support
+Exec=/usr/bin/ori-agent
+Icon=ori-agent
+Terminal=false
+Categories=Development;Utility;
+Keywords=AI;Agent;LLM;Automation;
+StartupNotify=true
