@@ -11,7 +11,12 @@ static NSMutableDictionary *menuItems = nil;
 
 // Initialize the status bar item
 void initStatusBar() {
-    if (statusItem != nil) return;
+    if (statusItem != nil) {
+        NSLog(@"initStatusBar: Already initialized");
+        return;
+    }
+
+    NSLog(@"initStatusBar: Starting initialization on main thread: %d", [NSThread isMainThread]);
 
     // Check if we're already on the main thread to avoid deadlock
     if ([NSThread isMainThread]) {
@@ -25,6 +30,7 @@ void initStatusBar() {
             statusItem.menu = menu;
 
             menuItems = [[NSMutableDictionary alloc] init];
+            NSLog(@"initStatusBar: Successfully initialized (direct)");
         }
     } else {
         dispatch_sync(dispatch_get_main_queue(), ^{
@@ -38,6 +44,7 @@ void initStatusBar() {
                 statusItem.menu = menu;
 
                 menuItems = [[NSMutableDictionary alloc] init];
+                NSLog(@"initStatusBar: Successfully initialized (dispatch_sync)");
             }
         });
     }
@@ -45,7 +52,12 @@ void initStatusBar() {
 
 // Set the status bar icon from PNG data
 void setIcon(const void *data, int length) {
-    if (statusItem == nil) return;
+    if (statusItem == nil) {
+        NSLog(@"setIcon: statusItem is nil!");
+        return;
+    }
+
+    NSLog(@"setIcon: Received %d bytes of icon data", length);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
@@ -56,6 +68,9 @@ void setIcon(const void *data, int length) {
                 [image setSize:NSMakeSize(18, 18)];
                 [image setTemplate:YES];
                 statusItem.button.image = image;
+                NSLog(@"setIcon: Successfully set icon");
+            } else {
+                NSLog(@"setIcon: Failed to create NSImage from data");
             }
         }
     });

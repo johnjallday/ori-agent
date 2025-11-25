@@ -45,26 +45,9 @@ APP_PATH="${BUILD_DIR}/${APP_BUNDLE}"
 mkdir -p "${APP_PATH}/Contents/MacOS"
 mkdir -p "${APP_PATH}/Contents/Resources"
 
-# Create the launcher script
-cat >"${APP_PATH}/Contents/MacOS/OriAgent" <<'LAUNCHER'
-#!/bin/bash
-
-# Get the directory where the app is located
-APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-RESOURCES_DIR="$APP_DIR/Contents/Resources"
-
-# Use proper macOS data directory
-DATA_DIR="$HOME/Library/Application Support/OriAgent"
-mkdir -p "$DATA_DIR"
-mkdir -p "$HOME/Library/Logs"
-
-cd "$DATA_DIR"
-
-# Launch the menu bar app
-# The menu bar app provides a UI to start/stop the server
-exec "$RESOURCES_DIR/ori-menubar"
-LAUNCHER
-
+# Copy the menubar binary directly as the main executable
+# No wrapper script - this is important for macOS security and XPC permissions
+cp "bin/ori-menubar" "${APP_PATH}/Contents/MacOS/OriAgent"
 chmod +x "${APP_PATH}/Contents/MacOS/OriAgent"
 
 # Create Info.plist
@@ -97,14 +80,25 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Copy binaries
-echo "📦 Copying binaries..."
-cp "bin/ori-menubar" "${APP_PATH}/Contents/Resources/"
+# Copy ori-agent binary to Resources
+echo "📦 Copying ori-agent binary..."
 cp "bin/ori-agent" "${APP_PATH}/Contents/Resources/"
-echo "  ✓ Copied ori-menubar"
 echo "  ✓ Copied ori-agent"
 
 echo "✅ .app bundle created"
+
+# Sign the app bundle
+echo ""
+echo "🔐 Signing app bundle..."
+CERT_NAME="OriAgent Self-Signed"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "${CERT_NAME}"; then
+    echo "  Using certificate: ${CERT_NAME}"
+    codesign --force --deep --options runtime --sign "${CERT_NAME}" "${APP_PATH}"
+else
+    echo "  Using ad-hoc signature (FREE, no Apple account needed)"
+    codesign --force --deep --sign - "${APP_PATH}"
+fi
+echo "✅ App signed successfully"
 
 # Step 2: Create DMG staging area
 echo ""
