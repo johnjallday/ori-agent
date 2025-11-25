@@ -1,18 +1,36 @@
 #!/bin/bash
 # Automated DMG creator for GoReleaser
 # This script is called by GoReleaser to create macOS DMG installers
-# Usage: ./build/macos/create-dmg.sh <version> <architecture> <dist-dir>
+# Usage: ./build/macos/create-dmg.sh <version> <os> <architecture> <dist-dir>
 
 set -e
 
 VERSION=$1
-ARCH=$2
-DIST_DIR=${3:-"dist"}
+OS=$2
+ARCH=$3
+DIST_DIR=${4:-"dist"}
 
-if [ -z "$VERSION" ] || [ -z "$ARCH" ]; then
-    echo "Usage: $0 <version> <architecture> <dist-dir>"
-    echo "Example: $0 0.0.11 amd64 dist"
+if [ -z "$VERSION" ] || [ -z "$OS" ] || [ -z "$ARCH" ]; then
+    echo "Usage: $0 <version> <os> <architecture> <dist-dir>"
+    echo "Example: $0 0.0.11 darwin amd64 dist"
     exit 1
+fi
+
+# Only build DMGs for macOS artifacts (GoReleaser invokes publishers for every artifact)
+if [ "$OS" != "darwin" ]; then
+    echo "ℹ️  Skipping DMG creation - current artifact OS is ${OS} (requires darwin)"
+    exit 0
+fi
+
+# Normalize architecture strings for manual invocations (e.g., x86_64 -> amd64)
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+fi
+
+# Optional guard so only the matching arch publisher runs (set via TARGET_ARCH env)
+if [ -n "$TARGET_ARCH" ] && [ "$ARCH" != "$TARGET_ARCH" ]; then
+    echo "ℹ️  Skipping DMG creation - artifact arch ${ARCH} does not match target ${TARGET_ARCH}"
+    exit 0
 fi
 
 # Check if this is a macOS build by looking for the menubar binary
@@ -35,6 +53,14 @@ echo "=========================================================="
 # Clean up previous builds
 echo "🧹 Cleaning up..."
 rm -rf "${BUILD_DIR}"
+rm -f "${DIST_DIR}/${DMG_NAME}"
+sleep 0.1  # brief pause to avoid FS race on rapid reruns
+
+# Extra safety: ensure no leftover files
+if [ -d "${BUILD_DIR}" ]; then
+    rm -rf "${BUILD_DIR}"
+fi
+
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${DIST_DIR}"
 
@@ -103,22 +129,33 @@ PLIST
 # Copy app icon
 echo "🎨 Copying app icon..."
 ICON_PATH="assets/AppIcon.icns"
+mkdir -p "${APP_PATH}/Contents/Resources"
 if [ -f "$ICON_PATH" ]; then
-    cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied icon from: $ICON_PATH"
+    if cp "$ICON_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied icon from: $ICON_PATH"
+    else
+        echo "  ❌ Failed to copy icon (non-fatal, continuing without icon)"
+    fi
 else
-    echo "⚠️  Warning: AppIcon.icns not found at $ICON_PATH"
+    echo "  ⚠️  Warning: AppIcon.icns not found at $ICON_PATH (continuing without icon)"
 fi
 
 # Copy binaries from dist directory
 echo "📦 Copying binaries..."
 
+# Ensure Resources directory exists before copying binaries
+mkdir -p "${APP_PATH}/Contents/Resources"
+
 # GoReleaser creates directories with version suffixes like _v1 or _v8.0
 # Find the menubar binary
 MENUBAR_PATH=$(find "${DIST_DIR}" -path "*/menubar_darwin_${ARCH}*/ori-menubar" -type f | head -1)
 if [ -f "$MENUBAR_PATH" ]; then
-    cp "$MENUBAR_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied menubar from: $MENUBAR_PATH"
+    if cp "$MENUBAR_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied menubar from: $MENUBAR_PATH"
+    else
+        echo "❌ Error: Failed to copy ori-menubar"
+        exit 1
+    fi
 else
     echo "❌ Error: ori-menubar binary not found for architecture ${ARCH}"
     echo "  Searched in: ${DIST_DIR}/menubar_darwin_${ARCH}*/"
@@ -128,8 +165,13 @@ fi
 # Find the server binary
 SERVER_PATH=$(find "${DIST_DIR}" -path "*/server_darwin_${ARCH}*/ori-agent" -type f | head -1)
 if [ -f "$SERVER_PATH" ]; then
-    cp "$SERVER_PATH" "${APP_PATH}/Contents/Resources/"
-    echo "  ✓ Copied server from: $SERVER_PATH"
+    if cp "$SERVER_PATH" "${APP_PATH}/Contents/Resources/"; then
+        echo "  ✓ Copied server from: $SERVER_PATH"
+    else
+        echo "❌ Error: Failed to copy ori-agent"
+        ls -la "${APP_PATH}/Contents/Resources/" || true
+        exit 1
+    fi
 else
     echo "❌ Error: ori-agent binary not found for architecture ${ARCH}"
     echo "  Searched in: ${DIST_DIR}/server_darwin_${ARCH}*/"
@@ -138,16 +180,34 @@ fi
 
 echo "✅ .app bundle created"
 
+# Verify binaries exist in .app bundle before proceeding
+echo ""
+echo "🔍 Verifying .app bundle contents..."
+if [ ! -f "${APP_PATH}/Contents/Resources/ori-menubar" ]; then
+    echo "❌ Error: ori-menubar not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/Resources/" || true
+    exit 1
+fi
+if [ ! -f "${APP_PATH}/Contents/Resources/ori-agent" ]; then
+    echo "❌ Error: ori-agent not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/Resources/" || true
+    exit 1
+fi
+echo "✓ All binaries present in .app bundle"
+
 # Step 2: Create DMG staging area
 echo ""
 echo "🎨 Preparing DMG contents..."
 DMG_STAGING="${BUILD_DIR}/dmg-staging"
+rm -rf "${DMG_STAGING}"  # Remove any existing staging area
 mkdir -p "${DMG_STAGING}"
 
-# Copy app to staging
-cp -R "${APP_PATH}" "${DMG_STAGING}/"
+# Copy app to staging (use ditto for better macOS compatibility)
+echo "📋 Copying .app to staging area..."
+ditto "${APP_PATH}" "${DMG_STAGING}/OriAgent.app"
 
-# Create Applications symlink
+# Create Applications symlink (remove if exists)
+rm -f "${DMG_STAGING}/Applications"
 ln -s /Applications "${DMG_STAGING}/Applications"
 
 # Create README
