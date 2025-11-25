@@ -35,6 +35,7 @@ echo "=========================================================="
 # Clean up previous builds
 echo "🧹 Cleaning up..."
 rm -rf "${BUILD_DIR}"
+rm -f "${DIST_DIR}/${DMG_NAME}"  # Remove any existing DMG
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${DIST_DIR}"
 
@@ -154,7 +155,8 @@ mkdir -p "${DMG_STAGING}"
 # Copy app to staging
 cp -R "${APP_PATH}" "${DMG_STAGING}/"
 
-# Create Applications symlink
+# Create Applications symlink (remove if exists)
+rm -f "${DMG_STAGING}/Applications"
 ln -s /Applications "${DMG_STAGING}/Applications"
 
 # Create README
