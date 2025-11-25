@@ -1,10 +1,10 @@
 # 🦆 Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.12-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.13-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
-![Go](https://img.shields.io/badge/Go-1.25-00add8)
+![Go](https://img.shields.io/badge/Go-1.25.3-00add8)
 <!-- AUTO:GO_VERSION_END -->
 
 **Ori Agent** is a platform that lets you create customizable AI assistants that can use tools to get things done. Think of it like ChatGPT, but you can add your own custom tools (called plugins) to make it do specific tasks like checking weather, doing calculations, or controlling other software on your computer. Each AI assistant you create can have its own set of tools and settings.

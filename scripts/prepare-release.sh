@@ -58,16 +58,26 @@ if ! git show-ref --verify --quiet refs/heads/dev; then
   exit 1
 fi
 
-# Check for uncommitted changes
+CURRENT_BRANCH=$(git branch --show-current)
+print_status "Current branch: $CURRENT_BRANCH"
+echo ""
+
+# Check for uncommitted changes BEFORE any git operations
+print_status "Checking for uncommitted changes..."
 if ! git diff-index --quiet HEAD --; then
   print_error "You have uncommitted changes. Please commit or stash them first."
   echo ""
   git status --short
+  echo ""
+  print_status "Commit your changes with:"
+  print_status "  git add ."
+  print_status "  git commit -m 'your message'"
+  print_status "Or stash them with:"
+  print_status "  git stash"
   exit 1
 fi
 
-CURRENT_BRANCH=$(git branch --show-current)
-print_status "Current branch: $CURRENT_BRANCH"
+print_success "Working directory is clean"
 echo ""
 
 # Switch to dev and pull latest
@@ -144,7 +154,61 @@ git push origin main
 print_success "Release preparation complete!"
 echo ""
 print_status "main branch now contains all commits from dev"
-print_status "You can now run the pre-release checks:"
+
+# Show latest GitHub release info
 echo ""
-echo "  ./scripts/pre-release-check.sh v0.X.X"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+print_status "Latest GitHub Release Information"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+if command -v gh &> /dev/null; then
+  # Check if there are any releases
+  if gh release list --limit 1 &> /dev/null && [ "$(gh release list --limit 1 | wc -l)" -gt 0 ]; then
+    print_status "Most recent release:"
+    echo ""
+    gh release view --json tagName,name,publishedAt,url \
+      --template '  Tag:       {{.tagName}}
+  Name:      {{.name}}
+  Published: {{.publishedAt}}
+  URL:       {{.url}}
+'
+    echo ""
+
+    # Show suggested next version
+    LATEST_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
+    if [ -n "$LATEST_TAG" ]; then
+      print_status "Suggested next version:"
+      echo ""
+      # Parse version and suggest increment
+      VERSION_NUM="${LATEST_TAG#v}"
+      IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
+      if [ -n "$MAJOR" ] && [ -n "$MINOR" ] && [ -n "$PATCH" ]; then
+        NEXT_PATCH=$((PATCH + 1))
+        NEXT_MINOR=$((MINOR + 1))
+        NEXT_MAJOR=$((MAJOR + 1))
+        echo "  Patch: v${MAJOR}.${MINOR}.${NEXT_PATCH} (bug fixes)"
+        echo "  Minor: v${MAJOR}.${NEXT_MINOR}.0 (new features)"
+        echo "  Major: v${NEXT_MAJOR}.0.0 (breaking changes)"
+        echo ""
+      fi
+    fi
+  else
+    print_warning "No releases found in this repository"
+    echo ""
+    print_status "This will be your first release!"
+    echo ""
+  fi
+else
+  print_warning "GitHub CLI (gh) not installed"
+  print_status "Install it to see release information: brew install gh"
+  echo ""
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+print_status "Next steps:"
+echo ""
+echo "  1. ./scripts/pre-release-check.sh v0.X.X"
+echo "  2. ./scripts/create-release.sh v0.X.X"
 echo ""

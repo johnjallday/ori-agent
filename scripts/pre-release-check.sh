@@ -26,6 +26,25 @@ echo ""
 if [ -n "$VERSION" ]; then
   echo "Target version: $VERSION"
   echo ""
+
+  # Update VERSION file if a version was specified
+  if [ -f "VERSION" ]; then
+    CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
+    if [ "$CURRENT_VERSION" != "$VERSION" ]; then
+      echo -e "${BLUE}[INFO]${NC} Updating VERSION file: $CURRENT_VERSION → $VERSION"
+      echo "$VERSION" > VERSION
+      echo -e "${GREEN}✅${NC} VERSION file updated"
+      echo ""
+    else
+      echo -e "${BLUE}[INFO]${NC} VERSION file already set to $VERSION"
+      echo ""
+    fi
+  else
+    echo -e "${BLUE}[INFO]${NC} Creating VERSION file with $VERSION"
+    echo "$VERSION" > VERSION
+    echo -e "${GREEN}✅${NC} VERSION file created"
+    echo ""
+  fi
 fi
 
 # Function to run check and track failures
@@ -178,10 +197,24 @@ echo ""
 run_check "Go Mod Verify" "go mod verify" || true
 run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || true
 
-# 5. GIT STATUS CHECK
+# 5. UPDATE README
 echo ""
 echo "════════════════════════════════════════════"
-echo "5. GIT STATUS CHECK"
+echo "5. UPDATE README"
+echo "════════════════════════════════════════════"
+echo ""
+
+if [ -f "./scripts/update-readme.sh" ]; then
+  run_check "Update README badges" "./scripts/update-readme.sh" || true
+else
+  echo -e "${YELLOW}⚠️  Update README: SKIPPED (update-readme.sh not found)${NC}"
+  echo ""
+fi
+
+# 6. GIT STATUS CHECK
+echo ""
+echo "════════════════════════════════════════════"
+echo "6. GIT STATUS CHECK"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -236,10 +269,10 @@ else
   FAILED_CHECKS+=("Not on dev or main branch")
 fi
 
-# 6. SMOKE TESTS (OPTIONAL)
+# 7. SMOKE TESTS (OPTIONAL)
 echo ""
 echo "════════════════════════════════════════════"
-echo "6. SMOKE TESTS (Optional)"
+echo "7. SMOKE TESTS (Optional)"
 echo "════════════════════════════════════════════"
 echo ""
 
