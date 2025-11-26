@@ -71,29 +71,6 @@ APP_PATH="${BUILD_DIR}/${APP_BUNDLE}"
 mkdir -p "${APP_PATH}/Contents/MacOS"
 mkdir -p "${APP_PATH}/Contents/Resources"
 
-# Create the launcher script
-cat >"${APP_PATH}/Contents/MacOS/OriAgent" <<'LAUNCHER'
-#!/bin/bash
-
-# Get the directory where the app is located
-APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-RESOURCES_DIR="$APP_DIR/Contents/Resources"
-
-# Use proper macOS data directory
-DATA_DIR="$HOME/Library/Application Support/OriAgent"
-mkdir -p "$DATA_DIR"
-mkdir -p "$HOME/Library/Logs"
-
-cd "$DATA_DIR"
-
-# Launch the menu bar app
-# The menu bar app provides a UI to start/stop the server
-# Note: We don't redirect stdout/stderr here because systray apps need direct terminal access
-exec "$RESOURCES_DIR/ori-menubar"
-LAUNCHER
-
-chmod +x "${APP_PATH}/Contents/MacOS/OriAgent"
-
 # Create Info.plist
 cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -150,8 +127,9 @@ mkdir -p "${APP_PATH}/Contents/Resources"
 # Find the menubar binary
 MENUBAR_PATH=$(find "${DIST_DIR}" -path "*/menubar_darwin_${ARCH}*/ori-menubar" -type f | head -1)
 if [ -f "$MENUBAR_PATH" ]; then
-    if cp "$MENUBAR_PATH" "${APP_PATH}/Contents/Resources/"; then
-        echo "  ✓ Copied menubar from: $MENUBAR_PATH"
+    # Place menubar in Contents/MacOS so LaunchServices treats it as the app executable
+    if cp "$MENUBAR_PATH" "${APP_PATH}/Contents/MacOS/OriAgent"; then
+        echo "  ✓ Copied menubar to MacOS from: $MENUBAR_PATH"
     else
         echo "❌ Error: Failed to copy ori-menubar"
         exit 1
@@ -183,9 +161,9 @@ echo "✅ .app bundle created"
 # Verify binaries exist in .app bundle before proceeding
 echo ""
 echo "🔍 Verifying .app bundle contents..."
-if [ ! -f "${APP_PATH}/Contents/Resources/ori-menubar" ]; then
-    echo "❌ Error: ori-menubar not found in .app bundle"
-    ls -la "${APP_PATH}/Contents/Resources/" || true
+if [ ! -f "${APP_PATH}/Contents/MacOS/OriAgent" ]; then
+    echo "❌ Error: OriAgent not found in .app bundle"
+    ls -la "${APP_PATH}/Contents/MacOS/" || true
     exit 1
 fi
 if [ ! -f "${APP_PATH}/Contents/Resources/ori-agent" ]; then

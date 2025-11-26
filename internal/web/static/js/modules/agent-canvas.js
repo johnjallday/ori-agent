@@ -28,13 +28,28 @@ class AgentCanvas {
     this.dragStartX = 0;
     this.dragStartY = 0;
 
+    // Keyboard state
+    this.spacePressed = false;
+    this.ctrlPressed = false;
+
+    // Context menu state
+    this.contextMenuVisible = false;
+    this.contextMenuAgent = null;
+    this.contextMenuX = 0;
+    this.contextMenuY = 0;
+
+    // Help overlay state
+    this.helpOverlayVisible = false;
+
     // Animation
     this.animationFrame = null;
     this.animationPaused = false;
     this.particles = []; // For visual effects
 
     // Canvas appearance
-    this.backgroundColor = '#e8e8e8'; // Default background color
+    // Set initial background based on current theme
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    this.backgroundColor = isDark ? '#1e293b' : '#f1f5f9';
 
     // Expanded task panel state
     this.expandedTask = null;
@@ -103,12 +118,43 @@ class AgentCanvas {
     this.canvas.addEventListener('mouseleave', () => this.onMouseUp());
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e));
     this.canvas.addEventListener('click', (e) => this.onClick(e));
+    this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
 
     // Keyboard interactions
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
+    window.addEventListener('keyup', (e) => this.onKeyUp(e));
   }
 
   onKeyDown(e) {
+    // Track modifier keys
+    if (e.key === ' ') {
+      this.spacePressed = true;
+      if (!this.isDragging) {
+        this.canvas.style.cursor = 'grab';
+      }
+    }
+    if (e.ctrlKey || e.metaKey) {
+      this.ctrlPressed = true;
+    }
+
+    // R key - Reset view (zoom to fit)
+    if (e.key === 'r' || e.key === 'R') {
+      if (!this.forms.createTaskDescriptionFocused) {
+        e.preventDefault();
+        this.zoomToFit();
+        return;
+      }
+    }
+
+    // H key - Toggle help overlay
+    if (e.key === 'h' || e.key === 'H') {
+      if (!this.forms.createTaskDescriptionFocused) {
+        e.preventDefault();
+        this.toggleHelpOverlay();
+        return;
+      }
+    }
+
     // Handle text input when description field is focused
     if (this.forms.createTaskDescriptionFocused) {
       if (e.key === 'Escape' || e.key === 'Esc') {
@@ -146,7 +192,21 @@ class AgentCanvas {
 
     // ESC key - close forms or cancel connection/assignment modes
     if (e.key === 'Escape' || e.key === 'Esc') {
-      if (this.forms.addAgentFormVisible) {
+      if (this.helpOverlayVisible) {
+        // Close help overlay
+        e.preventDefault();
+        this.helpOverlayVisible = false;
+        this.draw();
+        return;
+      } else if (this.contextMenuVisible) {
+        // Close context menu
+        e.preventDefault();
+        this.contextMenuVisible = false;
+        this.contextMenuAgent = null;
+        this.contextMenuItems = [];
+        this.draw();
+        return;
+      } else if (this.forms.addAgentFormVisible) {
         // Close the add agent form
         e.preventDefault();
         this.forms.hideAddAgentForm();
@@ -928,6 +988,16 @@ class AgentCanvas {
 
     // Draw toast notifications (always on top)
     this.drawNotifications();
+
+    // Draw context menu (if visible)
+    if (this.contextMenuVisible) {
+      this.drawContextMenu();
+    }
+
+    // Draw help overlay (if visible)
+    if (this.helpOverlayVisible) {
+      this.drawHelpOverlay();
+    }
   }
 
   drawConnections() {
@@ -2562,9 +2632,52 @@ class AgentCanvas {
   // Mouse interaction handlers
   onMouseDown(e) {
     const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
     // Convert screen coordinates to canvas coordinates
     const x = (e.clientX - rect.left - this.offsetX) / this.scale;
     const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+    // Handle help overlay clicks (highest priority - modal overlay)
+    if (this.helpOverlayVisible) {
+      // Close help overlay on any click
+      this.helpOverlayVisible = false;
+      this.draw();
+      return;
+    }
+
+    // Handle context menu clicks (screen coordinates)
+    if (this.contextMenuVisible && this.contextMenuItems) {
+      for (const item of this.contextMenuItems) {
+        if (screenX >= item.x && screenX <= item.x + item.width &&
+            screenY >= item.y && screenY <= item.y + item.height) {
+          // Handle menu item click
+          this.handleContextMenuAction(item.action, item.agent);
+          this.contextMenuVisible = false;
+          this.contextMenuAgent = null;
+          this.contextMenuItems = [];
+          this.draw();
+          return;
+        }
+      }
+      // Clicked outside menu - close it
+      this.contextMenuVisible = false;
+      this.contextMenuAgent = null;
+      this.contextMenuItems = [];
+      this.draw();
+      return;
+    }
+
+    // Check if Space is pressed for pan mode
+    if (this.spacePressed) {
+      // Space+Drag to pan
+      this.isDragging = true;
+      this.dragStartX = screenX - this.offsetX;
+      this.dragStartY = screenY - this.offsetY;
+      this.canvas.style.cursor = 'grabbing';
+      return;
+    }
 
     // Check if clicking on a task card first (tasks are drawn on top)
     if (this.tasks && this.tasks.length > 0) {
@@ -2616,6 +2729,15 @@ class AgentCanvas {
 
   onMouseMove(e) {
     const rect = this.canvas.getBoundingClientRect();
+
+    // Track mouse position for context menu hover effects
+    this.lastMouseX = e.clientX - rect.left;
+    this.lastMouseY = e.clientY - rect.top;
+
+    // If context menu is visible, redraw to update hover effects
+    if (this.contextMenuVisible) {
+      this.draw();
+    }
 
     // Track mouse position for assignment mode
     if (this.assignmentMode && this.assignmentSourceTask) {
@@ -4585,6 +4707,372 @@ class AgentCanvas {
 
     console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents)`);
     this.draw();
+  }
+
+  // === NEW FEATURES ===
+
+  // Keyboard shortcut: onKeyUp handler
+  onKeyUp(e) {
+    if (e.key === ' ') {
+      this.spacePressed = false;
+      if (!this.isDragging) {
+        this.canvas.style.cursor = 'grab';
+      }
+    }
+    if (!e.ctrlKey && !e.metaKey) {
+      this.ctrlPressed = false;
+    }
+  }
+
+  // Zoom to fit all agents in viewport
+  zoomToFit() {
+    if (this.agents.length === 0) {
+      // No agents, just reset to default
+      this.offsetX = 0;
+      this.offsetY = 0;
+      this.scale = 1;
+      this.draw();
+      return;
+    }
+
+    // Find bounding box of all agents
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+
+    this.agents.forEach(agent => {
+      const agentRadius = 40;
+      minX = Math.min(minX, agent.x - agentRadius);
+      minY = Math.min(minY, agent.y - agentRadius);
+      maxX = Math.max(maxX, agent.x + agentRadius);
+      maxY = Math.max(maxY, agent.y + agentRadius);
+    });
+
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const padding = 100; // Padding around edges
+
+    // Calculate scale to fit content
+    const scaleX = (this.width - 2 * padding) / contentWidth;
+    const scaleY = (this.height - 2 * padding) / contentHeight;
+    const newScale = Math.min(scaleX, scaleY, 2); // Max zoom of 2x
+
+    // Center the content
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    this.scale = newScale;
+    this.offsetX = this.width / 2 - centerX * newScale;
+    this.offsetY = this.height / 2 - centerY * newScale;
+
+    this.draw();
+    console.log('🎯 Zoomed to fit all agents');
+  }
+
+  // Context menu for agents
+  onContextMenu(e) {
+    e.preventDefault();
+
+    const rect = this.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+
+    // Convert to canvas coordinates
+    const canvasX = (screenX - this.offsetX) / this.scale;
+    const canvasY = (screenY - this.offsetY) / this.scale;
+
+    // Check if clicking on an agent
+    const clickedAgent = this.agents.find(agent => {
+      const dx = canvasX - agent.x;
+      const dy = canvasY - agent.y;
+      return Math.sqrt(dx * dx + dy * dy) <= 40;
+    });
+
+    if (clickedAgent) {
+      this.contextMenuVisible = true;
+      this.contextMenuAgent = clickedAgent;
+      this.contextMenuX = screenX;
+      this.contextMenuY = screenY;
+      this.draw();
+    }
+  }
+
+  // Toggle help overlay
+  toggleHelpOverlay() {
+    if (!this.helpOverlayVisible) {
+      this.helpOverlayVisible = true;
+      console.log('📖 Showing keyboard shortcuts');
+    } else {
+      this.helpOverlayVisible = false;
+      console.log('📖 Hiding keyboard shortcuts');
+    }
+    this.draw();
+  }
+
+  // Draw context menu for agent quick actions
+  drawContextMenu() {
+    if (!this.contextMenuAgent) return;
+
+    const menuWidth = 200;
+    const menuHeight = 140;
+    const padding = 10;
+    const itemHeight = 35;
+
+    // Position menu (ensure it stays within canvas bounds)
+    let x = this.contextMenuX;
+    let y = this.contextMenuY;
+    if (x + menuWidth > this.width) x = this.width - menuWidth - 10;
+    if (y + menuHeight > this.height) y = this.height - menuHeight - 10;
+
+    // Draw menu background (glassmorphism effect)
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    this.ctx.lineWidth = 1;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 20;
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 4;
+
+    // Rounded rectangle for menu
+    this.ctx.beginPath();
+    const radius = 8;
+    this.ctx.moveTo(x + radius, y);
+    this.ctx.lineTo(x + menuWidth - radius, y);
+    this.ctx.arcTo(x + menuWidth, y, x + menuWidth, y + radius, radius);
+    this.ctx.lineTo(x + menuWidth, y + menuHeight - radius);
+    this.ctx.arcTo(x + menuWidth, y + menuHeight, x + menuWidth - radius, y + menuHeight, radius);
+    this.ctx.lineTo(x + radius, y + menuHeight);
+    this.ctx.arcTo(x, y + menuHeight, x, y + menuHeight - radius, radius);
+    this.ctx.lineTo(x, y + radius);
+    this.ctx.arcTo(x, y, x + radius, y, radius);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Menu title
+    this.ctx.save();
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.font = 'bold 13px Inter, sans-serif';
+    this.ctx.fillText(this.contextMenuAgent.name, x + padding, y + padding + 12);
+    this.ctx.restore();
+
+    // Draw separator line
+    this.ctx.save();
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + padding, y + padding + 20);
+    this.ctx.lineTo(x + menuWidth - padding, y + padding + 20);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Menu items
+    const items = [
+      { icon: '👁️', label: 'View Details', action: 'view' },
+      { icon: '📋', label: 'Assign Task', action: 'assign' },
+      { icon: '🗑️', label: 'Remove', action: 'remove' }
+    ];
+
+    this.ctx.save();
+    this.ctx.font = '13px Inter, sans-serif';
+    items.forEach((item, i) => {
+      const itemY = y + padding + 30 + (i * itemHeight);
+
+      // Check if mouse is hovering over this item
+      const mouseX = this.lastMouseX || 0;
+      const mouseY = this.lastMouseY || 0;
+      const isHovered = mouseX >= x && mouseX <= x + menuWidth &&
+                       mouseY >= itemY && mouseY <= itemY + itemHeight;
+
+      // Draw hover background
+      if (isHovered) {
+        this.ctx.fillStyle = 'rgba(29, 78, 216, 0.1)';
+        this.ctx.fillRect(x + 5, itemY, menuWidth - 10, itemHeight);
+      }
+
+      // Draw icon
+      this.ctx.fillStyle = '#475569';
+      this.ctx.fillText(item.icon, x + padding + 5, itemY + 22);
+
+      // Draw label
+      this.ctx.fillStyle = item.action === 'remove' ? '#dc2626' : '#1e293b';
+      this.ctx.fillText(item.label, x + padding + 30, itemY + 22);
+
+      // Store item bounds for click detection
+      if (!this.contextMenuItems) this.contextMenuItems = [];
+      this.contextMenuItems[i] = {
+        x, y: itemY, width: menuWidth, height: itemHeight,
+        action: item.action, agent: this.contextMenuAgent
+      };
+    });
+    this.ctx.restore();
+  }
+
+  // Handle context menu action
+  handleContextMenuAction(action, agent) {
+    console.log(`🎯 Context menu action: ${action} for agent ${agent.name}`);
+
+    switch (action) {
+      case 'view':
+        // View agent details - expand agent panel
+        if (this.expandedAgentPanelWidth === 0) {
+          this.expandedAgentPanelWidth = 1;
+          this.expandedAgentPanelTarget = 350;
+        }
+        this.selectedAgent = agent;
+        this.draw();
+        break;
+
+      case 'assign':
+        // Assign task to agent - show task creation form
+        this.forms.showCreateTaskForm(agent.x, agent.y);
+        this.forms.createTaskTargetAgent = agent.name;
+        this.draw();
+        break;
+
+      case 'remove':
+        // Remove agent (with confirmation)
+        if (confirm(`Remove agent "${agent.name}"?`)) {
+          this.agents = this.agents.filter(a => a !== agent);
+          this.showNotification('Agent removed', 'success');
+          this.draw();
+
+          // Save layout after removal
+          this.saveLayout();
+        }
+        break;
+
+      default:
+        console.warn(`Unknown context menu action: ${action}`);
+    }
+  }
+
+  // Draw help overlay with keyboard shortcuts
+  drawHelpOverlay() {
+    const overlayWidth = 400;
+    const overlayHeight = 450;
+    const x = (this.width - overlayWidth) / 2;
+    const y = (this.height - overlayHeight) / 2;
+    const padding = 20;
+
+    // Draw semi-transparent backdrop
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    this.ctx.fillRect(0, 0, this.width, this.height);
+    this.ctx.restore();
+
+    // Draw overlay background
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    this.ctx.lineWidth = 1;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    this.ctx.shadowBlur = 30;
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 8;
+
+    // Rounded rectangle
+    const radius = 12;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + radius, y);
+    this.ctx.lineTo(x + overlayWidth - radius, y);
+    this.ctx.arcTo(x + overlayWidth, y, x + overlayWidth, y + radius, radius);
+    this.ctx.lineTo(x + overlayWidth, y + overlayHeight - radius);
+    this.ctx.arcTo(x + overlayWidth, y + overlayHeight, x + overlayWidth - radius, y + overlayHeight, radius);
+    this.ctx.lineTo(x + radius, y + overlayHeight);
+    this.ctx.arcTo(x, y + overlayHeight, x, y + overlayHeight - radius, radius);
+    this.ctx.lineTo(x, y + radius);
+    this.ctx.arcTo(x, y, x + radius, y, radius);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Title
+    this.ctx.save();
+    this.ctx.fillStyle = '#1e293b';
+    this.ctx.font = 'bold 20px Inter, sans-serif';
+    this.ctx.fillText('⌨️ Keyboard Shortcuts', x + padding, y + padding + 20);
+    this.ctx.restore();
+
+    // Close hint
+    this.ctx.save();
+    this.ctx.fillStyle = '#64748b';
+    this.ctx.font = '12px Inter, sans-serif';
+    this.ctx.fillText('Press H or ESC to close', x + padding, y + padding + 45);
+    this.ctx.restore();
+
+    // Shortcuts list
+    const shortcuts = [
+      { section: 'Navigation', items: [] },
+      { key: 'Space + Drag', desc: 'Pan canvas' },
+      { key: 'Mouse Wheel', desc: 'Zoom in/out' },
+      { key: 'Ctrl + Wheel', desc: 'Precise zoom' },
+      { key: 'R', desc: 'Reset view (zoom to fit)' },
+      { section: 'Agents', items: [] },
+      { key: 'Click Agent', desc: 'Select agent' },
+      { key: 'Right-click', desc: 'Agent quick actions' },
+      { key: 'Drag Agent', desc: 'Move agent position' },
+      { section: 'Tasks', items: [] },
+      { key: 'Click Task', desc: 'View task details' },
+      { key: 'Drag Task', desc: 'Assign to agent' },
+      { section: 'General', items: [] },
+      { key: 'H', desc: 'Toggle this help' },
+      { key: 'ESC', desc: 'Cancel/Close' }
+    ];
+
+    let currentY = y + padding + 70;
+    const lineHeight = 28;
+    const sectionSpacing = 10;
+
+    this.ctx.save();
+    shortcuts.forEach(item => {
+      if (item.section) {
+        // Section header
+        this.ctx.fillStyle = '#1e293b';
+        this.ctx.font = 'bold 14px Inter, sans-serif';
+        this.ctx.fillText(item.section, x + padding, currentY);
+        currentY += lineHeight + sectionSpacing;
+      } else {
+        // Shortcut item
+        // Draw key badge
+        const keyWidth = this.ctx.measureText(item.key).width + 16;
+        this.ctx.fillStyle = 'rgba(29, 78, 216, 0.1)';
+        this.ctx.strokeStyle = 'rgba(29, 78, 216, 0.3)';
+        this.ctx.lineWidth = 1;
+        const badgeRadius = 4;
+        const badgeX = x + padding;
+        const badgeY = currentY - 18;
+        const badgeHeight = 24;
+        this.ctx.beginPath();
+        this.ctx.moveTo(badgeX + badgeRadius, badgeY);
+        this.ctx.lineTo(badgeX + keyWidth - badgeRadius, badgeY);
+        this.ctx.arcTo(badgeX + keyWidth, badgeY, badgeX + keyWidth, badgeY + badgeRadius, badgeRadius);
+        this.ctx.lineTo(badgeX + keyWidth, badgeY + badgeHeight - badgeRadius);
+        this.ctx.arcTo(badgeX + keyWidth, badgeY + badgeHeight, badgeX + keyWidth - badgeRadius, badgeY + badgeHeight, badgeRadius);
+        this.ctx.lineTo(badgeX + badgeRadius, badgeY + badgeHeight);
+        this.ctx.arcTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - badgeRadius, badgeRadius);
+        this.ctx.lineTo(badgeX, badgeY + badgeRadius);
+        this.ctx.arcTo(badgeX, badgeY, badgeX + badgeRadius, badgeY, badgeRadius);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Draw key text
+        this.ctx.fillStyle = '#1d4ed8';
+        this.ctx.font = 'bold 12px Inter, monospace';
+        this.ctx.fillText(item.key, badgeX + 8, currentY);
+
+        // Draw description
+        this.ctx.fillStyle = '#475569';
+        this.ctx.font = '13px Inter, sans-serif';
+        this.ctx.fillText(item.desc, badgeX + keyWidth + 15, currentY);
+
+        currentY += lineHeight;
+      }
+    });
+    this.ctx.restore();
   }
 }
 

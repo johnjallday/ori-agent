@@ -5,7 +5,7 @@
     --primary-light: #2563eb;
     --primary-dark: #1e40af;
     --secondary-color: #64748b;
-    --success-color: #10b981;
+    --success-color: #34d399;
     --danger-color: #ef4444;
     --warning-color: #f59e0b;
     --info-color: #06b6d4;
@@ -28,6 +28,21 @@
     --radius-md: 0.5rem;
     --radius-lg: 0.75rem;
     --radius-xl: 1rem;
+
+    /* Provider brand colors */
+    --provider-openai: #10a37f;
+    --provider-claude: #cc785c;
+    --provider-ollama: #6366f1;
+
+    /* Category colors */
+    --category-research: #7c3aed;
+    --category-analysis: #ec4899;
+    --category-validation: #10b981;
+
+    /* Status colors */
+    --status-online: var(--success-color);
+    --status-offline: var(--danger-color);
+    --status-warning: var(--warning-color);
 }
 
 /* Support both .dark-mode class and Bootstrap's data-bs-theme attribute */
@@ -130,4 +145,94 @@ body {
 .dark-mode .modern-btn-secondary:hover,
 [data-bs-theme="dark"] .modern-btn-secondary:hover {
     background: rgba(15, 23, 42, 0.5);
+}
+
+/* Chat Area Styles */
+.chat-label {
+    color: rgba(0, 0, 0, 0.65);
+    font-weight: 500;
+}
+
+.dark-mode .chat-label,
+[data-bs-theme="dark"] .chat-label {
+    color: rgba(255, 255, 255, 0.75);
+}
+
+/* Clear Chat Button */
+.clear-chat-btn {
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    font-weight: 500;
+}
+
+.clear-chat-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #b91c1c;
+    border-color: rgba(239, 68, 68, 0.3);
+    transform: translateY(-1px);
+}
+
+.dark-mode .clear-chat-btn,
+[data-bs-theme="dark"] .clear-chat-btn {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.dark-mode .clear-chat-btn:hover,
+[data-bs-theme="dark"] .clear-chat-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fecaca;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Clear Files Button */
+.clear-files-btn {
+    color: #dc2626;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.clear-files-btn:hover {
+    color: #b91c1c;
+    text-decoration: underline;
+}
+
+.dark-mode .clear-files-btn,
+[data-bs-theme="dark"] .clear-files-btn {
+    color: #fca5a5;
+}
+
+.dark-mode .clear-files-btn:hover,
+[data-bs-theme="dark"] .clear-files-btn:hover {
+    color: #fecaca;
+}
+
+/* Attach Files Button */
+.attach-files-btn:hover {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    transform: translateY(-1px);
+}
+
+/* Badge Styles */
+.modern-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.badge-secondary {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.dark-mode .badge-secondary,
+[data-bs-theme="dark"] .badge-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
 }

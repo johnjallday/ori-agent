@@ -1,12 +1,12 @@
 <!-- Modal placeholders - will be filled with actual modal content later -->
 <div class="modal fade" id="agentInfoModal" tabindex="-1" aria-labelledby="agentInfoModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h1 class="modal-title fs-5" id="agentInfoModalLabel">Agent Information</h1>
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h1 class="modal-title fs-5" id="agentInfoModalLabel" style="color: var(--text-primary);">Agent Information</h1>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" style="color: var(--text-primary);">
         <!-- Modal content will be populated here -->
         <p>Agent information will be displayed here...</p>
       </div>
@@ -20,9 +20,9 @@
 <!-- Update Available Modal -->
 <div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h1 class="modal-title fs-5" id="updateModalLabel">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h1 class="modal-title fs-5" id="updateModalLabel" style="color: var(--text-primary);">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
             <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
           </svg>
@@ -30,14 +30,14 @@
         </h1>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body" id="updateModalBody">
+      <div class="modal-body" id="updateModalBody" style="color: var(--text-primary);">
         <div class="text-center py-4">
           <div class="spinner-border text-primary" role="status">
             <span class="visually-hidden">Loading...</span>
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Later</button>
         <a id="downloadUpdateBtn" href="#" class="btn btn-primary" target="_blank" style="display:none;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
@@ -115,12 +115,12 @@
 
 <div class="modal fade" id="onboardingModal" tabindex="-1" aria-labelledby="onboardingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" role="dialog" aria-modal="true">
   <div class="modal-dialog modal-lg" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h1 class="modal-title fs-5" id="onboardingModalLabel">Welcome to Ori Agent</h1>
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h1 class="modal-title fs-5" id="onboardingModalLabel" style="color: var(--text-primary);">Welcome to Ori Agent</h1>
         <button type="button" class="btn-close" id="onboardingCloseBtn" aria-label="Close" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; z-index: 10001;"></button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" style="color: var(--text-primary);">
         <!-- Progress indicator -->
         <div class="mb-4">
           <div class="d-flex justify-content-between mb-2">
@@ -328,7 +328,7 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
         <button type="button" class="btn btn-outline-secondary" id="skipOnboardingBtn" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; position: relative; z-index: 10000;">Skip Tour</button>
         <div class="ms-auto">
           <button type="button" class="btn btn-secondary d-none" id="prevStepBtn">Previous</button>

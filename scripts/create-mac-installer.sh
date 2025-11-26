@@ -7,7 +7,7 @@
 set -e
 
 # Configuration
-VERSION=${1:-"0.0.7"}
+VERSION=${1:-"0.0.14"}
 APP_NAME="Ori Agent"
 APP_BUNDLE="OriAgent.app"
 DMG_NAME="OriAgent-${VERSION}.dmg"
@@ -49,28 +49,6 @@ APP_PATH="${BUILD_DIR}/${APP_BUNDLE}"
 mkdir -p "${APP_PATH}/Contents/MacOS"
 mkdir -p "${APP_PATH}/Contents/Resources"
 
-# Create the launcher script
-cat >"${APP_PATH}/Contents/MacOS/OriAgent" <<'LAUNCHER'
-#!/bin/bash
-
-# Get the directory where the app is located
-APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-RESOURCES_DIR="$APP_DIR/Contents/Resources"
-
-# Use proper macOS data directory
-DATA_DIR="$HOME/Library/Application Support/OriAgent"
-mkdir -p "$DATA_DIR"
-mkdir -p "$HOME/Library/Logs"
-
-cd "$DATA_DIR"
-
-# Launch the menu bar app
-# The menu bar app provides a UI to start/stop the server
-exec "$RESOURCES_DIR/ori-menubar" > ~/Library/Logs/ori-menubar.log 2>&1
-LAUNCHER
-
-chmod +x "${APP_PATH}/Contents/MacOS/OriAgent"
-
 # Create Info.plist
 cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -104,7 +82,8 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
 PLIST
 
 # Copy resources
-cp "${BUILD_DIR}/ori-menubar" "${APP_PATH}/Contents/Resources/"
+# Menubar binary must live in Contents/MacOS so macOS sees it as the app executable
+cp "${BUILD_DIR}/ori-menubar" "${APP_PATH}/Contents/MacOS/OriAgent"
 cp "${BUILD_DIR}/ori-agent" "${APP_PATH}/Contents/Resources/"
 
 # Copy app icon

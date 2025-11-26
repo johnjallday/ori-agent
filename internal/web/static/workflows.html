@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="/css/workspace.css">
     <style>
         body {
-            background: var(--bg-color);
-            color: var(--text-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
@@ -38,6 +38,21 @@
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
+        }
+
+        /* Responsive grid breakpoints */
+        @media (max-width: 768px) {
+            .templates-grid {
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                gap: 16px;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .templates-grid {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
         }
 
         .template-card {
@@ -141,7 +156,7 @@
 
         .btn-secondary {
             background: var(--bg-secondary);
-            color: var(--text-color);
+            color: var(--text-primary);
         }
 
         .btn-secondary:hover {
@@ -203,7 +218,7 @@
         }
 
         .close-btn:hover {
-            color: var(--text-color);
+            color: var(--text-primary);
         }
 
         .form-group {
@@ -224,8 +239,8 @@
             padding: 10px;
             border: 1px solid var(--border-color);
             border-radius: 6px;
-            background: var(--bg-color);
-            color: var(--text-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
             font-size: 14px;
         }
 
@@ -297,17 +312,20 @@
         }
 
         /* Dark mode specific */
-        [data-theme="dark"] .template-category.research {
+        .dark-mode .template-category.research,
+        [data-bs-theme="dark"] .template-category.research {
             background: #1565c0;
             color: #e3f2fd;
         }
 
-        [data-theme="dark"] .template-category.analysis {
+        .dark-mode .template-category.analysis,
+        [data-bs-theme="dark"] .template-category.analysis {
             background: #6a1b9a;
             color: #f3e5f5;
         }
 
-        [data-theme="dark"] .template-category.validation {
+        .dark-mode .template-category.validation,
+        [data-bs-theme="dark"] .template-category.validation {
             background: #2e7d32;
             color: #e8f5e9;
         }

@@ -22,27 +22,6 @@ echo "📦 Creating .app bundle..."
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
-# Create the launcher script
-cat >"${APP_BUNDLE}/Contents/MacOS/OriAgent" <<'LAUNCHER'
-#!/bin/bash
-
-# Get the directory where the app is located
-APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-RESOURCES_DIR="$APP_DIR/Contents/Resources"
-
-# Use proper macOS data directory
-DATA_DIR="$HOME/Library/Application Support/OriAgent"
-mkdir -p "$DATA_DIR"
-mkdir -p "$HOME/Library/Logs"
-
-cd "$DATA_DIR"
-
-# Launch the menu bar app
-exec "$RESOURCES_DIR/ori-menubar"
-LAUNCHER
-
-chmod +x "${APP_BUNDLE}/Contents/MacOS/OriAgent"
-
 # Create Info.plist
 cat >"${APP_BUNDLE}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -86,8 +65,8 @@ fi
 
 # Build and copy binaries
 echo "📦 Building and copying binaries..."
-echo "  Building ori-menubar..."
-go build -o "${APP_BUNDLE}/Contents/Resources/ori-menubar" ./cmd/menubar
+echo "  Building OriAgent (menubar)..."
+go build -o "${APP_BUNDLE}/Contents/MacOS/OriAgent" ./cmd/menubar
 
 echo "  Building ori-agent..."
 go build -o "${APP_BUNDLE}/Contents/Resources/ori-agent" ./cmd/server

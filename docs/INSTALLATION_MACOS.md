@@ -140,7 +140,7 @@ tail -f ~/Library/Logs/ori-menubar.log
 
 3. Try running the server directly:
    ```bash
-   ~/Applications/OriAgent.app/Contents/Resources/ori-menubar
+   ~/Applications/OriAgent.app/Contents/MacOS/OriAgent
    ```
 
 ## Why the Gatekeeper Warning?

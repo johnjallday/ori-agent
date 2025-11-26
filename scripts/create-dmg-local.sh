@@ -5,7 +5,7 @@
 set -e
 
 # Configuration
-VERSION="0.0.13-native"
+VERSION="0.0.14-native"
 ARCH=$(uname -m)  # arm64 or x86_64
 if [ "$ARCH" = "x86_64" ]; then
     ARCH="amd64"
