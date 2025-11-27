@@ -363,7 +363,6 @@ export class AgentCanvasRenderer {
     lines.push(currentLine);
     return lines;
   }
-}
 
   // ==================== TASK & AGENT RENDERING ====================
   drawTaskFlows() {
@@ -2810,3 +2809,4 @@ export class AgentCanvasRenderer {
 
     this.ctx.restore();
   }
+}
