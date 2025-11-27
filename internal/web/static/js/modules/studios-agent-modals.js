@@ -3,8 +3,8 @@
  * Handles agent creation, deletion, and workspace assignment via modals
  */
 
-// State for agent management
-let studiosSystemAgents = [];
+// State for agent management (using shared variable from studios-workspace.js)
+// studiosSystemAgents is declared in studios-workspace.js
 let studiosAvailableProviders = [];
 
 /**
@@ -339,10 +339,8 @@ function initializeAgentModalListeners() {
 /**
  * Utility function to escape HTML (uses window.escapeHtml if available)
  */
+// escapeHtml is defined in studios-workspace.js and exported to window
 function escapeHtml(text) {
-    if (typeof window.escapeHtml === 'function') {
-        return window.escapeHtml(text);
-    }
     if (text == null) return '';
     const div = document.createElement('div');
     div.textContent = text;

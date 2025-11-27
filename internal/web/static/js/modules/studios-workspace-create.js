@@ -3,9 +3,8 @@
  * Handles workspace creation modal and agent selection
  */
 
-// State for workspace creation
-let selectedAgents = new Set();
-let availableAgents = [];
+// State for workspace creation (using shared variables from window object)
+// window.selectedAgents and window.availableAgents are declared in studios.tmpl
 
 /**
  * Opens the workspace creation modal and populates available agents
@@ -15,12 +14,12 @@ function openCreateWorkspaceModal() {
     // Populate agent selection
     const container = document.getElementById('agents-selection');
 
-    // Get available agents from window or fetch if needed
-    if (window.availableAgents && window.availableAgents.length > 0) {
-        availableAgents = window.availableAgents;
+    // Ensure availableAgents is initialized
+    if (!window.availableAgents) {
+        window.availableAgents = [];
     }
 
-    container.innerHTML = availableAgents.map(agent => `
+    container.innerHTML = window.availableAgents.map(agent => `
         <div class="col-md-6">
             <div class="modern-card p-3">
                 <div class="form-check">
@@ -130,10 +129,8 @@ function showError(message) {
  * @param {string|null} text - Text to escape
  * @returns {string} HTML-escaped text
  */
+// escapeHtml is defined in studios-workspace.js and exported to window
 function escapeHtml(text) {
-    if (typeof window.escapeHtml === 'function') {
-        return window.escapeHtml(text);
-    }
     if (text == null) return '';
     const div = document.createElement('div');
     div.textContent = text;

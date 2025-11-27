@@ -1,4 +1,12 @@
 import { AgentCanvasForms } from './agent-canvas-forms.js';
+import { apiGet, apiPost, apiPut, apiDelete } from './agent-canvas-api.js';
+import { connectProgressStream } from './agent-canvas-events.js';
+import {
+  createCombinerTask as combinerCreateTask,
+  ensureCombinerTask as combinerEnsureTask,
+  executeCombiner as combinerExecute
+} from './agent-canvas-combiners.js';
+import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTaskToCombiner as tasksAssignToCombiner } from './agent-canvas-tasks.js';
 
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
@@ -269,8 +277,7 @@ class AgentCanvas {
       console.log('AgentCanvas.init() - studioId:', this.studioId);
 
       // Load studio data
-      const response = await fetch(`/api/studios/${this.studioId}`);
-      this.studio = await response.json();
+      this.studio = await apiGet(`/api/studios/${this.studioId}`);
 
       console.log('AgentCanvas.init() - studio data loaded:', this.studio);
 
@@ -421,15 +428,9 @@ class AgentCanvas {
     // Toast notifications array
     this.notifications = this.notifications || [];
 
-    // Connect to progress stream
-    this.eventSource = new EventSource(`/api/orchestration/progress/stream?workspace_id=${this.studioId}`);
-
-    // Handle initial state
-    this.eventSource.addEventListener('initial', (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    this.eventSource = connectProgressStream(this.studioId, {
+      onInitial: (data) => {
         console.log('📊 Initial progress state:', data);
-
         if (data.workspace_progress) {
           this.workspaceProgress = data.workspace_progress;
         }
@@ -437,7 +438,6 @@ class AgentCanvas {
           this.updateAgentStats(data.agent_stats);
         }
         if (data.tasks) {
-          // Preserve existing positions when updating tasks
           const existingPositions = {};
           this.tasks.forEach(t => {
             if (t.x !== null && t.y !== null) {
@@ -455,17 +455,9 @@ class AgentCanvas {
           });
         }
         this.draw();
-      } catch (error) {
-        console.error('Failed to parse initial event:', error);
-      }
-    });
-
-    // Handle workspace progress updates
-    this.eventSource.addEventListener('workspace.progress', (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      },
+      onWorkspaceProgress: (data) => {
         console.log('📊 Workspace progress update:', data);
-
         if (data.workspace_progress) {
           this.workspaceProgress = data.workspace_progress;
         }
@@ -473,88 +465,53 @@ class AgentCanvas {
           this.updateAgentStats(data.agent_stats);
         }
         this.draw();
-      } catch (error) {
-        console.error('Failed to parse workspace progress:', error);
-      }
-    });
-
-    // Handle task events
-    this.eventSource.addEventListener('task.created', (event) => {
-      const data = JSON.parse(event.data);
-      this.handleTaskEvent(data);
-      this.showNotification('Task created', 'info');
-      this.addTimelineEvent(data);
-    });
-
-    this.eventSource.addEventListener('task.started', (event) => {
-      const data = JSON.parse(event.data);
-      this.handleTaskEvent(data);
-      const taskDesc = data.data.description || 'Task';
-      this.showNotification(`${taskDesc} started`, 'info');
-      this.addTimelineEvent(data);
-    });
-
-    this.eventSource.addEventListener('task.completed', (event) => {
-      const data = JSON.parse(event.data);
-      this.handleTaskEvent(data);
-      const taskDesc = data.data.description || 'Task';
-      this.showNotification(`✓ ${taskDesc} completed`, 'success');
-      this.addTimelineEvent(data);
-    });
-
-    this.eventSource.addEventListener('task.failed', (event) => {
-      const data = JSON.parse(event.data);
-      this.handleTaskEvent(data);
-      const taskDesc = data.data.description || 'Task';
-      const error = data.data.error || 'Unknown error';
-      this.showNotification(`✗ ${taskDesc} failed: ${error}`, 'error');
-      this.addTimelineEvent(data);
-    });
-
-    // Task execution detail events
-    this.eventSource.addEventListener('task.thinking', (event) => {
-      const data = JSON.parse(event.data);
-      this.addExecutionLog(data.data.task_id, 'thinking', data.data.message || 'Analyzing task...');
-      this.addTimelineEvent(data);
-    });
-
-    this.eventSource.addEventListener('task.tool_call', (event) => {
-      const data = JSON.parse(event.data);
-      const toolName = data.data.tool_name || 'Unknown tool';
-      this.addExecutionLog(data.data.task_id, 'tool_call', `Calling tool: ${toolName}`);
-      this.addTimelineEvent(data);
-    });
-
-    this.eventSource.addEventListener('task.tool_result', (event) => {
-      const data = JSON.parse(event.data);
-      const toolName = data.data.tool_name || 'Unknown tool';
-      const success = data.data.success !== false;
-      const message = success
-        ? `✓ Tool ${toolName} completed`
-        : `✗ Tool ${toolName} failed: ${data.data.error}`;
-      this.addExecutionLog(data.data.task_id, success ? 'tool_success' : 'tool_error', message);
-      this.addTimelineEvent(data);
-    });
-
-    // Generic message handler for other events
-    this.eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.handleEvent(data);
-      } catch (error) {
-        console.error('Failed to parse event:', error);
-      }
-    };
-
-    this.eventSource.onerror = (error) => {
-      console.error('EventSource error:', error);
-      // Attempt to reconnect after 5 seconds
-      setTimeout(() => {
-        if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
-          this.connectEventStream();
+      },
+      onTaskEvent: (type, data) => {
+        const evt = { type, data };
+        this.handleTaskEvent(evt);
+        const taskDesc = data.data?.description || 'Task';
+        if (type === 'task.completed') {
+          this.showNotification(`✓ ${taskDesc} completed`, 'success');
+        } else if (type === 'task.failed') {
+          const error = data.data?.error || 'Unknown error';
+          this.showNotification(`✗ ${taskDesc} failed: ${error}`, 'error');
+        } else if (type === 'task.started') {
+          this.showNotification(`${taskDesc} started`, 'info');
+        } else if (type === 'task.created') {
+          this.showNotification('Task created', 'info');
         }
-      }, 5000);
-    };
+        this.addTimelineEvent(evt);
+      },
+      onTaskThinking: (data) => {
+        this.addExecutionLog(data.data.task_id, 'thinking', data.data.message || 'Analyzing task...');
+        this.addTimelineEvent({ type: 'task.thinking', data });
+      },
+      onTaskToolCall: (data) => {
+        const toolName = data.data.tool_name || 'Unknown tool';
+        this.addExecutionLog(data.data.task_id, 'tool_call', `Calling tool: ${toolName}`);
+        this.addTimelineEvent({ type: 'task.tool_call', data });
+      },
+      onTaskToolSuccess: (data) => {
+        this.addExecutionLog(data.data.task_id, 'tool_success', data.data.message || 'Tool succeeded');
+        this.addTimelineEvent({ type: 'task.tool_success', data });
+      },
+      onTaskToolError: (data) => {
+        this.addExecutionLog(data.data.task_id, 'tool_error', data.data.message || 'Tool failed');
+        this.addTimelineEvent({ type: 'task.tool_error', data });
+      },
+      onTaskProgress: (data) => {
+        this.addExecutionLog(data.data.task_id, 'progress', data.data.message || 'Task progress update');
+        this.addTimelineEvent({ type: 'task.progress', data });
+      },
+      onError: (error) => {
+        console.error('EventSource error:', error);
+        setTimeout(() => {
+          if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
+            this.connectEventStream();
+          }
+        }, 5000);
+      }
+    });
 
     console.log('🔄 Connected to progress stream');
   }
@@ -3790,7 +3747,7 @@ class AgentCanvas {
 
       // Fetch agent configuration before expanding (optional - doesn't block panel)
       try {
-        const configResponse = await fetch(`/api/agents/${agent.name}`);
+        const configResponse = await apiGet(`/api/agents/${agent.name}`);
         if (configResponse.ok) {
           const agentConfig = await configResponse.json();
           // Merge config data with agent
@@ -4163,23 +4120,10 @@ class AgentCanvas {
   async assignTaskToAgent(agent) {
     // Update task assignment via API
     try {
-      const response = await fetch(`/api/orchestration/tasks`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          task_id: this.assignmentSourceTask.id,
-          to: agent.name
-        }),
+      const result = await apiPut(`/api/orchestration/tasks`, {
+        task_id: this.assignmentSourceTask.id,
+        to: agent.name
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to assign task: ${errorText}`);
-      }
-
-      const result = await response.json();
       console.log('✅ Task assigned:', result);
 
       // Exit assignment mode
@@ -4212,96 +4156,7 @@ class AgentCanvas {
   }
 
   async assignTaskToCombiner(combiner) {
-    // Assign task to combiner node - it will route to appropriate agent based on connections
-    try {
-      // Find the agent connected to the combiner's output
-      const outputConnection = this.connections.find(c => c.from === combiner.id && c.fromPort === 'output');
-
-      // Remove any prior combiner→this task connections to avoid loops
-      this.connections = this.connections.filter(c =>
-        !(c.from === combiner.id && c.to === this.assignmentSourceTask.id)
-      );
-
-      // Determine or create an input port for this task
-      const existingInputConns = this.connections.filter(c => c.to === combiner.id && c.toPort.startsWith('input'));
-      // Reuse existing connection if this task is already wired
-      let targetInputPortId = null;
-      const existingForTask = existingInputConns.find(c => c.from === this.assignmentSourceTask.id);
-      if (existingForTask) {
-        targetInputPortId = existingForTask.toPort;
-      } else {
-        const nextIndex = existingInputConns.length;
-        targetInputPortId = `input-${nextIndex}`;
-        this.ensureCombinerInputPort(combiner, targetInputPortId);
-        // Create visual connection from task to combiner input
-        this.createConnection(this.assignmentSourceTask.id, 'output', combiner.id, targetInputPortId);
-      }
-
-      // Get the target agent (optional). If none wired yet, keep task unassigned but still store combiner metadata.
-      const targetAgentName = outputConnection ? outputConnection.to : (this.assignmentSourceTask?.to || 'unassigned');
-
-      // Find input connections to gather input task IDs (after ensuring current task is wired)
-      const inputConnections = this.connections.filter(c => c.to === combiner.id);
-      const inputTaskIds = [];
-
-      for (const conn of inputConnections) {
-        const nodeData = this.getNodeById(conn.from);
-        if (nodeData && nodeData.type === 'task') {
-          inputTaskIds.push(conn.from);
-        }
-      }
-
-      // Assign task to target agent with combiner metadata
-      const response = await fetch(`/api/orchestration/tasks`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          task_id: this.assignmentSourceTask.id,
-          to: targetAgentName,
-          input_task_ids: inputTaskIds,
-          result_combination_mode: combiner.resultCombinationMode || 'merge'
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to assign task: ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('✅ Task assigned to combiner → agent:', result);
-
-      // Exit assignment mode
-      this.assignmentMode = false;
-      this.assignmentSourceTask = null;
-      this.assignmentMouseX = 0;
-      this.assignmentMouseY = 0;
-      this.canvas.style.cursor = 'grab';
-
-      // Update task locally
-      const task = this.tasks.find(t => t.id === result.id);
-      if (task) {
-        task.to = targetAgentName;
-        task.input_task_ids = inputTaskIds;
-      }
-
-      this.draw();
-
-      // Show success notification
-      this.addNotification(`✅ Task assigned via ${combiner.name} → ${targetAgentName}`, 'success');
-      console.log(`📊 Task will receive combined results from: ${inputTaskIds.join(', ')}`);
-    } catch (error) {
-      console.error('❌ Error assigning task to combiner:', error);
-      this.addNotification('Failed to assign task: ' + error.message, 'error');
-      this.assignmentMode = false;
-      this.assignmentSourceTask = null;
-      this.assignmentMouseX = 0;
-      this.assignmentMouseY = 0;
-      this.canvas.style.cursor = 'grab';
-      this.draw();
-    }
+    return tasksAssignToCombiner(this, combiner);
   }
 
   updateMetrics() {
@@ -4830,14 +4685,7 @@ class AgentCanvas {
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(task.id)}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to delete task');
-      }
+      await apiDelete(`/api/orchestration/tasks?id=${encodeURIComponent(task.id)}`);
 
       console.log('✅ Task deleted:', task.id);
 
@@ -4871,378 +4719,75 @@ class AgentCanvas {
    * Execute a task manually
    */
   async executeTask(task) {
-    if (!task || !task.id) {
-      console.error('Invalid task:', task);
-      return;
-    }
-
-    // For unassigned tasks, ask user to select an agent
-    if (task.to === 'unassigned') {
-      if (!this.agents || this.agents.length === 0) {
-        alert('No agents available. Please add agents to the workspace first.');
-        return;
-      }
-
-      // Show agent selection prompt
-      let agentOptions = this.agents.map((a, i) => `${i + 1}. ${a.name}`).join('\n');
-      const selection = prompt(`This task is unassigned. Select an agent to execute it:\n\n${agentOptions}\n\nEnter agent number (1-${this.agents.length}):`);
-
-      if (!selection) return; // User cancelled
-
-      const agentIndex = parseInt(selection) - 1;
-      if (agentIndex < 0 || agentIndex >= this.agents.length) {
-        alert('Invalid agent selection');
-        return;
-      }
-
-      const selectedAgent = this.agents[agentIndex];
-
-      // Update task's 'to' field before executing
-      try {
-        const updateResponse = await fetch(`/api/orchestration/tasks/${task.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: selectedAgent.name,
-            status: 'pending'
-          })
-        });
-
-        if (!updateResponse.ok) {
-          throw new Error('Failed to assign task to agent');
-        }
-
-        // Update local task object
-        task.to = selectedAgent.name;
-      } catch (error) {
-        console.error('Error assigning task:', error);
-        alert('Failed to assign task: ' + error.message);
-        return;
-      }
-    }
-
-    // Execute the task
-    try {
-      const response = await fetch('/api/orchestration/tasks/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: task.id })
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to execute task');
-      }
-
-      const result = await response.json();
-      console.log('✅ Task execution started:', result);
-
-      // Update task status locally
-      task.status = 'in_progress';
-      this.draw();
-
-      // Reload after a short delay to get updated status
-      setTimeout(() => this.init(), 1000);
-
-    } catch (error) {
-      console.error('❌ Error executing task:', error);
-      alert('Failed to execute task: ' + error.message);
-    }
+    return tasksExecuteTask(this, task);
   }
 
   /**
    * Rerun a completed or failed task
    */
   async rerunTask(task) {
-    if (!task || !task.id) {
-      console.error('Invalid task:', task);
-      return;
+    return tasksRerunTask(this, task);
+  }
+
+  /**
+   * Find the most recent task associated with an agent so combiners can treat
+   * direct agent connections as inputs.
+   */
+  getLatestTaskForAgent(agentName) {
+    if (!agentName || !this.tasks || this.tasks.length === 0) {
+      return null;
     }
 
-    // Confirm rerun
-    const confirmMsg = task.status === 'failed'
-      ? `Rerun this failed task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again.`
-      : `Rerun this task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again with the same parameters.`;
+    const candidates = this.tasks.filter(task =>
+      task && (task.to === agentName || task.from === agentName)
+    );
 
-    if (!confirm(confirmMsg)) return;
-
-    try {
-      // Reset task status to pending first
-      const updateResponse = await fetch(`/api/orchestration/tasks/${task.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'pending',
-          result: null // Clear previous result
-        })
-      });
-
-      if (!updateResponse.ok) {
-        throw new Error('Failed to reset task status');
-      }
-
-      // Update local task object
-      task.status = 'pending';
-      task.result = null;
-      this.draw();
-
-      // Execute the task
-      const response = await fetch('/api/orchestration/tasks/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: task.id })
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Failed to execute task');
-      }
-
-      const result = await response.json();
-      console.log('✅ Task rerun started:', result);
-
-      // Update task status locally
-      task.status = 'in_progress';
-      this.draw();
-
-      // Show notification
-      this.showNotification(`Task "${task.description || task.id}" is being rerun`, 'success');
-
-      // Reload after a short delay to get updated status
-      setTimeout(() => this.init(), 1000);
-
-    } catch (error) {
-      console.error('❌ Error rerunning task:', error);
-      alert('Failed to rerun task: ' + error.message);
+    if (candidates.length === 0) {
+      return null;
     }
+
+    const getTimestamp = (task) => {
+      const value = task.completed_at || task.started_at || task.created_at;
+      const parsed = value ? new Date(value).getTime() : 0;
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
+    const sortByRecency = (a, b) => getTimestamp(b) - getTimestamp(a);
+
+    const completedWithResult = candidates
+      .filter(task => task.status === 'completed' && task.result)
+      .sort(sortByRecency);
+    if (completedWithResult.length > 0) {
+      return completedWithResult[0];
+    }
+
+    const completed = candidates
+      .filter(task => task.status === 'completed')
+      .sort(sortByRecency);
+    if (completed.length > 0) {
+      return completed[0];
+    }
+
+    const active = candidates
+      .filter(task => task.status === 'in_progress' || task.status === 'assigned')
+      .sort(sortByRecency);
+    if (active.length > 0) {
+      return active[0];
+    }
+
+    return candidates.sort(sortByRecency)[0];
   }
 
   /**
    * Execute a combiner node - sets up and executes the output task with merged inputs
    */
+  /**
+   * Execute a combiner node - executes the combiner's internal task with merged inputs
+   */
   async executeCombiner(combiner) {
-    if (!combiner || !combiner.id) {
-      console.error('Invalid combiner:', combiner);
-      return;
-    }
-
-    console.log('🔀 Executing combiner:', combiner.id);
-
-    try {
-      // Find all input connections to this combiner
-      const inputConnections = this.connections.filter(c => c.to === combiner.id);
-      console.log('📥 Input connections:', inputConnections.length);
-
-      // Get all input tasks (these provide the data to be merged)
-      const inputTasks = [];
-      for (const conn of inputConnections) {
-        const nodeData = this.getNodeById(conn.from);
-        if (nodeData && nodeData.type === 'task') {
-          inputTasks.push(nodeData.node);
-        }
-      }
-
-      const inputTaskIds = inputTasks.map(t => t.id);
-
-      if (inputTasks.length === 0) {
-        this.showNotification('No input tasks connected to this combiner', 'warning');
-        return;
-      }
-
-      // Check which input tasks need to be executed (pending or failed, no results)
-      const tasksToExecute = inputTasks.filter(t =>
-        (t.status === 'pending' || t.status === 'failed' || !t.result)
-      );
-
-      // Execute pending input tasks first
-      if (tasksToExecute.length > 0) {
-        this.showNotification(`Executing ${tasksToExecute.length} input task(s)...`, 'info');
-
-        const executionPromises = tasksToExecute.map(task => {
-          return fetch('/api/orchestration/tasks/execute', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_id: task.id })
-          }).then(response => {
-            if (!response.ok) {
-              throw new Error(`Failed to execute task ${task.id}`);
-            }
-            task.status = 'in_progress';
-            return response.json();
-          });
-        });
-
-        // Start all executions in parallel
-        await Promise.all(executionPromises);
-
-        // Update UI
-        this.draw();
-
-        // Wait for tasks to complete (poll every 2 seconds, max 30 seconds)
-        this.showNotification('Waiting for input tasks to complete...', 'info');
-
-        let waitTime = 0;
-        const maxWaitTime = 30000; // 30 seconds max
-        const pollInterval = 2000; // Check every 2 seconds
-
-        while (waitTime < maxWaitTime) {
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-          waitTime += pollInterval;
-
-          // Reload tasks to check status
-          await this.init();
-
-          // Check if all input tasks are completed
-          const allCompleted = inputTasks.every(t => {
-            const updatedTask = this.tasks.find(ut => ut.id === t.id);
-            return updatedTask && updatedTask.status === 'completed';
-          });
-
-          if (allCompleted) {
-            this.showNotification('All input tasks completed!', 'success');
-            break;
-          }
-
-          const anyFailed = inputTasks.some(t => {
-            const updatedTask = this.tasks.find(ut => ut.id === t.id);
-            return updatedTask && updatedTask.status === 'failed';
-          });
-
-          if (anyFailed) {
-            this.showNotification('Some input tasks failed. Check the results.', 'warning');
-            break;
-          }
-        }
-
-        if (waitTime >= maxWaitTime) {
-          this.showNotification('Timeout waiting for input tasks. Proceeding anyway...', 'warning');
-        }
-
-        // Final reload to get all results
-        await this.init();
-      }
-
-      // Find the output connection from this combiner to a task
-      // The combiner outputs to a task that will be executed with merged results
-      const outputConnection = this.connections.find(c => c.from === combiner.id && c.fromPort === 'output');
-
-      if (!outputConnection) {
-        this.showNotification('No output task connected from this combiner', 'warning');
-        return;
-      }
-
-      // The output connection points to a task that should be executed
-      const outputTaskId = outputConnection.to;
-      const outputTask = this.tasks.find(t => t.id === outputTaskId);
-
-      if (!outputTask) {
-        this.showNotification('Output task not found', 'warning');
-        return;
-      }
-
-      // Get the agent that this output task should be assigned to
-      // Look for a connection from the output task to an agent
-      const taskToAgentConn = this.connections.find(c => c.from === outputTaskId && c.fromPort === 'output');
-
-      if (!taskToAgentConn) {
-        this.showNotification('Output task must be connected to an agent', 'warning');
-        return;
-      }
-
-      const targetAgentName = taskToAgentConn.to;
-
-      const outputTasks = [outputTask];
-
-      if (outputTasks.length === 0) {
-        this.showNotification('No tasks connected to this combiner to execute', 'warning');
-        return;
-      }
-
-      // Determine combination mode based on combiner type
-      const combinationMode = combiner.combinerType || 'merge';
-      console.log('🔀 Combination mode:', combinationMode);
-
-      // For each output task, update its target agent, InputTaskIDs and ResultCombinationMode, then execute
-      this.showNotification(`Configuring and executing ${outputTasks.length} task(s) with ${combinationMode} mode...`, 'info');
-
-      for (const task of outputTasks) {
-        console.log(`⚙️  Configuring output task ${task.id} with input tasks:`, inputTaskIds);
-        console.log(`🎯 Setting target agent to: ${targetAgentName}`);
-
-        // Update task to include target agent, input task IDs and combination mode
-        const updateResponse = await fetch(`/api/orchestration/tasks`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task_id: task.id,
-            to: targetAgentName,
-            input_task_ids: inputTaskIds,
-            result_combination_mode: combinationMode,
-            status: 'pending'
-          })
-        });
-
-        if (!updateResponse.ok) {
-          const errorText = await updateResponse.text();
-          throw new Error(`Failed to configure task ${task.id}: ${errorText}`);
-        }
-
-        const updateResult = await updateResponse.json();
-        console.log(`✅ Task ${task.id} configured for ${combinationMode} with agent ${targetAgentName}`);
-        console.log(`📋 Update result:`, updateResult);
-
-        // Update local task object
-        task.to = targetAgentName;
-        task.input_task_ids = inputTaskIds;
-        task.result_combination_mode = combinationMode;
-        task.status = 'pending';
-
-        // Reload tasks to ensure we have the updated version
-        await this.init();
-
-        // Get the updated task from the reloaded list
-        const updatedTask = this.tasks.find(t => t.id === task.id);
-        if (!updatedTask) {
-          throw new Error(`Task ${task.id} not found after reload`);
-        }
-
-        console.log(`🔍 Reloaded task ${task.id}:`, {
-          to: updatedTask.to,
-          status: updatedTask.status,
-          input_task_ids: updatedTask.input_task_ids
-        });
-
-        if (updatedTask.to === 'unassigned' || !updatedTask.to) {
-          throw new Error(`Task ${task.id} still shows as unassigned after update. Target was: ${targetAgentName}`);
-        }
-
-        // Execute the task
-        console.log(`▶ Executing output task: ${task.id} assigned to ${updatedTask.to}`);
-        const executeResponse = await fetch('/api/orchestration/tasks/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: task.id })
-        });
-
-        if (!executeResponse.ok) {
-          const executeError = await executeResponse.text();
-          throw new Error(`Failed to execute task ${task.id}: ${executeError}`);
-        }
-
-        updatedTask.status = 'in_progress';
-      }
-
-      this.draw();
-      this.showNotification(`Combiner execution started! Task will ${combinationMode} ${inputTaskIds.length} inputs.`, 'success');
-
-      // Reload after a delay to show results
-      setTimeout(() => this.init(), 1000);
-
-    } catch (error) {
-      console.error('❌ Error executing combiner:', error);
-      this.showNotification('Failed to execute combiner: ' + error.message, 'error');
-    }
+    return combinerExecute(this, combiner);
   }
+
 
   showExecutionLog(task) {
     const logs = this.executionLogs[task.id] || [];
@@ -5385,7 +4930,8 @@ class AgentCanvas {
         outputPort: node.outputPort || { id: 'output' },
         resultCombinationMode: node.resultCombinationMode,
         customInstruction: node.customInstruction,
-        config: node.config || {}
+        config: node.config || {},
+        taskId: node.taskId // Include taskId for backend task association
       }));
 
       // Collect workflow connections (agents/tasks/combiners)
@@ -5405,30 +4951,18 @@ class AgentCanvas {
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
 
-      const response = await fetch('/api/orchestration/workspace/layout', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          workspace_id: this.studioId,
-          task_positions: taskPositions,
-          agent_positions: agentPositions,
-          combiner_nodes: combinerNodes,
-          workflow_connections: workflowConnections,
-          scale: this.scale,
-          offset_x: this.offsetX,
-          offset_y: this.offsetY,
-        }),
+      await apiPut('/api/orchestration/workspace/layout', {
+        workspace_id: this.studioId,
+        task_positions: taskPositions,
+        agent_positions: agentPositions,
+        combiner_nodes: combinerNodes,
+        workflow_connections: workflowConnections,
+        scale: this.scale,
+        offset_x: this.offsetX,
+        offset_y: this.offsetY,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Failed to save layout:', errorText);
-      } else {
-        const result = await response.json();
-        console.log('✅ Layout saved successfully:', result);
-      }
+      console.log('✅ Layout saved successfully');
     } catch (error) {
       console.error('❌ Error saving layout:', error);
     }
@@ -5769,14 +5303,8 @@ class AgentCanvas {
         // Remove agent (with confirmation)
         if (confirm(`Remove agent "${agent.name}"?`)) {
           // Call backend to remove agent from studio
-          fetch(`/api/studios/${encodeURIComponent(this.studioId)}/agents/${encodeURIComponent(agent.name)}`, {
-            method: 'DELETE'
-          })
-            .then(async (resp) => {
-              if (!resp.ok) {
-                const msg = await resp.text();
-                throw new Error(msg || 'Failed to remove agent');
-              }
+          apiDelete(`/api/studios/${encodeURIComponent(this.studioId)}/agents/${encodeURIComponent(agent.name)}`)
+            .then(() => {
               // Remove from local state
               this.agents = this.agents.filter(a => a.name !== agent.name);
 
@@ -6377,7 +5905,7 @@ class AgentCanvas {
   /**
    * Create a new combiner node
    */
-  createCombinerNode(type, x, y) {
+  async createCombinerNode(type, x, y) {
     const combinerType = AgentCanvas.COMBINER_TYPES[type.toUpperCase()];
     if (!combinerType) {
       console.error(`Unknown combiner type: ${type}`);
@@ -6400,12 +5928,26 @@ class AgentCanvas {
       outputPort: { id: 'output', x: 0, y: 40 }, // Relative to node position
       resultCombinationMode: combinerType.resultCombinationMode,
       customInstruction: combinerType.customInstruction || '',
-      config: {}
+      config: {},
+      taskId: null // Will be set after task creation
     };
 
     this.combinerNodes.push(node);
     console.log(`✨ Created ${node.name} combiner node at (${x}, ${y})`);
+
+    // Create a backend task for this combiner
+    await this.createCombinerTask(node);
+
     return node;
+  }
+
+  // Combiner helpers (delegated to combiner module)
+  async createCombinerTask(combinerNode) {
+    return combinerCreateTask(this, combinerNode);
+  }
+
+  async ensureCombinerTask(combiner) {
+    return combinerEnsureTask(this, combiner);
   }
 
   /**

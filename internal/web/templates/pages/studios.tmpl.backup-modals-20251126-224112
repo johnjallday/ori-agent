@@ -1,0 +1,490 @@
+{{define "studios"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
+                </svg>
+                Agent Studios
+              </h2>
+              <p class="mb-0" style="color: rgba(255, 255, 255, 0.85);">Collaborative multi-agent workspaces with visual canvas</p>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="modern-btn modern-btn-secondary" onclick="openManageAgentsModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+                </svg>
+                Manage Agents
+              </button>
+              <button class="modern-btn modern-btn-primary" onclick="openCreateWorkspaceModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grid View -->
+        <div id="grid-view">
+          <div id="workspaces-grid" class="row g-4">
+            <div class="col-12 text-center py-5">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-3" style="color: var(--text-muted);">Loading workspaces...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas View (hidden by default) -->
+        <div id="canvas-view" style="display: none;">
+          <div class="modern-card p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center gap-3">
+                <button class="modern-btn modern-btn-secondary" onclick="switchView('grid')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,11H5V13H19V11M19,7H5V9H19V7M19,15H5V17H19V15Z"/>
+                  </svg>
+                  Back to List
+                </button>
+                <div id="canvas-studio-selector" class="d-flex align-items-center gap-2">
+                  <span id="canvas-studio-label" style="color: var(--text-secondary); font-size: 0.875rem;">Select Studio:</span>
+                  <select id="canvas-studio-select" class="form-control form-control-sm" style="width: 250px;" onchange="loadCanvasStudio(this.value)">
+                    <option value="">Choose a studio...</option>
+                  </select>
+                </div>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <button class="modern-btn modern-btn-secondary" onclick="toggleCanvasSidebar()" title="Toggle Sidebar">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
+                  </svg>
+                </button>
+                <button class="modern-btn modern-btn-secondary" onclick="exportCanvas()" title="Export as Image">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                  </svg>
+                </button>
+                <span class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background: rgba(40,167,69,0.1); border-radius: 4px; font-size: 0.75rem;">
+                  <span class="status-indicator status-online"></span>
+                  <span style="color: var(--success-color); font-weight: 500;">Live Updates</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <!-- Canvas Area -->
+            <div id="canvas-main-area" class="col-lg-12">
+              <div class="modern-card" style="height: calc(100vh - 250px); position: relative; overflow: hidden;">
+                <canvas id="agent-canvas" style="width: 100%; height: 100%; cursor: grab;"></canvas>
+                <div id="canvas-info" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
+                  No studio selected
+                </div>
+                <!-- Combiner Nodes Palette -->
+                <div style="position: absolute; top: 60px; left: 10px; display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;">
+                  <div style="color: white; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Combiner Nodes</div>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('merge')" title="Merge - Combine multiple inputs" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    🔀
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('append')" title="Append - Concatenate outputs" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    📎
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('summarize')" title="Summarize - Create summary" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    📝
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('compare')" title="Compare - Side-by-side comparison" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    ⚖️
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('vote')" title="Vote - Select best result" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    🗳️
+                  </button>
+                </div>
+
+                <!-- Controls overlay -->
+                <div style="position: absolute; bottom: 10px; left: 10px; display: flex; gap: 8px; align-items: center;">
+                  <button class="modern-btn modern-btn-secondary" onclick="zoomToFitCanvas()" title="Zoom to Fit (R)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+                    </svg>
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="resetCanvasView()" title="Reset View">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12H4A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4Z"/>
+                    </svg>
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="toggleCanvasAnimation()" id="animation-toggle" title="Toggle Animation">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                    </svg>
+                  </button>
+                  <div class="d-flex align-items-center gap-2" style="background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white" title="Background Color">
+                      <path d="M12.433 10.07C14.133 10.585 16 11.15 16 8a8 8 0 1 0-8 8c1.996 0 1.826-1.504 1.649-3.08-.124-1.101-.252-2.237.351-2.92.465-.527 1.42-.237 2.433.07zM8 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 3a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm.5 6.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+                    </svg>
+                    <input type="color" id="canvas-bg-color" value="#f1f5f9" onchange="changeCanvasBackground(this.value)" title="Choose background color" style="width: 32px; height: 28px; border: 2px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer; background: transparent;">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sidebar (hidden by default) -->
+            <div id="canvas-sidebar" class="col-lg-3" style="display: none;">
+              <!-- Set Mission -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                  </svg>
+                  Set Mission
+                </h6>
+                <div class="mb-2">
+                  <textarea id="mission-input" class="form-control form-control-sm" rows="3" placeholder="Enter mission description..." style="font-size: 0.875rem;"></textarea>
+                  <style>
+                    #mission-input::placeholder {
+                      color: #9ca3af;
+                      opacity: 1;
+                    }
+                  </style>
+                </div>
+                <button class="modern-btn modern-btn-primary w-100" onclick="executeMission()" id="execute-mission-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+                  </svg>
+                  Set Mission
+                </button>
+              </div>
+
+              <!-- Agent Details -->
+              <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
+                <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
+                <div id="agent-details-content" style="font-size: 0.875rem;">
+                  Click an agent to see details
+                </div>
+              </div>
+
+              <!-- Task Details -->
+              <div class="modern-card p-3 mb-3" id="task-details-panel" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Task Details</h6>
+                  <button class="btn btn-sm btn-link p-0" onclick="hideTaskDetails()" style="color: var(--text-secondary);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div id="task-details-content" style="font-size: 0.875rem;">
+                  Click a task to see details
+                </div>
+                <div id="task-actions" class="mt-3" style="display: none;">
+                  <button id="execute-task-btn" class="btn btn-sm btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                    </svg>
+                    Execute Task
+                  </button>
+                  <button class="btn btn-sm btn-danger w-100" onclick="deleteCurrentTask()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                    </svg>
+                    Delete Task
+                  </button>
+                </div>
+              </div>
+
+              <!-- Performance Metrics -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/>
+                  </svg>
+                  Metrics
+                </h6>
+                <div id="metrics-content" style="font-size: 0.875rem;">
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">Total Tasks:</span>
+                    <strong id="metric-tasks">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">Completed:</span>
+                    <strong id="metric-completed" style="color: var(--success-color);">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">In Progress:</span>
+                    <strong id="metric-progress" style="color: var(--info-color);">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span style="color: var(--text-secondary);">Success Rate:</span>
+                    <strong id="metric-rate">0%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Task Timeline -->
+              <div class="modern-card p-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                  </svg>
+                  Timeline
+                </h6>
+                <div id="timeline-content" style="max-height: 300px; overflow-y: auto; font-size: 0.75rem;">
+                  <div class="text-muted text-center py-3">No events yet</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Agents Modal -->
+  <div class="modal fade" id="manageAgentsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+            </svg>
+            Manage Agents
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+
+          <!-- Create Agent Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Create New Agent</h6>
+            <form id="studiosCreateAgentForm" class="modern-card p-3">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
+                  <input type="text" id="studios-new-agent-name" class="modern-input w-100" placeholder="Enter agent name..." required>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Type</label>
+                  <select id="studios-new-agent-type" class="modern-input w-100">
+                    <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
+                    <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                    <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
+                    <option value="research">Research (Expensive - Complex thinking)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Model</label>
+                <select id="studios-new-agent-model" class="modern-input w-100">
+                  <option value="">Loading models...</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">
+                  Temperature: <span id="studios-new-agent-temperature-value">1.0</span>
+                </label>
+                <input type="range" id="studios-new-agent-temperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
+                       style="cursor: pointer;">
+                <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
+                  <span>Focused (0)</span>
+                  <span>Balanced (1)</span>
+                  <span>Creative (2)</span>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">System Prompt</label>
+                <textarea id="studios-new-agent-prompt" class="form-control" rows="4"
+                          style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                          placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+              </div>
+              <button type="submit" class="modern-btn modern-btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Agent
+              </button>
+            </form>
+          </div>
+
+          <!-- Add to Workspace Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Add Agents to Workspace</h6>
+            <div class="modern-card p-3">
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Select Workspace</label>
+                <select id="studios-workspace-select" class="modern-input w-100">
+                  <option value="">Loading workspaces...</option>
+                </select>
+              </div>
+              <div class="alert alert-info mb-0" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+                Select a workspace above, then click "Add to Workspace" next to any agent below to add them to the selected workspace.
+              </div>
+            </div>
+          </div>
+
+          <!-- Existing Agents Section -->
+          <div>
+            <h6 style="color: var(--text-primary);">Existing Agents</h6>
+            <div id="studios-agents-list-modal" class="modern-card p-3">
+              <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2" style="color: var(--text-muted);">Loading agents...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Workspace Modal -->
+  <div class="modal fade" id="createWorkspaceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Workspace
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+          <form id="createWorkspaceForm">
+            <!-- Basic Info -->
+            <div class="mb-4">
+              <h6 style="color: var(--text-primary);">Basic Information</h6>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Workspace Name</label>
+                <input type="text" id="workspace-name" class="form-control" placeholder="My Research Project" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Description</label>
+                <textarea id="workspace-description" class="form-control" rows="2" placeholder="Brief description of the workspace"></textarea>
+              </div>
+            </div>
+
+            <!-- Agent Selection -->
+            <div class="mb-4">
+              <h6 style="color: var(--text-primary);">Select Agents</h6>
+              <p class="text-muted small mb-3">Choose which agents will participate in this workspace</p>
+              <div id="agents-selection" class="row g-3">
+                <!-- Will be populated dynamically -->
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="createWorkspaceBtn" class="modern-btn modern-btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Workspace
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Details Modal -->
+  <div class="modal fade" id="workspaceDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+            </svg>
+            Workspace Details
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="workspace-details-content" style="max-height: 70vh; overflow-y: auto;">
+          <!-- Content will be populated dynamically -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="js/modules/resizer.js"></script>
+  <script src="js/modules/settings.js"></script>
+  <script src="js/modules/agents.js"></script>
+  <script src="js/modules/plugins.js"></script>
+  <script src="js/modules/plugin-config.js"></script>
+  <script src="js/modules/plugin-store.js"></script>
+  <script src="js/modules/apikey.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/modules/sidebar.js"></script>
+  <script src="js/modules/update-checker.js"></script>
+  <script src="js/modules/plugin-update-checker.js"></script>
+  <script src="js/modules/plugin-health.js"></script>
+  <script src="js/modules/file-upload.js"></script>
+  <!-- Real-time studio modules -->
+  <script src="js/modules/studio-realtime.js"></script>
+  <script src="js/modules/message-timeline.js"></script>
+  <script src="js/modules/studio-dashboard.js"></script>
+  <script type="module" src="js/modules/agent-canvas.js?v=1764203700"></script>
+  <!-- Studios workspace management -->
+  <link rel="stylesheet" href="css/studio.css">
+  <script src="js/modules/studios-workspace.js"></script>
+  <script src="js/modules/studios-agent-modals.js"></script>
+  <script src="js/modules/studios-workspace-create.js"></script>
+  <script src="js/modules/studios-canvas-helpers.js"></script>
+
+
+  <script>
+    // NOTE: Most JavaScript has been extracted to external modules:
+    // - studios-workspace.js: Core workspace CRUD & polling
+    // - studios-agent-modals.js: Agent management modals
+    // - studios-workspace-create.js: Workspace creation
+    // - studios-canvas-helpers.js: Canvas visualization & interactions
+
+    // Shared state (accessed by modules via window object)
+    window.availableAgents = [];
+    window.selectedAgents = new Set();
+
+    // All initialization is handled by the modules via their own DOMContentLoaded handlers
+    // No additional page-specific initialization needed
+  </script>
+  <script src="/js/modules/themeManager.js"></script>
+  <script>
+    // Initialize theme on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
+</body>
+</html>
+{{end}}

@@ -490,12 +490,16 @@ function addTimelineEvent(event) {
  */
 function loadCanvasBackground() {
     const savedColor = localStorage.getItem('canvas-bg-color');
-    if (savedColor && window.agentCanvas) {
+    if (!savedColor) return;
+
+    // Newer AgentCanvas may not expose setBackgroundColor; guard it
+    if (window.agentCanvas && typeof window.agentCanvas.setBackgroundColor === 'function') {
         window.agentCanvas.setBackgroundColor(savedColor);
-        const colorPicker = document.getElementById('canvas-bg-color');
-        if (colorPicker) {
-            colorPicker.value = savedColor;
-        }
+    }
+
+    const colorPicker = document.getElementById('canvas-bg-color');
+    if (colorPicker) {
+        colorPicker.value = savedColor;
     }
 }
 
@@ -510,12 +514,9 @@ function changeCanvasBackground(color) {
 }
 
 /**
- * Utility function to escape HTML
+ * Utility function to escape HTML (uses global from studios-workspace.js)
  */
 function escapeHtml(text) {
-    if (typeof window.escapeHtml === 'function') {
-        return window.escapeHtml(text);
-    }
     if (text == null) return '';
     const div = document.createElement('div');
     div.textContent = text;
@@ -616,6 +617,30 @@ async function createMergeWorkflowTasks() {
           `Check the console (F12) for more details!`);
 }
 
+/**
+ * Add a combiner node to the canvas
+ * @param {string} type - Type of combiner (merge, vote, etc.)
+ */
+async function addCombinerNode(type) {
+    const canvas = window.agentCanvas;
+    if (!canvas) {
+        alert('Canvas not initialized. Please open a workspace first.');
+        return;
+    }
+
+    // Calculate center position on canvas (accounting for offset and scale)
+    const centerX = (window.innerWidth / 2 - canvas.offsetX) / canvas.scale;
+    const centerY = (window.innerHeight / 2 - canvas.offsetY) / canvas.scale;
+
+    try {
+        await canvas.createCombinerNode(type, centerX, centerY);
+        console.log(`✨ Added ${type.toUpperCase()} combiner node to canvas`);
+    } catch (error) {
+        console.error('Error adding combiner node:', error);
+        alert(`Failed to add ${type} combiner node: ${error.message}`);
+    }
+}
+
 // Export functions for global access
 window.viewWorkspace = viewWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
@@ -628,3 +653,4 @@ window.createTask = createTask;
 window.changeCanvasBackground = changeCanvasBackground;
 window.connectToMerge = connectToMerge;
 window.createMergeWorkflowTasks = createMergeWorkflowTasks;
+window.addCombinerNode = addCombinerNode;

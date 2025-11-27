@@ -18,7 +18,7 @@ let serverOfflineNotification = null;
 
 // Studios-specific state for agent management
 let studiosSystemAgents = [];
-let studiosAvailableProviders = [];
+// studiosAvailableProviders is declared in studios-agent-modals.js
 
 /**
  * Initialize the studios page
@@ -498,8 +498,8 @@ async function viewWorkspace(workspaceId) {
 }
 
 // Export functions for global access
-window.openManageAgentsModal = openManageAgentsModal;
-window.openCreateWorkspaceModal = openCreateWorkspaceModal;
+// openManageAgentsModal is exported from studios-agent-modals.js
+// openCreateWorkspaceModal is exported from studios-workspace-create.js
 window.viewWorkspace = viewWorkspace;
 window.deleteWorkspace = deleteWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;

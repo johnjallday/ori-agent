@@ -83,6 +83,7 @@ type CombinerNodeLayout struct {
 	ResultCombinationMode string                 `json:"resultCombinationMode,omitempty"`
 	CustomInstruction     string                 `json:"customInstruction,omitempty"`
 	Config                map[string]interface{} `json:"config,omitempty"`
+	TaskID                string                 `json:"taskId,omitempty"` // Backend task associated with this combiner
 }
 
 // CombinerPort represents a single port on a combiner node

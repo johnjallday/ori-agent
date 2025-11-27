@@ -1,0 +1,2316 @@
+{{define "studios"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
+                </svg>
+                Agent Studios
+              </h2>
+              <p class="mb-0" style="color: rgba(255, 255, 255, 0.85);">Collaborative multi-agent workspaces with visual canvas</p>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="modern-btn modern-btn-secondary" onclick="openManageAgentsModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+                </svg>
+                Manage Agents
+              </button>
+              <button class="modern-btn modern-btn-primary" onclick="openCreateWorkspaceModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Grid View -->
+        <div id="grid-view">
+          <div id="workspaces-grid" class="row g-4">
+            <div class="col-12 text-center py-5">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-3" style="color: var(--text-muted);">Loading workspaces...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas View (hidden by default) -->
+        <div id="canvas-view" style="display: none;">
+          <div class="modern-card p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center gap-3">
+                <button class="modern-btn modern-btn-secondary" onclick="switchView('grid')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,11H5V13H19V11M19,7H5V9H19V7M19,15H5V17H19V15Z"/>
+                  </svg>
+                  Back to List
+                </button>
+                <div id="canvas-studio-selector" class="d-flex align-items-center gap-2">
+                  <span id="canvas-studio-label" style="color: var(--text-secondary); font-size: 0.875rem;">Select Studio:</span>
+                  <select id="canvas-studio-select" class="form-control form-control-sm" style="width: 250px;" onchange="loadCanvasStudio(this.value)">
+                    <option value="">Choose a studio...</option>
+                  </select>
+                </div>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <button class="modern-btn modern-btn-secondary" onclick="toggleCanvasSidebar()" title="Toggle Sidebar">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
+                  </svg>
+                </button>
+                <button class="modern-btn modern-btn-secondary" onclick="exportCanvas()" title="Export as Image">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                  </svg>
+                </button>
+                <span class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background: rgba(40,167,69,0.1); border-radius: 4px; font-size: 0.75rem;">
+                  <span class="status-indicator status-online"></span>
+                  <span style="color: var(--success-color); font-weight: 500;">Live Updates</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3">
+            <!-- Canvas Area -->
+            <div id="canvas-main-area" class="col-lg-12">
+              <div class="modern-card" style="height: calc(100vh - 250px); position: relative; overflow: hidden;">
+                <canvas id="agent-canvas" style="width: 100%; height: 100%; cursor: grab;"></canvas>
+                <div id="canvas-info" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
+                  No studio selected
+                </div>
+                <!-- Combiner Nodes Palette -->
+                <div style="position: absolute; top: 60px; left: 10px; display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;">
+                  <div style="color: white; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Combiner Nodes</div>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('merge')" title="Merge - Combine multiple inputs" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    🔀
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('append')" title="Append - Concatenate outputs" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    📎
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('summarize')" title="Summarize - Create summary" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    📝
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('compare')" title="Compare - Side-by-side comparison" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    ⚖️
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('vote')" title="Vote - Select best result" style="padding: 8px; font-size: 20px; line-height: 1;">
+                    🗳️
+                  </button>
+                </div>
+
+                <!-- Controls overlay -->
+                <div style="position: absolute; bottom: 10px; left: 10px; display: flex; gap: 8px; align-items: center;">
+                  <button class="modern-btn modern-btn-secondary" onclick="zoomToFitCanvas()" title="Zoom to Fit (R)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+                    </svg>
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="resetCanvasView()" title="Reset View">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12H4A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4Z"/>
+                    </svg>
+                  </button>
+                  <button class="modern-btn modern-btn-secondary" onclick="toggleCanvasAnimation()" id="animation-toggle" title="Toggle Animation">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                    </svg>
+                  </button>
+                  <div class="d-flex align-items-center gap-2" style="background: rgba(0,0,0,0.7); padding: 4px 8px; border-radius: 4px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white" title="Background Color">
+                      <path d="M12.433 10.07C14.133 10.585 16 11.15 16 8a8 8 0 1 0-8 8c1.996 0 1.826-1.504 1.649-3.08-.124-1.101-.252-2.237.351-2.92.465-.527 1.42-.237 2.433.07zM8 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 3a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm.5 6.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+                    </svg>
+                    <input type="color" id="canvas-bg-color" value="#f1f5f9" onchange="changeCanvasBackground(this.value)" title="Choose background color" style="width: 32px; height: 28px; border: 2px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer; background: transparent;">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sidebar (hidden by default) -->
+            <div id="canvas-sidebar" class="col-lg-3" style="display: none;">
+              <!-- Set Mission -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                  </svg>
+                  Set Mission
+                </h6>
+                <div class="mb-2">
+                  <textarea id="mission-input" class="form-control form-control-sm" rows="3" placeholder="Enter mission description..." style="font-size: 0.875rem;"></textarea>
+                  <style>
+                    #mission-input::placeholder {
+                      color: #9ca3af;
+                      opacity: 1;
+                    }
+                  </style>
+                </div>
+                <button class="modern-btn modern-btn-primary w-100" onclick="executeMission()" id="execute-mission-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+                  </svg>
+                  Set Mission
+                </button>
+              </div>
+
+              <!-- Agent Details -->
+              <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
+                <h6 class="mb-2" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
+                <div id="agent-details-content" style="font-size: 0.875rem;">
+                  Click an agent to see details
+                </div>
+              </div>
+
+              <!-- Task Details -->
+              <div class="modern-card p-3 mb-3" id="task-details-panel" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Task Details</h6>
+                  <button class="btn btn-sm btn-link p-0" onclick="hideTaskDetails()" style="color: var(--text-secondary);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                    </svg>
+                  </button>
+                </div>
+                <div id="task-details-content" style="font-size: 0.875rem;">
+                  Click a task to see details
+                </div>
+                <div id="task-actions" class="mt-3" style="display: none;">
+                  <button id="execute-task-btn" class="btn btn-sm btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                    </svg>
+                    Execute Task
+                  </button>
+                  <button class="btn btn-sm btn-danger w-100" onclick="deleteCurrentTask()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                    </svg>
+                    Delete Task
+                  </button>
+                </div>
+              </div>
+
+              <!-- Performance Metrics -->
+              <div class="modern-card p-3 mb-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/>
+                  </svg>
+                  Metrics
+                </h6>
+                <div id="metrics-content" style="font-size: 0.875rem;">
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">Total Tasks:</span>
+                    <strong id="metric-tasks">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">Completed:</span>
+                    <strong id="metric-completed" style="color: var(--success-color);">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between mb-2">
+                    <span style="color: var(--text-secondary);">In Progress:</span>
+                    <strong id="metric-progress" style="color: var(--info-color);">0</strong>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span style="color: var(--text-secondary);">Success Rate:</span>
+                    <strong id="metric-rate">0%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Task Timeline -->
+              <div class="modern-card p-3">
+                <h6 class="mb-3" style="color: var(--text-primary); font-weight: 600;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                  </svg>
+                  Timeline
+                </h6>
+                <div id="timeline-content" style="max-height: 300px; overflow-y: auto; font-size: 0.75rem;">
+                  <div class="text-muted text-center py-3">No events yet</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Agents Modal -->
+  <div class="modal fade" id="manageAgentsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+            </svg>
+            Manage Agents
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+
+          <!-- Create Agent Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Create New Agent</h6>
+            <form id="studiosCreateAgentForm" class="modern-card p-3">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
+                  <input type="text" id="studios-new-agent-name" class="modern-input w-100" placeholder="Enter agent name..." required>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Agent Type</label>
+                  <select id="studios-new-agent-type" class="modern-input w-100">
+                    <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
+                    <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                    <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
+                    <option value="research">Research (Expensive - Complex thinking)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Model</label>
+                <select id="studios-new-agent-model" class="modern-input w-100">
+                  <option value="">Loading models...</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">
+                  Temperature: <span id="studios-new-agent-temperature-value">1.0</span>
+                </label>
+                <input type="range" id="studios-new-agent-temperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
+                       style="cursor: pointer;">
+                <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
+                  <span>Focused (0)</span>
+                  <span>Balanced (1)</span>
+                  <span>Creative (2)</span>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">System Prompt</label>
+                <textarea id="studios-new-agent-prompt" class="form-control" rows="4"
+                          style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                          placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+              </div>
+              <button type="submit" class="modern-btn modern-btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Agent
+              </button>
+            </form>
+          </div>
+
+          <!-- Add to Workspace Section -->
+          <div class="mb-4">
+            <h6 style="color: var(--text-primary);">Add Agents to Workspace</h6>
+            <div class="modern-card p-3">
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Select Workspace</label>
+                <select id="studios-workspace-select" class="modern-input w-100">
+                  <option value="">Loading workspaces...</option>
+                </select>
+              </div>
+              <div class="alert alert-info mb-0" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+                Select a workspace above, then click "Add to Workspace" next to any agent below to add them to the selected workspace.
+              </div>
+            </div>
+          </div>
+
+          <!-- Existing Agents Section -->
+          <div>
+            <h6 style="color: var(--text-primary);">Existing Agents</h6>
+            <div id="studios-agents-list-modal" class="modern-card p-3">
+              <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2" style="color: var(--text-muted);">Loading agents...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Workspace Modal -->
+  <div class="modal fade" id="createWorkspaceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Workspace
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+          <form id="createWorkspaceForm">
+            <!-- Basic Info -->
+            <div class="mb-4">
+              <h6 style="color: var(--text-primary);">Basic Information</h6>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Workspace Name</label>
+                <input type="text" id="workspace-name" class="form-control" placeholder="My Research Project" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Description</label>
+                <textarea id="workspace-description" class="form-control" rows="2" placeholder="Brief description of the workspace"></textarea>
+              </div>
+            </div>
+
+            <!-- Agent Selection -->
+            <div class="mb-4">
+              <h6 style="color: var(--text-primary);">Select Agents</h6>
+              <p class="text-muted small mb-3">Choose which agents will participate in this workspace</p>
+              <div id="agents-selection" class="row g-3">
+                <!-- Will be populated dynamically -->
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="createWorkspaceBtn" class="modern-btn modern-btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Workspace
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Details Modal -->
+  <div class="modal fade" id="workspaceDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+            </svg>
+            Workspace Details
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="workspace-details-content" style="max-height: 70vh; overflow-y: auto;">
+          <!-- Content will be populated dynamically -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="js/modules/resizer.js"></script>
+  <script src="js/modules/settings.js"></script>
+  <script src="js/modules/agents.js"></script>
+  <script src="js/modules/plugins.js"></script>
+  <script src="js/modules/plugin-config.js"></script>
+  <script src="js/modules/plugin-store.js"></script>
+  <script src="js/modules/apikey.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/modules/sidebar.js"></script>
+  <script src="js/modules/update-checker.js"></script>
+  <script src="js/modules/plugin-update-checker.js"></script>
+  <script src="js/modules/plugin-health.js"></script>
+  <script src="js/modules/file-upload.js"></script>
+  <!-- Real-time studio modules -->
+  <script src="js/modules/studio-realtime.js"></script>
+  <script src="js/modules/message-timeline.js"></script>
+  <script src="js/modules/studio-dashboard.js"></script>
+  <script type="module" src="js/modules/agent-canvas.js?v=1764203700"></script>
+  <!-- Studios workspace management -->
+  <link rel="stylesheet" href="css/studio.css">
+  <script src="js/modules/studios-workspace.js"></script>
+  <script src="js/modules/studios-agent-modals.js"></script>
+  <script src="js/modules/studios-workspace-create.js"></script>
+  <script src="js/modules/studios-canvas-helpers.js"></script>
+
+  <script>
+    let availableAgents = [];
+    let selectedAgents = new Set();
+
+    // Auto-refresh workspaces every 10 seconds
+    let workspaceRefreshInterval = null;
+
+    // Server connection state management
+    let isServerConnected = true;
+    let consecutiveFailures = 0;
+    let retryDelay = 5000; // Start with 5 seconds
+    const MAX_RETRY_DELAY = 60000; // Max 60 seconds between retries
+    const MAX_CONSECUTIVE_FAILURES = 3; // After 3 failures, show offline notification
+    let serverOfflineNotification = null;
+
+    // Load workspaces and agents on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      loadWorkspaces();
+      loadWorkspaceAgents();
+
+      // Check URL parameters for view and workspace
+      const urlParams = new URLSearchParams(window.location.search);
+      const view = urlParams.get('view');
+      const workspaceId = urlParams.get('workspace');
+
+      if (view === 'canvas') {
+        // Switch to canvas view
+        switchView('canvas');
+
+        // If workspace ID is provided, select it after studios are loaded
+        if (workspaceId) {
+          // Hide the "Select Studio:" label since studio is already selected
+          const label = document.getElementById('canvas-studio-label');
+          if (label) {
+            label.style.display = 'none';
+          }
+
+          // Wait a bit for the select to be populated
+          setTimeout(() => {
+            const select = document.getElementById('canvas-studio-select');
+            if (select) {
+              select.value = workspaceId;
+              loadCanvasStudio(workspaceId);
+            }
+          }, 500);
+        }
+      }
+
+      // Enable auto-refresh
+      startWorkspacePolling();
+    });
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      stopWorkspacePolling();
+    });
+
+    function startWorkspacePolling() {
+      if (workspaceRefreshInterval) {
+        clearInterval(workspaceRefreshInterval);
+      }
+      workspaceRefreshInterval = setInterval(() => {
+        loadWorkspaces();
+      }, 10000); // Refresh every 10 seconds
+    }
+
+    function stopWorkspacePolling() {
+      if (workspaceRefreshInterval) {
+        clearInterval(workspaceRefreshInterval);
+        workspaceRefreshInterval = null;
+      }
+    }
+
+    function showServerOfflineNotification() {
+      // Remove existing notification if any
+      hideServerOfflineNotification();
+
+      // Create notification banner
+      const notification = document.createElement('div');
+      notification.id = 'server-offline-notification';
+      notification.style.cssText = `
+        position: fixed;
+        top: 70px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #dc3545;
+        color: white;
+        padding: 16px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: slideDown 0.3s ease;
+      `;
+
+      notification.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+        </svg>
+        <span><strong>Server Offline</strong> - Unable to connect to the server. Retrying automatically...</span>
+        <button onclick="manualRetryConnection()" style="
+          background: rgba(255,255,255,0.2);
+          border: 1px solid rgba(255,255,255,0.3);
+          color: white;
+          padding: 6px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 14px;
+          margin-left: 12px;
+        ">Retry Now</button>
+      `;
+
+      // Add animation
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+      `;
+      document.head.appendChild(style);
+
+      document.body.appendChild(notification);
+      serverOfflineNotification = notification;
+    }
+
+    function hideServerOfflineNotification() {
+      if (serverOfflineNotification) {
+        serverOfflineNotification.remove();
+        serverOfflineNotification = null;
+      }
+    }
+
+    function handleConnectionFailure() {
+      consecutiveFailures++;
+
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        // Stop regular polling
+        stopWorkspacePolling();
+
+        // Show offline notification
+        showServerOfflineNotification();
+        isServerConnected = false;
+
+        // Implement exponential backoff for retries
+        retryDelay = Math.min(retryDelay * 1.5, MAX_RETRY_DELAY);
+
+        console.log(`Server appears offline. Will retry in ${retryDelay/1000} seconds...`);
+
+        // Schedule retry with exponential backoff
+        setTimeout(() => {
+          loadWorkspaces();
+        }, retryDelay);
+      }
+    }
+
+    function handleConnectionSuccess() {
+      if (!isServerConnected) {
+        // Server is back online
+        console.log('Server connection restored');
+        hideServerOfflineNotification();
+
+        // Resume normal polling
+        startWorkspacePolling();
+      }
+
+      // Reset failure tracking
+      consecutiveFailures = 0;
+      retryDelay = 5000;
+      isServerConnected = true;
+    }
+
+    window.manualRetryConnection = async function() {
+      console.log('Manual retry triggered');
+      hideServerOfflineNotification();
+
+      // Show loading state
+      const grid = document.getElementById('workspaces-grid');
+      grid.innerHTML = `
+        <div class="col-12 text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Reconnecting...</span>
+          </div>
+          <p class="mt-3" style="color: var(--text-muted);">Attempting to reconnect...</p>
+        </div>
+      `;
+
+      await loadWorkspaces();
+    };
+
+    async function loadWorkspaces() {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      try {
+        const response = await fetch('/api/orchestration/workspace', {
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          console.error('Server error:', data.error);
+          handleConnectionFailure();
+          return;
+        }
+
+        // Connection successful
+        handleConnectionSuccess();
+        renderWorkspaces(data.workspaces || []);
+
+      } catch (error) {
+        clearTimeout(timeoutId); // Clear timeout even on error
+
+        // Silently ignore abort errors if server is connected (these are just timeouts)
+        if (error.name === 'AbortError' && isServerConnected) {
+          console.warn('Request timed out, but server appears online');
+          return;
+        }
+
+        console.error('Error loading workspaces:', error);
+
+        // Check if it's a network error (server offline)
+        if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          handleConnectionFailure();
+        } else {
+          // Other errors (not connection-related) - still try to show something
+          if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+            consecutiveFailures++;
+          }
+        }
+      }
+    }
+
+    function renderWorkspaces(workspaces) {
+      const grid = document.getElementById('workspaces-grid');
+
+      if (workspaces.length === 0) {
+        grid.innerHTML = `
+          <div class="col-12 text-center py-5">
+            <div class="empty-state-container" style="max-width: 500px; margin: 0 auto; padding: 3rem 2rem;">
+              <div class="empty-state-icon-wrapper" style="display: inline-block; position: relative; margin-bottom: 2rem;">
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 120px; height: 120px; background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 70%); border-radius: 50%; animation: pulse-bg 3s ease-in-out infinite;"></div>
+                <svg width="80" height="80" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color); position: relative; z-index: 1; opacity: 0.9;">
+                  <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
+                </svg>
+              </div>
+              <h3 style="color: var(--text-primary); font-weight: 700; margin-bottom: 1rem; font-size: 1.75rem;">Welcome to Agent Studios</h3>
+              <p style="color: var(--text-secondary); margin-bottom: 0.5rem; font-size: 1.1rem; line-height: 1.6;">Create your first workspace to unlock collaborative multi-agent capabilities</p>
+              <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 2rem;">Workspaces let multiple AI agents work together on complex tasks with real-time visualization</p>
+              <button class="modern-btn modern-btn-primary" onclick="openCreateWorkspaceModal()" style="padding: 0.75rem 2rem; font-size: 1rem; box-shadow: 0 4px 14px rgba(29, 78, 216, 0.3);">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Create Your First Workspace
+              </button>
+              <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">Quick features:</p>
+                <div style="display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; font-size: 0.85rem;">
+                  <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Multi-agent collaboration</span>
+                  <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Visual canvas</span>
+                  <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Real-time updates</span>
+                </div>
+              </div>
+            </div>
+            <style>
+              @keyframes pulse-bg {
+                0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
+                50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.5; }
+              }
+              .empty-state-container {
+                animation: fadeIn 0.5s ease-in-out;
+              }
+              @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+            </style>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = workspaces.map(workspace => {
+        const statusBadge = workspace.status === 'active' ? 'badge-success' :
+                           workspace.status === 'completed' ? 'badge-info' : 'badge-secondary';
+
+        const isActive = workspace.status === 'active';
+        const activityIndicator = isActive ? `
+          <span class="d-inline-flex align-items-center gap-1 text-success" style="font-size: 0.75rem;">
+            <span class="status-indicator status-online"></span>
+            <span>Active</span>
+          </span>
+        ` : '';
+
+        return `
+          <div class="col-12 col-sm-6 col-lg-4">
+            <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${isActive ? 'active-workspace' : ''}" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
+              <div class="d-flex justify-content-between align-items-start mb-3">
+                <div class="flex-grow-1">
+                  <h5 style="color: var(--text-primary);" class="mb-1">${escapeHtml(workspace.name || workspace.id)}</h5>
+                  ${activityIndicator}
+                </div>
+                <span class="modern-badge ${statusBadge}">${escapeHtml(workspace.status || 'unknown')}</span>
+              </div>
+
+              ${workspace.description ? `
+                <p class="text-muted small mb-3">${escapeHtml(workspace.description)}</p>
+              ` : ''}
+
+              <div class="mb-3">
+                <small style="color: var(--text-secondary); font-weight: 500;">Agents: ${workspace.agents ? workspace.agents.length : 0}</small>
+              </div>
+
+              <div class="d-flex gap-2 mt-3">
+                <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
+                  View
+                </button>
+                <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
+                  Canvas
+                </button>
+                <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadWorkspaceAgents() {
+      try {
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+
+        availableAgents = data.agents || [];
+        populateAgentDropdown();
+      } catch (error) {
+        console.error('Error loading workspace agents:', error);
+      }
+    }
+
+    function populateAgentDropdown() {
+      const select = document.getElementById('parent-agent');
+      if (!select) return; // Element doesn't exist in canvas view
+      select.innerHTML = availableAgents.map(agent =>
+        `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
+      ).join('');
+    }
+
+    // ========== MANAGE AGENTS MODAL FUNCTIONS ==========
+
+    let studiosSystemAgents = [];
+    let studiosAvailableProviders = [];
+
+    // Load providers for studios
+    async function loadStudiosProviders() {
+      try {
+        const response = await fetch('/api/providers');
+        const data = await response.json();
+        studiosAvailableProviders = data.providers || [];
+        return studiosAvailableProviders;
+      } catch (error) {
+        console.error('Failed to load providers:', error);
+        return [];
+      }
+    }
+
+    // Populate model select for studios
+    function populateStudiosModelSelect(modelSelect, selectedType = 'tool-calling') {
+      if (!modelSelect || studiosAvailableProviders.length === 0) {
+        console.warn('Cannot populate models: modelSelect or providers missing');
+        return;
+      }
+
+      modelSelect.innerHTML = '';
+
+      studiosAvailableProviders.forEach(provider => {
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+
+        provider.models.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model.value;
+          option.textContent = model.label;
+          option.setAttribute('data-type', model.type);
+          option.setAttribute('data-provider', model.provider);
+
+          if (model.type !== selectedType) {
+            option.style.display = 'none';
+            option.disabled = true;
+          }
+
+          providerGroup.appendChild(option);
+        });
+
+        modelSelect.appendChild(providerGroup);
+      });
+
+      // Select first available option
+      for (let i = 0; i < modelSelect.options.length; i++) {
+        if (!modelSelect.options[i].disabled) {
+          modelSelect.selectedIndex = i;
+          break;
+        }
+      }
+    }
+
+    async function openManageAgentsModal() {
+      const modal = new bootstrap.Modal(document.getElementById('manageAgentsModal'));
+      modal.show();
+
+      // Load agents when modal opens
+      await loadStudiosSystemAgents();
+
+      // Load workspaces for the dropdown
+      await loadWorkspacesForAgentManagement();
+
+      // Load and populate available models
+      try {
+        await loadStudiosProviders();
+        const modelSelect = document.getElementById('studios-new-agent-model');
+        const typeSelect = document.getElementById('studios-new-agent-type');
+        if (modelSelect && typeSelect) {
+          populateStudiosModelSelect(modelSelect, typeSelect.value);
+        }
+      } catch (error) {
+        console.error('Error loading providers:', error);
+      }
+    }
+
+    async function loadStudiosSystemAgents() {
+      try {
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+
+        studiosSystemAgents = data.agents || [];
+        renderStudiosAgentsListModal();
+      } catch (error) {
+        console.error('Error loading agents:', error);
+        document.getElementById('studios-agents-list-modal').innerHTML = `
+          <div class="alert alert-danger">Failed to load agents: ${escapeHtml(error.message)}</div>
+        `;
+      }
+    }
+
+    function renderStudiosAgentsListModal() {
+      const container = document.getElementById('studios-agents-list-modal');
+
+      if (studiosSystemAgents.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-3">
+            <p style="color: var(--text-muted);">No agents found</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = studiosSystemAgents.map(agent => `
+        <div class="d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--bg-secondary); border-radius: var(--radius-sm);">
+          <div class="d-flex align-items-center gap-3">
+            <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
+            <div>
+              <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
+              <div class="text-muted small">${escapeHtml(agent.type || 'tool-calling')}</div>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="addAgentToSelectedWorkspace('${escapeHtml(agent.name)}')" title="Add to workspace">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+              Add to Workspace
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteStudiosSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Update model dropdown when agent type changes
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('studios-new-agent-type').addEventListener('change', function(e) {
+        const modelSelect = document.getElementById('studios-new-agent-model');
+        if (modelSelect && studiosAvailableProviders.length > 0) {
+          populateStudiosModelSelect(modelSelect, e.target.value);
+        }
+      });
+
+      // Update temperature value display when slider changes
+      document.getElementById('studios-new-agent-temperature').addEventListener('input', function(e) {
+        document.getElementById('studios-new-agent-temperature-value').textContent = e.target.value;
+      });
+
+      // Create agent form submission
+      document.getElementById('studiosCreateAgentForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const name = document.getElementById('studios-new-agent-name').value.trim();
+        const type = document.getElementById('studios-new-agent-type').value;
+        const model = document.getElementById('studios-new-agent-model').value.trim();
+        const temperature = document.getElementById('studios-new-agent-temperature').value;
+        const systemPrompt = document.getElementById('studios-new-agent-prompt').value.trim();
+
+        if (!name) {
+          alert('Please enter an agent name');
+          return;
+        }
+
+        // Check if agent already exists
+        if (studiosSystemAgents.some(a => a.name === name)) {
+          alert('An agent with this name already exists');
+          return;
+        }
+
+        try {
+          const requestBody = { name, type };
+
+          if (model) requestBody.model = model;
+          if (temperature) requestBody.temperature = parseFloat(temperature);
+          if (systemPrompt) requestBody.system_prompt = systemPrompt;
+
+          const response = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+          });
+
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to create agent');
+          }
+
+          // Clear form and reload
+          document.getElementById('studiosCreateAgentForm').reset();
+          await loadStudiosSystemAgents();
+          await loadWorkspaceAgents(); // Refresh the workspace agents list
+          alert('Agent created successfully: ' + name);
+        } catch (error) {
+          console.error('Error creating agent:', error);
+          alert('Failed to create agent: ' + error.message);
+        }
+      });
+    });
+
+    async function deleteStudiosSystemAgent(agentName) {
+      if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to delete agent');
+        }
+
+        await loadStudiosSystemAgents();
+        await loadWorkspaceAgents(); // Refresh the workspace agents list
+        alert('Agent deleted successfully: ' + agentName);
+      } catch (error) {
+        console.error('Error deleting agent:', error);
+        alert('Failed to delete agent: ' + error.message);
+      }
+    }
+
+    // Load workspaces for the agent management dropdown
+    async function loadWorkspacesForAgentManagement() {
+      try {
+        const response = await fetch('/api/orchestration/workspace');
+        const data = await response.json();
+
+        const workspaces = data.workspaces || [];
+        const select = document.getElementById('studios-workspace-select');
+
+        if (workspaces.length === 0) {
+          select.innerHTML = '<option value="">No workspaces available</option>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">-- Select a workspace --</option>' +
+          workspaces.map(ws =>
+            `<option value="${escapeHtml(ws.id)}">${escapeHtml(ws.name || ws.id)}</option>`
+          ).join('');
+      } catch (error) {
+        console.error('Error loading workspaces:', error);
+        const select = document.getElementById('studios-workspace-select');
+        select.innerHTML = '<option value="">Error loading workspaces</option>';
+      }
+    }
+
+    // Add an agent to the selected workspace
+    async function addAgentToSelectedWorkspace(agentName) {
+      const workspaceSelect = document.getElementById('studios-workspace-select');
+      const workspaceId = workspaceSelect.value;
+
+      if (!workspaceId) {
+        alert('Please select a workspace first');
+        workspaceSelect.focus();
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to add agent to workspace');
+        }
+
+        const result = await response.json();
+        alert(`Agent "${agentName}" added to workspace successfully!`);
+
+        // Refresh workspaces if we're in grid view
+        await loadWorkspaces();
+      } catch (error) {
+        console.error('Error adding agent to workspace:', error);
+        // Check if it's a conflict (agent already in workspace)
+        if (error.message.includes('already in workspace') || error.message.includes('409')) {
+          alert(`Agent "${agentName}" is already in this workspace`);
+        } else {
+          alert('Failed to add agent to workspace: ' + error.message);
+        }
+      }
+    }
+
+    // ========== END MANAGE AGENTS MODAL FUNCTIONS ==========
+
+    function openCreateWorkspaceModal() {
+      // Populate agent selection
+      const container = document.getElementById('agents-selection');
+      container.innerHTML = availableAgents.map(agent => `
+        <div class="col-md-6">
+          <div class="modern-card p-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="agent-${escapeHtml(agent.name)}"
+                     value="${escapeHtml(agent.name)}" onchange="toggleAgent('${escapeHtml(agent.name)}')">
+              <label class="form-check-label" for="agent-${escapeHtml(agent.name)}" style="color: var(--text-primary);">
+                ${escapeHtml(agent.name)}
+              </label>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      // Reset selected agents
+      selectedAgents = new Set();
+
+      const modal = new bootstrap.Modal(document.getElementById('createWorkspaceModal'));
+      modal.show();
+    }
+
+    function toggleAgent(agentName) {
+      if (selectedAgents.has(agentName)) {
+        selectedAgents.delete(agentName);
+      } else {
+        selectedAgents.add(agentName);
+      }
+    }
+
+    document.getElementById('createWorkspaceBtn').addEventListener('click', async function() {
+      const name = document.getElementById('workspace-name').value;
+      const description = document.getElementById('workspace-description').value;
+
+      if (!name) {
+        showError('Please fill in all required fields');
+        return;
+      }
+
+      if (selectedAgents.size === 0) {
+        showError('Please select at least one agent');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/orchestration/workspace', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name,
+            description: description,
+            participating_agents: Array.from(selectedAgents)
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+          showError('Failed to create workspace: ' + result.error);
+          return;
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('createWorkspaceModal')).hide();
+        loadWorkspaces();
+      } catch (error) {
+        console.error('Error creating workspace:', error);
+        showError('Failed to create workspace');
+      }
+    });
+
+    let currentWorkspaceDashboard = null;
+
+    async function viewWorkspace(workspaceId) {
+      // Navigate to the workspace dashboard page
+      window.location.href = `/studios/${workspaceId}`;
+    }
+
+    // Keep old modal function for backward compatibility (if needed elsewhere)
+    async function viewWorkspaceModal(workspaceId) {
+      try {
+        // Show modal immediately
+        const modal = new bootstrap.Modal(document.getElementById('workspaceDetailsModal'));
+        modal.show();
+
+        // Clean up previous dashboard if exists
+        if (currentWorkspaceDashboard) {
+          currentWorkspaceDashboard.destroy();
+        }
+
+        // Show loading state
+        const container = document.getElementById('workspace-details-content');
+        container.innerHTML = `
+          <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3" style="color: var(--text-muted);">Loading workspace...</p>
+          </div>
+        `;
+
+        // Initialize real-time dashboard
+        currentWorkspaceDashboard = new WorkspaceDashboard(workspaceId, 'workspace-details-content');
+        await currentWorkspaceDashboard.init();
+
+        // Make it globally accessible for onclick handlers
+        window.workspaceDashboard = currentWorkspaceDashboard;
+
+      } catch (error) {
+        console.error('Error loading workspace details:', error);
+        showError('Failed to load workspace details');
+      }
+    }
+
+    // Clean up dashboard when modal is closed
+    document.getElementById('workspaceDetailsModal').addEventListener('hidden.bs.modal', function() {
+      if (currentWorkspaceDashboard) {
+        currentWorkspaceDashboard.destroy();
+        currentWorkspaceDashboard = null;
+      }
+    });
+
+    function renderWorkspaceDetails(workspace) {
+      const container = document.getElementById('workspace-details-content');
+
+      const statusBadge = workspace.status === 'active' ? 'badge-success' :
+                         workspace.status === 'completed' ? 'badge-info' : 'badge-secondary';
+
+      let html = `
+        <div class="mb-4">
+          <h6 style="color: var(--text-primary);">${escapeHtml(workspace.workspace_id)}</h6>
+          <span class="modern-badge ${statusBadge}">${escapeHtml(workspace.status)}</span>
+        </div>
+      `;
+
+      container.innerHTML = html;
+    }
+
+    async function deleteWorkspace(workspaceId) {
+      if (!confirm('Are you sure you want to delete this workspace?')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`, {
+          method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+          showError('Failed to delete workspace: ' + result.error);
+          return;
+        }
+
+        loadWorkspaces();
+      } catch (error) {
+        console.error('Error deleting workspace:', error);
+        showError('Failed to delete workspace');
+      }
+    }
+
+    function showError(message) {
+      alert(message);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Open workspace in canvas mode
+    function openWorkspaceCanvas(workspaceId) {
+      // Switch to canvas view and load the specific workspace
+      switchView('canvas');
+
+      // Wait a bit for the select to be populated, then select and load the workspace
+      setTimeout(() => {
+        const select = document.getElementById('canvas-studio-select');
+        if (select) {
+          select.value = workspaceId;
+          loadCanvasStudio(workspaceId);
+        }
+      }, 100);
+    }
+
+    // View switching
+    function switchView(view) {
+      const gridView = document.getElementById('grid-view');
+      const canvasView = document.getElementById('canvas-view');
+
+      if (view === 'canvas') {
+        gridView.style.display = 'none';
+        canvasView.style.display = 'block';
+        populateCanvasStudioSelect();
+      } else {
+        gridView.style.display = 'block';
+        canvasView.style.display = 'none';
+      }
+    }
+
+    function populateCanvasStudioSelect() {
+      const select = document.getElementById('canvas-studio-select');
+      fetch('/api/studios')
+        .then(res => res.json())
+        .then(data => {
+          select.innerHTML = '<option value="">Choose a studio...</option>' +
+            (data.studios || []).map(s =>
+              `<option value="${s.id}">${escapeHtml(s.name || s.id)}</option>`
+            ).join('');
+        });
+    }
+
+    let currentStudioId = null;
+
+    function loadCanvasStudio(studioId) {
+      if (!studioId) {
+        document.getElementById('canvas-info').textContent = 'No studio selected';
+        // Show the label when no studio is selected
+        const label = document.getElementById('canvas-studio-label');
+        if (label) {
+          label.style.display = '';
+        }
+        return;
+      }
+
+      // Hide the "Select Studio:" label once a studio is loaded
+      const label = document.getElementById('canvas-studio-label');
+      if (label) {
+        label.style.display = 'none';
+      }
+
+      currentStudioId = studioId;
+
+      // Initialize canvas visualization
+      if (window.agentCanvas) {
+        window.agentCanvas.destroy();
+      }
+      window.agentCanvas = new AgentCanvas('agent-canvas', studioId);
+      window.agentCanvas.init();
+
+      // Load saved background color
+      loadCanvasBackground();
+
+      // Set up event listeners for canvas clicks
+      window.agentCanvas.onAgentClick = showAgentDetails;
+      window.agentCanvas.onTaskClick = showTaskDetails;
+      window.agentCanvas.onMetricsUpdate = updateMetrics;
+      window.agentCanvas.onTimelineEvent = addTimelineEvent;
+
+      // Load available agents and update current list
+      setTimeout(() => {
+        loadAvailableAgents();
+        updateCurrentAgentsList();
+        updateTaskAgentSelectors();
+      }, 500);
+    }
+
+    // Mission execution
+    async function executeMission() {
+      if (!currentStudioId) {
+        alert('Please select a studio first');
+        return;
+      }
+
+      const mission = document.getElementById('mission-input').value.trim();
+      if (!mission) {
+        alert('Please enter a mission description');
+        return;
+      }
+
+      const btn = document.getElementById('execute-mission-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/mission`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission })
+        });
+
+        const result = await response.json();
+
+        if (result.message) {
+          // Add to timeline
+          addTimelineEvent({
+            type: 'mission_started',
+            data: { mission }
+          });
+
+          // Set mission on canvas directly
+          if (window.agentCanvas) {
+            window.agentCanvas.setMission(mission);
+          }
+
+          document.getElementById('mission-input').value = '';
+        }
+      } catch (error) {
+        console.error('Failed to execute mission:', error);
+        alert('Failed to execute mission');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
+      }
+    }
+
+    // Manage Agents functions
+    async function loadAvailableAgents() {
+      try {
+        const select = document.getElementById('available-agents');
+
+        // Element doesn't exist in canvas view, skip update
+        if (!select) {
+          return;
+        }
+
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+
+        // Get current workspace agents
+        const currentAgents = window.agentCanvas ? window.agentCanvas.agents.map(a => a.name) : [];
+
+        // Filter out already added agents
+        const availableAgents = (data.agents || []).filter(agent => !currentAgents.includes(agent.name));
+
+        select.innerHTML = '<option value="">Select agent to add...</option>' +
+          availableAgents.map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
+      } catch (error) {
+        console.error('Failed to load agents:', error);
+      }
+    }
+
+    async function addAgentToCanvas() {
+      const select = document.getElementById('available-agents');
+      const agentName = select.value;
+
+      if (!agentName) {
+        alert('Please select an agent to add');
+        return;
+      }
+
+      if (!currentStudioId) {
+        alert('Please select a studio first');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (response.ok) {
+          // Reload the canvas to show new agent
+          loadCanvasStudio(currentStudioId);
+          select.value = '';
+        } else {
+          alert('Failed to add agent');
+        }
+      } catch (error) {
+        console.error('Failed to add agent:', error);
+        alert('Failed to add agent');
+      }
+    }
+
+    async function removeAgentFromCanvas(agentName) {
+      if (!confirm(`Remove agent "${agentName}" from this workspace?`)) {
+        return;
+      }
+
+      if (!currentStudioId) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/agents/${agentName}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          // Reload the canvas to update
+          loadCanvasStudio(currentStudioId);
+        } else {
+          alert('Failed to remove agent');
+        }
+      } catch (error) {
+        console.error('Failed to remove agent:', error);
+        alert('Failed to remove agent');
+      }
+    }
+
+    function updateCurrentAgentsList() {
+      const listDiv = document.getElementById('current-agents-list');
+
+      // Element doesn't exist in canvas view, skip update
+      if (!listDiv) {
+        return;
+      }
+
+      if (!window.agentCanvas || !window.agentCanvas.agents) {
+        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+        return;
+      }
+
+      const agents = window.agentCanvas.agents;
+      if (agents.length === 0) {
+        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+        return;
+      }
+
+      listDiv.innerHTML = `
+        <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.5rem;">
+          <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Current Agents:</small>
+          <div class="mt-2">
+            ${agents.map(agent => `
+              <div class="d-flex justify-content-between align-items-center mb-1 p-2" style="background: rgba(255,255,255,0.03); border-radius: 4px;">
+                <div class="d-flex align-items-center">
+                  <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${agent.color}; margin-right: 8px;"></span>
+                  <span style="color: var(--text-primary);">${escapeHtml(agent.name)}</span>
+                </div>
+                <button class="btn btn-sm" onclick="removeAgentFromCanvas('${escapeHtml(agent.name)}')" style="padding: 2px 6px; font-size: 0.75rem; color: var(--danger-color);" title="Remove agent">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+                  </svg>
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    // Task management functions
+    function updateTaskAgentSelectors() {
+      const toSelect = document.getElementById('task-to-agent');
+
+      // Element doesn't exist in canvas view, skip update
+      if (!toSelect) {
+        return;
+      }
+
+      if (!window.agentCanvas || !window.agentCanvas.agents) {
+        toSelect.innerHTML = '<option value="">Select agent...</option>';
+        return;
+      }
+
+      const agents = window.agentCanvas.agents;
+      const options = '<option value="">Select agent...</option>' +
+        agents.map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`).join('');
+
+      toSelect.innerHTML = options;
+    }
+
+    async function createTask() {
+      const description = document.getElementById('task-description').value.trim();
+      const toAgent = document.getElementById('task-to-agent').value;
+
+      if (!description) {
+        alert('Please enter a task description');
+        return;
+      }
+
+      if (!toAgent) {
+        alert('Please select an agent to assign the task to');
+        return;
+      }
+
+      if (!currentStudioId) {
+        alert('Please select a studio first');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: description,
+            from: 'system',
+            to: toAgent,
+            priority: 1
+          })
+        });
+
+        if (response.ok) {
+          // Clear form
+          document.getElementById('task-description').value = '';
+          document.getElementById('task-to-agent').value = '';
+
+          // Reload canvas to show new task
+          loadCanvasStudio(currentStudioId);
+        } else {
+          const error = await response.text();
+          alert('Failed to create task: ' + error);
+        }
+      } catch (error) {
+        console.error('Failed to create task:', error);
+        alert('Failed to create task');
+      }
+    }
+
+    // Agent details panel
+    async function showAgentDetails(agent) {
+      const panel = document.getElementById('agent-details-panel');
+      const content = document.getElementById('agent-details-content');
+
+      panel.style.display = 'block';
+
+      const statusBadge = agent.status === 'active' ? 'badge-success' :
+                         agent.status === 'busy' ? 'badge-warning' : 'badge-secondary';
+
+      // Show loading state
+      content.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-2 small" style="color: var(--text-muted);">Loading agent details...</p>
+        </div>
+      `;
+
+      try {
+        // Fetch full agent details from settings file
+        const response = await fetch(`/agents/${agent.name}/agent_settings.json`);
+        let agentSettings = null;
+        if (response.ok) {
+          agentSettings = await response.json();
+        }
+
+        // Fetch enabled plugins
+        let enabledPlugins = [];
+        if (agentSettings && agentSettings.Plugins) {
+          enabledPlugins = Object.keys(agentSettings.Plugins);
+        }
+
+        const agentType = agentSettings?.type || 'tool-calling';
+        const model = agentSettings?.Settings?.model || 'N/A';
+        const temperature = agentSettings?.Settings?.temperature || 1.0;
+
+        content.innerHTML = `
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong style="color: #f0f0f0; font-size: 1rem;">${escapeHtml(agent.name)}</strong>
+              <span class="modern-badge ${statusBadge}">${agent.status}</span>
+            </div>
+            <div class="small mb-2" style="color: #b0b0b0; font-style: italic;">
+              Color: <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: ${agent.color}; vertical-align: middle; border: 1px solid rgba(0,0,0,0.2);"></span>
+            </div>
+          </div>
+
+          <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Agent Configuration</h6>
+            <div class="small" style="color: #d0d0d0;">
+              <div class="mb-1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom; color: #d0d0d0;">
+                  <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+                </svg>
+                <strong style="color: #e0e0e0;">Type:</strong> <span style="color: #d0d0d0;">${escapeHtml(agentType)}</span>
+              </div>
+              <div class="mb-1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom; color: #d0d0d0;">
+                  <path d="M17.81,4.47C17.73,4.47 17.65,4.45 17.58,4.41C15.66,3.42 14,3 12,3C10.03,3 8.15,3.47 6.44,4.41C6.2,4.54 5.9,4.45 5.76,4.21C5.63,3.97 5.72,3.66 5.96,3.53C7.82,2.5 9.86,2 12,2C14.14,2 16,2.47 18.04,3.5C18.29,3.65 18.38,3.95 18.25,4.19C18.17,4.37 18,4.47 17.81,4.47M3.5,9.72C3.4,9.72 3.3,9.69 3.21,9.63C3,9.47 2.93,9.16 3.09,8.93C4.08,7.53 5.34,6.43 6.84,5.66C10,4.04 14,4.03 17.15,5.65C18.65,6.42 19.91,7.5 20.9,8.9C21.06,9.12 21,9.44 20.78,9.6C20.55,9.76 20.24,9.71 20.08,9.5C19.18,8.22 18.04,7.23 16.69,6.54C13.82,5.07 10.15,5.07 7.29,6.55C5.93,7.25 4.79,8.25 3.89,9.5C3.81,9.65 3.66,9.72 3.5,9.72M9.75,21.79C9.62,21.79 9.5,21.74 9.4,21.64C8.53,20.77 8.06,19.65 8.06,18.5C8.06,17.35 8.53,16.23 9.4,15.36L10.92,13.84L9.4,12.32C8.53,11.45 8.06,10.33 8.06,9.18C8.06,8.03 8.53,6.91 9.4,6.04C10.27,5.17 11.39,4.7 12.54,4.7C13.69,4.7 14.81,5.17 15.68,6.04L17.2,7.56L18.72,6.04C19.59,5.17 20.71,4.7 21.86,4.7C23.01,4.7 24.13,5.17 25,6.04C25.87,6.91 26.34,8.03 26.34,9.18C26.34,10.33 25.87,11.45 25,12.32L23.48,13.84L25,15.36C25.87,16.23 26.34,17.35 26.34,18.5C26.34,19.65 25.87,20.77 25,21.64C24.13,22.51 23.01,22.98 21.86,22.98C20.71,22.98 19.59,22.51 18.72,21.64L17.2,20.12L15.68,21.64C14.81,22.51 13.69,22.98 12.54,22.98C11.39,22.98 10.27,22.51 9.4,21.64C9.3,21.54 9.25,21.42 9.25,21.29C9.25,21.16 9.3,21.04 9.4,20.94C9.6,20.74 9.9,20.74 10.1,20.94C10.8,21.64 11.66,22 12.54,22C13.42,22 14.28,21.64 14.98,20.94L17.2,18.72L14.98,16.5C14.28,15.8 13.42,15.44 12.54,15.44C11.66,15.44 10.8,15.8 10.1,16.5C9.4,17.2 9.04,18.06 9.04,18.94C9.04,19.82 9.4,20.68 10.1,21.38C10.3,21.58 10.3,21.88 10.1,22.08C10,22.18 9.88,22.23 9.75,22.23V21.79Z"/>
+                </svg>
+                <strong style="color: #e0e0e0;">Model:</strong> <span style="color: #d0d0d0;">${escapeHtml(model)}</span>
+              </div>
+              <div class="mb-1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom; color: #d0d0d0;">
+                  <path d="M15,13H16.5V15.82L18.94,17.23L18.19,18.53L15,16.69V13M19,8H5V19H9.67C9.24,18.09 9,17.07 9,16A7,7 0 0,1 16,9C17.07,9 18.09,9.24 19,9.67V8M5,21C3.89,21 3,20.1 3,19V5C3,3.89 3.89,3 5,3H6V1H8V3H16V1H18V3H19A2,2 0 0,1 21,5V11.1C22.24,12.36 23,14.09 23,16A7,7 0 0,1 16,23C14.09,23 12.36,22.24 11.1,21H5M16,11.15A4.85,4.85 0 0,0 11.15,16C11.15,18.68 13.32,20.85 16,20.85A4.85,4.85 0 0,0 20.85,16C20.85,13.32 18.68,11.15 16,11.15Z"/>
+                </svg>
+                <strong style="color: #e0e0e0;">Temperature:</strong> <span style="color: #d0d0d0;">${temperature}</span>
+              </div>
+              <div class="mb-1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom; color: #d0d0d0;">
+                  <path d="M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M19,5V19H5V5H19Z"/>
+                </svg>
+                <strong style="color: #e0e0e0;">Tasks:</strong> <span style="color: #d0d0d0;">${agent.tasks ? agent.tasks.length : 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom; color: #f0f0f0;">
+                <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+              </svg>
+              Enabled Tools
+            </h6>
+            <div class="small" style="color: #d0d0d0;">
+              ${enabledPlugins.length > 0 ? `
+                <div class="d-flex flex-wrap gap-1 mt-2">
+                  ${enabledPlugins.map(plugin => `
+                    <span class="badge" style="background: rgba(var(--primary-color-rgb, 0,123,255), 0.1); color: var(--primary-color); padding: 0.35rem 0.65rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500;">
+                      ${escapeHtml(plugin)}
+                    </span>
+                  `).join('')}
+                </div>
+              ` : `
+                <p style="color: #b0b0b0; font-style: italic; margin: 0.5rem 0 0 0;">No tools enabled</p>
+              `}
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Failed to load agent details:', error);
+        content.innerHTML = `
+          <div class="mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong style="color: #f0f0f0;">${escapeHtml(agent.name)}</strong>
+              <span class="modern-badge ${statusBadge}">${agent.status}</span>
+            </div>
+            <p class="small" style="color: #b0b0b0;">Could not load detailed information</p>
+          </div>
+        `;
+      }
+    }
+
+    // Task details panel
+    let currentTask = null;
+
+    async function showTaskDetails(task) {
+      currentTask = task;
+      const panel = document.getElementById('task-details-panel');
+      const content = document.getElementById('task-details-content');
+      const actions = document.getElementById('task-actions');
+      const executeBtn = document.getElementById('execute-task-btn');
+
+      panel.style.display = 'block';
+      actions.style.display = 'block';
+
+      // Show loading state
+      content.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-2 small" style="color: var(--text-muted);">Loading task details...</p>
+        </div>
+      `;
+
+      // Fetch fresh task data from API
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}`);
+        if (response.ok) {
+          const studio = await response.json();
+          // Find the specific task by ID
+          const freshTask = studio.tasks ? studio.tasks.find(t => t.id === task.id) : null;
+
+          if (freshTask) {
+            // Use the fresh task data
+            task = freshTask;
+            currentTask = freshTask;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch fresh task data:', error);
+        // Continue with the stale data
+      }
+
+      // Show execute button only for pending or failed tasks
+      if (task.status === 'pending' || task.status === 'failed') {
+        executeBtn.style.display = 'block';
+      } else {
+        executeBtn.style.display = 'none';
+      }
+
+      const statusColors = {
+        'pending': 'var(--warning-color)',
+        'in_progress': 'var(--info-color)',
+        'completed': 'var(--success-color)',
+        'failed': 'var(--danger-color)'
+      };
+
+      const statusColor = statusColors[task.status] || 'var(--text-secondary)';
+      const statusText = task.status ? task.status.replace('_', ' ').toUpperCase() : 'UNKNOWN';
+
+      content.innerHTML = `
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong style="color: #f0f0f0; font-size: 0.9rem;">Task ${task.id ? task.id.substring(0, 8) : ''}</strong>
+            <span class="modern-badge" style="background: ${statusColor}20; color: ${statusColor}; border: 1px solid ${statusColor};">${statusText}</span>
+          </div>
+        </div>
+
+        <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Description</h6>
+          <p style="color: #d0d0d0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.description || 'No description')}</p>
+        </div>
+
+        <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+          <div class="d-flex justify-content-between mb-2">
+            <span style="color: #b0b0b0;">From:</span>
+            <strong style="color: #f0f0f0;">${escapeHtml(task.from || 'N/A')}</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span style="color: #b0b0b0;">To:</span>
+            <strong style="color: #f0f0f0;">${escapeHtml(task.to || 'N/A')}</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span style="color: #b0b0b0;">Priority:</span>
+            <strong style="color: #f0f0f0;">${task.priority || 1}/5</strong>
+          </div>
+        </div>
+
+        ${task.result ? `
+          <div class="mb-2" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Result</h6>
+            <p style="color: #a0d0a0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.result)}</p>
+          </div>
+        ` : ''}
+
+        ${task.error ? `
+          <div class="mb-2" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+            <h6 style="color: #f0f0f0; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Error</h6>
+            <p style="color: #d0a0a0; margin: 0; white-space: pre-wrap;">${escapeHtml(task.error)}</p>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    function hideTaskDetails() {
+      const panel = document.getElementById('task-details-panel');
+      panel.style.display = 'none';
+      currentTask = null;
+    }
+
+    async function deleteCurrentTask() {
+      if (!currentTask || !currentStudioId) return;
+
+      if (!confirm(`Are you sure you want to delete this task?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks/${currentTask.id}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          hideTaskDetails();
+          loadCanvasStudio(currentStudioId);
+        } else {
+          alert('Failed to delete task: ' + await response.text());
+        }
+      } catch (error) {
+        console.error('Failed to delete task:', error);
+        alert('Failed to delete task');
+      }
+    }
+
+    async function executeCurrentTask() {
+      if (!currentTask || !currentStudioId) return;
+
+      const executeBtn = document.getElementById('execute-task-btn');
+      const originalText = executeBtn.innerHTML;
+
+      // Show loading state
+      executeBtn.disabled = true;
+      executeBtn.innerHTML = `
+        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+        Executing...
+      `;
+
+      try {
+        const response = await fetch(`/api/studios/${currentStudioId}/tasks/${currentTask.id}/execute`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Close details and reload canvas to see updated status
+          hideTaskDetails();
+          loadCanvasStudio(currentStudioId);
+
+          // Show success message
+          alert('Task execution started! Check the canvas for status updates.');
+        } else {
+          const error = await response.text();
+          alert('Failed to execute task: ' + error);
+          executeBtn.disabled = false;
+          executeBtn.innerHTML = originalText;
+        }
+      } catch (error) {
+        console.error('Failed to execute task:', error);
+        alert('Failed to execute task');
+        executeBtn.disabled = false;
+        executeBtn.innerHTML = originalText;
+      }
+    }
+
+    // Update metrics
+    function updateMetrics(metrics) {
+      document.getElementById('metric-tasks').textContent = metrics.total || 0;
+      document.getElementById('metric-completed').textContent = metrics.completed || 0;
+      document.getElementById('metric-progress').textContent = metrics.inProgress || 0;
+
+      const rate = metrics.total > 0 ? Math.round((metrics.completed / metrics.total) * 100) : 0;
+      document.getElementById('metric-rate').textContent = rate + '%';
+    }
+
+    // Add timeline event
+    function addTimelineEvent(event) {
+      const timeline = document.getElementById('timeline-content');
+
+      // Remove "no events" message
+      if (timeline.querySelector('.text-muted')) {
+        timeline.innerHTML = '';
+      }
+
+      const eventDiv = document.createElement('div');
+      eventDiv.className = 'border-start border-3 ps-2 mb-2';
+      eventDiv.style.borderColor = getEventColor(event.type);
+
+      const time = new Date().toLocaleTimeString();
+      const eventLabel = getEventLabel(event.type);
+
+      eventDiv.innerHTML = `
+        <div class="d-flex justify-content-between align-items-start">
+          <small style="color: var(--text-primary); font-weight: 500;">${eventLabel}</small>
+          <small style="color: var(--text-muted);">${time}</small>
+        </div>
+        ${event.data && event.data.mission ? `<small style="color: var(--text-secondary);">${escapeHtml(event.data.mission)}</small>` : ''}
+        ${event.data && event.data.task_id ? `<small style="color: var(--text-secondary);">Task: ${event.data.task_id.substring(0, 8)}</small>` : ''}
+        ${event.data && event.data.assigned_to ? `<small style="color: var(--text-secondary);">Agent: ${escapeHtml(event.data.assigned_to)}</small>` : ''}
+      `;
+
+      timeline.insertBefore(eventDiv, timeline.firstChild);
+
+      // Keep only last 20 events
+      while (timeline.children.length > 20) {
+        timeline.removeChild(timeline.lastChild);
+      }
+    }
+
+    function getEventColor(type) {
+      const colors = {
+        'task_created': 'var(--info-color)',
+        'task_started': 'var(--primary-color)',
+        'task_completed': 'var(--success-color)',
+        'task_failed': 'var(--danger-color)',
+        'message_sent': 'var(--secondary-color)',
+        'mission_started': 'var(--warning-color)'
+      };
+      return colors[type] || 'var(--text-muted)';
+    }
+
+    function getEventLabel(type) {
+      const labels = {
+        'task_created': 'Task Created',
+        'task_started': 'Task Started',
+        'task_completed': 'Task Completed',
+        'task_failed': 'Task Failed',
+        'message_sent': 'Message Sent',
+        'mission_started': 'Mission Set'
+      };
+      return labels[type] || type;
+    }
+
+    // Canvas controls
+    function toggleCanvasSidebar() {
+      const sidebar = document.getElementById('canvas-sidebar');
+      const mainArea = document.getElementById('canvas-main-area');
+
+      if (sidebar.style.display === 'none') {
+        sidebar.style.display = 'block';
+        mainArea.className = 'col-lg-9';
+      } else {
+        sidebar.style.display = 'none';
+        mainArea.className = 'col-lg-12';
+      }
+
+      // Trigger canvas resize
+      if (window.agentCanvas) {
+        window.agentCanvas.resize();
+      }
+    }
+
+    function resetCanvasView() {
+      if (window.agentCanvas) {
+        window.agentCanvas.offsetX = 0;
+        window.agentCanvas.offsetY = 0;
+        window.agentCanvas.scale = 1;
+        window.agentCanvas.draw();
+      }
+    }
+
+    function toggleCanvasAnimation() {
+      if (window.agentCanvas) {
+        window.agentCanvas.animationPaused = !window.agentCanvas.animationPaused;
+        const btn = document.getElementById('animation-toggle');
+        if (window.agentCanvas.animationPaused) {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,19H18V5H14M6,19H10V5H6V19Z"/></svg>';
+          btn.title = 'Resume Animation';
+        } else {
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
+          btn.title = 'Pause Animation';
+        }
+      }
+    }
+
+    async function exportCanvas() {
+      if (!window.agentCanvas) {
+        alert('No canvas to export');
+        return;
+      }
+
+      try {
+        // Create a temporary canvas with white background
+        const canvas = document.getElementById('agent-canvas');
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = canvas.height;
+
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.fillStyle = '#ffffff';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.drawImage(canvas, 0, 0);
+
+        // Convert to blob and download
+        tempCanvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `agent-studio-${currentStudioId}-${Date.now()}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
+      } catch (error) {
+        console.error('Failed to export canvas:', error);
+        alert('Failed to export canvas');
+      }
+    }
+
+    function changeCanvasBackground(color) {
+      if (window.agentCanvas) {
+        window.agentCanvas.backgroundColor = color;
+        window.agentCanvas.draw();
+        // Save to localStorage
+        localStorage.setItem('canvas-bg-color', color);
+        // Mark as custom (user override)
+        localStorage.setItem('canvas-bg-custom', 'true');
+      }
+    }
+
+    // Auto-set canvas background based on theme
+    function updateCanvasTheme() {
+      const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+      const isCustom = localStorage.getItem('canvas-bg-custom') === 'true';
+
+      // Only auto-update if user hasn't set a custom color
+      if (!isCustom && window.agentCanvas) {
+        const darkBg = '#1e293b';  // Dark slate background
+        const lightBg = '#f1f5f9';  // Light gray background
+        const newBg = isDark ? darkBg : lightBg;
+
+        window.agentCanvas.backgroundColor = newBg;
+        window.agentCanvas.draw();
+
+        // Update color picker to reflect auto theme
+        const colorPicker = document.getElementById('canvas-bg-color');
+        if (colorPicker) {
+          colorPicker.value = newBg;
+        }
+      }
+    }
+
+    // Watch for theme changes
+    const themeObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'data-bs-theme') {
+          updateCanvasTheme();
+        }
+      });
+    });
+
+    // Start observing theme changes
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-bs-theme']
+    });
+
+    // Load saved background color on page load
+    function loadCanvasBackground() {
+      const savedColor = localStorage.getItem('canvas-bg-color');
+      const isCustom = localStorage.getItem('canvas-bg-custom') === 'true';
+
+      if (savedColor && isCustom) {
+        // User has set a custom color, use it
+        const colorPicker = document.getElementById('canvas-bg-color');
+        if (colorPicker) {
+          colorPicker.value = savedColor;
+        }
+        if (window.agentCanvas) {
+          window.agentCanvas.backgroundColor = savedColor;
+          window.agentCanvas.draw();
+        }
+      } else {
+        // Use theme-based color
+        updateCanvasTheme();
+      }
+    }
+
+    // Zoom to fit all agents on canvas
+    function zoomToFitCanvas() {
+      if (window.agentCanvas) {
+        window.agentCanvas.zoomToFit();
+      }
+    }
+
+    // Add a combiner node to the canvas
+    function addCombinerNode(type) {
+      if (!window.agentCanvas) {
+        console.error('Canvas not initialized');
+        return;
+      }
+
+      // Add at center of visible area
+      const centerX = (window.agentCanvas.width / 2 - window.agentCanvas.offsetX) / window.agentCanvas.scale;
+      const centerY = (window.agentCanvas.height / 2 - window.agentCanvas.offsetY) / window.agentCanvas.scale;
+
+      const node = window.agentCanvas.createCombinerNode(type, centerX, centerY);
+      if (node) {
+        window.agentCanvas.draw();
+        console.log(`✨ Added ${type} combiner node`);
+      }
+    }
+
+    // Helper: Set up Agent → Merge → Agent workflow
+    function setupMergeWorkflow() {
+      if (!window.agentCanvas) {
+        alert('Please select a workspace first!');
+        return;
+      }
+
+      const canvas = window.agentCanvas;
+
+      // Check if we have enough agents
+      if (canvas.agents.length < 2) {
+        alert('You need at least 2 agents in the workspace. Please add agents first!');
+        return;
+      }
+
+      // Get first 2 agents
+      const agent1 = canvas.agents[0]; // First agent - executes "1+3"
+      const agent2 = canvas.agents[1]; // Second agent - executes final calculation
+
+      // Position agents nicely
+      agent1.x = 250;
+      agent1.y = 250;
+
+      agent2.x = 650;
+      agent2.y = 250;
+
+      // Create MERGE combiner in the middle
+      const mergeNode = canvas.createCombinerNode('merge', 450, 250);
+
+      if (!mergeNode) {
+        alert('Failed to create merge node');
+        return;
+      }
+
+      // Create connections
+      // Agent 1 → Merge Node (input port 0)
+      canvas.createConnection(agent1.name, 'output', mergeNode.id, 'input-0');
+
+      // Merge Node → Agent 2
+      canvas.createConnection(mergeNode.id, 'output', agent2.name, 'input');
+
+      // Zoom to fit everything
+      canvas.zoomToFit();
+      canvas.draw();
+
+      canvas.showNotification(`✅ Merge workflow created: ${agent1.name} → MERGE → ${agent2.name}`, 'success');
+
+      console.log('✅ Merge workflow setup complete!');
+      console.log(`   ${agent1.name} → MERGE → ${agent2.name}`);
+      console.log('');
+      console.log('📖 How to use this workflow:');
+      console.log('   1. Create a task "1+ 3" and assign to ' + agent1.name);
+      console.log('   2. Run the task - result will be stored on ' + agent1.name);
+      console.log('   3. The MERGE node will combine inputs from connected agents');
+      console.log('   4. Create a task for ' + agent2.name + ' that uses the merged result');
+      console.log('');
+      console.log('💡 To manually add more connections:');
+      console.log('   • Drag from the small circle at bottom of agent/node');
+      console.log('   • Drop on small circle at top of combiner node (input port)');
+      console.log('   • Or drag from bottom of combiner to top of agent');
+    }
+
+    // Helper: Connect current selection to merge node
+    function connectToMerge() {
+      if (!window.agentCanvas) {
+        alert('Please select a workspace first!');
+        return;
+      }
+
+      const canvas = window.agentCanvas;
+
+      // Find the merge node
+      const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
+      if (!mergeNode) {
+        alert('No MERGE node found! Please add a MERGE combiner node first using the palette on the right.');
+        return;
+      }
+
+      // Find the selected agent
+      const selectedAgent = canvas.selectedAgent || canvas.agents[0];
+      if (!selectedAgent) {
+        alert('No agent available! Please add an agent first.');
+        return;
+      }
+
+      // Determine next available input port
+      const existingInputs = canvas.connections.filter(c => c.to === mergeNode.id);
+      const nextInputPort = `input-${existingInputs.length}`;
+
+      // Create connection
+      canvas.createConnection(selectedAgent.name, 'output', mergeNode.id, nextInputPort);
+      canvas.draw();
+
+      canvas.showNotification(`✅ Connected ${selectedAgent.name} to MERGE node (${nextInputPort})`, 'success');
+    }
+
+    // Helper: Create workflow using merge combiner
+    async function createMergeWorkflowTasks() {
+      if (!window.agentCanvas) {
+        alert('Please select a workspace first!');
+        return;
+      }
+
+      const canvas = window.agentCanvas;
+
+      // Find the merge node and connected agents
+      const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
+      if (!mergeNode) {
+        alert('No MERGE node found! Click "Setup Merge" first to create the workflow structure.');
+        return;
+      }
+
+      // Find input connections to merge node
+      const inputConnections = canvas.connections.filter(c => c.to === mergeNode.id);
+      if (inputConnections.length === 0) {
+        alert('No agents connected to MERGE node! Connect agents first.');
+        return;
+      }
+
+      // Find output connection from merge node
+      const outputConnection = canvas.connections.find(c => c.from === mergeNode.id);
+      if (!outputConnection) {
+        alert('MERGE node has no output connection! Connect it to a target agent.');
+        return;
+      }
+
+      const targetAgentName = outputConnection.to;
+
+      console.log('📊 Creating merge workflow tasks...');
+      console.log('   Input agents:', inputConnections.map(c => c.from).join(', '));
+      console.log('   Target agent:', targetAgentName);
+      console.log('');
+      console.log('💡 Instructions:');
+      console.log('   1. Create tasks for the input agents (e.g., "1+3")');
+      console.log('   2. After those tasks complete, their results are stored');
+      console.log('   3. Create a task for the target agent that references those results');
+      console.log('   4. The task description can say: "Use the results from previous tasks"');
+      console.log('');
+      console.log('   The MERGE node visually shows how data flows,');
+      console.log('   but execution happens on the agents themselves.');
+
+      alert(`✅ Merge Workflow Ready!\n\n` +
+            `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
+            `Target Agent: ${targetAgentName}\n\n` +
+            `Next Steps:\n` +
+            `1. Create tasks for input agents\n` +
+            `2. Run those tasks to completion\n` +
+            `3. Create a task for ${targetAgentName}\n` +
+            `4. That task can reference previous results\n\n` +
+            `Check the console (F12) for more details!`);
+    }
+
+  </script>
+  <script src="/js/modules/themeManager.js"></script>
+  <script>
+    // Initialize theme on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      themeManager.initialize();
+    });
+  </script>
+</body>
+</html>
+{{end}}
