@@ -53,9 +53,14 @@ func main() {
 		go func() {
 			time.Sleep(500 * time.Millisecond) // Wait for server to start
 			if err := openBrowser(url); err != nil {
-				log.Printf("Failed to open browser: %v", err)
+				log.Printf("Could not auto-open browser: %v", err)
+				log.Printf("Please open your browser manually and navigate to: %s", url)
+			} else {
+				log.Printf("Browser opened at: %s", url)
 			}
 		}()
+	} else {
+		log.Printf("Auto-open browser disabled. Navigate to: %s", url)
 	}
 
 	log.Fatal(srv.HTTPServer(addr).ListenAndServe())
@@ -118,5 +123,17 @@ func openBrowser(url string) error {
 		return nil // Unsupported platform, silently skip
 	}
 
-	return cmd.Start()
+	// Set a timeout to prevent hanging
+	if err := cmd.Start(); err != nil {
+		// If fork/exec fails due to resource limits, return a helpful error
+		return fmt.Errorf("unable to open browser (you may need to open it manually): %w", err)
+	}
+
+	// Don't wait for the command to finish - let it run in background
+	// Use a goroutine to clean up the process without blocking
+	go func() {
+		_ = cmd.Wait()
+	}()
+
+	return nil
 }

@@ -50,17 +50,55 @@ type Workspace struct {
 
 // CanvasLayout stores positions of tasks and agents on the canvas
 type CanvasLayout struct {
-	TaskPositions  map[string]Position `json:"task_positions,omitempty"`  // task ID -> position
-	AgentPositions map[string]Position `json:"agent_positions,omitempty"` // agent name -> position
-	Scale          float64             `json:"scale,omitempty"`           // zoom level
-	OffsetX        float64             `json:"offset_x,omitempty"`        // pan offset X
-	OffsetY        float64             `json:"offset_y,omitempty"`        // pan offset Y
+	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
+	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent name -> position
+	CombinerNodes       []CombinerNodeLayout       `json:"combiner_nodes,omitempty"`       // combiner (merge/append/etc) nodes on canvas
+	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents/combiners
+	Scale               float64                    `json:"scale,omitempty"`                // zoom level
+	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
+	OffsetY             float64                    `json:"offset_y,omitempty"`             // pan offset Y
 }
 
 // Position represents a 2D position on the canvas
 type Position struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
+}
+
+// CombinerNodeLayout represents a combiner (e.g., merge) node on the canvas
+type CombinerNodeLayout struct {
+	ID                    string                 `json:"id"`
+	Type                  string                 `json:"type,omitempty"`
+	CombinerType          string                 `json:"combinerType,omitempty"`
+	Name                  string                 `json:"name,omitempty"`
+	Icon                  string                 `json:"icon,omitempty"`
+	Color                 string                 `json:"color,omitempty"`
+	Description           string                 `json:"description,omitempty"`
+	X                     float64                `json:"x"`
+	Y                     float64                `json:"y"`
+	Width                 float64                `json:"width,omitempty"`
+	Height                float64                `json:"height,omitempty"`
+	InputPorts            []CombinerPort         `json:"inputPorts,omitempty"`
+	OutputPort            CombinerPort           `json:"outputPort,omitempty"`
+	ResultCombinationMode string                 `json:"resultCombinationMode,omitempty"`
+	CustomInstruction     string                 `json:"customInstruction,omitempty"`
+	Config                map[string]interface{} `json:"config,omitempty"`
+}
+
+// CombinerPort represents a single port on a combiner node
+type CombinerPort struct {
+	ID string `json:"id"`
+}
+
+// WorkflowConnectionLayout represents a connection between nodes (task/agent/combiner)
+type WorkflowConnectionLayout struct {
+	ID       string `json:"id"`
+	From     string `json:"from"`
+	FromPort string `json:"fromPort"`
+	To       string `json:"to"`
+	ToPort   string `json:"toPort"`
+	Color    string `json:"color,omitempty"`
+	Animated bool   `json:"animated,omitempty"`
 }
 
 // AgentMessage represents a message passed between agents

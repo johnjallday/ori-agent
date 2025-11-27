@@ -69,6 +69,12 @@ class AgentCanvas {
     this.agentPanelScrollOffset = 0; // Scroll offset for agent panel content
     this.agentPanelMaxScroll = 0; // Maximum scroll offset for agent panel
 
+    // Expanded combiner panel state
+    this.expandedCombiner = null;
+    this.expandedCombinerPanelWidth = 0;
+    this.expandedCombinerPanelTargetWidth = 360;
+    this.expandedCombinerPanelAnimating = false;
+
     // Connection mode state (task-to-task)
     this.connectionMode = false;
     this.connectionSourceTask = null;
@@ -79,6 +85,10 @@ class AgentCanvas {
     this.assignmentSourceTask = null;
     this.assignmentMouseX = 0;
     this.assignmentMouseY = 0;
+
+    // Combiner output assignment mode (connect combiner output to agent)
+    this.combinerAssignMode = false;
+    this.combinerAssignmentSource = null;
 
     // Create task mode state
     this.createTaskMode = false;
@@ -98,6 +108,17 @@ class AgentCanvas {
     // Chain visualization state
     this.activeChains = []; // Array of active chain objects
     this.chainParticles = []; // Particles flowing along chain paths
+
+    // Combiner nodes state (NEW - for visual workflow design)
+    this.combinerNodes = []; // Array of combiner node objects
+    this.connections = []; // Array of connection objects between nodes
+    this.draggedConnection = null; // Connection being dragged
+    this.connectionDragStart = null; // Starting port for connection drag
+    this.isDraggingConnection = false; // Connection drag state
+    this.isDraggingCombiner = false; // Combiner node drag state
+    this.draggedCombiner = null; // Combiner being dragged
+    this.selectedCombiner = null; // Currently selected combiner node
+    this.hoveredCombiner = null; // Combiner node under mouse
 
     // Execution logs state (task ID -> array of log entries)
     this.executionLogs = {}; // { taskId: [{ type: 'thinking'|'tool_call'|'tool_success'|'tool_error', message: string, timestamp: Date }] }
@@ -135,15 +156,6 @@ class AgentCanvas {
     }
     if (e.ctrlKey || e.metaKey) {
       this.ctrlPressed = true;
-    }
-
-    // R key - Reset view (zoom to fit)
-    if (e.key === 'r' || e.key === 'R') {
-      if (!this.forms.createTaskDescriptionFocused) {
-        e.preventDefault();
-        this.zoomToFit();
-        return;
-      }
     }
 
     // H key - Toggle help overlay
@@ -214,19 +226,31 @@ class AgentCanvas {
         // Close the create task form
         e.preventDefault();
         this.forms.hideCreateTaskForm();
-      } else if (this.connectionMode) {
-        this.connectionMode = false;
-        this.connectionSourceTask = null;
-        this.canvas.style.cursor = 'grab';
-        this.draw();
-        console.log('Connection mode cancelled');
       } else if (this.assignmentMode) {
         this.assignmentMode = false;
         this.assignmentSourceTask = null;
+        this.assignmentMouseX = 0;
+        this.assignmentMouseY = 0;
         this.canvas.style.cursor = 'grab';
         this.draw();
         console.log('Assignment mode cancelled');
+      } else if (this.combinerAssignMode) {
+        this.combinerAssignMode = false;
+        this.combinerAssignmentSource = null;
+        this.canvas.style.cursor = 'grab';
+        this.draw();
+        console.log('Combiner assignment cancelled');
       }
+    }
+
+    // ESC also cancels connection dragging (e.g., from combiner/agent ports)
+    if ((e.key === 'Escape' || e.key === 'Esc') && this.isDraggingConnection) {
+      e.preventDefault();
+      this.isDraggingConnection = false;
+      this.connectionDragStart = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+      return;
     }
   }
 
@@ -335,7 +359,8 @@ class AgentCanvas {
         name: agentName,
         x: startX + (index * spacing),
         y: centerY,
-        radius: 40,
+        width: 120,
+        height: 70,
         color: this.getAgentColor(index),
         status: stats.status, // Use status from backend
         currentTasks: stats.current_tasks || [],
@@ -546,6 +571,20 @@ class AgentCanvas {
       } else if (eventData.type === 'task.completed') {
         task.status = 'completed';
         task.completed_at = new Date().toISOString();
+
+        // Store result on task if available
+        if (eventData.data.result) {
+          task.result = eventData.data.result;
+
+          // Update the agent's lastResult
+          if (task.to) {
+            const agent = this.agents.find(a => a.name === task.to);
+            if (agent) {
+              agent.lastResult = eventData.data.result;
+              console.log(`✅ Updated lastResult for agent ${agent.name}:`, eventData.data.result);
+            }
+          }
+        }
       } else if (eventData.type === 'task.failed') {
         task.status = 'failed';
         task.error = eventData.data.error;
@@ -930,6 +969,22 @@ class AgentCanvas {
     // Draw agents
     this.drawAgents();
 
+    // Normalize combiner inputs before drawing connections/nodes
+    if (this.combinerNodes.length) {
+      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node, true));
+    }
+
+    // Draw workflow connections (between agents and combiners)
+    this.drawWorkflowConnections();
+
+    // Draw combiner nodes
+    this.drawCombinerNodes();
+
+    // Draw dragging connection line (if dragging)
+    if (this.isDraggingConnection && this.connectionDragStart) {
+      this.drawDraggingConnection();
+    }
+
     this.ctx.restore();
 
     // Draw mission OUTSIDE the transform context (so it stays fixed at top)
@@ -945,9 +1000,9 @@ class AgentCanvas {
       this.drawExpandedAgentPanel();
     }
 
-    // Draw connection mode indicator
-    if (this.connectionMode) {
-      this.drawConnectionModeIndicator();
+    // Draw expanded combiner panel OUTSIDE the transform context (fixed position)
+    if (this.expandedCombinerPanelWidth > 0) {
+      this.drawExpandedCombinerPanel();
     }
 
     // Draw assignment line
@@ -1127,7 +1182,9 @@ class AgentCanvas {
         this.ctx.setLineDash([5, 5]);
         // Calculate shortened end point to avoid hiding arrowhead behind task card
         const angle = Math.atan2(task.y - fromAgent.y, task.x - fromAgent.x);
-        const agentRadius = fromAgent.radius || 60;
+        const agentHalfW = (fromAgent.width || 120) / 2;
+        const agentHalfH = (fromAgent.height || 70) / 2;
+        const agentRadius = Math.hypot(agentHalfW, agentHalfH);
         const taskCardRadius = 80; // Approximate diagonal of task card
         const x1 = fromAgent.x + agentRadius * Math.cos(angle);
         const y1 = fromAgent.y + agentRadius * Math.sin(angle);
@@ -1144,7 +1201,9 @@ class AgentCanvas {
         // Calculate shortened end point to avoid hiding arrowhead behind agent circle
         const angle = Math.atan2(toAgent.y - task.y, toAgent.x - task.x);
         const taskCardRadius = 80; // Approximate diagonal of task card
-        const agentRadius = toAgent.radius || 60;
+        const agentHalfW = (toAgent.width || 120) / 2;
+        const agentHalfH = (toAgent.height || 70) / 2;
+        const agentRadius = Math.hypot(agentHalfW, agentHalfH);
         const x1 = task.x + taskCardRadius * Math.cos(angle);
         const y1 = task.y + taskCardRadius * Math.sin(angle);
         const x2 = toAgent.x - agentRadius * Math.cos(angle);
@@ -1185,23 +1244,51 @@ class AgentCanvas {
       this.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
       this.ctx.stroke();
 
-      // Task description (truncated)
+      // Task description (use built-in maxWidth for reliable clipping)
       this.ctx.fillStyle = '#212529';
       this.ctx.font = 'bold 11px system-ui';
-      const maxWidth = cardWidth - 16;
-      let description = task.description || 'Task';
-      if (description.length > 25) {
-        description = description.substring(0, 22) + '...';
-      }
-      this.ctx.fillText(description, cardX + 8, cardY + 18);
+      const maxTextWidth = cardWidth - 32; // Reserve space for padding and delete button
+      const description = task.description || 'Task';
 
-      // Task status - show "UNASSIGNED" label for unassigned tasks
+      // Use canvas maxWidth parameter for automatic text truncation
+      this.ctx.save();
+      this.ctx.fillText(description, cardX + 8, cardY + 18, maxTextWidth);
+      this.ctx.restore();
+
+      // Task status - show connected node if unassigned, otherwise show from → to
       this.ctx.fillStyle = '#6c757d';
       this.ctx.font = '9px system-ui';
-      const statusText = isUnassigned ? '⚠️ UNASSIGNED' : `${task.from} → ${task.to}`;
-      this.ctx.fillText(statusText, cardX + 8, cardY + 34);
 
-      // Status badge
+      let statusText;
+      if (isUnassigned) {
+        // Find output connection from this task (task is the source)
+        const outputConn = this.connections.find(c => c.from === task.id);
+
+        if (outputConn) {
+          // Get the connected node (where the task output goes)
+          const connectedNode = this.getNodeById(outputConn.to);
+
+          if (connectedNode) {
+            const nodeName = connectedNode.node.name || connectedNode.node.id || 'Unknown';
+            statusText = `→ ${nodeName}`;
+          } else {
+            statusText = '⚠️ UNASSIGNED';
+          }
+        } else {
+          statusText = '⚠️ UNASSIGNED';
+        }
+      } else {
+        statusText = `${task.from} → ${task.to}`;
+      }
+
+      const maxStatusWidth = cardWidth - 16;
+
+      // Use canvas maxWidth parameter for automatic text truncation
+      this.ctx.save();
+      this.ctx.fillText(statusText, cardX + 8, cardY + 34, maxStatusWidth);
+      this.ctx.restore();
+
+      // Status badge (left aligned)
       this.ctx.fillStyle = borderColor;
       this.ctx.font = 'bold 8px system-ui';
       const badge = (task.status || 'pending').toUpperCase();
@@ -1209,32 +1296,6 @@ class AgentCanvas {
       this.ctx.fillRect(cardX + 8, cardY + 40, badgeWidth, 12);
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillText(badge, cardX + 12, cardY + 49);
-
-      // Input indicator badge (if task receives input from other tasks)
-      // Position at top-left corner for better visibility
-      if (task.input_task_ids && task.input_task_ids.length > 0) {
-        const inputBadgeX = cardX + 8;
-        const inputBadgeY = cardY + 4;
-        const inputBadgeText = `🔗 ${task.input_task_ids.length}`;
-        this.ctx.font = 'bold 8px system-ui';
-        const inputBadgeWidth = this.ctx.measureText(inputBadgeText).width + 8;
-        const inputBadgeHeight = 14;
-
-        // Background with rounded corners
-        this.ctx.fillStyle = '#9b59b6'; // Purple to match connection lines
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 1.5;
-        this.roundRect(inputBadgeX, inputBadgeY, inputBadgeWidth, inputBadgeHeight, 7);
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        // Text
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 8px system-ui';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(inputBadgeText, inputBadgeX + 4, inputBadgeY + inputBadgeHeight / 2);
-        this.ctx.textBaseline = 'alphabetic';
-      }
 
       // Delete button (always visible, top-right corner)
       const deleteBtnSize = 18;
@@ -1262,56 +1323,37 @@ class AgentCanvas {
       this.ctx.lineTo(deleteBtnX + xOffset, deleteBtnY + deleteBtnSize - xOffset);
       this.ctx.stroke();
 
-      // "Can Connect" indicator for completed tasks with results
-      if (task.status === 'completed' && task.result) {
-        const indicatorSize = 24;
-        const indicatorX = cardX + cardWidth - indicatorSize - 4;
-        const indicatorY = cardY + cardHeight - indicatorSize - 4;
+      // Clear bounds if task doesn't have result
+      task.connectionIndicatorBounds = null;
 
-        // Store bounds for click detection
-        task.connectionIndicatorBounds = {
-          x: indicatorX,
-          y: indicatorY,
-          width: indicatorSize,
-          height: indicatorSize
-        };
+      // Output port for connecting task to combiner nodes
+      const outputPortRadius = 6;
+      const outputPortX = task.x;
+      const outputPortY = cardY + cardHeight + 5;
 
-        // Pulsing glow effect
-        const pulsePhase = (Date.now() % 2000) / 2000; // 0 to 1
-        const glowIntensity = 0.3 + 0.2 * Math.sin(pulsePhase * Math.PI * 2);
+      // Draw output port circle
+      this.ctx.fillStyle = '#6366f1'; // Indigo color
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.arc(outputPortX, outputPortY, outputPortRadius, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.stroke();
 
-        this.ctx.save();
-        this.ctx.globalAlpha = glowIntensity;
-        this.ctx.fillStyle = '#9b59b6';
-        this.ctx.beginPath();
-        this.ctx.arc(indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2, indicatorSize / 2 + 3, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.restore();
+      // Store port bounds for connection detection
+      task.outputPortBounds = {
+        x: outputPortX - outputPortRadius,
+        y: outputPortY - outputPortRadius,
+        width: outputPortRadius * 2,
+        height: outputPortRadius * 2
+      };
 
-        // Main indicator background
-        this.ctx.fillStyle = '#9b59b6';
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.arc(indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2, indicatorSize / 2, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.stroke();
+      // Check if this task outputs to a combiner (if so, hide RUN button - combiner will execute it)
+      const outputConn = this.connections.find(c => c.from === task.id);
+      const outputsToCombiner = outputConn ? this.getNodeById(outputConn.to)?.type === 'combiner' : false;
 
-        // Link icon
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 12px system-ui';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText('🔗', indicatorX + indicatorSize / 2, indicatorY + indicatorSize / 2);
-        this.ctx.textAlign = 'left';
-        this.ctx.textBaseline = 'alphabetic';
-      } else {
-        // Clear bounds if task doesn't have result
-        task.connectionIndicatorBounds = null;
-      }
-
-      // Execute button for pending tasks
-      if (task.status === 'pending') {
+      // Execute button for pending tasks (hide if outputs to combiner)
+      if (task.status === 'pending' && !outputsToCombiner) {
         const btnWidth = 50;
         const btnHeight = 14;
         const btnX = cardX + cardWidth - btnWidth - 6;
@@ -1330,6 +1372,29 @@ class AgentCanvas {
         this.ctx.font = 'bold 8px system-ui';
         this.ctx.textAlign = 'center';
         this.ctx.fillText('▶ RUN', btnX + btnWidth / 2, btnY + 10);
+        this.ctx.textAlign = 'left';
+      }
+
+      // Rerun button for completed or failed tasks
+      if (task.status === 'completed' || task.status === 'failed') {
+        const rerunBtnWidth = 50;
+        const rerunBtnHeight = 14;
+        const rerunBtnX = cardX + cardWidth - rerunBtnWidth - 6;
+        const rerunBtnY = cardY + 40;
+
+        // Store button bounds for click detection
+        task.rerunBtnBounds = { x: rerunBtnX, y: rerunBtnY, width: rerunBtnWidth, height: rerunBtnHeight };
+
+        // Button background (orange for rerun)
+        this.ctx.fillStyle = task.status === 'failed' ? '#dc3545' : '#fd7e14';
+        this.roundRect(rerunBtnX, rerunBtnY, rerunBtnWidth, rerunBtnHeight, 3);
+        this.ctx.fill();
+
+        // Button text
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 8px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('↻ RERUN', rerunBtnX + rerunBtnWidth / 2, rerunBtnY + 10);
         this.ctx.textAlign = 'left';
       }
 
@@ -1444,8 +1509,7 @@ class AgentCanvas {
       }
     });
 
-    // Draw result-to-task connections for tasks with input_task_ids
-    this.drawResultConnections();
+    // (Result-to-task connections hidden for clarity)
   }
 
   /**
@@ -1466,45 +1530,25 @@ class AgentCanvas {
         // Draw a more prominent line with glow effect to indicate result flow
         this.ctx.save();
 
-        // Glow effect for visibility
-        this.ctx.strokeStyle = '#9b59b6'; // Purple for result connections
-        this.ctx.lineWidth = 6;
-        this.ctx.globalAlpha = 0.3;
-        this.ctx.setLineDash([12, 6]);
-        this.drawArrow(inputTask.x, inputTask.y, task.x, task.y, '#9b59b6', 6);
+        // Offset arrow so the head doesn't sit on top of the task card
+        const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
+        const startOffset = 30; // move start off input task center a bit
+        const endOffset = 80;   // stop before target card center
+        const startX = inputTask.x + startOffset * Math.cos(angle);
+        const startY = inputTask.y + startOffset * Math.sin(angle);
+        const endX = task.x - endOffset * Math.cos(angle);
+        const endY = task.y - endOffset * Math.sin(angle);
 
-        // Main line (more prominent) with arrow
-        this.ctx.globalAlpha = 1.0;
-        this.ctx.setLineDash([]);
-        this.drawArrow(inputTask.x, inputTask.y, task.x, task.y, '#9b59b6', 3);
-        this.ctx.restore();
-
-        // Calculate midpoint for label
-        const midX = (inputTask.x + task.x) / 2;
-        const midY = (inputTask.y + task.y) / 2;
-
-        // Draw a more prominent label with background
-        const labelText = '📊 Result';
-        this.ctx.font = 'bold 10px system-ui';
-        const labelWidth = this.ctx.measureText(labelText).width + 8;
-        const labelX = midX - labelWidth / 2;
-        const labelY = midY - 25;
-
-        // Label background
-        this.ctx.fillStyle = '#9b59b6';
-        this.ctx.strokeStyle = '#ffffff';
+        // Draw softened line (no arrowhead) for result flow
+        this.ctx.strokeStyle = 'rgba(155, 89, 182, 0.35)';
         this.ctx.lineWidth = 2;
-        this.roundRect(labelX, labelY, labelWidth, 16, 8);
-        this.ctx.fill();
+        this.ctx.setLineDash([6, 10]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(startX, startY);
+        this.ctx.lineTo(endX, endY);
         this.ctx.stroke();
-
-        // Label text
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(labelText, midX, labelY + 8);
-        this.ctx.textAlign = 'left';
-        this.ctx.textBaseline = 'alphabetic';
+        this.ctx.setLineDash([]);
+        this.ctx.restore();
       });
     });
   }
@@ -1641,42 +1685,44 @@ class AgentCanvas {
 
   drawAgents() {
     this.agents.forEach(agent => {
-      // Draw connection mode highlight
-      if (this.connectionMode) {
-        this.ctx.strokeStyle = '#3b82f6';
-        this.ctx.lineWidth = 4;
-        this.ctx.shadowColor = '#3b82f6';
-        this.ctx.shadowBlur = 15;
-        this.ctx.beginPath();
-        this.ctx.arc(agent.x, agent.y, agent.radius + 8, 0, Math.PI * 2);
-        this.ctx.stroke();
-        this.ctx.shadowColor = 'transparent';
-      }
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
 
       // Draw enhanced pulse effect for active/busy agents
       if (agent.status === 'active' || agent.status === 'busy') {
-        const pulseSize = agent.radius + 15 * Math.sin(agent.pulsePhase);
-        const pulseAlpha = 0.3 + 0.2 * Math.sin(agent.pulsePhase);
+        const grow = 10 + 6 * Math.sin(agent.pulsePhase);
+        const glowAlpha = 0.22 + 0.18 * Math.sin(agent.pulsePhase);
+        const glowColor = agent.status === 'active'
+          ? `rgba(16, 185, 129, ${glowAlpha})`
+          : `rgba(245, 158, 11, ${glowAlpha})`;
 
-        // Outer pulse ring
-        this.ctx.strokeStyle = agent.status === 'active' ? `rgba(16, 185, 129, ${pulseAlpha})` : `rgba(245, 158, 11, ${pulseAlpha})`;
-        this.ctx.lineWidth = 3;
-        this.ctx.beginPath();
-        this.ctx.arc(agent.x, agent.y, pulseSize, 0, Math.PI * 2);
-        this.ctx.stroke();
-
-        // Inner glow
-        this.ctx.fillStyle = agent.status === 'active' ? `rgba(16, 185, 129, ${pulseAlpha * 0.3})` : `rgba(245, 158, 11, ${pulseAlpha * 0.3})`;
-        this.ctx.beginPath();
-        this.ctx.arc(agent.x, agent.y, pulseSize, 0, Math.PI * 2);
+        this.ctx.save();
+        this.ctx.fillStyle = glowColor;
+        this.ctx.shadowColor = glowColor;
+        this.ctx.shadowBlur = 12;
+        this.roundRect(
+          agent.x - halfWidth - grow,
+          agent.y - halfHeight - grow,
+          (halfWidth * 2) + grow * 2,
+          (halfHeight * 2) + grow * 2,
+          14
+        );
         this.ctx.fill();
+        this.ctx.restore();
       }
 
-      // Draw agent circle
+      // Draw agent rectangle
       this.ctx.fillStyle = agent.color;
-      this.ctx.beginPath();
-      this.ctx.arc(agent.x, agent.y, agent.radius, 0, Math.PI * 2);
+      this.ctx.shadowColor = 'rgba(0,0,0,0.12)';
+      this.ctx.shadowBlur = 10;
+      this.roundRect(agent.x - halfWidth, agent.y - halfHeight, halfWidth * 2, halfHeight * 2, 12);
       this.ctx.fill();
+      this.ctx.shadowColor = 'transparent';
+
+      // Draw workflow ports to support incoming/outgoing connections
+      // Inputs point into the agent (down), outputs point outward (down from the node)
+      this.drawPort(agent.x, agent.y - halfHeight - 10, 'input', agent.color, 'down');
+      this.drawPort(agent.x, agent.y + halfHeight + 10, 'output', agent.color, 'down');
 
       // Draw status indicator
       let statusColor;
@@ -1689,7 +1735,7 @@ class AgentCanvas {
       }
       this.ctx.fillStyle = statusColor;
       this.ctx.beginPath();
-      this.ctx.arc(agent.x + agent.radius - 10, agent.y - agent.radius + 10, 6, 0, Math.PI * 2);
+      this.ctx.arc(agent.x + halfWidth - 10, agent.y - halfHeight + 10, 6, 0, Math.PI * 2);
       this.ctx.fill();
 
       // Draw agent name
@@ -1697,7 +1743,61 @@ class AgentCanvas {
       this.ctx.font = 'bold 14px system-ui';
       this.ctx.textAlign = 'center';
       this.ctx.textBaseline = 'middle';
-      this.ctx.fillText(agent.name, agent.x, agent.y);
+
+      // If there's a result, move name up to make room
+      const nameY = agent.lastResult ? agent.y - 15 : agent.y;
+      this.ctx.fillText(agent.name, agent.x, nameY);
+
+      // Draw last result (if available) - PROMINENT DISPLAY
+      if (agent.lastResult) {
+        // Result background container
+        const resultText = agent.lastResult.toString();
+        const maxWidth = 150;
+
+        // Measure text to determine background size
+        this.ctx.font = 'bold 13px system-ui';
+        let displayText = resultText;
+        let metrics = this.ctx.measureText(displayText);
+
+        // Truncate if needed
+        if (metrics.width > maxWidth) {
+          while (metrics.width > maxWidth && displayText.length > 3) {
+            displayText = resultText.substring(0, displayText.length - 4) + '...';
+            metrics = this.ctx.measureText(displayText);
+          }
+        }
+
+        // Draw result container
+        const padding = 8;
+        const resultBoxWidth = metrics.width + padding * 2;
+        const resultBoxHeight = 24;
+        const resultBoxX = agent.x - resultBoxWidth / 2;
+        const resultBoxY = agent.y + 5;
+
+        // Background with gradient
+        const gradient = this.ctx.createLinearGradient(
+          resultBoxX, resultBoxY,
+          resultBoxX, resultBoxY + resultBoxHeight
+        );
+        gradient.addColorStop(0, 'rgba(16, 185, 129, 0.9)'); // Success green
+        gradient.addColorStop(1, 'rgba(5, 150, 105, 0.9)');
+
+        this.ctx.save();
+        this.ctx.fillStyle = gradient;
+        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        this.ctx.shadowBlur = 8;
+        this.ctx.shadowOffsetY = 2;
+        this.roundRect(resultBoxX, resultBoxY, resultBoxWidth, resultBoxHeight, 4);
+        this.ctx.fill();
+        this.ctx.restore();
+
+        // Result text
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 13px system-ui';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(displayText, agent.x, resultBoxY + resultBoxHeight / 2);
+      }
 
       // Draw task count badge
       const currentTaskCount = agent.currentTasks?.length || 0;
@@ -1706,8 +1806,8 @@ class AgentCanvas {
 
       if (totalTaskCount > 0) {
         // Badge background
-        const badgeX = agent.x + agent.radius - 5;
-        const badgeY = agent.y + agent.radius - 5;
+        const badgeX = agent.x + ((agent.width || 120) / 2) - 5;
+        const badgeY = agent.y + ((agent.height || 70) / 2) - 5;
         const badgeRadius = 12;
 
         this.ctx.fillStyle = statusColor;
@@ -1739,7 +1839,7 @@ class AgentCanvas {
           taskText = `${queuedTaskCount} queued`;
         }
         if (taskText) {
-          this.ctx.fillText(taskText, agent.x, agent.y + agent.radius + 15);
+          this.ctx.fillText(taskText, agent.x, agent.y + ((agent.height || 70) / 2) + 15);
         }
       }
     });
@@ -2225,70 +2325,10 @@ class AgentCanvas {
       this.ctx.fillText('No result yet', contentX, currentY);
     }
 
-    // "Connect Result to Agent" button (only if task has result and is completed)
-    if (this.expandedTask.result && this.expandedTask.status === 'completed') {
-      const buttonY = panelHeight - 80;
-      const buttonWidth = this.expandedPanelWidth - padding * 2;
-      const buttonHeight = 40;
-
-      // Store button bounds for click detection
-      this.connectButtonBounds = {
-        x: panelX + padding,
-        y: buttonY,
-        width: buttonWidth,
-        height: buttonHeight
-      };
-
-      // Draw button
-      this.ctx.fillStyle = this.connectionMode ? '#dc2626' : '#3b82f6';
-      this.ctx.strokeStyle = this.connectionMode ? '#991b1b' : '#1e40af';
-      this.ctx.lineWidth = 2;
-      this.roundRect(contentX, buttonY, buttonWidth, buttonHeight, 8);
-      this.ctx.fill();
-      this.ctx.stroke();
-
-      // Button text
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 14px system-ui';
-      this.ctx.textAlign = 'center';
-      const buttonText = this.connectionMode ? '✕ Cancel Connection' : '🔗 Connect Result to Agent';
-      this.ctx.fillText(buttonText, panelX + this.expandedPanelWidth / 2, buttonY + 25);
-      this.ctx.textAlign = 'left';
-    } else {
-      this.connectButtonBounds = null;
-    }
+    // Connection-to-agent flow removed; keep bounds null
+    this.connectButtonBounds = null;
 
     this.ctx.restore();
-  }
-
-  drawConnectionModeIndicator() {
-    const centerX = this.width / 2;
-    const centerY = 50;
-    const boxWidth = 450;
-    const boxHeight = 80;
-
-    // Draw semi-transparent background
-    this.ctx.fillStyle = 'rgba(155, 89, 182, 0.95)'; // Purple to match connection theme
-    this.ctx.strokeStyle = '#8e44ad';
-    this.ctx.lineWidth = 3;
-    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-    this.ctx.shadowBlur = 15;
-    this.roundRect(centerX - boxWidth / 2, centerY, boxWidth, boxHeight, 8);
-    this.ctx.fill();
-    this.ctx.stroke();
-    this.ctx.shadowColor = 'transparent';
-
-    // Draw text
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 16px system-ui';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.fillText(`🔗 Connecting: "${this.connectionSourceTask.description.substring(0, 30)}..."`, centerX, centerY + 20);
-    this.ctx.font = '13px system-ui';
-    this.ctx.fillText('Click a task to link it  •  Click an agent to create new task', centerX, centerY + 45);
-    this.ctx.font = '11px system-ui';
-    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    this.ctx.fillText('Press ESC to cancel', centerX, centerY + 65);
   }
 
   drawExpandedAgentPanel() {
@@ -2375,6 +2415,47 @@ class AgentCanvas {
     this.roundRect(contentX, currentY, 30, 30, 15);
     this.ctx.fill();
     currentY += 40;
+
+    // Last Result section (if available)
+    if (this.expandedAgent.lastResult) {
+      this.ctx.fillStyle = '#10b981'; // Green
+      this.ctx.font = 'bold 14px system-ui';
+      this.ctx.fillText('📊 Last Result', contentX, currentY);
+      currentY += 20;
+
+      // Result box
+      const resultBoxWidth = this.expandedAgentPanelWidth - padding * 2;
+      const resultText = this.expandedAgent.lastResult.toString();
+
+      // Wrap text for long results
+      const maxLineLength = 40;
+      const resultLines = this.wrapText(resultText, resultBoxWidth - 20);
+      const resultBoxHeight = Math.max(60, resultLines.length * 18 + 20);
+
+      // Background gradient
+      const gradient = this.ctx.createLinearGradient(
+        contentX, currentY,
+        contentX, currentY + resultBoxHeight
+      );
+      gradient.addColorStop(0, 'rgba(16, 185, 129, 0.1)');
+      gradient.addColorStop(1, 'rgba(5, 150, 105, 0.15)');
+
+      this.ctx.fillStyle = gradient;
+      this.ctx.strokeStyle = '#10b981';
+      this.ctx.lineWidth = 2;
+      this.roundRect(contentX, currentY, resultBoxWidth, resultBoxHeight, 8);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Result text
+      this.ctx.fillStyle = '#065f46'; // Dark green
+      this.ctx.font = 'bold 14px monospace';
+      resultLines.forEach((line, index) => {
+        this.ctx.fillText(line, contentX + 10, currentY + 20 + index * 18);
+      });
+
+      currentY += resultBoxHeight + 20;
+    }
 
     // Activity Statistics section
     this.ctx.fillStyle = '#3b82f6';
@@ -2614,6 +2695,118 @@ class AgentCanvas {
     this.ctx.restore();
   }
 
+  drawExpandedCombinerPanel() {
+    if (!this.expandedCombiner) return;
+
+    const panelX = this.width - this.expandedCombinerPanelWidth;
+    const panelY = 0;
+    const panelHeight = this.height;
+    const padding = 20;
+
+    this.ctx.save();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+    this.ctx.shadowBlur = 18;
+    this.ctx.shadowOffsetX = -5;
+    this.ctx.fillRect(panelX, panelY, this.expandedCombinerPanelWidth, panelHeight);
+    this.ctx.shadowColor = 'transparent';
+
+    if (this.expandedCombinerPanelWidth < 80) {
+      this.ctx.restore();
+      return;
+    }
+
+    // Close button
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = 'bold 24px system-ui';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText('×', panelX + this.expandedCombinerPanelWidth - padding, padding + 20);
+
+    // Title
+    let currentY = padding + 50;
+    this.ctx.textAlign = 'left';
+    this.ctx.fillStyle = '#111827';
+    this.ctx.font = 'bold 16px system-ui';
+    this.ctx.fillText(`${this.expandedCombiner.name} Node`, panelX + padding, currentY);
+    currentY += 26;
+
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = '12px system-ui';
+    this.ctx.fillText(`Mode: ${this.expandedCombiner.resultCombinationMode || 'merge'}`, panelX + padding, currentY);
+    currentY += 22;
+
+    // Inputs section
+    this.ctx.fillStyle = '#111827';
+    this.ctx.font = 'bold 13px system-ui';
+    this.ctx.fillText('Inputs', panelX + padding, currentY);
+    currentY += 18;
+
+    const inputConnections = this.connections.filter(c => c.to === this.expandedCombiner.id);
+    if (inputConnections.length === 0) {
+      this.ctx.fillStyle = '#9ca3af';
+      this.ctx.font = '12px system-ui';
+      this.ctx.fillText('No inputs connected', panelX + padding, currentY);
+      currentY += 22;
+    } else {
+      inputConnections.forEach(conn => {
+        const source = this.getNodeById(conn.from);
+        this.ctx.fillStyle = '#2563eb';
+        this.ctx.font = 'bold 12px system-ui';
+        this.ctx.fillText(source?.node?.description || source?.node?.name || conn.from, panelX + padding, currentY);
+        currentY += 16;
+      });
+    }
+
+    currentY += 10;
+    this.ctx.strokeStyle = '#e5e7eb';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(panelX + padding, currentY);
+    this.ctx.lineTo(panelX + this.expandedCombinerPanelWidth - padding, currentY);
+    this.ctx.stroke();
+    currentY += 20;
+
+    // Combined result
+    this.ctx.fillStyle = '#111827';
+    this.ctx.font = 'bold 13px system-ui';
+    this.ctx.fillText('Combined Output', panelX + padding, currentY);
+    currentY += 18;
+
+    const combinedText = this.buildCombinerResultPreview(this.expandedCombiner);
+    const textLines = this.wrapText(combinedText || 'No results yet', this.expandedCombinerPanelWidth - padding * 2);
+
+    this.ctx.fillStyle = combinedText ? '#111827' : '#9ca3af';
+    this.ctx.font = '12px system-ui';
+    textLines.slice(0, 12).forEach(line => {
+      this.ctx.fillText(line, panelX + padding, currentY);
+      currentY += 16;
+    });
+
+    this.ctx.restore();
+  }
+
+  buildCombinerResultPreview(combiner) {
+    const inputConns = this.connections.filter(c => c.to === combiner.id);
+    if (!inputConns.length) return '';
+    const inputs = [];
+    inputConns.forEach(conn => {
+      const nodeData = this.getNodeById(conn.from);
+      if (nodeData?.type === 'task' && nodeData.node?.result) {
+        inputs.push(nodeData.node.result);
+      }
+    });
+    if (!inputs.length) return '';
+
+    switch (combiner.resultCombinationMode) {
+      case 'append':
+        return inputs.join('\n---\n');
+      case 'summarize':
+      case 'merge':
+      default:
+        return inputs.map((t, i) => `• Input ${i + 1}: ${t}`).join('\n');
+    }
+  }
+
   // Helper function to draw rounded rectangle
   roundRect(x, y, width, height, radius) {
     this.ctx.beginPath();
@@ -2669,6 +2862,127 @@ class AgentCanvas {
       return;
     }
 
+    // If in assignment mode, prioritize assignment clicks over manual port wiring
+    // Check ports if not in assignment mode, or treat combiner ports as clicks during assignment
+    const clickedPort = this.getPortAtPosition(x, y);
+    if (clickedPort) {
+      if (this.assignmentMode && this.assignmentSourceTask) {
+        const target = this.getNodeById(clickedPort.nodeId);
+        if (target && target.type === 'combiner') {
+          e.stopPropagation();
+          e.preventDefault();
+          console.log('Assigning task to combiner via port click:', target.node.id);
+          this.assignTaskToCombiner(target.node);
+          return;
+        }
+        // Otherwise ignore port clicks while assigning
+      } else {
+        e.stopPropagation();
+        e.preventDefault();
+        this.isDraggingConnection = true;
+        this.connectionDragStart = clickedPort;
+        this.canvas.style.cursor = 'crosshair';
+        console.log(`🔗 Started dragging connection from ${clickedPort.nodeId}.${clickedPort.portId}`);
+        return;
+      }
+    }
+
+    // Check if clicking on a combiner node
+    for (const combiner of this.combinerNodes) {
+      // Check delete button first (higher priority)
+      if (combiner.deleteButtonBounds) {
+        const bounds = combiner.deleteButtonBounds;
+        if (x >= bounds.x && x <= bounds.x + bounds.width &&
+            y >= bounds.y && y <= bounds.y + bounds.height) {
+          // Delete this combiner
+          e.stopPropagation();
+          e.preventDefault();
+          this.deleteCombinerNode(combiner.id);
+          this.showNotification('Combiner node deleted', 'success');
+          return;
+        }
+      }
+
+      // Check RUN button
+      if (combiner.runButtonBounds) {
+        const b = combiner.runButtonBounds;
+        if (x >= b.x && x <= b.x + b.width &&
+            y >= b.y && y <= b.y + b.height) {
+          e.stopPropagation();
+          e.preventDefault();
+          this.executeCombiner(combiner);
+          return;
+        }
+      }
+
+      // Check assign output button
+      if (combiner.assignButtonBounds) {
+        const b = combiner.assignButtonBounds;
+        if (x >= b.x && x <= b.x + b.width &&
+            y >= b.y && y <= b.y + b.height) {
+          e.stopPropagation();
+          e.preventDefault();
+          if (this.combinerAssignMode && this.combinerAssignmentSource && this.combinerAssignmentSource.id === combiner.id) {
+            this.combinerAssignMode = false;
+            this.combinerAssignmentSource = null;
+            this.canvas.style.cursor = 'grab';
+            this.draw();
+            this.showNotification('Combiner assignment cancelled', 'info');
+          } else {
+            this.combinerAssignMode = true;
+            this.combinerAssignmentSource = combiner;
+            this.canvas.style.cursor = 'crosshair';
+            this.draw();
+            this.showNotification('Click an agent to route Merge output', 'info');
+          }
+          return;
+        }
+      }
+
+      // Check if clicking on combiner body
+      if (x >= combiner.x && x <= combiner.x + combiner.width &&
+          y >= combiner.y && y <= combiner.y + combiner.height) {
+
+        // Check if in assignment mode first (higher priority than dragging)
+        if (this.assignmentMode && this.assignmentSourceTask) {
+          e.stopPropagation();
+          e.preventDefault();
+          console.log('Assigning task to combiner in mousedown:', combiner.id);
+          this.assignTaskToCombiner(combiner);
+          return;
+        }
+
+        // If not assigning, auto-connect from the last dragged connection start
+        if (this.connectionDragStart) {
+          e.stopPropagation();
+          e.preventDefault();
+          const portId = `input-${Math.max(combiner.inputPorts.length, 0)}`;
+          this.ensureCombinerInputPort(combiner, portId);
+          this.createConnection(
+            this.connectionDragStart.nodeId,
+            this.connectionDragStart.portId,
+            combiner.id,
+            portId
+          );
+          this.connectionDragStart = null;
+          this.isDraggingConnection = false;
+          this.canvas.style.cursor = 'grab';
+          this.draw();
+          return;
+        }
+
+        // Otherwise, start dragging this combiner
+        e.stopPropagation();
+        e.preventDefault();
+        this.isDraggingCombiner = true;
+        this.draggedCombiner = combiner;
+        this.dragStartX = x;
+        this.dragStartY = y;
+        this.canvas.style.cursor = 'move';
+        return;
+      }
+    }
+
     // Check if Space is pressed for pan mode
     if (this.spacePressed) {
       // Space+Drag to pan
@@ -2706,10 +3020,12 @@ class AgentCanvas {
       }
     }
 
-    // Check if clicking on an agent
+    // Check if clicking on an agent (rectangle hitbox)
     for (const agent of this.agents) {
-      const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
-      if (dist <= agent.radius) {
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
+          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
         // Start dragging this agent
         this.isDraggingAgent = true;
         this.draggedAgent = agent;
@@ -2737,6 +3053,22 @@ class AgentCanvas {
     // If context menu is visible, redraw to update hover effects
     if (this.contextMenuVisible) {
       this.draw();
+    }
+
+    // Handle connection dragging
+    if (this.isDraggingConnection) {
+      this.draw();
+      return;
+    }
+
+    // Handle combiner node dragging
+    if (this.isDraggingCombiner && this.draggedCombiner) {
+      const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+      const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+      this.draggedCombiner.x = x;
+      this.draggedCombiner.y = y;
+      this.draw();
+      return;
     }
 
     // Track mouse position for assignment mode
@@ -2801,25 +3133,113 @@ class AgentCanvas {
     }
   }
 
-  onMouseUp() {
+  onMouseUp(e) {
     const wasDraggingAgent = this.isDraggingAgent;
     const wasDraggingTask = this.isDraggingTask;
+    const wasDraggingConnection = this.isDraggingConnection;
+    const wasDraggingCombiner = this.isDraggingCombiner;
+
+    // Handle connection drop
+    if (wasDraggingConnection && this.connectionDragStart) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.offsetX) / this.scale;
+      const y = (e.clientY - rect.top - this.offsetY) / this.scale;
+
+      // Find port at drop position
+      const targetPort = this.getPortAtPosition(x, y);
+      let resolvedPort = targetPort;
+
+      // Fallback: if no explicit port hit but dropped on an agent body, treat as input port
+      if (!resolvedPort) {
+        for (const agent of this.agents) {
+          const halfWidth = (agent.width || 120) / 2;
+          const halfHeight = (agent.height || 70) / 2;
+          if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
+              y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+            resolvedPort = {
+              nodeId: agent.name,
+              nodeType: 'agent',
+              portId: 'input',
+              type: 'input'
+            };
+            break;
+          }
+        }
+      }
+
+      // Fallback: if no port but dropped on a combiner body, attach to a new input port
+      if (!resolvedPort) {
+        for (const combiner of this.combinerNodes) {
+          if (x >= combiner.x && x <= combiner.x + combiner.width &&
+              y >= combiner.y && y <= combiner.y + combiner.height) {
+            const nextIndex = Math.max(combiner.inputPorts.length, 0);
+            const portId = `input-${nextIndex}`;
+            this.ensureCombinerInputPort(combiner, portId);
+            resolvedPort = {
+              nodeId: combiner.id,
+              nodeType: 'combiner',
+              portId: portId,
+              type: 'input'
+            };
+            break;
+          }
+        }
+      }
+
+      // Fallback: snap to nearest agent input port within a generous radius
+      if (!resolvedPort && this.agents.length > 0) {
+        let closest = null;
+        let closestDist = Infinity;
+        this.agents.forEach(agent => {
+          const halfHeight = (agent.height || 70) / 2;
+          const portX = agent.x;
+          const portY = agent.y - halfHeight - 10;
+          const dist = Math.hypot(portX - x, portY - y);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closest = { nodeId: agent.name, nodeType: 'agent', portId: 'input', type: 'input', x: portX, y: portY };
+          }
+        });
+        // Accept if within 80px to make drops forgiving
+        if (closest && closestDist <= 80) {
+          resolvedPort = closest;
+        }
+      }
+
+      if (resolvedPort && resolvedPort.nodeId !== this.connectionDragStart.nodeId) {
+        // Create connection
+        this.createConnection(
+          this.connectionDragStart.nodeId,
+          this.connectionDragStart.portId,
+          resolvedPort.nodeId,
+          resolvedPort.portId
+        );
+        this.showNotification('Connection created', 'success');
+      }
+
+      // Clear connection drag state
+      this.isDraggingConnection = false;
+      this.connectionDragStart = null;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+      return;
+    }
 
     this.isDragging = false;
     this.isDraggingAgent = false;
     this.draggedAgent = null;
     this.isDraggingTask = false;
+    this.isDraggingCombiner = false;
+    this.draggedCombiner = null;
     this.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingCombiner) {
       this.saveLayout();
     }
 
     // Preserve cursor state for assignment/connection modes
-    if (this.assignmentMode) {
-      this.canvas.style.cursor = 'crosshair';
-    } else if (this.connectionMode) {
+    if (this.assignmentMode || this.combinerAssignMode) {
       this.canvas.style.cursor = 'crosshair';
     } else {
       this.canvas.style.cursor = 'grab';
@@ -3106,6 +3526,25 @@ class AgentCanvas {
       }
     }
 
+    // Check if click is on close button of expanded combiner panel
+    if (this.expandedCombinerPanelWidth > 0) {
+      const panelX = this.width - this.expandedCombinerPanelWidth;
+      const closeButtonX = panelX + this.expandedCombinerPanelWidth - 40;
+      const closeButtonY = 30;
+      const closeButtonSize = 40;
+
+      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
+          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+        this.closeCombinerPanel();
+        return;
+      }
+
+      // If clicking anywhere on the combiner panel, don't process other clicks
+      if (screenX >= panelX) {
+        return;
+      }
+    }
+
     // Check if click is on close button of expanded task panel
     if (this.expandedPanelWidth > 0) {
       const panelX = this.width - this.expandedPanelWidth;
@@ -3129,16 +3568,6 @@ class AgentCanvas {
         }
       }
 
-      // Check if click is on "Connect Result to Agent" button
-      if (this.connectButtonBounds) {
-        const btn = this.connectButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
-          this.toggleConnectionMode();
-          return;
-        }
-      }
-
       // If clicking anywhere on the panel, don't process other clicks
       if (screenX >= panelX) {
         return;
@@ -3158,20 +3587,6 @@ class AgentCanvas {
         const cardX = task.x - cardWidth / 2;
         const cardY = task.y - cardHeight / 2;
 
-        // Check if click is on connection indicator (purple pulsing icon)
-        if (task.connectionIndicatorBounds && task.status === 'completed' && task.result) {
-          const btn = task.connectionIndicatorBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
-            // Connection indicator clicked - enter connection mode
-            this.connectionMode = true;
-            this.connectionSourceTask = task;
-            this.canvas.style.cursor = 'crosshair';
-            this.draw();
-            return;
-          }
-        }
-
         // Check if click is on delete button first
         if (task.deleteBtnBounds) {
           const btn = task.deleteBtnBounds;
@@ -3190,6 +3605,17 @@ class AgentCanvas {
               y >= btn.y && y <= btn.y + btn.height) {
             // Execute button clicked
             this.executeTask(task);
+            return;
+          }
+        }
+
+        // Check if click is on rerun button
+        if (task.rerunBtnBounds && (task.status === 'completed' || task.status === 'failed')) {
+          const btn = task.rerunBtnBounds;
+          if (x >= btn.x && x <= btn.x + btn.width &&
+              y >= btn.y && y <= btn.y + btn.height) {
+            // Rerun button clicked
+            this.rerunTask(task);
             return;
           }
         }
@@ -3218,19 +3644,6 @@ class AgentCanvas {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
-          // Check if in connection mode
-          if (this.connectionMode && this.connectionSourceTask) {
-            // In connection mode - link this task to receive input from source task
-            // Don't link to itself
-            if (task.id === this.connectionSourceTask.id) {
-              alert('⚠️ Cannot connect a task to itself. Please select a different task.');
-              return;
-            }
-            // Connect this task to receive input
-            this.connectToExistingTask(task);
-            return;
-          }
-
           // Task clicked - expand/collapse panel
           this.toggleTaskPanel(task);
           return;
@@ -3240,23 +3653,50 @@ class AgentCanvas {
 
     // Check if click is on any agent
     for (const agent of this.agents) {
-      const dist = Math.sqrt((x - agent.x) ** 2 + (y - agent.y) ** 2);
-      if (dist <= agent.radius) {
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
+          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
         // Agent clicked
-        console.log('Agent clicked:', agent.name, 'assignmentMode:', this.assignmentMode);
+        console.log('Agent clicked:', agent.name, 'assignmentMode:', this.assignmentMode, 'combinerAssignMode:', this.combinerAssignMode);
         if (this.assignmentMode && this.assignmentSourceTask) {
           // In assignment mode - assign task to agent
           console.log('Assigning task to agent:', agent.name);
           this.assignTaskToAgent(agent);
           return;
-        } else if (this.connectionMode && this.connectionSourceTask) {
-          // In connection mode - create task with result linked
-          this.createConnectedTask(agent);
+        } else if (this.combinerAssignMode && this.combinerAssignmentSource) {
+          // Wire combiner output to this agent
+          this.createConnection(this.combinerAssignmentSource.id, 'output', agent.name, 'input');
+          this.combinerAssignMode = false;
+          this.combinerAssignmentSource = null;
+          this.canvas.style.cursor = 'grab';
+          this.draw();
+          this.saveLayout();
+          this.showNotification(`Combiner output connected to ${agent.name}`, 'success');
           return;
         } else {
           // Toggle agent panel
           this.toggleAgentPanel(agent);
         }
+        return;
+      }
+    }
+
+    // Check combiner node clicks (for task assignment)
+    for (const combiner of this.combinerNodes) {
+      if (x >= combiner.x && x <= combiner.x + combiner.width &&
+          y >= combiner.y && y <= combiner.y + combiner.height) {
+        // Combiner clicked
+        console.log('Combiner clicked:', combiner.id, 'assignmentMode:', this.assignmentMode, 'combinerAssignMode:', this.combinerAssignMode);
+        if (this.assignmentMode && this.assignmentSourceTask) {
+          // In assignment mode - assign task to combiner
+          console.log('Assigning task to combiner:', combiner.id);
+          this.assignTaskToCombiner(combiner);
+          return;
+        }
+
+        // Toggle combiner detail panel
+        this.toggleCombinerPanel(combiner);
         return;
       }
     }
@@ -3268,12 +3708,18 @@ class AgentCanvas {
     if (this.expandedAgent) {
       this.closeAgentPanel();
     }
+    if (this.expandedCombiner) {
+      this.closeCombinerPanel();
+    }
   }
 
   toggleTaskPanel(task) {
     // Close agent panel if open
     if (this.expandedAgent) {
       this.closeAgentPanel();
+    }
+    if (this.expandedCombiner) {
+      this.closeCombinerPanel();
     }
 
     if (this.expandedTask && this.expandedTask.id === task.id) {
@@ -3330,6 +3776,9 @@ class AgentCanvas {
     if (this.expandedTask) {
       this.closeTaskPanel();
     }
+    if (this.expandedCombiner) {
+      this.closeCombinerPanel();
+    }
 
     if (this.expandedAgent && this.expandedAgent.name === agent.name) {
       // Clicking the same agent - close panel
@@ -3375,6 +3824,52 @@ class AgentCanvas {
     this.animateAgentPanel(false);
   }
 
+  toggleCombinerPanel(combiner) {
+    // Close other panels
+    if (this.expandedTask) this.closeTaskPanel();
+    if (this.expandedAgent) this.closeAgentPanel();
+
+    if (this.expandedCombiner && this.expandedCombiner.id === combiner.id) {
+      this.closeCombinerPanel();
+      return;
+    }
+
+    this.expandedCombiner = combiner;
+    this.expandedCombinerPanelAnimating = true;
+    this.animateCombinerPanel(true);
+  }
+
+  closeCombinerPanel() {
+    this.expandedCombinerPanelAnimating = true;
+    this.animateCombinerPanel(false);
+  }
+
+  animateCombinerPanel(expanding) {
+    const animate = () => {
+      const speed = 30;
+      if (expanding) {
+        this.expandedCombinerPanelWidth = Math.min(
+          this.expandedCombinerPanelWidth + speed,
+          this.expandedCombinerPanelTargetWidth
+        );
+        if (this.expandedCombinerPanelWidth >= this.expandedCombinerPanelTargetWidth) {
+          this.expandedCombinerPanelAnimating = false;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      } else {
+        this.expandedCombinerPanelWidth = Math.max(this.expandedCombinerPanelWidth - speed, 0);
+        if (this.expandedCombinerPanelWidth <= 0) {
+          this.expandedCombinerPanelAnimating = false;
+          this.expandedCombiner = null;
+        } else {
+          requestAnimationFrame(animate);
+        }
+      }
+    };
+    animate();
+  }
+
   animateAgentPanel(expanding) {
     const animate = () => {
       const speed = 30; // pixels per frame
@@ -3407,21 +3902,6 @@ class AgentCanvas {
     animate();
   }
 
-  toggleConnectionMode() {
-    if (this.connectionMode) {
-      // Cancel connection mode
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-    } else {
-      // Enter connection mode
-      this.connectionMode = true;
-      this.connectionSourceTask = this.expandedTask;
-      this.canvas.style.cursor = 'crosshair';
-    }
-    this.draw();
-  }
-
   async copyResultToClipboard() {
     if (!this.expandedTask || !this.expandedTask.result) {
       return;
@@ -3451,123 +3931,6 @@ class AgentCanvas {
     }
   }
 
-  async createConnectedTask(agent) {
-    // Prompt for task description
-    const description = prompt(
-      `Create task for ${agent.name}\n\nThe result from "${this.connectionSourceTask.description}" will be provided as input.\n\nEnter task description:`,
-      `Process the result from the previous task`
-    );
-
-    if (!description) {
-      // User cancelled
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-      this.draw();
-      return;
-    }
-
-    // Create task via API
-    try {
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          studio_id: this.studioId,  // Backend expects 'studio_id', not 'workspace_id'
-          from: this.connectionSourceTask.to, // From the agent that completed the source task
-          to: agent.name,
-          description: description,
-          input_task_ids: [this.connectionSourceTask.id],
-          priority: 0,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create task');
-      }
-
-      const result = await response.json();
-      console.log('✅ Connected task created:', result);
-
-      // Exit connection mode
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-
-      // Reload studio data to show new task
-      await this.init();
-
-      // Show success message
-      alert(`✅ Task created!\n\n${agent.name} will process the result from the previous task.`);
-    } catch (error) {
-      console.error('❌ Error creating connected task:', error);
-      alert('Failed to create task: ' + error.message);
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-      this.draw();
-    }
-  }
-
-  async connectToExistingTask(targetTask) {
-    // Connect an existing task to receive input from the source task
-    try {
-      // Add the source task ID to the target task's input_task_ids
-      const currentInputs = targetTask.input_task_ids || [];
-
-      // Check if already connected
-      if (currentInputs.includes(this.connectionSourceTask.id)) {
-        alert(`⚠️ This task is already connected to "${this.connectionSourceTask.description}"`);
-        this.connectionMode = false;
-        this.connectionSourceTask = null;
-        this.canvas.style.cursor = 'grab';
-        this.draw();
-        return;
-      }
-
-      const updatedInputs = [...currentInputs, this.connectionSourceTask.id];
-
-      // Update task via API
-      const response = await fetch('/api/orchestration/tasks', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          task_id: targetTask.id,
-          input_task_ids: updatedInputs,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to connect task: ${errorText}`);
-      }
-
-      console.log(`✅ Connected task ${targetTask.id} to receive input from ${this.connectionSourceTask.id}`);
-
-      // Exit connection mode
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-
-      // Reload studio data to show new connection
-      await this.init();
-
-      // Show success message
-      alert(`✅ Task connected!\n\n"${targetTask.description}" will now receive the result from "${this.connectionSourceTask.description}"`);
-    } catch (error) {
-      console.error('❌ Error connecting task:', error);
-      alert('Failed to connect task: ' + error.message);
-      this.connectionMode = false;
-      this.connectionSourceTask = null;
-      this.canvas.style.cursor = 'grab';
-      this.draw();
-    }
-  }
-
   toggleAssignmentMode(task) {
     console.log('toggleAssignmentMode called for task:', task.id);
     if (this.assignmentMode && this.assignmentSourceTask && this.assignmentSourceTask.id === task.id) {
@@ -3594,35 +3957,38 @@ class AgentCanvas {
     this.ctx.translate(this.offsetX, this.offsetY);
     this.ctx.scale(this.scale, this.scale);
 
-    // Draw line
-    this.ctx.strokeStyle = '#fd7e14';
-    this.ctx.lineWidth = 3;
-    this.ctx.setLineDash([10, 5]);
-    this.ctx.beginPath();
-    this.ctx.moveTo(this.assignmentSourceTask.x, this.assignmentSourceTask.y);
-    this.ctx.lineTo(this.assignmentMouseX, this.assignmentMouseY);
-    this.ctx.stroke();
-    this.ctx.setLineDash([]);
+    // Only draw when we have a source task
+    if (this.assignmentSourceTask) {
+      // Draw line
+      this.ctx.strokeStyle = '#fd7e14';
+      this.ctx.lineWidth = 3;
+      this.ctx.setLineDash([10, 5]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.assignmentSourceTask.x, this.assignmentSourceTask.y);
+      this.ctx.lineTo(this.assignmentMouseX, this.assignmentMouseY);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
 
-    // Draw arrow at cursor
-    const angle = Math.atan2(
-      this.assignmentMouseY - this.assignmentSourceTask.y,
-      this.assignmentMouseX - this.assignmentSourceTask.x
-    );
-    const arrowSize = 15;
-    this.ctx.fillStyle = '#fd7e14';
-    this.ctx.beginPath();
-    this.ctx.moveTo(this.assignmentMouseX, this.assignmentMouseY);
-    this.ctx.lineTo(
-      this.assignmentMouseX - arrowSize * Math.cos(angle - Math.PI / 6),
-      this.assignmentMouseY - arrowSize * Math.sin(angle - Math.PI / 6)
-    );
-    this.ctx.lineTo(
-      this.assignmentMouseX - arrowSize * Math.cos(angle + Math.PI / 6),
-      this.assignmentMouseY - arrowSize * Math.sin(angle + Math.PI / 6)
-    );
-    this.ctx.closePath();
-    this.ctx.fill();
+      // Draw arrow at cursor
+      const angle = Math.atan2(
+        this.assignmentMouseY - this.assignmentSourceTask.y,
+        this.assignmentMouseX - this.assignmentSourceTask.x
+      );
+      const arrowSize = 15;
+      this.ctx.fillStyle = '#fd7e14';
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.assignmentMouseX, this.assignmentMouseY);
+      this.ctx.lineTo(
+        this.assignmentMouseX - arrowSize * Math.cos(angle - Math.PI / 6),
+        this.assignmentMouseY - arrowSize * Math.sin(angle - Math.PI / 6)
+      );
+      this.ctx.lineTo(
+        this.assignmentMouseX - arrowSize * Math.cos(angle + Math.PI / 6),
+        this.assignmentMouseY - arrowSize * Math.sin(angle + Math.PI / 6)
+      );
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
 
     this.ctx.restore();
   }
@@ -3702,11 +4068,12 @@ class AgentCanvas {
 
     // Include agents
     this.agents.forEach(agent => {
-      const agentRadius = 60;
-      minX = Math.min(minX, agent.x - agentRadius);
-      maxX = Math.max(maxX, agent.x + agentRadius);
-      minY = Math.min(minY, agent.y - agentRadius);
-      maxY = Math.max(maxY, agent.y + agentRadius);
+      const halfW = (agent.width || 120) / 2;
+      const halfH = (agent.height || 70) / 2;
+      minX = Math.min(minX, agent.x - halfW);
+      maxX = Math.max(maxX, agent.x + halfW);
+      minY = Math.min(minY, agent.y - halfH);
+      maxY = Math.max(maxY, agent.y + halfH);
     });
 
     // Calculate content dimensions
@@ -3735,7 +4102,6 @@ class AgentCanvas {
   arrangeAgentsAtBottom(canvasWidth, canvasHeight, tasksBottomY) {
     if (!this.agents || this.agents.length === 0) return;
 
-    const agentRadius = 60; // Approximate agent circle radius
     const agentSpacing = 200; // Space between agents
     const bottomMargin = 150; // Space from bottom
 
@@ -3835,6 +4201,99 @@ class AgentCanvas {
       this.addNotification(`✅ Task assigned to ${agent.name}`, 'success');
     } catch (error) {
       console.error('❌ Error assigning task:', error);
+      this.addNotification('Failed to assign task: ' + error.message, 'error');
+      this.assignmentMode = false;
+      this.assignmentSourceTask = null;
+      this.assignmentMouseX = 0;
+      this.assignmentMouseY = 0;
+      this.canvas.style.cursor = 'grab';
+      this.draw();
+    }
+  }
+
+  async assignTaskToCombiner(combiner) {
+    // Assign task to combiner node - it will route to appropriate agent based on connections
+    try {
+      // Find the agent connected to the combiner's output
+      const outputConnection = this.connections.find(c => c.from === combiner.id && c.fromPort === 'output');
+
+      // Remove any prior combiner→this task connections to avoid loops
+      this.connections = this.connections.filter(c =>
+        !(c.from === combiner.id && c.to === this.assignmentSourceTask.id)
+      );
+
+      // Determine or create an input port for this task
+      const existingInputConns = this.connections.filter(c => c.to === combiner.id && c.toPort.startsWith('input'));
+      // Reuse existing connection if this task is already wired
+      let targetInputPortId = null;
+      const existingForTask = existingInputConns.find(c => c.from === this.assignmentSourceTask.id);
+      if (existingForTask) {
+        targetInputPortId = existingForTask.toPort;
+      } else {
+        const nextIndex = existingInputConns.length;
+        targetInputPortId = `input-${nextIndex}`;
+        this.ensureCombinerInputPort(combiner, targetInputPortId);
+        // Create visual connection from task to combiner input
+        this.createConnection(this.assignmentSourceTask.id, 'output', combiner.id, targetInputPortId);
+      }
+
+      // Get the target agent (optional). If none wired yet, keep task unassigned but still store combiner metadata.
+      const targetAgentName = outputConnection ? outputConnection.to : (this.assignmentSourceTask?.to || 'unassigned');
+
+      // Find input connections to gather input task IDs (after ensuring current task is wired)
+      const inputConnections = this.connections.filter(c => c.to === combiner.id);
+      const inputTaskIds = [];
+
+      for (const conn of inputConnections) {
+        const nodeData = this.getNodeById(conn.from);
+        if (nodeData && nodeData.type === 'task') {
+          inputTaskIds.push(conn.from);
+        }
+      }
+
+      // Assign task to target agent with combiner metadata
+      const response = await fetch(`/api/orchestration/tasks`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: this.assignmentSourceTask.id,
+          to: targetAgentName,
+          input_task_ids: inputTaskIds,
+          result_combination_mode: combiner.resultCombinationMode || 'merge'
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to assign task: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Task assigned to combiner → agent:', result);
+
+      // Exit assignment mode
+      this.assignmentMode = false;
+      this.assignmentSourceTask = null;
+      this.assignmentMouseX = 0;
+      this.assignmentMouseY = 0;
+      this.canvas.style.cursor = 'grab';
+
+      // Update task locally
+      const task = this.tasks.find(t => t.id === result.id);
+      if (task) {
+        task.to = targetAgentName;
+        task.input_task_ids = inputTaskIds;
+      }
+
+      this.draw();
+
+      // Show success notification
+      this.addNotification(`✅ Task assigned via ${combiner.name} → ${targetAgentName}`, 'success');
+      console.log(`📊 Task will receive combined results from: ${inputTaskIds.join(', ')}`);
+    } catch (error) {
+      console.error('❌ Error assigning task to combiner:', error);
       this.addNotification('Failed to assign task: ' + error.message, 'error');
       this.assignmentMode = false;
       this.assignmentSourceTask = null;
@@ -4491,6 +4950,300 @@ class AgentCanvas {
     }
   }
 
+  /**
+   * Rerun a completed or failed task
+   */
+  async rerunTask(task) {
+    if (!task || !task.id) {
+      console.error('Invalid task:', task);
+      return;
+    }
+
+    // Confirm rerun
+    const confirmMsg = task.status === 'failed'
+      ? `Rerun this failed task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again.`
+      : `Rerun this task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again with the same parameters.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      // Reset task status to pending first
+      const updateResponse = await fetch(`/api/orchestration/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'pending',
+          result: null // Clear previous result
+        })
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error('Failed to reset task status');
+      }
+
+      // Update local task object
+      task.status = 'pending';
+      task.result = null;
+      this.draw();
+
+      // Execute the task
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: task.id })
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to execute task');
+      }
+
+      const result = await response.json();
+      console.log('✅ Task rerun started:', result);
+
+      // Update task status locally
+      task.status = 'in_progress';
+      this.draw();
+
+      // Show notification
+      this.showNotification(`Task "${task.description || task.id}" is being rerun`, 'success');
+
+      // Reload after a short delay to get updated status
+      setTimeout(() => this.init(), 1000);
+
+    } catch (error) {
+      console.error('❌ Error rerunning task:', error);
+      alert('Failed to rerun task: ' + error.message);
+    }
+  }
+
+  /**
+   * Execute a combiner node - sets up and executes the output task with merged inputs
+   */
+  async executeCombiner(combiner) {
+    if (!combiner || !combiner.id) {
+      console.error('Invalid combiner:', combiner);
+      return;
+    }
+
+    console.log('🔀 Executing combiner:', combiner.id);
+
+    try {
+      // Find all input connections to this combiner
+      const inputConnections = this.connections.filter(c => c.to === combiner.id);
+      console.log('📥 Input connections:', inputConnections.length);
+
+      // Get all input tasks (these provide the data to be merged)
+      const inputTasks = [];
+      for (const conn of inputConnections) {
+        const nodeData = this.getNodeById(conn.from);
+        if (nodeData && nodeData.type === 'task') {
+          inputTasks.push(nodeData.node);
+        }
+      }
+
+      const inputTaskIds = inputTasks.map(t => t.id);
+
+      if (inputTasks.length === 0) {
+        this.showNotification('No input tasks connected to this combiner', 'warning');
+        return;
+      }
+
+      // Check which input tasks need to be executed (pending or failed, no results)
+      const tasksToExecute = inputTasks.filter(t =>
+        (t.status === 'pending' || t.status === 'failed' || !t.result)
+      );
+
+      // Execute pending input tasks first
+      if (tasksToExecute.length > 0) {
+        this.showNotification(`Executing ${tasksToExecute.length} input task(s)...`, 'info');
+
+        const executionPromises = tasksToExecute.map(task => {
+          return fetch('/api/orchestration/tasks/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task_id: task.id })
+          }).then(response => {
+            if (!response.ok) {
+              throw new Error(`Failed to execute task ${task.id}`);
+            }
+            task.status = 'in_progress';
+            return response.json();
+          });
+        });
+
+        // Start all executions in parallel
+        await Promise.all(executionPromises);
+
+        // Update UI
+        this.draw();
+
+        // Wait for tasks to complete (poll every 2 seconds, max 30 seconds)
+        this.showNotification('Waiting for input tasks to complete...', 'info');
+
+        let waitTime = 0;
+        const maxWaitTime = 30000; // 30 seconds max
+        const pollInterval = 2000; // Check every 2 seconds
+
+        while (waitTime < maxWaitTime) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          waitTime += pollInterval;
+
+          // Reload tasks to check status
+          await this.init();
+
+          // Check if all input tasks are completed
+          const allCompleted = inputTasks.every(t => {
+            const updatedTask = this.tasks.find(ut => ut.id === t.id);
+            return updatedTask && updatedTask.status === 'completed';
+          });
+
+          if (allCompleted) {
+            this.showNotification('All input tasks completed!', 'success');
+            break;
+          }
+
+          const anyFailed = inputTasks.some(t => {
+            const updatedTask = this.tasks.find(ut => ut.id === t.id);
+            return updatedTask && updatedTask.status === 'failed';
+          });
+
+          if (anyFailed) {
+            this.showNotification('Some input tasks failed. Check the results.', 'warning');
+            break;
+          }
+        }
+
+        if (waitTime >= maxWaitTime) {
+          this.showNotification('Timeout waiting for input tasks. Proceeding anyway...', 'warning');
+        }
+
+        // Final reload to get all results
+        await this.init();
+      }
+
+      // Find the output connection from this combiner to a task
+      // The combiner outputs to a task that will be executed with merged results
+      const outputConnection = this.connections.find(c => c.from === combiner.id && c.fromPort === 'output');
+
+      if (!outputConnection) {
+        this.showNotification('No output task connected from this combiner', 'warning');
+        return;
+      }
+
+      // The output connection points to a task that should be executed
+      const outputTaskId = outputConnection.to;
+      const outputTask = this.tasks.find(t => t.id === outputTaskId);
+
+      if (!outputTask) {
+        this.showNotification('Output task not found', 'warning');
+        return;
+      }
+
+      // Get the agent that this output task should be assigned to
+      // Look for a connection from the output task to an agent
+      const taskToAgentConn = this.connections.find(c => c.from === outputTaskId && c.fromPort === 'output');
+
+      if (!taskToAgentConn) {
+        this.showNotification('Output task must be connected to an agent', 'warning');
+        return;
+      }
+
+      const targetAgentName = taskToAgentConn.to;
+
+      const outputTasks = [outputTask];
+
+      if (outputTasks.length === 0) {
+        this.showNotification('No tasks connected to this combiner to execute', 'warning');
+        return;
+      }
+
+      // Determine combination mode based on combiner type
+      const combinationMode = combiner.combinerType || 'merge';
+      console.log('🔀 Combination mode:', combinationMode);
+
+      // For each output task, update its target agent, InputTaskIDs and ResultCombinationMode, then execute
+      this.showNotification(`Configuring and executing ${outputTasks.length} task(s) with ${combinationMode} mode...`, 'info');
+
+      for (const task of outputTasks) {
+        console.log(`⚙️  Configuring output task ${task.id} with input tasks:`, inputTaskIds);
+        console.log(`🎯 Setting target agent to: ${targetAgentName}`);
+
+        // Update task to include target agent, input task IDs and combination mode
+        const updateResponse = await fetch(`/api/orchestration/tasks`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: task.id,
+            to: targetAgentName,
+            input_task_ids: inputTaskIds,
+            result_combination_mode: combinationMode,
+            status: 'pending'
+          })
+        });
+
+        if (!updateResponse.ok) {
+          const errorText = await updateResponse.text();
+          throw new Error(`Failed to configure task ${task.id}: ${errorText}`);
+        }
+
+        const updateResult = await updateResponse.json();
+        console.log(`✅ Task ${task.id} configured for ${combinationMode} with agent ${targetAgentName}`);
+        console.log(`📋 Update result:`, updateResult);
+
+        // Update local task object
+        task.to = targetAgentName;
+        task.input_task_ids = inputTaskIds;
+        task.result_combination_mode = combinationMode;
+        task.status = 'pending';
+
+        // Reload tasks to ensure we have the updated version
+        await this.init();
+
+        // Get the updated task from the reloaded list
+        const updatedTask = this.tasks.find(t => t.id === task.id);
+        if (!updatedTask) {
+          throw new Error(`Task ${task.id} not found after reload`);
+        }
+
+        console.log(`🔍 Reloaded task ${task.id}:`, {
+          to: updatedTask.to,
+          status: updatedTask.status,
+          input_task_ids: updatedTask.input_task_ids
+        });
+
+        if (updatedTask.to === 'unassigned' || !updatedTask.to) {
+          throw new Error(`Task ${task.id} still shows as unassigned after update. Target was: ${targetAgentName}`);
+        }
+
+        // Execute the task
+        console.log(`▶ Executing output task: ${task.id} assigned to ${updatedTask.to}`);
+        const executeResponse = await fetch('/api/orchestration/tasks/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_id: task.id })
+        });
+
+        if (!executeResponse.ok) {
+          const executeError = await executeResponse.text();
+          throw new Error(`Failed to execute task ${task.id}: ${executeError}`);
+        }
+
+        updatedTask.status = 'in_progress';
+      }
+
+      this.draw();
+      this.showNotification(`Combiner execution started! Task will ${combinationMode} ${inputTaskIds.length} inputs.`, 'success');
+
+      // Reload after a delay to show results
+      setTimeout(() => this.init(), 1000);
+
+    } catch (error) {
+      console.error('❌ Error executing combiner:', error);
+      this.showNotification('Failed to execute combiner: ' + error.message, 'error');
+    }
+  }
+
   showExecutionLog(task) {
     const logs = this.executionLogs[task.id] || [];
 
@@ -4598,6 +5351,9 @@ class AgentCanvas {
     }
 
     try {
+      // Keep combiner input ports in sync with actual connections before persisting
+      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node));
+
       // Collect task positions
       const taskPositions = {};
       this.tasks.forEach(task => {
@@ -4612,8 +5368,39 @@ class AgentCanvas {
         agentPositions[agent.name] = { x: agent.x, y: agent.y };
       });
 
+      // Collect combiner nodes
+      const combinerNodes = this.combinerNodes.map(node => ({
+        id: node.id,
+        type: node.type,
+        combinerType: node.combinerType,
+        name: node.name,
+        icon: node.icon,
+        color: node.color,
+        description: node.description,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        inputPorts: node.inputPorts || [],
+        outputPort: node.outputPort || { id: 'output' },
+        resultCombinationMode: node.resultCombinationMode,
+        customInstruction: node.customInstruction,
+        config: node.config || {}
+      }));
+
+      // Collect workflow connections (agents/tasks/combiners)
+      const workflowConnections = this.connections.map(conn => ({
+        id: conn.id,
+        from: conn.from,
+        fromPort: conn.fromPort,
+        to: conn.to,
+        toPort: conn.toPort,
+        color: conn.color,
+        animated: conn.animated
+      }));
+
       console.log(`💾 Saving layout for workspace ${this.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Combiners: ${combinerNodes.length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.scale}, Offset: (${this.offsetX}, ${this.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
@@ -4627,6 +5414,8 @@ class AgentCanvas {
           workspace_id: this.studioId,
           task_positions: taskPositions,
           agent_positions: agentPositions,
+          combiner_nodes: combinerNodes,
+          workflow_connections: workflowConnections,
           scale: this.scale,
           offset_x: this.offsetX,
           offset_y: this.offsetY,
@@ -4664,6 +5453,8 @@ class AgentCanvas {
 
     let tasksRestored = 0;
     let agentsRestored = 0;
+    let combinersRestored = 0;
+    let connectionsRestored = 0;
 
     // Restore task positions
     if (layout.task_positions) {
@@ -4691,6 +5482,36 @@ class AgentCanvas {
       });
     }
 
+    // Restore combiner nodes
+    if (layout.combiner_nodes && Array.isArray(layout.combiner_nodes)) {
+      this.combinerNodes = layout.combiner_nodes.map(node => ({
+        ...node,
+        width: node.width || 120,
+        height: node.height || 80,
+        inputPorts: node.inputPorts || [],
+        outputPort: node.outputPort || { id: 'output', x: 0, y: 40 }
+      }));
+      combinersRestored = this.combinerNodes.length;
+    }
+
+    // Restore workflow connections
+    if (layout.workflow_connections && Array.isArray(layout.workflow_connections)) {
+      this.connections = layout.workflow_connections;
+      // Ensure combiner port state matches restored connections
+      this.connections.forEach(conn => {
+        const targetNode = this.getNodeById(conn.to);
+        if (targetNode && targetNode.type === 'combiner' && conn.toPort && conn.toPort.startsWith('input')) {
+          this.ensureCombinerInputPort(targetNode.node, conn.toPort);
+        }
+      });
+      connectionsRestored = this.connections.length;
+    }
+
+    // Remove stale combiner input ports so only active connections are shown
+    if (this.combinerNodes.length > 0) {
+      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node));
+    }
+
     // Restore zoom and pan
     if (layout.scale) {
       this.scale = layout.scale;
@@ -4705,7 +5526,7 @@ class AgentCanvas {
       console.log(`  Restoring offsetY: ${layout.offset_y}`);
     }
 
-    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents)`);
+    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents, ${combinersRestored} combiners, ${connectionsRestored} connections)`);
     this.draw();
   }
 
@@ -4740,11 +5561,12 @@ class AgentCanvas {
     let maxX = -Infinity, maxY = -Infinity;
 
     this.agents.forEach(agent => {
-      const agentRadius = 40;
-      minX = Math.min(minX, agent.x - agentRadius);
-      minY = Math.min(minY, agent.y - agentRadius);
-      maxX = Math.max(maxX, agent.x + agentRadius);
-      maxY = Math.max(maxY, agent.y + agentRadius);
+      const halfW = (agent.width || 120) / 2;
+      const halfH = (agent.height || 70) / 2;
+      minX = Math.min(minX, agent.x - halfW);
+      minY = Math.min(minY, agent.y - halfH);
+      maxX = Math.max(maxX, agent.x + halfW);
+      maxY = Math.max(maxY, agent.y + halfH);
     });
 
     const contentWidth = maxX - minX;
@@ -4780,11 +5602,23 @@ class AgentCanvas {
     const canvasX = (screenX - this.offsetX) / this.scale;
     const canvasY = (screenY - this.offsetY) / this.scale;
 
+    // Check if clicking on a connection (highest priority for context menu)
+    const clickedConnection = this.getConnectionAtPosition(canvasX, canvasY);
+    if (clickedConnection) {
+      // Confirm and delete connection
+      if (confirm('Delete this connection?')) {
+        this.deleteConnection(clickedConnection.id);
+        this.showNotification('Connection deleted', 'success');
+      }
+      return;
+    }
+
     // Check if clicking on an agent
     const clickedAgent = this.agents.find(agent => {
-      const dx = canvasX - agent.x;
-      const dy = canvasY - agent.y;
-      return Math.sqrt(dx * dx + dy * dy) <= 40;
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      return canvasX >= agent.x - halfWidth && canvasX <= agent.x + halfWidth &&
+             canvasY >= agent.y - halfHeight && canvasY <= agent.y + halfHeight;
     });
 
     if (clickedAgent) {
@@ -4934,12 +5768,37 @@ class AgentCanvas {
       case 'remove':
         // Remove agent (with confirmation)
         if (confirm(`Remove agent "${agent.name}"?`)) {
-          this.agents = this.agents.filter(a => a !== agent);
-          this.showNotification('Agent removed', 'success');
-          this.draw();
+          // Call backend to remove agent from studio
+          fetch(`/api/studios/${encodeURIComponent(this.studioId)}/agents/${encodeURIComponent(agent.name)}`, {
+            method: 'DELETE'
+          })
+            .then(async (resp) => {
+              if (!resp.ok) {
+                const msg = await resp.text();
+                throw new Error(msg || 'Failed to remove agent');
+              }
+              // Remove from local state
+              this.agents = this.agents.filter(a => a.name !== agent.name);
 
-          // Save layout after removal
-          this.saveLayout();
+              // Unassign tasks targeting this agent
+              this.tasks = this.tasks.map(t => ({
+                ...t,
+                to: t.to === agent.name ? 'unassigned' : t.to
+              }));
+
+              // Remove any workflow connections involving this agent
+              this.connections = this.connections.filter(c =>
+                c.from !== agent.name && c.to !== agent.name
+              );
+
+              this.showNotification('Agent removed', 'success');
+              this.draw();
+              this.saveLayout();
+            })
+            .catch(err => {
+              console.error('Failed to remove agent:', err);
+              this.addNotification(`Failed to remove agent: ${err.message}`, 'error');
+            });
         }
         break;
 
@@ -5073,6 +5932,799 @@ class AgentCanvas {
       }
     });
     this.ctx.restore();
+  }
+
+  // ==================== COMBINER NODE RENDERING ====================
+
+  /**
+   * Draw all workflow connections
+   */
+  drawWorkflowConnections() {
+    // Get mouse position in canvas coordinates for hover detection
+    const rect = this.canvas.getBoundingClientRect();
+    const mouseCanvasX = this.lastMouseX ? (this.lastMouseX - this.offsetX) / this.scale : -9999;
+    const mouseCanvasY = this.lastMouseY ? (this.lastMouseY - this.offsetY) / this.scale : -9999;
+
+    this.connections.forEach(conn => {
+      const fromPos = this.getPortPosition(conn.from, conn.fromPort);
+      const toPos = this.getPortPosition(conn.to, conn.toPort);
+
+      if (!fromPos || !toPos) return;
+
+      // Convert back to canvas coordinates
+      const fromX = (fromPos.x - this.offsetX) / this.scale;
+      const fromY = (fromPos.y - this.offsetY) / this.scale;
+      const toX = (toPos.x - this.offsetX) / this.scale;
+      const toY = (toPos.y - this.offsetY) / this.scale;
+
+      // Check if mouse is hovering over this connection
+      const hoveredConn = this.getConnectionAtPosition(mouseCanvasX, mouseCanvasY, 15);
+      const isHovered = hoveredConn && hoveredConn.id === conn.id;
+
+      // Draw bezier curve connection
+      this.ctx.save();
+      this.ctx.strokeStyle = isHovered ? '#ff6b6b' : conn.color; // Red on hover
+      this.ctx.lineWidth = isHovered ? 5 : 3; // Thicker on hover
+      this.ctx.lineCap = 'round';
+
+      // Add glow effect (stronger on hover)
+      this.ctx.shadowColor = isHovered ? '#ff6b6b' : conn.color;
+      this.ctx.shadowBlur = isHovered ? 15 : 10;
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(fromX, fromY);
+
+      // Bezier curve for smooth connection
+      const controlOffset = Math.abs(toY - fromY) / 2;
+      this.ctx.bezierCurveTo(
+        fromX, fromY + controlOffset,
+        toX, toY - controlOffset,
+        toX, toY
+      );
+
+      this.ctx.stroke();
+      this.ctx.restore();
+
+      // Draw arrow at destination
+      const arrowSize = isHovered ? 10 : 8; // Larger arrow on hover
+      const angle = Math.atan2(toY - fromY, toX - fromX);
+      this.ctx.save();
+      this.ctx.fillStyle = isHovered ? '#ff6b6b' : conn.color;
+      this.ctx.beginPath();
+      this.ctx.moveTo(toX, toY);
+      this.ctx.lineTo(
+        toX - arrowSize * Math.cos(angle - Math.PI / 6),
+        toY - arrowSize * Math.sin(angle - Math.PI / 6)
+      );
+      this.ctx.lineTo(
+        toX - arrowSize * Math.cos(angle + Math.PI / 6),
+        toY - arrowSize * Math.sin(angle + Math.PI / 6)
+      );
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Draw delete icon on hover
+      if (isHovered) {
+        // Calculate midpoint of connection for delete button
+        const midX = (fromX + toX) / 2;
+        const midY = (fromY + toY) / 2;
+
+        // Draw delete button circle
+        this.ctx.save();
+        this.ctx.fillStyle = '#dc3545';
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(midX, midY, 12, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.stroke();
+
+        // Draw X icon
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.lineCap = 'round';
+        this.ctx.beginPath();
+        this.ctx.moveTo(midX - 5, midY - 5);
+        this.ctx.lineTo(midX + 5, midY + 5);
+        this.ctx.moveTo(midX + 5, midY - 5);
+        this.ctx.lineTo(midX - 5, midY + 5);
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        // Show tooltip
+        this.ctx.save();
+        this.ctx.font = '11px system-ui';
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.textAlign = 'center';
+        const tooltipText = 'Right-click to delete';
+        const textWidth = this.ctx.measureText(tooltipText).width;
+        this.ctx.fillRect(midX - textWidth / 2 - 6, midY - 30, textWidth + 12, 18);
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillText(tooltipText, midX, midY - 18);
+        this.ctx.restore();
+      }
+    });
+  }
+
+  /**
+   * Draw all combiner nodes
+   */
+  drawCombinerNodes() {
+    this.combinerNodes.forEach(node => {
+      this.ctx.save();
+
+      // Draw diamond/rectangle shape
+      const x = node.x;
+      const y = node.y;
+      const w = node.width;
+      const h = node.height;
+
+      // Background with gradient
+      const gradient = this.ctx.createLinearGradient(x, y, x, y + h);
+      gradient.addColorStop(0, node.color);
+      gradient.addColorStop(1, this.lightenColor(node.color, 20));
+
+      this.ctx.fillStyle = gradient;
+      this.ctx.strokeStyle = this.darkenColor(node.color, 20);
+      this.ctx.lineWidth = 2;
+
+      // Draw rounded rectangle
+      const radius = 8;
+      this.ctx.beginPath();
+      this.ctx.moveTo(x + radius, y);
+      this.ctx.lineTo(x + w - radius, y);
+      this.ctx.arcTo(x + w, y, x + w, y + radius, radius);
+      this.ctx.lineTo(x + w, y + h - radius);
+      this.ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+      this.ctx.lineTo(x + radius, y + h);
+      this.ctx.arcTo(x, y + h, x, y + h - radius, radius);
+      this.ctx.lineTo(x, y + radius);
+      this.ctx.arcTo(x, y, x + radius, y, radius);
+      this.ctx.closePath();
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      // Draw icon
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = '24px Arial';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(node.icon, x + w / 2, y + h / 2 - 10);
+
+      // Draw label
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 12px Inter, sans-serif';
+      this.ctx.fillText(node.name.toUpperCase(), x + w / 2, y + h / 2 + 15);
+
+      // Draw input ports (top)
+      const numInputs = Math.max(node.inputPorts.length, 1); // At least 1 input port when empty
+      const portSpacing = w / (numInputs + 1);
+      for (let i = 0; i < numInputs; i++) {
+        const portX = x + portSpacing * (i + 1);
+        const portY = y - 5;
+        this.drawPort(portX, portY, 'input', node.color, 'down');
+      }
+
+      // Draw output port (bottom)
+      const outputX = x + w / 2;
+      const outputY = y + h + 5;
+      this.drawPort(outputX, outputY, 'output', node.color);
+
+      // Draw delete button (always visible in top-right corner)
+      const deleteButtonSize = 20;
+      const deleteButtonX = x + w - deleteButtonSize / 2;
+      const deleteButtonY = y - deleteButtonSize / 2;
+
+      // Store bounds for click detection
+      if (!node.deleteButtonBounds) node.deleteButtonBounds = {};
+      node.deleteButtonBounds = {
+        x: deleteButtonX - deleteButtonSize / 2,
+        y: deleteButtonY - deleteButtonSize / 2,
+        width: deleteButtonSize,
+        height: deleteButtonSize
+      };
+
+      // Draw delete button background
+      this.ctx.fillStyle = '#ef4444';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteButtonX, deleteButtonY, deleteButtonSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Draw X icon
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.lineCap = 'round';
+      const crossSize = 6;
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteButtonX - crossSize / 2, deleteButtonY - crossSize / 2);
+      this.ctx.lineTo(deleteButtonX + crossSize / 2, deleteButtonY + crossSize / 2);
+      this.ctx.moveTo(deleteButtonX + crossSize / 2, deleteButtonY - crossSize / 2);
+      this.ctx.lineTo(deleteButtonX - crossSize / 2, deleteButtonY + crossSize / 2);
+      this.ctx.stroke();
+
+      // RUN button (bottom-left corner)
+      const runButtonWidth = 50;
+      const runButtonHeight = 18;
+      const runX = x + 8;
+      const runY = y + h - runButtonHeight - 6;
+
+      node.runButtonBounds = {
+        x: runX,
+        y: runY,
+        width: runButtonWidth,
+        height: runButtonHeight
+      };
+
+      this.ctx.fillStyle = '#10b981';
+      this.ctx.strokeStyle = '#059669';
+      this.ctx.lineWidth = 1.5;
+      this.roundRect(runX, runY, runButtonWidth, runButtonHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 10px Inter, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText('▶ RUN', runX + runButtonWidth / 2, runY + runButtonHeight / 2);
+
+      // Assign output button (bottom-right corner)
+      const assignButtonWidth = 60;
+      const assignButtonHeight = 18;
+      const assignX = x + w - assignButtonWidth - 8;
+      const assignY = y + h - assignButtonHeight - 6;
+
+      node.assignButtonBounds = {
+        x: assignX,
+        y: assignY,
+        width: assignButtonWidth,
+        height: assignButtonHeight
+      };
+
+      this.ctx.fillStyle = '#3b82f6';
+      this.ctx.strokeStyle = '#1d4ed8';
+      this.ctx.lineWidth = 1.5;
+      this.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 10px Inter, sans-serif';
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText('Assign', assignX + assignButtonWidth / 2, assignY + assignButtonHeight / 2);
+
+      this.ctx.restore();
+    });
+  }
+
+  /**
+   * Draw a connection port
+   */
+  drawPort(x, y, type, color, orientation = 'auto') {
+    this.ctx.save();
+    const size = 10;
+    const isInput = type === 'input';
+
+    // Determine direction
+    let pointUp = true;
+    if (orientation === 'down') {
+      pointUp = false;
+    } else if (orientation === 'up') {
+      pointUp = true;
+    } else {
+      // auto: input points up, output points down
+      pointUp = isInput;
+    }
+
+    // Triangles: input points upward, output points downward
+    const points = pointUp
+      ? [
+          { x: x, y: y - size },      // top
+          { x: x - size, y: y + size },
+          { x: x + size, y: y + size },
+        ]
+      : [
+          { x: x, y: y + size },      // bottom
+          { x: x - size, y: y - size },
+          { x: x + size, y: y - size },
+        ];
+
+    // Outer triangle
+    this.ctx.beginPath();
+    this.ctx.moveTo(points[0].x, points[0].y);
+    this.ctx.lineTo(points[1].x, points[1].y);
+    this.ctx.lineTo(points[2].x, points[2].y);
+    this.ctx.closePath();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 2;
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Inner accent
+    const innerShrink = 4;
+    const innerPoints = points.map(p => ({
+      x: x + (p.x - x) * ((size - innerShrink) / size),
+      y: y + (p.y - y) * ((size - innerShrink) / size),
+    }));
+    this.ctx.beginPath();
+    this.ctx.moveTo(innerPoints[0].x, innerPoints[0].y);
+    this.ctx.lineTo(innerPoints[1].x, innerPoints[1].y);
+    this.ctx.lineTo(innerPoints[2].x, innerPoints[2].y);
+    this.ctx.closePath();
+    this.ctx.fillStyle = color;
+    this.ctx.fill();
+
+    this.ctx.restore();
+  }
+
+  /**
+   * Draw connection being dragged
+   */
+  drawDraggingConnection() {
+    if (!this.connectionDragStart) return;
+
+    const fromPos = this.getPortPosition(
+      this.connectionDragStart.nodeId,
+      this.connectionDragStart.portId
+    );
+
+    if (!fromPos) return;
+
+    const fromX = (fromPos.x - this.offsetX) / this.scale;
+    const fromY = (fromPos.y - this.offsetY) / this.scale;
+
+    // Mouse position in canvas coordinates
+    const rect = this.canvas.getBoundingClientRect();
+    const mouseX = (this.lastMouseX - this.offsetX) / this.scale;
+    const mouseY = (this.lastMouseY - this.offsetY) / this.scale;
+
+    this.ctx.save();
+    this.ctx.strokeStyle = '#6366f1';
+    this.ctx.lineWidth = 3;
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.lineCap = 'round';
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(fromX, fromY);
+    this.ctx.lineTo(mouseX, mouseY);
+    this.ctx.stroke();
+
+    this.ctx.restore();
+  }
+
+  /**
+   * Helper: Lighten a hex color
+   */
+  lightenColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) + amt;
+    const G = (num >> 8 & 0x00FF) + amt;
+    const B = (num & 0x0000FF) + amt;
+    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
+      (B < 255 ? B < 1 ? 0 : B : 255))
+      .toString(16).slice(1);
+  }
+
+  /**
+   * Helper: Darken a hex color
+   */
+  darkenColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = (num >> 16) - amt;
+    const G = (num >> 8 & 0x00FF) - amt;
+    const B = (num & 0x0000FF) - amt;
+    return '#' + (0x1000000 + (R > 0 ? R : 0) * 0x10000 +
+      (G > 0 ? G : 0) * 0x100 +
+      (B > 0 ? B : 0))
+      .toString(16).slice(1);
+  }
+
+  // ==================== COMBINER NODE SYSTEM ====================
+
+  /**
+   * Combiner node types and their configurations
+   */
+  static COMBINER_TYPES = {
+    MERGE: {
+      id: 'merge',
+      name: 'Merge',
+      icon: '🔀',
+      color: '#8b5cf6',
+      description: 'Combine multiple inputs into single context',
+      resultCombinationMode: 'merge'
+    },
+    APPEND: {
+      id: 'append',
+      name: 'Append',
+      icon: '📎',
+      color: '#3b82f6',
+      description: 'Concatenate outputs sequentially',
+      resultCombinationMode: 'append'
+    },
+    SUMMARIZE: {
+      id: 'summarize',
+      name: 'Summarize',
+      icon: '📝',
+      color: '#10b981',
+      description: 'Create executive summary of inputs',
+      resultCombinationMode: 'summarize'
+    },
+    COMPARE: {
+      id: 'compare',
+      name: 'Compare',
+      icon: '⚖️',
+      color: '#f59e0b',
+      description: 'Side-by-side comparison of inputs',
+      resultCombinationMode: 'compare'
+    },
+    VOTE: {
+      id: 'vote',
+      name: 'Vote',
+      icon: '🗳️',
+      color: '#ef4444',
+      description: 'Select best result via voting',
+      resultCombinationMode: 'custom',
+      customInstruction: 'Analyze all inputs and select the best result based on quality, accuracy, and completeness.'
+    }
+  };
+
+  /**
+   * Create a new combiner node
+   */
+  createCombinerNode(type, x, y) {
+    const combinerType = AgentCanvas.COMBINER_TYPES[type.toUpperCase()];
+    if (!combinerType) {
+      console.error(`Unknown combiner type: ${type}`);
+      return null;
+    }
+
+    const node = {
+      id: `combiner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'combiner',
+      combinerType: combinerType.id,
+      name: combinerType.name,
+      icon: combinerType.icon,
+      color: combinerType.color,
+      description: combinerType.description,
+      x: x,
+      y: y,
+      width: 120,
+      height: 80,
+      inputPorts: [], // Will be populated when connections are made
+      outputPort: { id: 'output', x: 0, y: 40 }, // Relative to node position
+      resultCombinationMode: combinerType.resultCombinationMode,
+      customInstruction: combinerType.customInstruction || '',
+      config: {}
+    };
+
+    this.combinerNodes.push(node);
+    console.log(`✨ Created ${node.name} combiner node at (${x}, ${y})`);
+    return node;
+  }
+
+  /**
+   * Ensure a combiner has a tracked input port entry (used for spacing/persistence)
+   */
+  ensureCombinerInputPort(combiner, portId) {
+    if (!combiner) return;
+    combiner.inputPorts = combiner.inputPorts || [];
+    if (!combiner.inputPorts.find(p => p.id === portId)) {
+      combiner.inputPorts.push({ id: portId });
+    }
+  }
+
+  /**
+   * Create a connection between two nodes (agent/combiner to agent/combiner)
+   */
+  createConnection(fromNodeId, fromPort, toNodeId, toPort) {
+    // Avoid duplicate connections with same endpoints
+    const existing = this.connections.find(c =>
+      c.from === fromNodeId &&
+      c.fromPort === fromPort &&
+      c.to === toNodeId &&
+      c.toPort === toPort
+    );
+    if (existing) {
+      console.log(`ℹ️ Connection already exists: ${fromNodeId}.${fromPort} → ${toNodeId}.${toPort}`);
+      return existing;
+    }
+
+    const connection = {
+      id: `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      from: fromNodeId,
+      fromPort: fromPort,
+      to: toNodeId,
+      toPort: toPort,
+      color: '#6366f1',
+      animated: false
+    };
+
+    // Track combiner input ports so spacing is stable and persisted
+    const targetNode = this.getNodeById(toNodeId);
+    if (targetNode && targetNode.type === 'combiner' && toPort && toPort.startsWith('input')) {
+      this.ensureCombinerInputPort(targetNode.node, toPort);
+    }
+
+    this.connections.push(connection);
+    console.log(`🔗 Created connection: ${fromNodeId}.${fromPort} → ${toNodeId}.${toPort}`);
+    this.saveLayout();
+    return connection;
+  }
+
+  /**
+   * Get node by ID (searches both agents and combiners)
+   */
+  getNodeById(nodeId) {
+    // Check if it's an agent
+    const agent = this.agents.find(a => a.name === nodeId || a.id === nodeId);
+    if (agent) return { type: 'agent', node: agent };
+
+    // Check if it's a task
+    const task = this.tasks.find(t => t.id === nodeId);
+    if (task) return { type: 'task', node: task };
+
+    // Check if it's a combiner
+    const combiner = this.combinerNodes.find(c => c.id === nodeId);
+    if (combiner) return { type: 'combiner', node: combiner };
+
+    return null;
+  }
+
+  /**
+   * Get port position in screen coordinates
+   */
+  getPortPosition(nodeId, portId) {
+    const nodeData = this.getNodeById(nodeId);
+    if (!nodeData) return null;
+
+    const { type, node } = nodeData;
+
+    if (type === 'agent') {
+      const halfHeight = (node.height || 70) / 2;
+      if (portId === 'input') {
+        return {
+          x: node.x * this.scale + this.offsetX,
+          y: (node.y - halfHeight - 10) * this.scale + this.offsetY
+        };
+      }
+      // Agents expose output port at bottom by default
+      return {
+        x: node.x * this.scale + this.offsetX,
+        y: (node.y + halfHeight + 10) * this.scale + this.offsetY
+      };
+    } else if (type === 'task') {
+      // Tasks have a single output port at the bottom center
+      if (node.cardBounds) {
+        return {
+          x: node.x * this.scale + this.offsetX,
+          y: (node.cardBounds.y + node.cardBounds.height + 5) * this.scale + this.offsetY
+        };
+      }
+      return null;
+    } else if (type === 'combiner') {
+      // Combiner nodes have multiple input ports at top, one output at bottom
+      if (portId === 'output') {
+        return {
+          x: (node.x + node.width / 2) * this.scale + this.offsetX,
+          y: (node.y + node.height + 10) * this.scale + this.offsetY
+        };
+      } else {
+        // Input ports are distributed across the top. Use the provided id to derive index.
+        const match = /input-(\d+)/.exec(portId);
+        const numericIndex = match ? parseInt(match[1], 10) : -1;
+        const inputIndex = node.inputPorts.findIndex(p => p.id === portId);
+        const resolvedIndex = numericIndex >= 0 ? numericIndex : inputIndex;
+
+        // Total inputs based on known ports and requested index, minimum 1 for usability
+        const totalInputs = Math.max(node.inputPorts.length, resolvedIndex + 1, 1);
+        const portSpacing = node.width / (totalInputs + 1);
+        return {
+          x: (node.x + portSpacing * (resolvedIndex + 1)) * this.scale + this.offsetX,
+          y: (node.y - 10) * this.scale + this.offsetY
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Delete a combiner node and its connections
+   */
+  deleteCombinerNode(nodeId) {
+    // Remove the node
+    this.combinerNodes = this.combinerNodes.filter(n => n.id !== nodeId);
+
+    // Remove all connections involving this node
+    this.connections = this.connections.filter(c =>
+      c.from !== nodeId && c.to !== nodeId
+    );
+
+    console.log(`🗑️ Deleted combiner node: ${nodeId}`);
+    this.saveLayout();
+    this.draw();
+  }
+
+  /**
+   * Delete a connection
+   */
+  deleteConnection(connectionId) {
+    // Find the connection before deleting to check if it's connected to a combiner
+    const connectionToDelete = this.connections.find(c => c.id === connectionId);
+
+    // Remove the connection
+    this.connections = this.connections.filter(c => c.id !== connectionId);
+    console.log(`🗑️ Deleted connection: ${connectionId}`);
+
+    // Clean up unused combiner input ports
+    if (connectionToDelete) {
+      const targetNode = this.getNodeById(connectionToDelete.to);
+      if (targetNode && targetNode.type === 'combiner') {
+        this.cleanupCombinerInputPorts(targetNode.node);
+      }
+    }
+
+    this.saveLayout();
+    this.draw();
+  }
+
+  /**
+   * Remove unused input ports from a combiner node
+   */
+  cleanupCombinerInputPorts(combiner, silent = false) {
+    if (!combiner || !combiner.inputPorts) return;
+
+    // Get all connections to this combiner
+    const connected = this.connections
+      .filter(c => c.to === combiner.id && c.toPort && c.toPort.startsWith('input'));
+
+    // Normalize and reindex input ports to remove gaps
+    const normalized = connected
+      .map(conn => {
+        const match = /input-(\d+)/.exec(conn.toPort);
+        return { conn, index: match ? parseInt(match[1], 10) : 0 };
+      })
+      .sort((a, b) => a.index - b.index);
+
+    normalized.forEach(({ conn }, idx) => {
+      const targetPortId = `input-${idx}`;
+      if (conn.toPort !== targetPortId) {
+        conn.toPort = targetPortId;
+      }
+    });
+
+    combiner.inputPorts = normalized.map((_, idx) => ({ id: `input-${idx}` }));
+
+    if (!silent) {
+      console.log(`🧹 Cleaned up combiner ${combiner.name}: ${combiner.inputPorts.length} ports remaining`);
+    }
+  }
+
+  /**
+   * Get connection near a given position (for click detection)
+   */
+  getConnectionAtPosition(x, y, threshold = 10) {
+    for (const conn of this.connections) {
+      const fromPos = this.getPortPosition(conn.from, conn.fromPort);
+      const toPos = this.getPortPosition(conn.to, conn.toPort);
+
+      if (!fromPos || !toPos) continue;
+
+      // Convert to canvas coordinates
+      const fromX = (fromPos.x - this.offsetX) / this.scale;
+      const fromY = (fromPos.y - this.offsetY) / this.scale;
+      const toX = (toPos.x - this.offsetX) / this.scale;
+      const toY = (toPos.y - this.offsetY) / this.scale;
+
+      // Calculate distance from point to line segment
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+      const lengthSquared = dx * dx + dy * dy;
+
+      if (lengthSquared === 0) continue;
+
+      const t = Math.max(0, Math.min(1, ((x - fromX) * dx + (y - fromY) * dy) / lengthSquared));
+      const projX = fromX + t * dx;
+      const projY = fromY + t * dy;
+      const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+      if (distance <= threshold) {
+        return conn;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get port at a given canvas position (for click detection)
+   */
+  getPortAtPosition(x, y) {
+    const portRadius = 14; // Click detection radius (larger for easier hits with triangles)
+
+    // Check task output ports (NEW - for connecting tasks to combiners)
+    for (const task of this.tasks) {
+      if (!task.cardBounds) continue;
+
+      // Output port at bottom center of task card
+      const portX = task.x;
+      const portY = task.cardBounds.y + task.cardBounds.height + 5;
+      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
+      if (dist <= portRadius) {
+        return {
+          nodeId: task.id,
+          nodeType: 'task',
+          portId: 'output',
+          type: 'output'
+        };
+      }
+    }
+
+    // Check agent output ports
+    for (const agent of this.agents) {
+      const portX = agent.x;
+      const halfHeight = (agent.height || 70) / 2;
+      const portY = agent.y + halfHeight + 10;
+      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
+      if (dist <= portRadius) {
+        return {
+          nodeId: agent.name,
+          nodeType: 'agent',
+          portId: 'output',
+          type: 'output'
+        };
+      }
+
+      // Agent input port (top center) for receiving connections
+      const inputPortY = agent.y - halfHeight - 10;
+      const inputDist = Math.sqrt((x - portX) ** 2 + (y - inputPortY) ** 2);
+      if (inputDist <= portRadius) {
+        return {
+          nodeId: agent.name,
+          nodeType: 'agent',
+          portId: 'input',
+          type: 'input'
+        };
+      }
+    }
+
+    // Check combiner ports
+    for (const combiner of this.combinerNodes) {
+      // Check input ports (top)
+      const numInputs = Math.max(combiner.inputPorts.length, 2);
+      const portSpacing = combiner.width / (numInputs + 1);
+      for (let i = 0; i < numInputs; i++) {
+        const portX = combiner.x + portSpacing * (i + 1);
+        const portY = combiner.y - 5;
+        const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
+        if (dist <= portRadius) {
+          return {
+            nodeId: combiner.id,
+            portId: `input-${i}`,
+            type: 'input'
+          };
+        }
+      }
+
+      // Check output port (bottom)
+      const outputX = combiner.x + combiner.width / 2;
+      const outputY = combiner.y + combiner.height + 5;
+      const dist = Math.sqrt((x - outputX) ** 2 + (y - outputY) ** 2);
+      if (dist <= portRadius) {
+        return {
+          nodeId: combiner.id,
+          portId: 'output',
+          type: 'output'
+        };
+      }
+    }
+
+    return null;
   }
 }
 

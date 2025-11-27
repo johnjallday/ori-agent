@@ -359,12 +359,14 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	var req struct {
-		WorkspaceID    string                          `json:"workspace_id"`
-		TaskPositions  map[string]agentstudio.Position `json:"task_positions"`
-		AgentPositions map[string]agentstudio.Position `json:"agent_positions"`
-		Scale          float64                         `json:"scale"`
-		OffsetX        float64                         `json:"offset_x"`
-		OffsetY        float64                         `json:"offset_y"`
+		WorkspaceID         string                                 `json:"workspace_id"`
+		TaskPositions       map[string]agentstudio.Position        `json:"task_positions"`
+		AgentPositions      map[string]agentstudio.Position        `json:"agent_positions"`
+		CombinerNodes       []agentstudio.CombinerNodeLayout       `json:"combiner_nodes"`
+		WorkflowConnections []agentstudio.WorkflowConnectionLayout `json:"workflow_connections"`
+		Scale               float64                                `json:"scale"`
+		OffsetX             float64                                `json:"offset_x"`
+		OffsetY             float64                                `json:"offset_y"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -391,6 +393,8 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 
 	ws.Layout.TaskPositions = req.TaskPositions
 	ws.Layout.AgentPositions = req.AgentPositions
+	ws.Layout.CombinerNodes = req.CombinerNodes
+	ws.Layout.WorkflowConnections = req.WorkflowConnections
 	ws.Layout.Scale = req.Scale
 	ws.Layout.OffsetX = req.OffsetX
 	ws.Layout.OffsetY = req.OffsetY
@@ -401,8 +405,8 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, scale: %.2f)",
-		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), req.Scale)
+	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, combiners: %d, conns: %d, scale: %.2f)",
+		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), len(req.CombinerNodes), len(req.WorkflowConnections), req.Scale)
 
 	// Broadcast workspace update event to notify all connected clients
 	wh.eventBus.Publish(agentstudio.Event{

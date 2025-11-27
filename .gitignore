@@ -46,6 +46,8 @@ local_plugin_registry.json
 cache/
 tmp/
 temp/
+.gocache/
+.gobuild/
 
 # Agent data and configuration
 agents/

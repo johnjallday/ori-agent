@@ -226,9 +226,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Handle input task connections update
-	if req.InputTaskIDs != nil {
-		log.Printf("🔗 Updating input connections for task %s", req.TaskID)
+	// Handle task updates (input connections, reassignment, or combination mode)
+	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil {
+		log.Printf("🔧 Updating task %s", req.TaskID)
 
 		// Get workspace from task
 		task, err := th.communicator.GetTask(req.TaskID)
@@ -245,19 +245,26 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// Update the task's input connections
+		// Update all fields in one pass
 		taskFound := false
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == req.TaskID {
-				ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
+				if req.InputTaskIDs != nil {
+					ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
+					log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
+				}
 				if req.ResultCombinationMode != nil {
 					ws.Tasks[i].ResultCombinationMode = *req.ResultCombinationMode
+					log.Printf("📝 Updated task %s combination mode: %s", req.TaskID, *req.ResultCombinationMode)
 				}
 				if req.CombinationInstruction != nil {
 					ws.Tasks[i].CombinationInstruction = *req.CombinationInstruction
 				}
+				if req.To != nil {
+					ws.Tasks[i].To = *req.To
+					log.Printf("📝 Reassigned task %s to %s", req.TaskID, *req.To)
+				}
 				taskFound = true
-				log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
 				break
 			}
 		}
@@ -275,18 +282,25 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		log.Printf("✅ Updated input connections for task %s", req.TaskID)
+		log.Printf("✅ Updated task %s", req.TaskID)
 
 		// Publish event
 		if th.eventBus != nil {
+			eventData := map[string]interface{}{
+				"task_id":     req.TaskID,
+				"update_type": "task_update",
+			}
+			if req.InputTaskIDs != nil {
+				eventData["input_task_ids"] = req.InputTaskIDs
+			}
+			if req.To != nil {
+				eventData["to"] = *req.To
+			}
+
 			th.eventBus.Publish(agentstudio.Event{
 				Type:        agentstudio.EventWorkspaceUpdated,
 				WorkspaceID: task.WorkspaceID,
-				Data: map[string]interface{}{
-					"task_id":        req.TaskID,
-					"input_task_ids": req.InputTaskIDs,
-					"update_type":    "task_connections",
-				},
+				Data:        eventData,
 			})
 		}
 
@@ -297,7 +311,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Handle task reassignment (changing "to" field)
+	// Legacy: Handle task reassignment alone (for backwards compatibility)
 	if req.To != nil {
 		log.Printf("🔄 Reassigning task %s to %s", req.TaskID, *req.To)
 

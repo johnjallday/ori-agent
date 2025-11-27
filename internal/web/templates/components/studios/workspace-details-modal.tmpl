@@ -1,0 +1,24 @@
+{{define "components/studios/workspace-details-modal.tmpl"}}
+<!-- Workspace Details Modal -->
+<div class="modal fade" id="workspaceDetailsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" style="color: var(--text-primary);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+          </svg>
+          Workspace Details
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="workspace-details-content" style="max-height: 70vh; overflow-y: auto;">
+        <!-- Content will be populated dynamically -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
