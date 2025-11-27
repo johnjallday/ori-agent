@@ -7,6 +7,7 @@ import {
   executeCombiner as combinerExecute
 } from './agent-canvas-combiners.js';
 import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTaskToCombiner as tasksAssignToCombiner } from './agent-canvas-tasks.js';
+import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
@@ -14,127 +15,23 @@ import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTas
  */
 class AgentCanvas {
   constructor(canvasId, studioId) {
-    this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d');
+    // Initialize state module (centralized state management)
+    this.state = new AgentCanvasState();
+
+    // Set canvas and context in state
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    this.state.setCanvas(canvas, ctx);
+    this.state.setStudioId(studioId);
+
+    // Keep canvas and ctx as direct properties for backward compatibility
+    this.canvas = canvas;
+    this.ctx = ctx;
     this.studioId = studioId;
-    this.studio = null;
-    this.agents = [];
-    this.tasks = [];
-    this.messages = [];
-    this.mission = null; // Current mission
-    this.eventSource = null;
-
-    // Canvas state
-    this.offsetX = 0;
-    this.offsetY = 0;
-    this.scale = 1;
-    this.isDragging = false;
-    this.isDraggingAgent = false;
-    this.draggedAgent = null;
-    this.isDraggingTask = false;
-    this.draggedTask = null;
-    this.dragStartX = 0;
-    this.dragStartY = 0;
-
-    // Keyboard state
-    this.spacePressed = false;
-    this.ctrlPressed = false;
-
-    // Context menu state
-    this.contextMenuVisible = false;
-    this.contextMenuAgent = null;
-    this.contextMenuX = 0;
-    this.contextMenuY = 0;
-
-    // Help overlay state
-    this.helpOverlayVisible = false;
-
-    // Animation
-    this.animationFrame = null;
-    this.animationPaused = false;
-    this.particles = []; // For visual effects
-
-    // Canvas appearance
-    // Set initial background based on current theme
-    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-    this.backgroundColor = isDark ? '#1e293b' : '#f1f5f9';
-
-    // Expanded task panel state
-    this.expandedTask = null;
-    this.expandedPanelWidth = 0;
-    this.expandedPanelTargetWidth = 400;
-    this.expandedPanelAnimating = false;
-    this.resultScrollOffset = 0; // Scroll offset for result content
-    this.resultBoxBounds = null; // Bounds of result box for scroll detection
-    this.copyButtonBounds = null; // Bounds of copy button for click detection
-    this.copyButtonState = 'idle'; // 'idle', 'hover', 'copied'
-
-    // Expanded agent panel state
-    this.expandedAgent = null;
-    this.expandedAgentPanelWidth = 0;
-    this.expandedAgentPanelTargetWidth = 400;
-    this.expandedAgentPanelAnimating = false;
-    this.agentPanelScrollOffset = 0; // Scroll offset for agent panel content
-    this.agentPanelMaxScroll = 0; // Maximum scroll offset for agent panel
-
-    // Expanded combiner panel state
-    this.expandedCombiner = null;
-    this.expandedCombinerPanelWidth = 0;
-    this.expandedCombinerPanelTargetWidth = 360;
-    this.expandedCombinerPanelAnimating = false;
-
-    // Connection mode state (task-to-task)
-    this.connectionMode = false;
-    this.connectionSourceTask = null;
-    this.highlightedAgent = null;
-
-    // Task-to-Agent assignment mode state
-    this.assignmentMode = false;
-    this.assignmentSourceTask = null;
-    this.assignmentMouseX = 0;
-    this.assignmentMouseY = 0;
-
-    // Combiner output assignment mode (connect combiner output to agent)
-    this.combinerAssignMode = false;
-    this.combinerAssignmentSource = null;
-
-    // Create task mode state
-    this.createTaskMode = false;
 
     // Initialize forms module
-    this.forms = new AgentCanvasForms(this);
-
-    // Timeline panel state
-    this.timelineVisible = false;
-    this.timelinePanelWidth = 0;
-    this.timelinePanelTargetWidth = 350;
-    this.timelinePanelAnimating = false;
-    this.timelineEvents = [];
-    this.timelineScrollOffset = 0;
-    this.timelineMaxEvents = 50;
-
-    // Chain visualization state
-    this.activeChains = []; // Array of active chain objects
-    this.chainParticles = []; // Particles flowing along chain paths
-
-    // Combiner nodes state (NEW - for visual workflow design)
-    this.combinerNodes = []; // Array of combiner node objects
-    this.connections = []; // Array of connection objects between nodes
-    this.draggedConnection = null; // Connection being dragged
-    this.connectionDragStart = null; // Starting port for connection drag
-    this.isDraggingConnection = false; // Connection drag state
-    this.isDraggingCombiner = false; // Combiner node drag state
-    this.draggedCombiner = null; // Combiner being dragged
-    this.selectedCombiner = null; // Currently selected combiner node
-    this.hoveredCombiner = null; // Combiner node under mouse
-
-    // Execution logs state (task ID -> array of log entries)
-    this.executionLogs = {}; // { taskId: [{ type: 'thinking'|'tool_call'|'tool_success'|'tool_error', message: string, timestamp: Date }] }
-
-    // Callback functions (set by parent)
-    this.onAgentClick = null;
-    this.onMetricsUpdate = null;
-    this.onTimelineEvent = null;
+    this.state.forms = new AgentCanvasForms(this);
+    this.forms = this.state.forms;
 
     // Setup canvas
     this.resize();
@@ -152,7 +49,264 @@ class AgentCanvas {
     // Keyboard interactions
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => this.onKeyUp(e));
+
+    // Subscribe to state changes that require redraw
+    this.state.on(EVENT_TYPES.AGENT_MOVED, () => this.draw());
+    this.state.on(EVENT_TYPES.TASK_MOVED, () => this.draw());
+    this.state.on(EVENT_TYPES.CANVAS_PANNED, () => this.draw());
+    this.state.on(EVENT_TYPES.CANVAS_ZOOMED, () => this.draw());
   }
+
+  // ==================== PROPERTY ACCESSORS (Backward Compatibility) ====================
+  // These getters/setters delegate to the state module for backward compatibility
+
+  // Studio and data
+  get studio() { return this.state.studio; }
+  set studio(value) { this.state.setStudio(value); }
+
+  get agents() { return this.state.agents; }
+  set agents(value) { this.state.setAgents(value); }
+
+  get tasks() { return this.state.tasks; }
+  set tasks(value) { this.state.setTasks(value); }
+
+  get messages() { return this.state.messages; }
+  set messages(value) { this.state.messages = value; }
+
+  get mission() { return this.state.mission; }
+  set mission(value) { this.state.mission = value; }
+
+  get eventSource() { return this.state.eventSource; }
+  set eventSource(value) { this.state.eventSource = value; }
+
+  // Transform state
+  get offsetX() { return this.state.offsetX; }
+  set offsetX(value) { this.state.offsetX = value; }
+
+  get offsetY() { return this.state.offsetY; }
+  set offsetY(value) { this.state.offsetY = value; }
+
+  get scale() { return this.state.scale; }
+  set scale(value) { this.state.setScale(value); }
+
+  // Drag states
+  get isDragging() { return this.state.isDragging; }
+  set isDragging(value) { this.state.isDragging = value; }
+
+  get isDraggingAgent() { return this.state.isDraggingAgent; }
+  set isDraggingAgent(value) { this.state.isDraggingAgent = value; }
+
+  get draggedAgent() { return this.state.draggedAgent; }
+  set draggedAgent(value) { this.state.draggedAgent = value; }
+
+  get isDraggingTask() { return this.state.isDraggingTask; }
+  set isDraggingTask(value) { this.state.isDraggingTask = value; }
+
+  get draggedTask() { return this.state.draggedTask; }
+  set draggedTask(value) { this.state.draggedTask = value; }
+
+  get isDraggingConnection() { return this.state.isDraggingConnection; }
+  set isDraggingConnection(value) { this.state.isDraggingConnection = value; }
+
+  get draggedConnection() { return this.state.draggedConnection; }
+  set draggedConnection(value) { this.state.draggedConnection = value; }
+
+  get connectionDragStart() { return this.state.connectionDragStart; }
+  set connectionDragStart(value) { this.state.connectionDragStart = value; }
+
+  get isDraggingCombiner() { return this.state.isDraggingCombiner; }
+  set isDraggingCombiner(value) { this.state.isDraggingCombiner = value; }
+
+  get draggedCombiner() { return this.state.draggedCombiner; }
+  set draggedCombiner(value) { this.state.draggedCombiner = value; }
+
+  get dragStartX() { return this.state.dragStartX; }
+  set dragStartX(value) { this.state.dragStartX = value; }
+
+  get dragStartY() { return this.state.dragStartY; }
+  set dragStartY(value) { this.state.dragStartY = value; }
+
+  // Keyboard state
+  get spacePressed() { return this.state.spacePressed; }
+  set spacePressed(value) { this.state.spacePressed = value; }
+
+  get ctrlPressed() { return this.state.ctrlPressed; }
+  set ctrlPressed(value) { this.state.ctrlPressed = value; }
+
+  // Context menu
+  get contextMenuVisible() { return this.state.contextMenuVisible; }
+  set contextMenuVisible(value) { this.state.contextMenuVisible = value; }
+
+  get contextMenuAgent() { return this.state.contextMenuAgent; }
+  set contextMenuAgent(value) { this.state.contextMenuAgent = value; }
+
+  get contextMenuX() { return this.state.contextMenuX; }
+  set contextMenuX(value) { this.state.contextMenuX = value; }
+
+  get contextMenuY() { return this.state.contextMenuY; }
+  set contextMenuY(value) { this.state.contextMenuY = value; }
+
+  // Help overlay
+  get helpOverlayVisible() { return this.state.helpOverlayVisible; }
+  set helpOverlayVisible(value) { this.state.helpOverlayVisible = value; }
+
+  // Animation
+  get animationFrame() { return this.state.animationFrame; }
+  set animationFrame(value) { this.state.animationFrame = value; }
+
+  get animationPaused() { return this.state.animationPaused; }
+  set animationPaused(value) { this.state.animationPaused = value; }
+
+  get particles() { return this.state.particles; }
+  set particles(value) { this.state.particles = value; }
+
+  // Appearance
+  get backgroundColor() { return this.state.backgroundColor; }
+  set backgroundColor(value) { this.state.backgroundColor = value; }
+
+  // Expanded panels
+  get expandedTask() { return this.state.expandedTask; }
+  set expandedTask(value) { this.state.expandedTask = value; }
+
+  get expandedPanelWidth() { return this.state.expandedPanelWidth; }
+  set expandedPanelWidth(value) { this.state.expandedPanelWidth = value; }
+
+  get expandedPanelTargetWidth() { return this.state.expandedPanelTargetWidth; }
+  set expandedPanelTargetWidth(value) { this.state.expandedPanelTargetWidth = value; }
+
+  get expandedPanelAnimating() { return this.state.expandedPanelAnimating; }
+  set expandedPanelAnimating(value) { this.state.expandedPanelAnimating = value; }
+
+  get resultScrollOffset() { return this.state.resultScrollOffset; }
+  set resultScrollOffset(value) { this.state.resultScrollOffset = value; }
+
+  get resultBoxBounds() { return this.state.resultBoxBounds; }
+  set resultBoxBounds(value) { this.state.resultBoxBounds = value; }
+
+  get copyButtonBounds() { return this.state.copyButtonBounds; }
+  set copyButtonBounds(value) { this.state.copyButtonBounds = value; }
+
+  get copyButtonState() { return this.state.copyButtonState; }
+  set copyButtonState(value) { this.state.copyButtonState = value; }
+
+  get expandedAgent() { return this.state.expandedAgent; }
+  set expandedAgent(value) { this.state.expandedAgent = value; }
+
+  get expandedAgentPanelWidth() { return this.state.expandedAgentPanelWidth; }
+  set expandedAgentPanelWidth(value) { this.state.expandedAgentPanelWidth = value; }
+
+  get expandedAgentPanelTargetWidth() { return this.state.expandedAgentPanelTargetWidth; }
+  set expandedAgentPanelTargetWidth(value) { this.state.expandedAgentPanelTargetWidth = value; }
+
+  get expandedAgentPanelAnimating() { return this.state.expandedAgentPanelAnimating; }
+  set expandedAgentPanelAnimating(value) { this.state.expandedAgentPanelAnimating = value; }
+
+  get agentPanelScrollOffset() { return this.state.agentPanelScrollOffset; }
+  set agentPanelScrollOffset(value) { this.state.agentPanelScrollOffset = value; }
+
+  get agentPanelMaxScroll() { return this.state.agentPanelMaxScroll; }
+  set agentPanelMaxScroll(value) { this.state.agentPanelMaxScroll = value; }
+
+  get expandedCombiner() { return this.state.expandedCombiner; }
+  set expandedCombiner(value) { this.state.expandedCombiner = value; }
+
+  get expandedCombinerPanelWidth() { return this.state.expandedCombinerPanelWidth; }
+  set expandedCombinerPanelWidth(value) { this.state.expandedCombinerPanelWidth = value; }
+
+  get expandedCombinerPanelTargetWidth() { return this.state.expandedCombinerPanelTargetWidth; }
+  set expandedCombinerPanelTargetWidth(value) { this.state.expandedCombinerPanelTargetWidth = value; }
+
+  get expandedCombinerPanelAnimating() { return this.state.expandedCombinerPanelAnimating; }
+  set expandedCombinerPanelAnimating(value) { this.state.expandedCombinerPanelAnimating = value; }
+
+  // Modes
+  get connectionMode() { return this.state.connectionMode; }
+  set connectionMode(value) { this.state.connectionMode = value; }
+
+  get connectionSourceTask() { return this.state.connectionSourceTask; }
+  set connectionSourceTask(value) { this.state.connectionSourceTask = value; }
+
+  get highlightedAgent() { return this.state.highlightedAgent; }
+  set highlightedAgent(value) { this.state.highlightedAgent = value; }
+
+  get assignmentMode() { return this.state.assignmentMode; }
+  set assignmentMode(value) { this.state.assignmentMode = value; }
+
+  get assignmentSourceTask() { return this.state.assignmentSourceTask; }
+  set assignmentSourceTask(value) { this.state.assignmentSourceTask = value; }
+
+  get assignmentMouseX() { return this.state.assignmentMouseX; }
+  set assignmentMouseX(value) { this.state.assignmentMouseX = value; }
+
+  get assignmentMouseY() { return this.state.assignmentMouseY; }
+  set assignmentMouseY(value) { this.state.assignmentMouseY = value; }
+
+  get combinerAssignMode() { return this.state.combinerAssignMode; }
+  set combinerAssignMode(value) { this.state.combinerAssignMode = value; }
+
+  get combinerAssignmentSource() { return this.state.combinerAssignmentSource; }
+  set combinerAssignmentSource(value) { this.state.combinerAssignmentSource = value; }
+
+  get createTaskMode() { return this.state.createTaskMode; }
+  set createTaskMode(value) { this.state.createTaskMode = value; }
+
+  // Timeline
+  get timelineVisible() { return this.state.timelineVisible; }
+  set timelineVisible(value) { this.state.timelineVisible = value; }
+
+  get timelinePanelWidth() { return this.state.timelinePanelWidth; }
+  set timelinePanelWidth(value) { this.state.timelinePanelWidth = value; }
+
+  get timelinePanelTargetWidth() { return this.state.timelinePanelTargetWidth; }
+  set timelinePanelTargetWidth(value) { this.state.timelinePanelTargetWidth = value; }
+
+  get timelinePanelAnimating() { return this.state.timelinePanelAnimating; }
+  set timelinePanelAnimating(value) { this.state.timelinePanelAnimating = value; }
+
+  get timelineEvents() { return this.state.timelineEvents; }
+  set timelineEvents(value) { this.state.timelineEvents = value; }
+
+  get timelineScrollOffset() { return this.state.timelineScrollOffset; }
+  set timelineScrollOffset(value) { this.state.timelineScrollOffset = value; }
+
+  get timelineMaxEvents() { return this.state.timelineMaxEvents; }
+  set timelineMaxEvents(value) { this.state.timelineMaxEvents = value; }
+
+  // Chains
+  get activeChains() { return this.state.activeChains; }
+  set activeChains(value) { this.state.activeChains = value; }
+
+  get chainParticles() { return this.state.chainParticles; }
+  set chainParticles(value) { this.state.chainParticles = value; }
+
+  // Combiner nodes
+  get combinerNodes() { return this.state.combinerNodes; }
+  set combinerNodes(value) { this.state.combinerNodes = value; }
+
+  get connections() { return this.state.connections; }
+  set connections(value) { this.state.connections = value; }
+
+  get selectedCombiner() { return this.state.selectedCombiner; }
+  set selectedCombiner(value) { this.state.selectedCombiner = value; }
+
+  get hoveredCombiner() { return this.state.hoveredCombiner; }
+  set hoveredCombiner(value) { this.state.hoveredCombiner = value; }
+
+  // Execution logs
+  get executionLogs() { return this.state.executionLogs; }
+  set executionLogs(value) { this.state.executionLogs = value; }
+
+  // Callbacks
+  get onAgentClick() { return this.state.onAgentClick; }
+  set onAgentClick(value) { this.state.onAgentClick = value; }
+
+  get onMetricsUpdate() { return this.state.onMetricsUpdate; }
+  set onMetricsUpdate(value) { this.state.onMetricsUpdate = value; }
+
+  get onTimelineEvent() { return this.state.onTimelineEvent; }
+  set onTimelineEvent(value) { this.state.onTimelineEvent = value; }
+
+  // ==================== METHODS ====================
 
   onKeyDown(e) {
     // Track modifier keys
