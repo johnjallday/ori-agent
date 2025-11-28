@@ -24,8 +24,8 @@ export class AgentCanvasLayoutManager {
     const levels = this.calculateTaskLevels();
 
     // Get canvas dimensions
-    const canvasWidth = this.state.width / this.state.scale;
-    const canvasHeight = this.state.height / this.state.scale;
+    const canvasWidth = this.parent.width / this.state.scale;
+    const canvasHeight = this.parent.height / this.state.scale;
 
     // Vertical flow layout: tasks on the left, agents on the right
     const taskColumnX = 300; // X position for tasks (left side)
@@ -105,16 +105,16 @@ export class AgentCanvasLayoutManager {
 
     // Calculate required scale to fit content with padding
     const padding = 100; // Padding around content
-    const scaleX = this.state.width / (contentWidth + padding * 2);
-    const scaleY = this.state.height / (contentHeight + padding * 2);
+    const scaleX = this.parent.width / (contentWidth + padding * 2);
+    const scaleY = this.parent.height / (contentHeight + padding * 2);
     const newScale = Math.min(scaleX, scaleY, 1.0); // Don't zoom in beyond 100%
 
     // Clamp scale to reasonable limits
     this.state.scale = Math.max(0.3, Math.min(1.0, newScale));
 
     // Calculate offset to center content
-    this.state.offsetX = (this.state.width / 2) - (contentCenterX * this.state.scale);
-    this.state.offsetY = (this.state.height / 2) - (contentCenterY * this.state.scale);
+    this.state.offsetX = (this.parent.width / 2) - (contentCenterX * this.state.scale);
+    this.state.offsetY = (this.parent.height / 2) - (contentCenterY * this.state.scale);
   }
 
   /**
@@ -148,8 +148,8 @@ export class AgentCanvasLayoutManager {
     const padding = 100; // Padding around edges
 
     // Calculate scale to fit content
-    const scaleX = (this.state.width - 2 * padding) / contentWidth;
-    const scaleY = (this.state.height - 2 * padding) / contentHeight;
+    const scaleX = (this.parent.width - 2 * padding) / contentWidth;
+    const scaleY = (this.parent.height - 2 * padding) / contentHeight;
     const newScale = Math.min(scaleX, scaleY, 2); // Max zoom of 2x
 
     // Center the content
@@ -157,8 +157,8 @@ export class AgentCanvasLayoutManager {
     const centerY = (minY + maxY) / 2;
 
     this.state.scale = newScale;
-    this.state.offsetX = this.state.width / 2 - centerX * newScale;
-    this.state.offsetY = this.state.height / 2 - centerY * newScale;
+    this.state.offsetX = this.parent.width / 2 - centerX * newScale;
+    this.state.offsetY = this.parent.height / 2 - centerY * newScale;
 
     this.parent.draw();
     console.log('🎯 Zoomed to fit all agents');
