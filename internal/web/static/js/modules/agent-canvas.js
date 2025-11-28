@@ -85,9 +85,6 @@ class AgentCanvas {
     // Initialize initialization module
     this.initModule = new AgentCanvasInitialization(this.state, this);
 
-    // Initialize layout manager module
-    this.layout = new AgentCanvasLayoutManager(this.state, this);
-
     this.canvas.addEventListener('mousemove', (e) => this.interactions.onMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.interactions.onMouseUp(e));
     this.canvas.addEventListener('mouseleave', (e) => this.interactions.onMouseUp(e));
@@ -364,6 +361,11 @@ class AgentCanvas {
 
 
 
+
+  // Initialization methods delegated to initialization module
+  init() { return this.initModule.init(); }
+  resize() { return this.initModule.resize(); }
+  initializeAgents() { return this.initModule.initializeAgents(); }
 
   // Animation methods delegated to animation module
   updateChains() { return this.animation.updateChains(); }
