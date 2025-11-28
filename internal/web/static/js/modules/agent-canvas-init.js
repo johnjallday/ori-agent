@@ -69,7 +69,8 @@ export class AgentCanvasInitialization {
       this.initializeAgents();
 
       // Load saved layout (positions and zoom)
-      this.parent.layout.loadLayout();
+      // TEMPORARILY DISABLED to fix zoom issue - will re-enable after testing
+      // this.parent.layout.loadLayout();
 
       // Detect and initialize chains
       this.parent.animation.updateChains();
