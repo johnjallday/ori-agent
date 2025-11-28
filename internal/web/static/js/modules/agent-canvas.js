@@ -13,6 +13,13 @@ import { AgentCanvasInteractionHandler } from './agent-canvas-interactions.js';
 import { AgentCanvasLayoutManager } from './agent-canvas-layout.js';
 import { AgentCanvasAnimationController } from './agent-canvas-animation.js';
 import { AgentCanvasTimelineManager } from './agent-canvas-timeline.js';
+import { AgentCanvasHelpers } from './agent-canvas-helpers.js';
+import { AgentCanvasCombinerOperations } from './agent-canvas-combiner-ops.js';
+import { AgentCanvasPanelManager } from './agent-canvas-panels.js';
+import { AgentCanvasNotifications } from './agent-canvas-notifications.js';
+import { AgentCanvasMetrics } from './agent-canvas-metrics.js';
+import { AgentCanvasContextMenu } from './agent-canvas-context-menu.js';
+import { AgentCanvasEventHandler } from './agent-canvas-event-handler.js';
 
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
@@ -52,6 +59,27 @@ class AgentCanvas {
 
     // Initialize timeline manager
     this.timeline = new AgentCanvasTimelineManager(this.state, this);
+
+    // Initialize helpers module
+    this.helpers = new AgentCanvasHelpers(this.state, this);
+
+    // Initialize combiner operations module
+    this.combinerOps = new AgentCanvasCombinerOperations(this.state, this);
+
+    // Initialize panel manager
+    this.panels = new AgentCanvasPanelManager(this.state, this);
+
+    // Initialize notifications module
+    this.notifications = new AgentCanvasNotifications(this.state, this);
+
+    // Initialize metrics module
+    this.metrics = new AgentCanvasMetrics(this.state, this);
+
+    // Initialize context menu module
+    this.contextMenu = new AgentCanvasContextMenu(this.state, this);
+
+    // Initialize event handler module
+    this.eventHandler = new AgentCanvasEventHandler(this.state, this);
 
     // Initialize layout manager module
     this.layout = new AgentCanvasLayoutManager(this.state, this);
@@ -470,318 +498,28 @@ class AgentCanvas {
     }
   }
 
-  getAgentColor(index) {
-    const colors = [
-      '#3b82f6', // blue
-      '#10b981', // green
-      '#f59e0b', // amber
-      '#ef4444', // red
-      '#8b5cf6', // purple
-      '#ec4899', // pink
-      '#14b8a6', // teal
-      '#f97316'  // orange
-    ];
-    return colors[index % colors.length];
-  }
 
-  connectEventStream() {
-    if (this.eventSource) {
-      this.eventSource.close();
-    }
 
-    // Toast notifications array
-    this.notifications = this.notifications || [];
 
-    this.eventSource = connectProgressStream(this.studioId, {
-      onInitial: (data) => {
-        console.log('📊 Initial progress state:', data);
-        if (data.workspace_progress) {
-          this.workspaceProgress = data.workspace_progress;
-        }
-        if (data.agent_stats) {
-          this.updateAgentStats(data.agent_stats);
-        }
-        if (data.tasks) {
-          const existingPositions = {};
-          this.tasks.forEach(t => {
-            if (t.x !== null && t.y !== null) {
-              existingPositions[t.id] = { x: t.x, y: t.y };
-            }
-          });
-
-          this.tasks = data.tasks.map(task => {
-            const existing = existingPositions[task.id];
-            return {
-              ...task,
-              x: existing ? existing.x : (task.x ?? null),
-              y: existing ? existing.y : (task.y ?? null)
-            };
-          });
-        }
-        this.draw();
-      },
-      onWorkspaceProgress: (data) => {
-        console.log('📊 Workspace progress update:', data);
-        if (data.workspace_progress) {
-          this.workspaceProgress = data.workspace_progress;
-        }
-        if (data.agent_stats) {
-          this.updateAgentStats(data.agent_stats);
-        }
-        this.draw();
-      },
-      onTaskEvent: (type, data) => {
-        const evt = { type, data };
-        this.handleTaskEvent(evt);
-        const taskDesc = data.data?.description || 'Task';
-        if (type === 'task.completed') {
-          this.showNotification(`✓ ${taskDesc} completed`, 'success');
-        } else if (type === 'task.failed') {
-          const error = data.data?.error || 'Unknown error';
-          this.showNotification(`✗ ${taskDesc} failed: ${error}`, 'error');
-        } else if (type === 'task.started') {
-          this.showNotification(`${taskDesc} started`, 'info');
-        } else if (type === 'task.created') {
-          this.showNotification('Task created', 'info');
-        }
-        this.addTimelineEvent(evt);
-      },
-      onTaskThinking: (data) => {
-        this.addExecutionLog(data.data.task_id, 'thinking', data.data.message || 'Analyzing task...');
-        this.addTimelineEvent({ type: 'task.thinking', data });
-      },
-      onTaskToolCall: (data) => {
-        const toolName = data.data.tool_name || 'Unknown tool';
-        this.addExecutionLog(data.data.task_id, 'tool_call', `Calling tool: ${toolName}`);
-        this.addTimelineEvent({ type: 'task.tool_call', data });
-      },
-      onTaskToolSuccess: (data) => {
-        this.addExecutionLog(data.data.task_id, 'tool_success', data.data.message || 'Tool succeeded');
-        this.addTimelineEvent({ type: 'task.tool_success', data });
-      },
-      onTaskToolError: (data) => {
-        this.addExecutionLog(data.data.task_id, 'tool_error', data.data.message || 'Tool failed');
-        this.addTimelineEvent({ type: 'task.tool_error', data });
-      },
-      onTaskProgress: (data) => {
-        this.addExecutionLog(data.data.task_id, 'progress', data.data.message || 'Task progress update');
-        this.addTimelineEvent({ type: 'task.progress', data });
-      },
-      onError: (error) => {
-        console.error('EventSource error:', error);
-        setTimeout(() => {
-          if (this.eventSource && this.eventSource.readyState === EventSource.CLOSED) {
-            this.connectEventStream();
-          }
-        }, 5000);
-      }
-    });
-
-    console.log('🔄 Connected to progress stream');
-  }
-
-  handleTaskEvent(eventData) {
-    const taskId = eventData.data.task_id;
-    const task = this.tasks.find(t => t.id === taskId);
-
-    if (task) {
-      // Update existing task
-      if (eventData.type === 'task.started') {
-        task.status = 'in_progress';
-        task.started_at = new Date().toISOString();
-      } else if (eventData.type === 'task.completed') {
-        task.status = 'completed';
-        task.completed_at = new Date().toISOString();
-
-        // Store result on task if available
-        if (eventData.data.result) {
-          task.result = eventData.data.result;
-
-          // Update the agent's lastResult
-          if (task.to) {
-            const agent = this.agents.find(a => a.name === task.to);
-            if (agent) {
-              agent.lastResult = eventData.data.result;
-              console.log(`✅ Updated lastResult for agent ${agent.name}:`, eventData.data.result);
-            }
-          }
-        }
-      } else if (eventData.type === 'task.failed') {
-        task.status = 'failed';
-        task.error = eventData.data.error;
-      }
-
-      // Update chains when task status changes
-      this.updateChains();
-      this.draw();
-    }
-  }
-
-  updateAgentStats(agentStats) {
-    // Update agent status and stats from server
-    for (const agentName in agentStats) {
-      const agent = this.agents.find(a => a.name === agentName);
-      if (agent) {
-        const stats = agentStats[agentName];
-        agent.status = stats.status;
-        agent.currentTasks = stats.current_tasks || [];
-        agent.queuedTasks = stats.queued_tasks || [];
-        agent.completedTasks = stats.completed_tasks || 0;
-        agent.failedTasks = stats.failed_tasks || 0;
-        agent.totalExecutions = stats.total_executions || 0;
-      }
-    }
-
-    // Update chains when agent stats change
-    this.updateChains();
-  }
 
   // Animation methods delegated to animation module
   updateChains() { return this.animation.updateChains(); }
   createChainParticle(fromTask, toTask) { return this.animation.createChainParticle(fromTask, toTask); }
   updateChainParticles() { return this.animation.updateChainParticles(); }
 
-  showNotification(message, type = 'info') {
-    const notification = {
-      id: Date.now() + Math.random(),
-      message,
-      type, // 'info', 'success', 'warning', 'error'
-      timestamp: Date.now()
-    };
 
-    this.notifications.push(notification);
-
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-      this.dismissNotification(notification.id);
-    }, 5000);
-
-    this.draw();
-  }
-
-  dismissNotification(id) {
-    this.notifications = this.notifications.filter(n => n.id !== id);
-    this.draw();
-  }
 
   // Timeline methods delegated to timeline module
   addTimelineEvent(eventData) { return this.timeline.addTimelineEvent(eventData); }
   toggleTimeline() { return this.timeline.toggleTimeline(); }
   animateTimelinePanel(expanding) { return this.timeline.animateTimelinePanel(expanding); }
 
-  addExecutionLog(taskId, type, message) {
-    if (!this.executionLogs[taskId]) {
-      this.executionLogs[taskId] = [];
-    }
 
-    this.executionLogs[taskId].push({
-      type,
-      message,
-      timestamp: new Date()
-    });
 
-    // Limit logs per task to 50 entries
-    if (this.executionLogs[taskId].length > 50) {
-      this.executionLogs[taskId] = this.executionLogs[taskId].slice(-50);
-    }
 
-    this.draw();
-  }
 
-  handleEvent(event) {
-    console.log('Canvas event:', event);
 
-    switch (event.type) {
-      case 'task.created':
-      case 'task_created':
-        this.addTask(event.data);
-        break;
-      case 'task.started':
-      case 'task_started':
-        this.updateTaskStatus(event.data.task_id, 'in_progress');
-        this.setAgentStatus(event.data.assigned_to, 'active');
-        break;
-      case 'task.completed':
-      case 'task_completed':
-        this.updateTaskStatus(event.data.task_id, 'completed');
-        break;
-      case 'message.sent':
-      case 'message_sent':
-        this.addMessage(event.data);
-        break;
-      case 'mission_started':
-        this.setMission(event.data.mission);
-        break;
-    }
 
-    // Forward event to timeline callback
-    if (this.onTimelineEvent) {
-      this.onTimelineEvent(event);
-    }
-
-    // Update metrics after any task-related event
-    if (event.type.includes('task')) {
-      this.updateMetrics();
-    }
-  }
-
-  addTask(taskData) {
-    const task = {
-      id: taskData.task_id || taskData.id,
-      from: taskData.from || 'orchestrator',
-      to: taskData.assigned_to || taskData.to,
-      description: taskData.description,
-      status: 'pending',
-      progress: 0
-    };
-    this.tasks.push(task);
-
-    // Create particle effect
-    this.createTaskParticles(task);
-
-    // Update metrics
-    this.updateMetrics();
-  }
-
-  updateTaskStatus(taskId, status) {
-    const task = this.tasks.find(t => t.id === taskId);
-    if (task) {
-      task.status = status;
-      if (status === 'in_progress') {
-        task.progress = 0;
-      } else if (status === 'completed') {
-        task.progress = 100;
-      }
-      // Update metrics when task status changes
-      this.updateMetrics();
-    }
-  }
-
-  setAgentStatus(agentName, status) {
-    const agent = this.agents.find(a => a.name === agentName);
-    if (agent) {
-      agent.status = status;
-    }
-  }
-
-  addMessage(messageData) {
-    this.messages.push({
-      from: messageData.from,
-      to: messageData.to,
-      content: messageData.content,
-      timestamp: Date.now()
-    });
-
-    // Keep only last 50 messages
-    if (this.messages.length > 50) {
-      this.messages.shift();
-    }
-  }
-
-  setMission(missionText) {
-    this.mission = missionText;
-    console.log('Mission set on canvas:', missionText);
-  }
 
   // Animation methods delegated to animation module (continued)
   createTaskParticles(task) { return this.animation.createTaskParticles(task); }
@@ -928,27 +666,6 @@ class AgentCanvas {
 
 
 
-  buildCombinerResultPreview(combiner) {
-    const inputConns = this.connections.filter(c => c.to === combiner.id);
-    if (!inputConns.length) return '';
-    const inputs = [];
-    inputConns.forEach(conn => {
-      const nodeData = this.getNodeById(conn.from);
-      if (nodeData?.type === 'task' && nodeData.node?.result) {
-        inputs.push(nodeData.node.result);
-      }
-    });
-    if (!inputs.length) return '';
-
-    switch (combiner.resultCombinationMode) {
-      case 'append':
-        return inputs.join('\n---\n');
-      case 'summarize':
-      case 'merge':
-      default:
-        return inputs.map((t, i) => `• Input ${i + 1}: ${t}`).join('\n');
-    }
-  }
 
   // Helper function to draw rounded rectangle
 
@@ -958,63 +675,8 @@ class AgentCanvas {
 
 
 
-  toggleTaskPanel(task) {
-    // Close agent panel if open
-    if (this.expandedAgent) {
-      this.closeAgentPanel();
-    }
-    if (this.expandedCombiner) {
-      this.closeCombinerPanel();
-    }
 
-    if (this.expandedTask && this.expandedTask.id === task.id) {
-      // Clicking the same task - close panel
-      this.closeTaskPanel();
-    } else {
-      // Expand panel for this task
-      this.expandedTask = task;
-      this.resultScrollOffset = 0; // Reset scroll when opening a new task
-      this.copyButtonState = 'idle'; // Reset copy button state
-      this.expandedPanelAnimating = true;
-      this.animatePanel(true);
-    }
-  }
 
-  closeTaskPanel() {
-    this.expandedPanelAnimating = true;
-    this.animatePanel(false);
-  }
-
-  animatePanel(expanding) {
-    const animate = () => {
-      const speed = 30; // pixels per frame
-
-      if (expanding) {
-        this.expandedPanelWidth = Math.min(
-          this.expandedPanelWidth + speed,
-          this.expandedPanelTargetWidth
-        );
-
-        if (this.expandedPanelWidth >= this.expandedPanelTargetWidth) {
-          this.expandedPanelAnimating = false;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      } else {
-        this.expandedPanelWidth = Math.max(this.expandedPanelWidth - speed, 0);
-
-        if (this.expandedPanelWidth <= 0) {
-          this.expandedPanelAnimating = false;
-          this.expandedTask = null;
-          this.resultScrollOffset = 0; // Reset scroll when closing panel
-        } else {
-          requestAnimationFrame(animate);
-        }
-      }
-    };
-
-    animate();
-  }
 
   async toggleAgentPanel(agent) {
     // Close task panel if open
@@ -1064,88 +726,10 @@ class AgentCanvas {
     }
   }
 
-  closeAgentPanel() {
-    this.expandedAgentPanelAnimating = true;
-    this.animateAgentPanel(false);
-  }
 
-  toggleCombinerPanel(combiner) {
-    // Close other panels
-    if (this.expandedTask) this.closeTaskPanel();
-    if (this.expandedAgent) this.closeAgentPanel();
 
-    if (this.expandedCombiner && this.expandedCombiner.id === combiner.id) {
-      this.closeCombinerPanel();
-      return;
-    }
 
-    this.expandedCombiner = combiner;
-    this.expandedCombinerPanelAnimating = true;
-    this.animateCombinerPanel(true);
-  }
 
-  closeCombinerPanel() {
-    this.expandedCombinerPanelAnimating = true;
-    this.animateCombinerPanel(false);
-  }
-
-  animateCombinerPanel(expanding) {
-    const animate = () => {
-      const speed = 30;
-      if (expanding) {
-        this.expandedCombinerPanelWidth = Math.min(
-          this.expandedCombinerPanelWidth + speed,
-          this.expandedCombinerPanelTargetWidth
-        );
-        if (this.expandedCombinerPanelWidth >= this.expandedCombinerPanelTargetWidth) {
-          this.expandedCombinerPanelAnimating = false;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      } else {
-        this.expandedCombinerPanelWidth = Math.max(this.expandedCombinerPanelWidth - speed, 0);
-        if (this.expandedCombinerPanelWidth <= 0) {
-          this.expandedCombinerPanelAnimating = false;
-          this.expandedCombiner = null;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      }
-    };
-    animate();
-  }
-
-  animateAgentPanel(expanding) {
-    const animate = () => {
-      const speed = 30; // pixels per frame
-
-      if (expanding) {
-        this.expandedAgentPanelWidth = Math.min(
-          this.expandedAgentPanelWidth + speed,
-          this.expandedAgentPanelTargetWidth
-        );
-
-        if (this.expandedAgentPanelWidth >= this.expandedAgentPanelTargetWidth) {
-          this.expandedAgentPanelAnimating = false;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      } else {
-        this.expandedAgentPanelWidth = Math.max(this.expandedAgentPanelWidth - speed, 0);
-
-        if (this.expandedAgentPanelWidth <= 0) {
-          this.expandedAgentPanelAnimating = false;
-          this.expandedAgent = null;
-          this.agentPanelScrollOffset = 0; // Reset scroll when closing panel
-          this.agentPanelMaxScroll = 0; // Reset max scroll when closing panel
-        } else {
-          requestAnimationFrame(animate);
-        }
-      }
-    };
-
-    animate();
-  }
 
   async copyResultToClipboard() {
     if (!this.expandedTask || !this.expandedTask.result) {
@@ -1176,25 +760,6 @@ class AgentCanvas {
     }
   }
 
-  toggleAssignmentMode(task) {
-    console.log('toggleAssignmentMode called for task:', task.id);
-    if (this.assignmentMode && this.assignmentSourceTask && this.assignmentSourceTask.id === task.id) {
-      // Cancel assignment mode
-      console.log('Exiting assignment mode');
-      this.assignmentMode = false;
-      this.assignmentSourceTask = null;
-      this.assignmentMouseX = 0;
-      this.assignmentMouseY = 0;
-      this.canvas.style.cursor = 'grab';
-    } else {
-      // Enter assignment mode
-      console.log('Entering assignment mode for task:', task.id);
-      this.assignmentMode = true;
-      this.assignmentSourceTask = task;
-      this.canvas.style.cursor = 'crosshair';
-    }
-    this.draw();
-  }
 
 
   // Layout methods delegated to layout module
@@ -1247,18 +812,6 @@ class AgentCanvas {
     return tasksAssignToCombiner(this, combiner);
   }
 
-  updateMetrics() {
-    if (!this.onMetricsUpdate) return;
-
-    const completed = this.tasks.filter(t => t.status === 'completed').length;
-    const inProgress = this.tasks.filter(t => t.status === 'in_progress').length;
-
-    this.onMetricsUpdate({
-      total: this.tasks.length,
-      completed: completed,
-      inProgress: inProgress
-    });
-  }
 
   /**
    * Draw the floating "Create Task" button in the top-right corner
@@ -1299,63 +852,14 @@ class AgentCanvas {
   /**
    * Get icon for event type
    */
-  getEventIcon(type) {
-    const icons = {
-      'task.created': '📋',
-      'task.started': '⏳',
-      'task.completed': '✓',
-      'task.failed': '❌',
-      'task.timeout': '⏰',
-      'task.deleted': '🗑️',
-      'workspace.progress': '📊',
-      'agent.active': '🔥',
-      'agent.idle': '💤',
-      'workflow.started': '🔗',
-      'workflow.completed': '✅',
-      'workflow.failed': '💥'
-    };
-    return icons[type] || '•';
-  }
 
   /**
    * Get color for event type
    */
-  getEventColor(type) {
-    if (type.includes('failed') || type.includes('error')) return '#ef4444';
-    if (type.includes('completed')) return '#10b981';
-    if (type.includes('started')) return '#3b82f6';
-    if (type.includes('deleted')) return '#6b7280';
-    return '#6b7280';
-  }
 
   /**
    * Get formatted message for event
    */
-  getEventMessage(event) {
-    const desc = event.data.description || event.data.task_id || '';
-    const truncDesc = desc.length > 40 ? desc.substring(0, 37) + '...' : desc;
-
-    switch (event.type) {
-      case 'task.created':
-        return `Task created: ${truncDesc}`;
-      case 'task.started':
-        return `Task started: ${truncDesc}`;
-      case 'task.completed':
-        return `Task completed: ${truncDesc}`;
-      case 'task.failed':
-        return `Task failed: ${truncDesc}`;
-      case 'task.deleted':
-        return `Task deleted: ${truncDesc}`;
-      case 'workspace.progress':
-        return 'Workspace progress updated';
-      case 'agent.active':
-        return `Agent ${event.data.agent} is now active`;
-      case 'agent.idle':
-        return `Agent ${event.data.agent} is now idle`;
-      default:
-        return event.type.replace('.', ' ').replace(/_/g, ' ');
-    }
-  }
 
   /**
    * Delete a task
@@ -1419,50 +923,6 @@ class AgentCanvas {
    * Find the most recent task associated with an agent so combiners can treat
    * direct agent connections as inputs.
    */
-  getLatestTaskForAgent(agentName) {
-    if (!agentName || !this.tasks || this.tasks.length === 0) {
-      return null;
-    }
-
-    const candidates = this.tasks.filter(task =>
-      task && (task.to === agentName || task.from === agentName)
-    );
-
-    if (candidates.length === 0) {
-      return null;
-    }
-
-    const getTimestamp = (task) => {
-      const value = task.completed_at || task.started_at || task.created_at;
-      const parsed = value ? new Date(value).getTime() : 0;
-      return Number.isNaN(parsed) ? 0 : parsed;
-    };
-
-    const sortByRecency = (a, b) => getTimestamp(b) - getTimestamp(a);
-
-    const completedWithResult = candidates
-      .filter(task => task.status === 'completed' && task.result)
-      .sort(sortByRecency);
-    if (completedWithResult.length > 0) {
-      return completedWithResult[0];
-    }
-
-    const completed = candidates
-      .filter(task => task.status === 'completed')
-      .sort(sortByRecency);
-    if (completed.length > 0) {
-      return completed[0];
-    }
-
-    const active = candidates
-      .filter(task => task.status === 'in_progress' || task.status === 'assigned')
-      .sort(sortByRecency);
-    if (active.length > 0) {
-      return active[0];
-    }
-
-    return candidates.sort(sortByRecency)[0];
-  }
 
   /**
    * Execute a combiner node - sets up and executes the output task with merged inputs
@@ -1475,93 +935,6 @@ class AgentCanvas {
   }
 
 
-  showExecutionLog(task) {
-    const logs = this.executionLogs[task.id] || [];
-
-    if (logs.length === 0) {
-      this.addNotification('No execution log available for this task', 'info');
-      return;
-    }
-
-    // Create modal HTML
-    let logsHTML = '<div style="max-height: 400px; overflow-y: auto;">';
-
-    logs.forEach((log, index) => {
-      const time = log.timestamp.toLocaleTimeString();
-      let icon = '•';
-      let color = '#6c757d';
-
-      switch (log.type) {
-        case 'thinking':
-          icon = '🧠';
-          color = '#17a2b8';
-          break;
-        case 'tool_call':
-          icon = '🔧';
-          color = '#ffc107';
-          break;
-        case 'tool_success':
-          icon = '✓';
-          color = '#28a745';
-          break;
-        case 'tool_error':
-          icon = '✗';
-          color = '#dc3545';
-          break;
-      }
-
-      logsHTML += `
-        <div style="padding: 8px; border-left: 3px solid ${color}; margin-bottom: 8px; background-color: #f8f9fa;">
-          <div style="font-size: 11px; color: #6c757d; margin-bottom: 4px;">
-            <strong>${time}</strong>
-          </div>
-          <div style="font-size: 12px; color: #212529;">
-            <span style="margin-right: 4px;">${icon}</span>
-            ${log.message}
-          </div>
-        </div>
-      `;
-    });
-
-    logsHTML += '</div>';
-
-    // Show modal using Bootstrap modal if available, or alert as fallback
-    if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-      // Create modal element
-      const modalDiv = document.createElement('div');
-      modalDiv.innerHTML = `
-        <div class="modal fade" id="executionLogModal" tabindex="-1">
-          <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-              <div class="modal-header">
-                <h5 class="modal-title">Execution Log: ${task.description || task.id}</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-              </div>
-              <div class="modal-body">
-                ${logsHTML}
-              </div>
-              <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modalDiv);
-
-      const modal = new bootstrap.Modal(document.getElementById('executionLogModal'));
-      modal.show();
-
-      // Clean up after modal is hidden
-      document.getElementById('executionLogModal').addEventListener('hidden.bs.modal', () => {
-        modalDiv.remove();
-      });
-    } else {
-      // Fallback: show in alert
-      const logText = logs.map(log => `[${log.timestamp.toLocaleTimeString()}] ${log.message}`).join('\n');
-      alert(`Execution Log:\n\n${logText}`);
-    }
-  }
 
   destroy() {
     if (this.animationFrame) {
@@ -1583,76 +956,10 @@ class AgentCanvas {
   // Context menu for agents
 
   // Toggle help overlay
-  toggleHelpOverlay() {
-    if (!this.helpOverlayVisible) {
-      this.helpOverlayVisible = true;
-      console.log('📖 Showing keyboard shortcuts');
-    } else {
-      this.helpOverlayVisible = false;
-      console.log('📖 Hiding keyboard shortcuts');
-    }
-    this.draw();
-  }
 
   // Draw context menu for agent quick actions
 
   // Handle context menu action
-  handleContextMenuAction(action, agent) {
-    console.log(`🎯 Context menu action: ${action} for agent ${agent.name}`);
-
-    switch (action) {
-      case 'view':
-        // View agent details - expand agent panel
-        if (this.expandedAgentPanelWidth === 0) {
-          this.expandedAgentPanelWidth = 1;
-          this.expandedAgentPanelTarget = 350;
-        }
-        this.selectedAgent = agent;
-        this.draw();
-        break;
-
-      case 'assign':
-        // Assign task to agent - show task creation form
-        this.forms.showCreateTaskForm(agent.x, agent.y);
-        this.forms.createTaskTargetAgent = agent.name;
-        this.draw();
-        break;
-
-      case 'remove':
-        // Remove agent (with confirmation)
-        if (confirm(`Remove agent "${agent.name}"?`)) {
-          // Call backend to remove agent from studio
-          apiDelete(`/api/studios/${encodeURIComponent(this.studioId)}/agents/${encodeURIComponent(agent.name)}`)
-            .then(() => {
-              // Remove from local state
-              this.agents = this.agents.filter(a => a.name !== agent.name);
-
-              // Unassign tasks targeting this agent
-              this.tasks = this.tasks.map(t => ({
-                ...t,
-                to: t.to === agent.name ? 'unassigned' : t.to
-              }));
-
-              // Remove any workflow connections involving this agent
-              this.connections = this.connections.filter(c =>
-                c.from !== agent.name && c.to !== agent.name
-              );
-
-              this.showNotification('Agent removed', 'success');
-              this.draw();
-              this.saveLayout();
-            })
-            .catch(err => {
-              console.error('Failed to remove agent:', err);
-              this.addNotification(`Failed to remove agent: ${err.message}`, 'error');
-            });
-        }
-        break;
-
-      default:
-        console.warn(`Unknown context menu action: ${action}`);
-    }
-  }
 
   // Draw help overlay with keyboard shortcuts
 
@@ -1677,32 +984,10 @@ class AgentCanvas {
   /**
    * Helper: Lighten a hex color
    */
-  lightenColor(color, percent) {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
-      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
-      (B < 255 ? B < 1 ? 0 : B : 255))
-      .toString(16).slice(1);
-  }
 
   /**
    * Helper: Darken a hex color
    */
-  darkenColor(color, percent) {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) - amt;
-    const G = (num >> 8 & 0x00FF) - amt;
-    const B = (num & 0x0000FF) - amt;
-    return '#' + (0x1000000 + (R > 0 ? R : 0) * 0x10000 +
-      (G > 0 ? G : 0) * 0x100 +
-      (B > 0 ? B : 0))
-      .toString(16).slice(1);
-  }
 
   // ==================== COMBINER NODE SYSTEM ====================
 
@@ -1804,321 +1089,38 @@ class AgentCanvas {
   /**
    * Ensure a combiner has a tracked input port entry (used for spacing/persistence)
    */
-  ensureCombinerInputPort(combiner, portId) {
-    if (!combiner) return;
-    combiner.inputPorts = combiner.inputPorts || [];
-    if (!combiner.inputPorts.find(p => p.id === portId)) {
-      combiner.inputPorts.push({ id: portId });
-    }
-  }
 
   /**
    * Create a connection between two nodes (agent/combiner to agent/combiner)
    */
-  createConnection(fromNodeId, fromPort, toNodeId, toPort) {
-    // Avoid duplicate connections with same endpoints
-    const existing = this.connections.find(c =>
-      c.from === fromNodeId &&
-      c.fromPort === fromPort &&
-      c.to === toNodeId &&
-      c.toPort === toPort
-    );
-    if (existing) {
-      console.log(`ℹ️ Connection already exists: ${fromNodeId}.${fromPort} → ${toNodeId}.${toPort}`);
-      return existing;
-    }
-
-    const connection = {
-      id: `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      from: fromNodeId,
-      fromPort: fromPort,
-      to: toNodeId,
-      toPort: toPort,
-      color: '#6366f1',
-      animated: false
-    };
-
-    // Track combiner input ports so spacing is stable and persisted
-    const targetNode = this.getNodeById(toNodeId);
-    if (targetNode && targetNode.type === 'combiner' && toPort && toPort.startsWith('input')) {
-      this.ensureCombinerInputPort(targetNode.node, toPort);
-    }
-
-    this.connections.push(connection);
-    console.log(`🔗 Created connection: ${fromNodeId}.${fromPort} → ${toNodeId}.${toPort}`);
-    this.saveLayout();
-    return connection;
-  }
 
   /**
    * Get node by ID (searches both agents and combiners)
    */
-  getNodeById(nodeId) {
-    // Check if it's an agent
-    const agent = this.agents.find(a => a.name === nodeId || a.id === nodeId);
-    if (agent) return { type: 'agent', node: agent };
-
-    // Check if it's a task
-    const task = this.tasks.find(t => t.id === nodeId);
-    if (task) return { type: 'task', node: task };
-
-    // Check if it's a combiner
-    const combiner = this.combinerNodes.find(c => c.id === nodeId);
-    if (combiner) return { type: 'combiner', node: combiner };
-
-    return null;
-  }
 
   /**
    * Get port position in screen coordinates
    */
-  getPortPosition(nodeId, portId) {
-    const nodeData = this.getNodeById(nodeId);
-    if (!nodeData) return null;
-
-    const { type, node } = nodeData;
-
-    if (type === 'agent') {
-      const halfHeight = (node.height || 70) / 2;
-      if (portId === 'input') {
-        return {
-          x: node.x * this.scale + this.offsetX,
-          y: (node.y - halfHeight - 10) * this.scale + this.offsetY
-        };
-      }
-      // Agents expose output port at bottom by default
-      return {
-        x: node.x * this.scale + this.offsetX,
-        y: (node.y + halfHeight + 10) * this.scale + this.offsetY
-      };
-    } else if (type === 'task') {
-      // Tasks have a single output port at the bottom center
-      if (node.cardBounds) {
-        return {
-          x: node.x * this.scale + this.offsetX,
-          y: (node.cardBounds.y + node.cardBounds.height + 5) * this.scale + this.offsetY
-        };
-      }
-      return null;
-    } else if (type === 'combiner') {
-      // Combiner nodes have multiple input ports at top, one output at bottom
-      if (portId === 'output') {
-        return {
-          x: (node.x + node.width / 2) * this.scale + this.offsetX,
-          y: (node.y + node.height + 10) * this.scale + this.offsetY
-        };
-      } else {
-        // Input ports are distributed across the top. Use the provided id to derive index.
-        const match = /input-(\d+)/.exec(portId);
-        const numericIndex = match ? parseInt(match[1], 10) : -1;
-        const inputIndex = node.inputPorts.findIndex(p => p.id === portId);
-        const resolvedIndex = numericIndex >= 0 ? numericIndex : inputIndex;
-
-        // Total inputs based on known ports and requested index, minimum 1 for usability
-        const totalInputs = Math.max(node.inputPorts.length, resolvedIndex + 1, 1);
-        const portSpacing = node.width / (totalInputs + 1);
-        return {
-          x: (node.x + portSpacing * (resolvedIndex + 1)) * this.scale + this.offsetX,
-          y: (node.y - 10) * this.scale + this.offsetY
-        };
-      }
-    }
-
-    return null;
-  }
 
   /**
    * Delete a combiner node and its connections
    */
-  deleteCombinerNode(nodeId) {
-    // Remove the node
-    this.combinerNodes = this.combinerNodes.filter(n => n.id !== nodeId);
-
-    // Remove all connections involving this node
-    this.connections = this.connections.filter(c =>
-      c.from !== nodeId && c.to !== nodeId
-    );
-
-    console.log(`🗑️ Deleted combiner node: ${nodeId}`);
-    this.saveLayout();
-    this.draw();
-  }
 
   /**
    * Delete a connection
    */
-  deleteConnection(connectionId) {
-    // Find the connection before deleting to check if it's connected to a combiner
-    const connectionToDelete = this.connections.find(c => c.id === connectionId);
-
-    // Remove the connection
-    this.connections = this.connections.filter(c => c.id !== connectionId);
-    console.log(`🗑️ Deleted connection: ${connectionId}`);
-
-    // Clean up unused combiner input ports
-    if (connectionToDelete) {
-      const targetNode = this.getNodeById(connectionToDelete.to);
-      if (targetNode && targetNode.type === 'combiner') {
-        this.cleanupCombinerInputPorts(targetNode.node);
-      }
-    }
-
-    this.saveLayout();
-    this.draw();
-  }
 
   /**
    * Remove unused input ports from a combiner node
    */
-  cleanupCombinerInputPorts(combiner, silent = false) {
-    if (!combiner || !combiner.inputPorts) return;
-
-    // Get all connections to this combiner
-    const connected = this.connections
-      .filter(c => c.to === combiner.id && c.toPort && c.toPort.startsWith('input'));
-
-    // Normalize and reindex input ports to remove gaps
-    const normalized = connected
-      .map(conn => {
-        const match = /input-(\d+)/.exec(conn.toPort);
-        return { conn, index: match ? parseInt(match[1], 10) : 0 };
-      })
-      .sort((a, b) => a.index - b.index);
-
-    normalized.forEach(({ conn }, idx) => {
-      const targetPortId = `input-${idx}`;
-      if (conn.toPort !== targetPortId) {
-        conn.toPort = targetPortId;
-      }
-    });
-
-    combiner.inputPorts = normalized.map((_, idx) => ({ id: `input-${idx}` }));
-
-    if (!silent) {
-      console.log(`🧹 Cleaned up combiner ${combiner.name}: ${combiner.inputPorts.length} ports remaining`);
-    }
-  }
 
   /**
    * Get connection near a given position (for click detection)
    */
-  getConnectionAtPosition(x, y, threshold = 10) {
-    for (const conn of this.connections) {
-      const fromPos = this.getPortPosition(conn.from, conn.fromPort);
-      const toPos = this.getPortPosition(conn.to, conn.toPort);
-
-      if (!fromPos || !toPos) continue;
-
-      // Convert to canvas coordinates
-      const fromX = (fromPos.x - this.offsetX) / this.scale;
-      const fromY = (fromPos.y - this.offsetY) / this.scale;
-      const toX = (toPos.x - this.offsetX) / this.scale;
-      const toY = (toPos.y - this.offsetY) / this.scale;
-
-      // Calculate distance from point to line segment
-      const dx = toX - fromX;
-      const dy = toY - fromY;
-      const lengthSquared = dx * dx + dy * dy;
-
-      if (lengthSquared === 0) continue;
-
-      const t = Math.max(0, Math.min(1, ((x - fromX) * dx + (y - fromY) * dy) / lengthSquared));
-      const projX = fromX + t * dx;
-      const projY = fromY + t * dy;
-      const distance = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
-
-      if (distance <= threshold) {
-        return conn;
-      }
-    }
-    return null;
-  }
 
   /**
    * Get port at a given canvas position (for click detection)
    */
-  getPortAtPosition(x, y) {
-    const portRadius = 14; // Click detection radius (larger for easier hits with triangles)
-
-    // Check task output ports (NEW - for connecting tasks to combiners)
-    for (const task of this.tasks) {
-      if (!task.cardBounds) continue;
-
-      // Output port at bottom center of task card
-      const portX = task.x;
-      const portY = task.cardBounds.y + task.cardBounds.height + 5;
-      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
-      if (dist <= portRadius) {
-        return {
-          nodeId: task.id,
-          nodeType: 'task',
-          portId: 'output',
-          type: 'output'
-        };
-      }
-    }
-
-    // Check agent output ports
-    for (const agent of this.agents) {
-      const portX = agent.x;
-      const halfHeight = (agent.height || 70) / 2;
-      const portY = agent.y + halfHeight + 10;
-      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
-      if (dist <= portRadius) {
-        return {
-          nodeId: agent.name,
-          nodeType: 'agent',
-          portId: 'output',
-          type: 'output'
-        };
-      }
-
-      // Agent input port (top center) for receiving connections
-      const inputPortY = agent.y - halfHeight - 10;
-      const inputDist = Math.sqrt((x - portX) ** 2 + (y - inputPortY) ** 2);
-      if (inputDist <= portRadius) {
-        return {
-          nodeId: agent.name,
-          nodeType: 'agent',
-          portId: 'input',
-          type: 'input'
-        };
-      }
-    }
-
-    // Check combiner ports
-    for (const combiner of this.combinerNodes) {
-      // Check input ports (top)
-      const numInputs = Math.max(combiner.inputPorts.length, 2);
-      const portSpacing = combiner.width / (numInputs + 1);
-      for (let i = 0; i < numInputs; i++) {
-        const portX = combiner.x + portSpacing * (i + 1);
-        const portY = combiner.y - 5;
-        const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
-        if (dist <= portRadius) {
-          return {
-            nodeId: combiner.id,
-            portId: `input-${i}`,
-            type: 'input'
-          };
-        }
-      }
-
-      // Check output port (bottom)
-      const outputX = combiner.x + combiner.width / 2;
-      const outputY = combiner.y + combiner.height + 5;
-      const dist = Math.sqrt((x - outputX) ** 2 + (y - outputY) ** 2);
-      if (dist <= portRadius) {
-        return {
-          nodeId: combiner.id,
-          portId: 'output',
-          type: 'output'
-        };
-      }
-    }
-
-    return null;
-  }
 }
 
 // Make it globally accessible
