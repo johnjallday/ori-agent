@@ -688,6 +688,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/chat-area.html", s.serveStaticFile)
 	mux.HandleFunc("/agents/", s.serveAgentFiles)
 
+	// Favicon endpoint
+	mux.HandleFunc("/favicon.svg", s.serveFavicon)
+
 	// Handlers: agents moved to separate package
 	agentHandler := agenthttp.New(s.st)
 	agentHandler.ActivityLogger = s.activityLogger
@@ -1479,6 +1482,23 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("Failed to write response: %v", err)
 
+	}
+}
+
+func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
+	// Read the favicon SVG from assets
+	content, err := os.ReadFile("assets/favicon.svg")
+	if err != nil {
+		log.Printf("Failed to read favicon: %v", err)
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // Cache for 1 day
+
+	if _, err := w.Write(content); err != nil {
+		log.Printf("Failed to write favicon response: %v", err)
 	}
 }
 
