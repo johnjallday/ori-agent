@@ -28,17 +28,17 @@ export class AgentCanvasEventHandler {
           this.parent.workspaceProgress = data.workspace_progress;
         }
         if (data.agent_stats) {
-          this.parent.metrics.updateAgentStats(data.agent_stats);
+          this.updateAgentStats(data.agent_stats);
         }
         if (data.tasks) {
           const existingPositions = {};
-          this.parent.tasks.forEach(t => {
+          this.state.tasks.forEach(t => {
             if (t.x !== null && t.y !== null) {
               existingPositions[t.id] = { x: t.x, y: t.y };
             }
           });
 
-          this.parent.tasks = data.tasks.map(task => {
+          const tasks = data.tasks.map(task => {
             const existing = existingPositions[task.id];
             return {
               ...task,
@@ -46,6 +46,7 @@ export class AgentCanvasEventHandler {
               y: existing ? existing.y : (task.y ?? null)
             };
           });
+          this.state.setTasks(tasks);
         }
         this.parent.draw();
       },
@@ -55,7 +56,7 @@ export class AgentCanvasEventHandler {
           this.parent.workspaceProgress = data.workspace_progress;
         }
         if (data.agent_stats) {
-          this.parent.metrics.updateAgentStats(data.agent_stats);
+          this.updateAgentStats(data.agent_stats);
         }
         this.parent.draw();
       },
@@ -114,7 +115,7 @@ export class AgentCanvasEventHandler {
    */
   handleTaskEvent(eventData) {
     const taskId = eventData.data.task_id;
-    const task = this.parent.tasks.find(t => t.id === taskId);
+    const task = this.state.tasks.find(t => t.id === taskId);
 
     if (task) {
       // Update existing task
@@ -131,7 +132,7 @@ export class AgentCanvasEventHandler {
 
           // Update the agent's lastResult
           if (task.to) {
-            const agent = this.parent.agents.find(a => a.name === task.to);
+            const agent = this.state.agents.find(a => a.name === task.to);
             if (agent) {
               agent.lastResult = eventData.data.result;
               console.log(`✅ Updated lastResult for agent ${agent.name}:`, eventData.data.result);
@@ -183,10 +184,6 @@ export class AgentCanvasEventHandler {
       this.parent.onTimelineEvent(event);
     }
 
-    // Update metrics after any task-related event
-    if (event.type.includes('task')) {
-      this.parent.metrics.updateMetrics();
-    }
   }
 
   /**
@@ -199,7 +196,7 @@ export class AgentCanvasEventHandler {
       y: taskData.y ?? null,
       status: taskData.status || 'pending'
     };
-    this.parent.tasks.push(task);
+    this.state.addTask(task);
     this.parent.draw();
   }
 
@@ -207,7 +204,7 @@ export class AgentCanvasEventHandler {
    * Update task status
    */
   updateTaskStatus(taskId, status) {
-    const task = this.parent.tasks.find(t => t.id === taskId);
+    const task = this.state.tasks.find(t => t.id === taskId);
     if (task) {
       task.status = status;
       this.parent.draw();
@@ -218,7 +215,7 @@ export class AgentCanvasEventHandler {
    * Set agent status
    */
   setAgentStatus(agentName, status) {
-    const agent = this.parent.agents.find(a => a.name === agentName);
+    const agent = this.state.agents.find(a => a.name === agentName);
     if (agent) {
       agent.status = status;
       this.parent.draw();
@@ -239,5 +236,27 @@ export class AgentCanvasEventHandler {
   setMission(missionText) {
     this.parent.mission = missionText;
     this.parent.draw();
+  }
+
+  /**
+   * Update agent statistics from server
+   */
+  updateAgentStats(agentStats) {
+    // Update agent status and stats from server
+    for (const agentName in agentStats) {
+      const agent = this.state.agents.find(a => a.name === agentName);
+      if (agent) {
+        const stats = agentStats[agentName];
+        agent.status = stats.status;
+        agent.currentTasks = stats.current_tasks || [];
+        agent.queuedTasks = stats.queued_tasks || [];
+        agent.completedTasks = stats.completed_tasks || 0;
+        agent.failedTasks = stats.failed_tasks || 0;
+        agent.totalExecutions = stats.total_executions || 0;
+      }
+    }
+
+    // Update chains when agent stats change
+    this.parent.animation.updateChains();
   }
 }

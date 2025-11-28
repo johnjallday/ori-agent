@@ -945,6 +945,8 @@ func (s *Server) Handler() http.Handler {
 				s.studioHandler.ExecuteTaskManually(w, r)
 			} else if r.Method == http.MethodPost {
 				s.studioHandler.CreateTask(w, r)
+			} else if r.Method == http.MethodPatch {
+				s.studioHandler.UpdateTask(w, r)
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteTask(w, r)
 			} else {

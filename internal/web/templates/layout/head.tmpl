@@ -11,11 +11,11 @@
       if (isDark) {
         document.documentElement.setAttribute('data-bs-theme', 'dark');
         document.documentElement.classList.add('dark-mode');
-        document.body.classList.add('dark-mode');
+        if (document.body) document.body.classList.add('dark-mode');
       } else {
         document.documentElement.setAttribute('data-bs-theme', 'light');
         document.documentElement.classList.remove('dark-mode');
-        document.body.classList.remove('dark-mode');
+        if (document.body) document.body.classList.remove('dark-mode');
       }
     })();
   </script>

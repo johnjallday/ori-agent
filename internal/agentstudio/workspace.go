@@ -132,10 +132,14 @@ type Task struct {
 	// ResultCombinationMode specifies how to combine results from input tasks with the new task
 	ResultCombinationMode string `json:"result_combination_mode,omitempty"`
 	// CombinationInstruction provides custom instructions for how to combine results (used when mode is "custom")
-	CombinationInstruction string     `json:"combination_instruction,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	StartedAt              *time.Time `json:"started_at,omitempty"`
-	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	CombinationInstruction string `json:"combination_instruction,omitempty"`
+	// CombinerType indicates if this task is a combiner node (merge, sequence, parallel, vote)
+	CombinerType string `json:"combiner_type,omitempty"`
+	// CombinerNodeID links this task to a combiner node on the canvas
+	CombinerNodeID string     `json:"combiner_node_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -744,8 +748,8 @@ func (w *Workspace) AddTask(task Task) error {
 	log.Printf("[DEBUG] AddTask - hasAgent(From): %v", w.hasAgent(task.From))
 
 	// Validate sender is part of workspace
-	// Allow "user" and "system" as special senders for UI-created tasks
-	if task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
+	// Allow "user", "system", and empty string as special senders for UI-created tasks
+	if task.From != "" && task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
 		log.Printf("[DEBUG] AddTask - Validation FAILED: From agent not valid")
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
@@ -965,8 +969,9 @@ func (w *Workspace) GetEnabledScheduledTasks() []ScheduledTask {
 	return enabled
 }
 
-// GetTaskResults retrieves results from multiple tasks by their IDs
-// Returns a map of task ID to task result, skipping tasks that don't exist or have no result
+// GetTaskResults retrieves results or descriptions from multiple tasks by their IDs
+// Returns a map of task ID to either the task's result (if executed) or description (if not executed)
+// This allows merge tasks to combine both completed results and pending task descriptions
 func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -975,8 +980,14 @@ func (w *Workspace) GetTaskResults(taskIDs []string) map[string]string {
 	for _, taskID := range taskIDs {
 		for _, task := range w.Tasks {
 			if task.ID == taskID {
+				// If task has been executed and has a result, use that
 				if task.Result != "" {
 					results[taskID] = task.Result
+				} else {
+					// Otherwise, use the task description
+					// This handles cases where tasks are not assigned to agents
+					// but their descriptions should be included in merge context
+					results[taskID] = task.Description
 				}
 				break
 			}

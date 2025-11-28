@@ -17,7 +17,6 @@ import { AgentCanvasHelpers } from './agent-canvas-helpers.js';
 import { AgentCanvasCombinerOperations } from './agent-canvas-combiner-ops.js';
 import { AgentCanvasPanelManager } from './agent-canvas-panels.js';
 import { AgentCanvasNotifications } from './agent-canvas-notifications.js';
-import { AgentCanvasMetrics } from './agent-canvas-metrics.js';
 import { AgentCanvasContextMenu } from './agent-canvas-context-menu.js';
 import { AgentCanvasEventHandler } from './agent-canvas-event-handler.js';
 import { AgentCanvasInitialization } from './agent-canvas-init.js';
@@ -75,8 +74,6 @@ class AgentCanvas {
     // Initialize notifications module
     this.notifications = new AgentCanvasNotifications(this.state, this);
 
-    // Initialize metrics module
-    this.metrics = new AgentCanvasMetrics(this.state, this);
 
     // Initialize context menu module
     this.contextMenu = new AgentCanvasContextMenu(this.state, this);
@@ -350,8 +347,6 @@ class AgentCanvas {
   get onAgentClick() { return this.state.onAgentClick; }
   set onAgentClick(value) { this.state.onAgentClick = value; }
 
-  get onMetricsUpdate() { return this.state.onMetricsUpdate; }
-  set onMetricsUpdate(value) { this.state.onMetricsUpdate = value; }
 
   get onTimelineEvent() { return this.state.onTimelineEvent; }
   set onTimelineEvent(value) { this.state.onTimelineEvent = value; }
@@ -608,10 +603,6 @@ class AgentCanvas {
   cleanupCombinerInputPorts(combiner, silent = false) { return this.combinerOps.cleanupCombinerInputPorts(combiner, silent); }
   buildCombinerResultPreview(combiner) { return this.combinerOps.buildCombinerResultPreview(combiner); }
 
-  // Metrics methods delegated to metrics module
-  updateMetrics() { return this.metrics.updateMetrics(); }
-  updateAgentStats(agentStats) { return this.metrics.updateAgentStats(agentStats); }
-
   // Notification methods delegated to notifications module
   showNotification(message, type = 'info') { return this.notifications.showNotification(message, type); }
   dismissNotification(id) { return this.notifications.dismissNotification(id); }
@@ -771,14 +762,49 @@ class AgentCanvas {
       this.draw();
 
       // Update metrics
-      this.updateMetrics();
-
       // Reload to ensure consistency
       setTimeout(() => this.init(), 500);
 
     } catch (error) {
       console.error('❌ Error deleting task:', error);
       alert('Failed to delete task: ' + error.message);
+    }
+  }
+
+  /**
+   * Remove an agent from the studio
+   */
+  async removeAgentFromStudio(agentName) {
+    if (!confirm(`Remove agent "${agentName}" from this studio?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/studios/${this.studioId}/agents/${agentName}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        console.log('✅ Agent removed from studio:', agentName);
+
+        // Remove agent from local state
+        const agents = this.state.agents.filter(a => a.name !== agentName);
+        this.state.setAgents(agents);
+
+        // Redraw canvas
+        this.draw();
+
+        // Show notification
+        this.showNotification(`Agent "${agentName}" removed from studio`, 'success');
+
+        // Reload to ensure consistency
+        setTimeout(() => this.init(), 500);
+      } else {
+        alert('Failed to remove agent from studio');
+      }
+    } catch (error) {
+      console.error('❌ Error removing agent:', error);
+      alert('Failed to remove agent: ' + error.message);
     }
   }
 
@@ -916,7 +942,7 @@ class AgentCanvas {
   };
 
   /**
-   * Create a new combiner node
+   * Create a new combiner task
    */
   async createCombinerNode(type, x, y) {
     const combinerType = AgentCanvas.COMBINER_TYPES[type.toUpperCase()];
@@ -925,33 +951,46 @@ class AgentCanvas {
       return null;
     }
 
-    const node = {
-      id: `combiner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      type: 'combiner',
-      combinerType: combinerType.id,
-      name: combinerType.name,
-      icon: combinerType.icon,
-      color: combinerType.color,
-      description: combinerType.description,
-      x: x,
-      y: y,
-      width: 120,
-      height: 80,
-      inputPorts: [], // Will be populated when connections are made
-      outputPort: { id: 'output', x: 0, y: 40 }, // Relative to node position
-      resultCombinationMode: combinerType.resultCombinationMode,
-      customInstruction: combinerType.customInstruction || '',
-      config: {},
-      taskId: null // Will be set after task creation
-    };
+    // Create backend task for this combiner
+    try {
+      const response = await apiPost(`/api/studios/${this.studioId}/tasks`, {
+        description: `${combinerType.name}: ${combinerType.description}`,
+        from: '',
+        to: '',
+        priority: 0,
+        combiner_type: combinerType.id,
+        result_combination_mode: combinerType.resultCombinationMode,
+        combination_instruction: combinerType.customInstruction || ''
+      });
 
-    this.combinerNodes.push(node);
-    console.log(`✨ Created ${node.name} combiner node at (${x}, ${y})`);
+      if (response.task) {
+        const task = response.task;
+        console.log(`✅ Created combiner task ${task.id}`);
 
-    // Create a backend task for this combiner
-    await this.createCombinerTask(node);
+        // Add task to state with position
+        const newTask = {
+          ...task,
+          x: x,
+          y: y,
+          combiner_type: task.combiner_type,
+          combinerType: task.combiner_type
+        };
 
-    return node;
+        const tasks = [...this.state.tasks, newTask];
+        this.state.setTasks(tasks);
+
+        // Save layout to persist position
+        await this.saveLayout();
+
+        // Redraw canvas
+        this.draw();
+
+        return newTask;
+      }
+    } catch (error) {
+      console.error('Failed to create combiner task:', error);
+      return null;
+    }
   }
 
   // Combiner helpers (delegated to combiner module)

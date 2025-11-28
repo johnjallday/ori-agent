@@ -64,13 +64,15 @@ export class AgentCanvasContextMenu {
           apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/agents/${encodeURIComponent(agent.name)}`)
             .then(() => {
               // Remove from local state
-              this.parent.agents = this.parent.agents.filter(a => a.name !== agent.name);
+              const filteredAgents = this.state.agents.filter(a => a.name !== agent.name);
+              this.state.setAgents(filteredAgents);
 
               // Unassign tasks targeting this agent
-              this.parent.tasks = this.parent.tasks.map(t => ({
+              const updatedTasks = this.state.tasks.map(t => ({
                 ...t,
                 to: t.to === agent.name ? 'unassigned' : t.to
               }));
+              this.state.setTasks(updatedTasks);
 
               // Remove any workflow connections involving this agent
               this.parent.connections = this.parent.connections.filter(c =>

@@ -61,14 +61,19 @@ export class AgentCanvasInitialization {
 
       // Load tasks from studio
       if (this.parent.studio.tasks) {
-        this.parent.tasks = this.parent.studio.tasks.map(task => {
+        const tasks = this.parent.studio.tasks.map(task => {
           // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
           return {
             ...task,
             x: task.x ?? null,
-            y: task.y ?? null
+            y: task.y ?? null,
+            combiner_type: task.combiner_type,
+            combinerType: task.combiner_type,
+            combiner_node_id: task.combiner_node_id,
+            combinerNodeID: task.combiner_node_id
           };
         });
+        this.state.setTasks(tasks);
       }
 
       // Initialize agent positions
@@ -76,6 +81,9 @@ export class AgentCanvasInitialization {
 
       // Load saved layout (positions only)
       this.parent.layout.loadLayout();
+
+      // Sync combiner nodes with their tasks
+      this.syncCombinerTasks();
 
       // Immediately reset zoom to fit content (ignore saved zoom values)
       this.parent.layout.zoomToFit();
@@ -91,10 +99,8 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.parent.agents.length}`;
+        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length}`;
 
-      // Initialize metrics
-      this.parent.metrics.updateMetrics();
 
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
@@ -117,7 +123,7 @@ export class AgentCanvasInitialization {
     // Get agent stats from studio data
     const agentStats = this.parent.studio.agent_stats || {};
 
-    this.parent.agents = this.parent.studio.agents.map((agentName, index) => {
+    const agents = this.parent.studio.agents.map((agentName, index) => {
       // Get stats for this agent
       const stats = agentStats[agentName] || {
         status: 'idle',
@@ -145,18 +151,19 @@ export class AgentCanvasInitialization {
         pulsePhase: Math.random() * Math.PI * 2
       };
     });
+    this.state.setAgents(agents);
 
     // Load tasks if available
     if (this.parent.studio.tasks) {
       // Preserve existing positions when updating tasks
       const existingPositions = {};
-      this.parent.tasks.forEach(t => {
+      this.state.tasks.forEach(t => {
         if (t.x !== null && t.y !== null) {
           existingPositions[t.id] = { x: t.x, y: t.y };
         }
       });
 
-      this.parent.tasks = this.parent.studio.tasks.map(task => {
+      const tasks = this.parent.studio.tasks.map(task => {
         const existing = existingPositions[task.id];
         return {
           id: task.id,
@@ -166,9 +173,43 @@ export class AgentCanvasInitialization {
           status: task.status,
           progress: 0,
           x: existing ? existing.x : null,
-          y: existing ? existing.y : null
+          y: existing ? existing.y : null,
+          combiner_type: task.combiner_type,
+          combinerType: task.combiner_type,
+          combiner_node_id: task.combiner_node_id,
+          combinerNodeID: task.combiner_node_id
         };
       });
+      this.state.setTasks(tasks);
     }
+  }
+
+  /**
+   * Sync combiner nodes with their backend tasks
+   * Links combiner nodes to their corresponding tasks by combiner_node_id
+   */
+  syncCombinerTasks() {
+    if (!this.state.combinerNodes || this.state.combinerNodes.length === 0) {
+      return;
+    }
+
+    if (!this.state.tasks || this.state.tasks.length === 0) {
+      return;
+    }
+
+    // For each combiner node, find its corresponding task
+    this.state.combinerNodes.forEach(combiner => {
+      // Find task with matching combiner_node_id
+      const task = this.state.tasks.find(t =>
+        t.combiner_node_id === combiner.id || t.combinerNodeID === combiner.id
+      );
+
+      if (task) {
+        combiner.taskId = task.id;
+        console.log(`🔗 Linked combiner node ${combiner.id} to task ${task.id}`);
+      } else {
+        console.log(`⚠️ No task found for combiner node ${combiner.id}`);
+      }
+    });
   }
 }

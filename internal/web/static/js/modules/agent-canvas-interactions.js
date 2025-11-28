@@ -346,6 +346,20 @@ export class AgentCanvasInteractionHandler {
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;
+
+      // Check delete button first (higher priority than dragging)
+      if (agent.deleteButton) {
+        const deleteBtn = agent.deleteButton;
+        if (x >= deleteBtn.x && x <= deleteBtn.x + deleteBtn.width &&
+            y >= deleteBtn.y && y <= deleteBtn.y + deleteBtn.height) {
+          // Remove agent from studio
+          e.stopPropagation();
+          e.preventDefault();
+          this.parent.removeAgentFromStudio(agent.name);
+          return;
+        }
+      }
+
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
         // Start dragging this agent
@@ -1011,8 +1025,14 @@ export class AgentCanvasInteractionHandler {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
-          // Task clicked - expand/collapse panel
-          this.parent.toggleTaskPanel(task);
+          // Task clicked - show details in sidebar
+          console.log('[CANVAS CLICK] Task clicked:', task.description, 'showing details');
+          if (window.showTaskDetails) {
+            window.showTaskDetails(task);
+            console.log('[CANVAS CLICK] showTaskDetails called');
+          } else {
+            console.error('[CANVAS CLICK] window.showTaskDetails is not available!');
+          }
           return;
         }
       }
@@ -1059,9 +1079,11 @@ export class AgentCanvasInteractionHandler {
           this.parent.showNotification(`Combiner output connected to ${agent.name}`, 'success');
           return;
         } else {
-          // Toggle agent panel
-          console.log('[CANVAS CLICK] Calling toggleAgentPanel for:', agent.name);
-          this.parent.toggleAgentPanel(agent);
+          // Show agent details in sidebar
+          console.log('[CANVAS CLICK] Showing agent details in sidebar for:', agent.name);
+          if (window.showAgentDetails) {
+            window.showAgentDetails(agent);
+          }
         }
         return;
       }
@@ -1080,8 +1102,15 @@ export class AgentCanvasInteractionHandler {
           return;
         }
 
-        // Toggle combiner detail panel
-        this.parent.toggleCombinerPanel(combiner);
+        // Trigger combiner click callback (shows sidebar details)
+        if (window.showCombinerDetails) {
+          window.showCombinerDetails(combiner);
+        } else if (this.parent.onCombinerClick) {
+          this.parent.onCombinerClick(combiner);
+        } else {
+          // Fallback: toggle combiner detail panel on canvas
+          this.parent.toggleCombinerPanel(combiner);
+        }
         return;
       }
     }

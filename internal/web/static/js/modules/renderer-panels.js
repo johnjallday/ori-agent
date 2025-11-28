@@ -27,9 +27,9 @@ export class RendererPanels {
   drawExpandedTaskPanel() {
     if (!this.state.expandedTask) return;
 
-    const panelX = this.state.width - this.state.expandedPanelWidth;
+    const panelX = this.canvas.width - this.state.expandedPanelWidth;
     const panelY = 0;
-    const panelHeight = this.state.height;
+    const panelHeight = this.canvas.height;
 
     // Draw panel background with shadow
     this.ctx.save();
@@ -330,11 +330,26 @@ export class RendererPanels {
   }
 
   drawExpandedAgentPanel() {
-    if (!this.state.expandedAgent) return;
+    if (!this.state.expandedAgent) {
+      return;
+    }
 
-    const panelX = this.state.width - this.state.expandedAgentPanelWidth;
+    const panelX = this.canvas.width - this.state.expandedAgentPanelWidth;
     const panelY = 0;
-    const panelHeight = this.state.height;
+    const panelHeight = this.canvas.height;
+
+    // Debug: Log once when panel width reaches target
+    if (this.state.expandedAgentPanelWidth === this.state.expandedAgentPanelTargetWidth && !this.state._panelDrawnLogged) {
+      console.log('🎨 DRAWING AGENT PANEL:', {
+        panelX,
+        panelY,
+        panelWidth: this.state.expandedAgentPanelWidth,
+        panelHeight,
+        canvasWidth: this.canvas.width,
+        canvasHeight: this.canvas.height
+      });
+      this.state._panelDrawnLogged = true;
+    }
 
     // Draw panel background with shadow
     this.ctx.save();
@@ -696,9 +711,9 @@ export class RendererPanels {
   drawExpandedCombinerPanel() {
     if (!this.state.expandedCombiner) return;
 
-    const panelX = this.state.width - this.state.expandedCombinerPanelWidth;
+    const panelX = this.canvas.width - this.state.expandedCombinerPanelWidth;
     const panelY = 0;
-    const panelHeight = this.state.height;
+    const panelHeight = this.canvas.height;
     const padding = 20;
 
     this.ctx.save();
@@ -790,9 +805,9 @@ export class RendererPanels {
       return;
     }
 
-    const panelX = this.state.width - this.state.timelinePanelWidth;
+    const panelX = this.canvas.width - this.state.timelinePanelWidth;
     const panelY = 0;
-    const panelHeight = this.state.height;
+    const panelHeight = this.canvas.height;
     const padding = 15;
 
     this.ctx.save();
@@ -856,9 +871,9 @@ export class RendererPanels {
   }
 
   drawEmptyTimeline() {
-    const panelX = this.state.width - this.state.timelinePanelWidth;
+    const panelX = this.canvas.width - this.state.timelinePanelWidth;
     const panelY = 0;
-    const panelHeight = this.state.height;
+    const panelHeight = this.canvas.height;
     const padding = 15;
 
     this.ctx.save();

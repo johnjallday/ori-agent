@@ -82,13 +82,13 @@ export async function createCombinerTask(canvas, combinerNode) {
  * Execute a combiner: resolves inputs, configures task, executes.
  */
 export async function executeCombiner(canvas, combiner) {
-  const ensuredTaskId = await ensureCombinerTask(canvas, combiner);
-  if (!ensuredTaskId) {
-    canvas.showNotification('Combiner task could not be created. Please try again.', 'error');
+  // Combiner tasks are now created upfront, so just verify it exists
+  if (!combiner.taskId) {
+    canvas.showNotification('Combiner task not found. Please recreate the combiner node.', 'error');
     return;
   }
 
-  console.log('🔀 Executing combiner:', combiner.id, 'Task:', ensuredTaskId);
+  console.log('🔀 Executing combiner:', combiner.id, 'Task:', combiner.taskId);
 
   const { tasks: inputTasks, missingAgentInputs } = resolveCombinerInputs(canvas, combiner);
 

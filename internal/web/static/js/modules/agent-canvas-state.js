@@ -257,7 +257,6 @@ export class AgentCanvasState {
 
     // Callbacks (set by parent)
     this.onAgentClick = null;
-    this.onMetricsUpdate = null;
     this.onTimelineEvent = null;
   }
 

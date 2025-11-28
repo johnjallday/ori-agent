@@ -14,12 +14,17 @@ export class AgentCanvasPanelManager {
    * Toggle task panel - opens panel for given task or closes if already open
    */
   toggleTaskPanel(task) {
-    // Close agent panel if open
+    // Close agent panel if open (immediately, no animation)
     if (this.state.expandedAgent) {
-      this.closeAgentPanel();
+      this.state.expandedAgentPanelWidth = 0;
+      this.state.expandedAgent = null;
+      this.state.agentPanelScrollOffset = 0;
+      this.state.agentPanelMaxScroll = 0;
     }
+    // Close combiner panel if open (immediately, no animation)
     if (this.state.expandedCombiner) {
-      this.closeCombinerPanel();
+      this.state.expandedCombinerPanelWidth = 0;
+      this.state.expandedCombiner = null;
     }
 
     if (this.state.expandedTask && this.state.expandedTask.id === task.id) {
@@ -88,14 +93,18 @@ export class AgentCanvasPanelManager {
     console.log('[PANEL] toggleAgentPanel called for:', agent.name);
     console.log('[PANEL] Current expandedAgent:', this.state.expandedAgent);
 
-    // Close task panel if open
+    // Close task panel if open (immediately, no animation)
     if (this.state.expandedTask) {
       console.log('[PANEL] Closing task panel');
-      this.closeTaskPanel();
+      this.state.expandedPanelWidth = 0;
+      this.state.expandedTask = null;
+      this.parent.resultScrollOffset = 0;
     }
+    // Close combiner panel if open (immediately, no animation)
     if (this.state.expandedCombiner) {
       console.log('[PANEL] Closing combiner panel');
-      this.closeCombinerPanel();
+      this.state.expandedCombinerPanelWidth = 0;
+      this.state.expandedCombiner = null;
     }
 
     if (this.state.expandedAgent && this.state.expandedAgent.name === agent.name) {
@@ -137,9 +146,13 @@ export class AgentCanvasPanelManager {
       }
 
       console.log('[PANEL] Setting expandedAgent to:', this.state.expandedAgent);
-      console.log('[PANEL] Starting animation, expandedAgentPanelAnimating = true');
+      console.log('[PANEL] About to start animation...');
+      console.log('[PANEL] expandedAgentPanelWidth:', this.state.expandedAgentPanelWidth);
+      console.log('[PANEL] expandedAgentPanelTargetWidth:', this.state.expandedAgentPanelTargetWidth);
       this.state.expandedAgentPanelAnimating = true;
+      console.log('[PANEL] Calling animateAgentPanel(true)');
       this.animateAgentPanel(true);
+      console.log('[PANEL] animateAgentPanel() called');
     }
   }
 
@@ -147,6 +160,7 @@ export class AgentCanvasPanelManager {
    * Close agent panel with animation
    */
   closeAgentPanel() {
+    console.log('[PANEL] closeAgentPanel called, current width:', this.state.expandedAgentPanelWidth);
     this.state.expandedAgentPanelAnimating = true;
     this.animateAgentPanel(false);
   }
@@ -155,9 +169,7 @@ export class AgentCanvasPanelManager {
    * Animate agent panel opening/closing
    */
   animateAgentPanel(expanding) {
-    console.log('[PANEL ANIM] animateAgentPanel called, expanding:', expanding);
-    console.log('[PANEL ANIM] Initial width:', this.state.expandedAgentPanelWidth, 'Target:', this.state.expandedAgentPanelTargetWidth);
-
+    let frameCount = 0;
     const animate = () => {
       const speed = 30; // pixels per frame
 
@@ -167,10 +179,16 @@ export class AgentCanvasPanelManager {
           this.state.expandedAgentPanelTargetWidth
         );
 
+        // Log every 5 frames
+        if (frameCount % 5 === 0) {
+          console.log('[ANIM] Frame', frameCount, 'width:', this.state.expandedAgentPanelWidth);
+        }
+        frameCount++;
+
         this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedAgentPanelWidth >= this.state.expandedAgentPanelTargetWidth) {
-          console.log('[PANEL ANIM] Animation complete, width:', this.state.expandedAgentPanelWidth);
+          console.log('[ANIM] Animation complete, width reached target:', this.state.expandedAgentPanelWidth);
           this.state.expandedAgentPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
@@ -181,7 +199,6 @@ export class AgentCanvasPanelManager {
         this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedAgentPanelWidth <= 0) {
-          console.log('[PANEL ANIM] Close animation complete');
           this.state.expandedAgentPanelAnimating = false;
           this.state.expandedAgent = null;
           this.state.agentPanelScrollOffset = 0; // Reset scroll when closing panel

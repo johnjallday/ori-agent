@@ -109,11 +109,11 @@ export class AgentCanvasHelpers {
    */
   getNodeById(nodeId) {
     // Check if it's an agent
-    const agent = this.parent.agents.find(a => a.name === nodeId || a.id === nodeId);
+    const agent = this.state.agents.find(a => a.name === nodeId || a.id === nodeId);
     if (agent) return { type: 'agent', node: agent };
 
     // Check if it's a task
-    const task = this.parent.tasks.find(t => t.id === nodeId);
+    const task = this.state.tasks.find(t => t.id === nodeId);
     if (task) return { type: 'task', node: task };
 
     // Check if it's a combiner
@@ -307,11 +307,11 @@ export class AgentCanvasHelpers {
    * direct agent connections as inputs.
    */
   getLatestTaskForAgent(agentName) {
-    if (!agentName || !this.parent.tasks || this.parent.tasks.length === 0) {
+    if (!agentName || !this.state.tasks || this.state.tasks.length === 0) {
       return null;
     }
 
-    const candidates = this.parent.tasks.filter(task =>
+    const candidates = this.state.tasks.filter(task =>
       task && (task.to === agentName || task.from === agentName)
     );
 

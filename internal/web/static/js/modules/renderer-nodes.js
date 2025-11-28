@@ -27,17 +27,26 @@ export class RendererNodes {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
     this.state.tasks.forEach((task, index) => {
+      // Check if this is a combiner task
+      const isCombinerTask = task.combiner_type || task.combinerType;
+
+      if (isCombinerTask) {
+        // Draw combiner task with special visual
+        this.drawCombinerTask(task);
+        return;
+      }
+
       const fromAgent = this.state.agents.find(a => a.name === task.from);
       const toAgent = this.state.agents.find(a => a.name === task.to);
 
-      // Handle unassigned tasks (to: "unassigned")
-      const isUnassigned = task.to === 'unassigned';
+      // Handle unassigned tasks (to: "unassigned" or empty string)
+      const isUnassigned = task.to === 'unassigned' || task.to === '' || !task.to;
 
       // Skip if target agent not found AND not unassigned
       if (!toAgent && !isUnassigned) return;
 
-      // Handle system/user-created tasks (no from agent)
-      const isSystemTask = !fromAgent || task.from === 'system' || task.from === 'user';
+      // Handle system/user-created tasks (no from agent or empty from field)
+      const isSystemTask = !fromAgent || task.from === 'system' || task.from === 'user' || task.from === '' || !task.from;
 
       // Calculate default position if task doesn't have one
       if (task.x == null || task.y == null) {  // Use == to catch both null and undefined
@@ -564,6 +573,36 @@ export class RendererNodes {
           this.ctx.fillText(taskText, agent.x, agent.y + ((agent.height || 70) / 2) + 15);
         }
       }
+
+      // Draw delete button (X) in top-left corner
+      const deleteSize = 22;
+      const deleteX = agent.x - halfWidth + 5;
+      const deleteY = agent.y - halfHeight + 5;
+
+      // Delete button background (red circle)
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Delete button X (white)
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2.5;
+      this.ctx.lineCap = 'round';
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteX + 6, deleteY + 6);
+      this.ctx.lineTo(deleteX + deleteSize - 6, deleteY + deleteSize - 6);
+      this.ctx.moveTo(deleteX + deleteSize - 6, deleteY + 6);
+      this.ctx.lineTo(deleteX + 6, deleteY + deleteSize - 6);
+      this.ctx.stroke();
+
+      // Store delete button bounds for click detection
+      agent.deleteButton = {
+        x: deleteX,
+        y: deleteY,
+        width: deleteSize,
+        height: deleteSize
+      };
     });
   }
 
@@ -714,6 +753,111 @@ export class RendererNodes {
 
       this.ctx.restore();
     });
+  }
+
+  /**
+   * Draw a combiner task as a special task card
+   */
+  drawCombinerTask(task) {
+    // Get combiner type info
+    const combinerTypes = {
+      'merge': { icon: '🔀', name: 'Merge', color: '#8b5cf6' },
+      'sequence': { icon: '⛓️', name: 'Sequence', color: '#06b6d4' },
+      'parallel': { icon: '⚡', name: 'Parallel', color: '#f59e0b' },
+      'vote': { icon: '🗳️', name: 'Vote', color: '#ef4444' }
+    };
+
+    const combinerType = combinerTypes[task.combiner_type || task.combinerType] ||
+                        { icon: '🔧', name: 'Combiner', color: '#8b5cf6' };
+
+    // Calculate position if not set
+    if (task.x == null || task.y == null) {
+      task.x = 200 + (Math.random() * 200);
+      task.y = 200 + (Math.random() * 200);
+    }
+
+    const cardWidth = 160;
+    const cardHeight = 100;
+    const x = task.x - cardWidth / 2;
+    const y = task.y - cardHeight / 2;
+
+    // Draw card background with combiner color
+    this.ctx.fillStyle = combinerType.color + '20'; // Light background
+    this.ctx.strokeStyle = combinerType.color;
+    this.ctx.lineWidth = 2;
+    this.primitives.roundRect(x, y, cardWidth, cardHeight, 8);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    // Draw combiner icon and type
+    this.ctx.font = 'bold 24px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillStyle = combinerType.color;
+    this.ctx.fillText(combinerType.icon, task.x, task.y - 20);
+
+    // Draw combiner name
+    this.ctx.font = 'bold 12px Arial';
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(combinerType.name, task.x, task.y + 5);
+
+    // Draw status
+    const statusText = task.status || 'pending';
+    this.ctx.font = '10px Arial';
+    this.ctx.fillStyle = '#9ca3af';
+    this.ctx.fillText(statusText, task.x, task.y + 25);
+
+    // Draw connection to target agent if assigned
+    if (task.to && task.to !== '' && task.to !== 'unassigned') {
+      const toAgent = this.state.agents.find(a => a.name === task.to);
+      if (toAgent) {
+        const color = combinerType.color + 'DD';
+        this.ctx.setLineDash([5, 5]);
+        const angle = Math.atan2(toAgent.y - task.y, toAgent.x - task.x);
+        const cardRadius = 80;
+        const agentHalfW = (toAgent.width || 120) / 2;
+        const agentHalfH = (toAgent.height || 70) / 2;
+        const agentRadius = Math.hypot(agentHalfW, agentHalfH);
+        const x1 = task.x + cardRadius * Math.cos(angle);
+        const y1 = task.y + cardRadius * Math.sin(angle);
+        const x2 = toAgent.x - agentRadius * Math.cos(angle);
+        const y2 = toAgent.y - agentRadius * Math.sin(angle);
+        this.primitives.drawArrow(x1, y1, x2, y2, color, 3);
+        this.ctx.setLineDash([]);
+      }
+    }
+
+    // Draw delete button (X) in top-right corner
+    const deleteSize = 20;
+    const deleteX = x + cardWidth - deleteSize - 5;
+    const deleteY = y + 5;
+
+    // Delete button background
+    this.ctx.fillStyle = 'rgba(239, 68, 68, 0.9)'; // Red background
+    this.ctx.beginPath();
+    this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    // Delete button X
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.moveTo(deleteX + 5, deleteY + 5);
+    this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
+    this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
+    this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
+    this.ctx.stroke();
+
+    // Store delete button bounds for click detection (use deleteBtnBounds to match task cards)
+    task.deleteBtnBounds = {
+      x: deleteX,
+      y: deleteY,
+      width: deleteSize,
+      height: deleteSize
+    };
+
+    // Store bounds for click detection
+    task.bounds = { x, y, width: cardWidth, height: cardHeight };
   }
 
 }

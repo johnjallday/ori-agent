@@ -457,10 +457,14 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description string `json:"description"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Priority    int    `json:"priority"`
+	Description            string `json:"description"`
+	From                   string `json:"from"`
+	To                     string `json:"to"`
+	Priority               int    `json:"priority"`
+	CombinerType           string `json:"combiner_type,omitempty"`
+	CombinerNodeID         string `json:"combiner_node_id,omitempty"`
+	ResultCombinationMode  string `json:"result_combination_mode,omitempty"`
+	CombinationInstruction string `json:"combination_instruction,omitempty"`
 }
 
 // CreateTask handles POST /api/studios/:id/tasks
@@ -491,14 +495,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task description is required", http.StatusBadRequest)
 		return
 	}
-	if req.From == "" {
-		http.Error(w, "From agent is required", http.StatusBadRequest)
-		return
-	}
-	if req.To == "" {
-		http.Error(w, "To agent is required", http.StatusBadRequest)
-		return
-	}
+	// Note: From and To agents are optional - tasks can be created without connections
 
 	// Get studio
 	studio, err := h.store.Get(studioID)
@@ -512,15 +509,19 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := Task{
-		ID:          uuid.New().String(),
-		WorkspaceID: studioID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Context:     make(map[string]interface{}),
-		Status:      TaskStatusPending,
-		CreatedAt:   time.Now(),
+		ID:                     uuid.New().String(),
+		WorkspaceID:            studioID,
+		From:                   req.From,
+		To:                     req.To,
+		Description:            req.Description,
+		Priority:               req.Priority,
+		Context:                make(map[string]interface{}),
+		Status:                 TaskStatusPending,
+		CombinerType:           req.CombinerType,
+		CombinerNodeID:         req.CombinerNodeID,
+		ResultCombinationMode:  req.ResultCombinationMode,
+		CombinationInstruction: req.CombinationInstruction,
+		CreatedAt:              time.Now(),
 	}
 
 	// Add task to studio
@@ -545,6 +546,87 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		"message": "Task created successfully",
 		"task_id": task.ID,
 		"task":    task,
+		"studio":  studioID,
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
+}
+
+// UpdateTask handles PATCH /api/studios/:id/tasks/:task_id
+func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	taskID := parts[2]
+
+	// Parse request body
+	var req struct {
+		Description  string   `json:"description"`
+		To           string   `json:"to"`
+		From         string   `json:"from"`
+		InputTaskIDs []string `json:"input_task_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find and update task
+	found := false
+	for i, task := range studio.Tasks {
+		if task.ID == taskID {
+			// Update only provided fields
+			if req.Description != "" {
+				studio.Tasks[i].Description = req.Description
+			}
+			// Allow updating to/from even if empty (for unassigning)
+			studio.Tasks[i].To = req.To
+			studio.Tasks[i].From = req.From
+			// Update input task IDs if provided
+			if req.InputTaskIDs != nil {
+				studio.Tasks[i].InputTaskIDs = req.InputTaskIDs
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Updated task %s in studio %s", taskID, studioID)
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Task updated successfully",
+		"task_id": taskID,
 		"studio":  studioID,
 	}); err != nil {
 		log.Printf("Failed to encode response: %v", err)
