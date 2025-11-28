@@ -87,6 +87,11 @@ export class AgentCanvasInitialization {
       // Initialize metrics
       this.parent.metrics.updateMetrics();
 
+      // Always reset view to fit content (overrides any bad saved layout)
+      setTimeout(() => {
+        this.parent.layout.zoomToFit();
+      }, 100);
+
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
       document.getElementById('canvas-info').textContent = 'Error loading studio';
