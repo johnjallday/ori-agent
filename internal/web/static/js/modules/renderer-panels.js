@@ -75,7 +75,7 @@ export class RendererPanels {
     this.ctx.font = 'bold 10px system-ui';
     const statusText = (this.state.expandedTask.status || 'pending').toUpperCase();
     const statusWidth = this.ctx.measureText(statusText).width + 12;
-    this.roundRect(contentX, currentY, statusWidth, 18, 9);
+    this.primitives.roundRect(contentX, currentY, statusWidth, 18, 9);
     this.ctx.fill();
     this.ctx.fillStyle = '#ffffff';
     this.ctx.fillText(statusText, contentX + 6, currentY + 13);
@@ -89,7 +89,7 @@ export class RendererPanels {
 
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = '13px system-ui';
-    const descLines = this.wrapText(this.state.expandedTask.description || '', this.state.expandedPanelWidth - padding * 2);
+    const descLines = this.primitives.wrapText(this.state.expandedTask.description || '', this.state.expandedPanelWidth - padding * 2);
     descLines.forEach(line => {
       this.ctx.fillText(line, contentX, currentY);
       currentY += 18;
@@ -120,7 +120,7 @@ export class RendererPanels {
       this.ctx.fillStyle = '#eff6ff';
       this.ctx.strokeStyle = '#3b82f6';
       this.ctx.lineWidth = 2;
-      this.roundRect(contentX, currentY, this.state.expandedPanelWidth - padding * 2, progressBoxHeight, 6);
+      this.primitives.roundRect(contentX, currentY, this.state.expandedPanelWidth - padding * 2, progressBoxHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -137,12 +137,12 @@ export class RendererPanels {
         const barX = contentX + 20;
 
         this.ctx.fillStyle = '#dbeafe';
-        this.roundRect(barX, progressY, barWidth, barHeight, 6);
+        this.primitives.roundRect(barX, progressY, barWidth, barHeight, 6);
         this.ctx.fill();
 
         const fillWidth = (barWidth * percentage) / 100;
         this.ctx.fillStyle = '#3b82f6';
-        this.roundRect(barX, progressY, fillWidth, barHeight, 6);
+        this.primitives.roundRect(barX, progressY, fillWidth, barHeight, 6);
         this.ctx.fill();
 
         // Percentage text
@@ -158,7 +158,7 @@ export class RendererPanels {
         if (this.state.expandedTask.progress.current_step) {
           this.ctx.fillStyle = '#1e3a8a';
           this.ctx.font = '11px system-ui';
-          const stepLines = this.wrapText(this.state.expandedTask.progress.current_step, this.state.expandedPanelWidth - padding * 2 - 40);
+          const stepLines = this.primitives.wrapText(this.state.expandedTask.progress.current_step, this.state.expandedPanelWidth - padding * 2 - 40);
           stepLines.forEach(line => {
             this.ctx.fillText(line, contentX + 20, progressY);
             progressY += 14;
@@ -223,7 +223,7 @@ export class RendererPanels {
       }
       this.ctx.strokeStyle = '#065f46';
       this.ctx.lineWidth = 1.5;
-      this.roundRect(copyButtonX, copyButtonY, copyButtonWidth, copyButtonHeight, 4);
+      this.primitives.roundRect(copyButtonX, copyButtonY, copyButtonWidth, copyButtonHeight, 4);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -253,14 +253,14 @@ export class RendererPanels {
       this.ctx.fillStyle = '#f0fdf4';
       this.ctx.strokeStyle = '#10b981';
       this.ctx.lineWidth = 2;
-      this.roundRect(contentX, resultBoxY, resultBoxWidth, resultBoxHeight, 6);
+      this.primitives.roundRect(contentX, resultBoxY, resultBoxWidth, resultBoxHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
       // Result text with scrolling
       this.ctx.fillStyle = '#065f46';
       this.ctx.font = '11px monospace';
-      const resultLines = this.wrapText(this.state.expandedTask.result, resultBoxWidth - 40); // Extra padding for scrollbar
+      const resultLines = this.primitives.wrapText(this.state.expandedTask.result, resultBoxWidth - 40); // Extra padding for scrollbar
       const lineHeight = 14;
       const visibleLines = Math.floor((resultBoxHeight - 20) / lineHeight);
       const totalLines = resultLines.length;
@@ -310,7 +310,7 @@ export class RendererPanels {
 
       this.ctx.fillStyle = '#7f1d1d';
       this.ctx.font = '11px monospace';
-      const errorLines = this.wrapText(this.state.expandedTask.error, this.state.expandedPanelWidth - padding * 2);
+      const errorLines = this.primitives.wrapText(this.state.expandedTask.error, this.state.expandedPanelWidth - padding * 2);
       errorLines.slice(0, 10).forEach(line => {
         this.ctx.fillText(line, contentX, currentY);
         currentY += 14;
@@ -391,7 +391,7 @@ export class RendererPanels {
     this.ctx.font = 'bold 10px system-ui';
     const statusText = (this.state.expandedAgent.status || 'idle').toUpperCase();
     const statusWidth = this.ctx.measureText(statusText).width + 12;
-    this.roundRect(contentX, currentY, statusWidth, 18, 9);
+    this.primitives.roundRect(contentX, currentY, statusWidth, 18, 9);
     this.ctx.fill();
     this.ctx.fillStyle = '#ffffff';
     this.ctx.fillText(statusText, contentX + 6, currentY + 13);
@@ -410,7 +410,7 @@ export class RendererPanels {
 
     // Agent color indicator
     this.ctx.fillStyle = this.state.expandedAgent.color;
-    this.roundRect(contentX, currentY, 30, 30, 15);
+    this.primitives.roundRect(contentX, currentY, 30, 30, 15);
     this.ctx.fill();
     currentY += 40;
 
@@ -427,7 +427,7 @@ export class RendererPanels {
 
       // Wrap text for long results
       const maxLineLength = 40;
-      const resultLines = this.wrapText(resultText, resultBoxWidth - 20);
+      const resultLines = this.primitives.wrapText(resultText, resultBoxWidth - 20);
       const resultBoxHeight = Math.max(60, resultLines.length * 18 + 20);
 
       // Background gradient
@@ -441,7 +441,7 @@ export class RendererPanels {
       this.ctx.fillStyle = gradient;
       this.ctx.strokeStyle = '#10b981';
       this.ctx.lineWidth = 2;
-      this.roundRect(contentX, currentY, resultBoxWidth, resultBoxHeight, 8);
+      this.primitives.roundRect(contentX, currentY, resultBoxWidth, resultBoxHeight, 8);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -480,7 +480,7 @@ export class RendererPanels {
       this.ctx.fillStyle = '#f9fafb';
       this.ctx.strokeStyle = stat.color;
       this.ctx.lineWidth = 2;
-      this.roundRect(statBoxX, statBoxY, statBoxWidth, statBoxHeight, 6);
+      this.primitives.roundRect(statBoxX, statBoxY, statBoxWidth, statBoxHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -531,7 +531,7 @@ export class RendererPanels {
           this.ctx.lineWidth = 1;
           const pluginText = plugin.length > 20 ? plugin.substring(0, 17) + '...' : plugin;
           const badgeWidth = this.ctx.measureText(pluginText).width + 16;
-          this.roundRect(contentX, currentY, badgeWidth, 22, 11);
+          this.primitives.roundRect(contentX, currentY, badgeWidth, 22, 11);
           this.ctx.fill();
           this.ctx.stroke();
 
@@ -572,7 +572,7 @@ export class RendererPanels {
       // Calculate height based on actual content (now showing ALL lines)
       this.ctx.fillStyle = '#7c2d12';
       this.ctx.font = '10px system-ui';
-      const promptLines = this.wrapText(this.state.expandedAgent.config.system_prompt, this.state.expandedAgentPanelWidth - padding * 2 - 20);
+      const promptLines = this.primitives.wrapText(this.state.expandedAgent.config.system_prompt, this.state.expandedAgentPanelWidth - padding * 2 - 20);
       const lineHeight = 13;
       const promptBoxHeight = Math.max(60, 15 + (promptLines.length * lineHeight) + 15); // top padding + lines + bottom padding
 
@@ -580,7 +580,7 @@ export class RendererPanels {
       this.ctx.fillStyle = '#fff7ed';
       this.ctx.strokeStyle = '#ea580c';
       this.ctx.lineWidth = 2;
-      this.roundRect(contentX, promptBoxY, this.state.expandedAgentPanelWidth - padding * 2, promptBoxHeight, 6);
+      this.primitives.roundRect(contentX, promptBoxY, this.state.expandedAgentPanelWidth - padding * 2, promptBoxHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -637,7 +637,7 @@ export class RendererPanels {
           this.ctx.fillStyle = '#f0fdf4';
           this.ctx.strokeStyle = '#10b981';
           this.ctx.lineWidth = 1;
-          this.roundRect(contentX, taskBoxY, this.state.expandedAgentPanelWidth - padding * 2, taskBoxHeight, 6);
+          this.primitives.roundRect(contentX, taskBoxY, this.state.expandedAgentPanelWidth - padding * 2, taskBoxHeight, 6);
           this.ctx.fill();
           this.ctx.stroke();
 
@@ -686,7 +686,7 @@ export class RendererPanels {
       const scrollbarY = scrollableStartY + (this.state.agentPanelScrollOffset / maxScroll) * (scrollableHeight - scrollbarHeight);
 
       this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-      this.roundRect(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, 3);
+      this.primitives.roundRect(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, 3);
       this.ctx.fill();
     }
 
@@ -771,7 +771,7 @@ export class RendererPanels {
     currentY += 18;
 
     const combinedText = this.parent.buildCombinerResultPreview(this.state.expandedCombiner);
-    const textLines = this.wrapText(combinedText || 'No results yet', this.state.expandedCombinerPanelWidth - padding * 2);
+    const textLines = this.primitives.wrapText(combinedText || 'No results yet', this.state.expandedCombinerPanelWidth - padding * 2);
 
     this.ctx.fillStyle = combinedText ? '#111827' : '#9ca3af';
     this.ctx.font = '12px system-ui';
@@ -922,7 +922,7 @@ export class RendererPanels {
     // Message
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = '12px system-ui';
-    const lines = this.wrapText(message, width - 35);
+    const lines = this.primitives.wrapText(message, width - 35);
     lines.slice(0, 2).forEach((line, i) => {
       this.ctx.fillText(line, x + 30, y + 20 + i * 16);
     });

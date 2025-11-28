@@ -46,7 +46,7 @@ export class RendererUI {
     this.ctx.shadowOffsetX = 0;
     this.ctx.shadowOffsetY = 2;
 
-    this.roundRect(panelX, panelY, panelWidth, panelHeight, 8);
+    this.primitives.roundRect(panelX, panelY, panelWidth, panelHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
 
@@ -76,7 +76,7 @@ export class RendererUI {
 
     // Background
     this.ctx.fillStyle = '#e5e7eb';
-    this.roundRect(panelX + padding, progressBarY, progressBarWidth, progressBarHeight, 6);
+    this.primitives.roundRect(panelX + padding, progressBarY, progressBarWidth, progressBarHeight, 6);
     this.ctx.fill();
 
     // Progress fill
@@ -86,7 +86,7 @@ export class RendererUI {
       gradient.addColorStop(0, '#10b981');
       gradient.addColorStop(1, '#059669');
       this.ctx.fillStyle = gradient;
-      this.roundRect(panelX + padding, progressBarY, fillWidth, progressBarHeight, 6);
+      this.primitives.roundRect(panelX + padding, progressBarY, fillWidth, progressBarHeight, 6);
       this.ctx.fill();
     }
 
@@ -138,7 +138,7 @@ export class RendererUI {
     // Measure text to size the box appropriately
     this.ctx.font = 'bold 18px system-ui';
     const maxWidth = this.state.width * 0.6; // Max 60% of canvas width
-    const lines = this.wrapText(this.state.mission, maxWidth);
+    const lines = this.primitives.wrapText(this.state.mission, maxWidth);
     const lineHeight = 26;
     const totalHeight = lines.length * lineHeight + 30;
     const boxWidth = Math.min(maxWidth + 40, this.state.width * 0.7);
@@ -158,7 +158,7 @@ export class RendererUI {
     this.ctx.shadowOffsetY = 2;
 
     // Rounded rectangle
-    this.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+    this.primitives.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
 
@@ -205,7 +205,7 @@ export class RendererUI {
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
     this.ctx.shadowBlur = 8;
     this.ctx.shadowOffsetY = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.primitives.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
     this.ctx.shadowColor = 'transparent';
@@ -241,7 +241,7 @@ export class RendererUI {
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
     this.ctx.shadowBlur = 8;
     this.ctx.shadowOffsetY = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.primitives.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
     this.ctx.shadowColor = 'transparent';
@@ -286,7 +286,7 @@ export class RendererUI {
       this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
       this.ctx.shadowBlur = 12;
       this.ctx.shadowOffsetY = 4;
-      this.roundRect(x, y, notificationWidth, notificationHeight, 8);
+      this.primitives.roundRect(x, y, notificationWidth, notificationHeight, 8);
       this.ctx.fill();
       this.ctx.stroke();
       this.ctx.shadowColor = 'transparent';
@@ -311,7 +311,7 @@ export class RendererUI {
 
       // Wrap text if too long
       const maxWidth = notificationWidth - padding * 2 - 35;
-      const lines = this.wrapText(notification.message, maxWidth);
+      const lines = this.primitives.wrapText(notification.message, maxWidth);
       lines.slice(0, 2).forEach((line, i) => {
         this.ctx.fillText(line, x + padding + 30, y + padding + i * 18);
       });
@@ -355,7 +355,7 @@ export class RendererUI {
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
     this.ctx.shadowBlur = 8;
     this.ctx.shadowOffsetY = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.primitives.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
     this.ctx.shadowColor = 'transparent';
@@ -392,7 +392,7 @@ export class RendererUI {
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
     this.ctx.shadowBlur = 8;
     this.ctx.shadowOffsetY = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.primitives.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
     this.ctx.shadowColor = 'transparent';
@@ -428,7 +428,7 @@ export class RendererUI {
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
     this.ctx.shadowBlur = 8;
     this.ctx.shadowOffsetY = 2;
-    this.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
+    this.primitives.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, 8);
     this.ctx.fill();
     this.ctx.stroke();
     this.ctx.shadowColor = 'transparent';

@@ -83,7 +83,7 @@ export class RendererNodes {
         const y1 = fromAgent.y + agentRadius * Math.sin(angle);
         const x2 = task.x - taskCardRadius * Math.cos(angle);
         const y2 = task.y - taskCardRadius * Math.sin(angle);
-        this.drawArrow(x1, y1, x2, y2, color, 3);
+        this.primitives.drawArrow(x1, y1, x2, y2, color, 3);
         this.ctx.setLineDash([]);
       }
 
@@ -101,7 +101,7 @@ export class RendererNodes {
         const y1 = task.y + taskCardRadius * Math.sin(angle);
         const x2 = toAgent.x - agentRadius * Math.cos(angle);
         const y2 = toAgent.y - agentRadius * Math.sin(angle);
-        this.drawArrow(x1, y1, x2, y2, color, 4);
+        this.primitives.drawArrow(x1, y1, x2, y2, color, 4);
         this.ctx.setLineDash([]);
       }
 
@@ -120,7 +120,7 @@ export class RendererNodes {
       this.ctx.shadowColor = 'rgba(0,0,0,0.15)';
       this.ctx.shadowBlur = 10;
       this.ctx.shadowOffsetY = 2;
-      this.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
       this.ctx.fill();
       this.ctx.restore();
 
@@ -134,7 +134,7 @@ export class RendererNodes {
       this.ctx.strokeStyle = borderColor;
       this.ctx.lineWidth = 2;
       this.ctx.beginPath();
-      this.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
       this.ctx.stroke();
 
       // Task description (use built-in maxWidth for reliable clipping)
@@ -257,7 +257,7 @@ export class RendererNodes {
 
         // Button background
         this.ctx.fillStyle = '#28a745';
-        this.roundRect(btnX, btnY, btnWidth, btnHeight, 3);
+        this.primitives.roundRect(btnX, btnY, btnWidth, btnHeight, 3);
         this.ctx.fill();
 
         // Button text
@@ -280,7 +280,7 @@ export class RendererNodes {
 
         // Button background (orange for rerun)
         this.ctx.fillStyle = task.status === 'failed' ? '#dc3545' : '#fd7e14';
-        this.roundRect(rerunBtnX, rerunBtnY, rerunBtnWidth, rerunBtnHeight, 3);
+        this.primitives.roundRect(rerunBtnX, rerunBtnY, rerunBtnWidth, rerunBtnHeight, 3);
         this.ctx.fill();
 
         // Button text
@@ -304,7 +304,7 @@ export class RendererNodes {
         // Button background (highlight if in assignment mode for this task)
         const isActiveAssignment = this.state.assignmentMode && this.state.assignmentSourceTask && this.state.assignmentSourceTask.id === task.id;
         this.ctx.fillStyle = isActiveAssignment ? '#fd7e14' : '#6c757d';
-        this.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
+        this.primitives.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
         this.ctx.fill();
 
         // Button text
@@ -329,7 +329,7 @@ export class RendererNodes {
         // Button background
         const logColor = hasLogs ? '#17a2b8' : '#adb5bd'; // Teal if logs exist, gray otherwise
         this.ctx.fillStyle = logColor;
-        this.roundRect(logBtnX, logBtnY, logBtnWidth, logBtnHeight, 3);
+        this.primitives.roundRect(logBtnX, logBtnY, logBtnWidth, logBtnHeight, 3);
         this.ctx.fill();
 
         // Button text
@@ -422,7 +422,7 @@ export class RendererNodes {
         this.ctx.fillStyle = glowColor;
         this.ctx.shadowColor = glowColor;
         this.ctx.shadowBlur = 12;
-        this.roundRect(
+        this.primitives.roundRect(
           agent.x - halfWidth - grow,
           agent.y - halfHeight - grow,
           (halfWidth * 2) + grow * 2,
@@ -437,14 +437,14 @@ export class RendererNodes {
       this.ctx.fillStyle = agent.color;
       this.ctx.shadowColor = 'rgba(0,0,0,0.12)';
       this.ctx.shadowBlur = 10;
-      this.roundRect(agent.x - halfWidth, agent.y - halfHeight, halfWidth * 2, halfHeight * 2, 12);
+      this.primitives.roundRect(agent.x - halfWidth, agent.y - halfHeight, halfWidth * 2, halfHeight * 2, 12);
       this.ctx.fill();
       this.ctx.shadowColor = 'transparent';
 
       // Draw workflow ports to support incoming/outgoing connections
       // Inputs point into the agent (down), outputs point outward (down from the node)
-      this.drawPort(agent.x, agent.y - halfHeight - 10, 'input', agent.color, 'down');
-      this.drawPort(agent.x, agent.y + halfHeight + 10, 'output', agent.color, 'down');
+      this.primitives.drawPort(agent.x, agent.y - halfHeight - 10, 'input', agent.color, 'down');
+      this.primitives.drawPort(agent.x, agent.y + halfHeight + 10, 'output', agent.color, 'down');
 
       // Draw status indicator
       let statusColor;
@@ -509,7 +509,7 @@ export class RendererNodes {
         this.ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         this.ctx.shadowBlur = 8;
         this.ctx.shadowOffsetY = 2;
-        this.roundRect(resultBoxX, resultBoxY, resultBoxWidth, resultBoxHeight, 4);
+        this.primitives.roundRect(resultBoxX, resultBoxY, resultBoxWidth, resultBoxHeight, 4);
         this.ctx.fill();
         this.ctx.restore();
 
@@ -620,13 +620,13 @@ export class RendererNodes {
       for (let i = 0; i < numInputs; i++) {
         const portX = x + portSpacing * (i + 1);
         const portY = y - 5;
-        this.drawPort(portX, portY, 'input', node.color, 'down');
+        this.primitives.drawPort(portX, portY, 'input', node.color, 'down');
       }
 
       // Draw output port (bottom)
       const outputX = x + w / 2;
       const outputY = y + h + 5;
-      this.drawPort(outputX, outputY, 'output', node.color);
+      this.primitives.drawPort(outputX, outputY, 'output', node.color);
 
       // Draw delete button (always visible in top-right corner)
       const deleteButtonSize = 20;
@@ -676,7 +676,7 @@ export class RendererNodes {
       this.ctx.fillStyle = '#10b981';
       this.ctx.strokeStyle = '#059669';
       this.ctx.lineWidth = 1.5;
-      this.roundRect(runX, runY, runButtonWidth, runButtonHeight, 6);
+      this.primitives.roundRect(runX, runY, runButtonWidth, runButtonHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -702,7 +702,7 @@ export class RendererNodes {
       this.ctx.fillStyle = '#3b82f6';
       this.ctx.strokeStyle = '#1d4ed8';
       this.ctx.lineWidth = 1.5;
-      this.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
+      this.primitives.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
       this.ctx.fill();
       this.ctx.stroke();
 
