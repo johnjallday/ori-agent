@@ -368,19 +368,21 @@ export class AgentCanvasLayoutManager {
       this.state.combinerNodes.forEach(node => this.parent.cleanupCombinerInputPorts(node));
     }
 
-    // Restore zoom and pan
-    if (layout.scale) {
-      this.state.scale = layout.scale;
-      console.log(`  Restoring scale: ${layout.scale}`);
-    }
-    if (layout.offset_x !== undefined) {
-      this.state.offsetX = layout.offset_x;
-      console.log(`  Restoring offsetX: ${layout.offset_x}`);
-    }
-    if (layout.offset_y !== undefined) {
-      this.state.offsetY = layout.offset_y;
-      console.log(`  Restoring offsetY: ${layout.offset_y}`);
-    }
+    // Skip restoring zoom and pan - will be set by zoomToFit() in init
+    // This prevents loading extreme zoom values that break the view
+    // if (layout.scale) {
+    //   this.state.scale = layout.scale;
+    //   console.log(`  Restoring scale: ${layout.scale}`);
+    // }
+    // if (layout.offset_x !== undefined) {
+    //   this.state.offsetX = layout.offset_x;
+    //   console.log(`  Restoring offsetX: ${layout.offset_x}`);
+    // }
+    // if (layout.offset_y !== undefined) {
+    //   this.state.offsetY = layout.offset_y;
+    //   console.log(`  Restoring offsetY: ${layout.offset_y}`);
+    // }
+    console.log('  Skipping zoom/pan restore - will use zoomToFit() instead');
 
     console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents, ${combinersRestored} combiners, ${connectionsRestored} connections)`);
     this.parent.draw();
