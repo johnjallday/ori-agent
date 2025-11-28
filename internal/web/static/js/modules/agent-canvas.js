@@ -998,7 +998,45 @@ class AgentCanvas {
   /**
    * Get port at a given canvas position (for click detection)
    */
+
+  /**
+   * Export canvas as PNG image
+   */
+  exportCanvas() {
+    // Create a temporary canvas with white background
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = this.canvas.width;
+    tempCanvas.height = this.canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    // Fill with white background
+    tempCtx.fillStyle = '#ffffff';
+    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+    // Draw the current canvas on top
+    tempCtx.drawImage(this.canvas, 0, 0);
+
+    // Create download link
+    tempCanvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `agent-canvas-${timestamp}.png`;
+      link.href = url;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+  }
 }
 
 // Make it globally accessible
 window.AgentCanvas = AgentCanvas;
+
+// Export canvas function - accessible globally for button onclick
+window.exportCanvas = function() {
+  if (window.currentCanvas) {
+    window.currentCanvas.exportCanvas();
+  } else {
+    console.warn('No canvas instance available to export');
+  }
+};
