@@ -547,55 +547,6 @@ class AgentCanvas {
 
 
 
-  async toggleAgentPanel(agent) {
-    // Close task panel if open
-    if (this.expandedTask) {
-      this.closeTaskPanel();
-    }
-    if (this.expandedCombiner) {
-      this.closeCombinerPanel();
-    }
-
-    if (this.expandedAgent && this.expandedAgent.name === agent.name) {
-      // Clicking the same agent - close panel
-      this.closeAgentPanel();
-    } else {
-      // Reset scroll offset when opening new agent
-      this.agentPanelScrollOffset = 0;
-      this.agentPanelMaxScroll = 0;
-
-      // Fetch agent configuration before expanding (optional - doesn't block panel)
-      try {
-        const configResponse = await apiGet(`/api/agents/${agent.name}`);
-        if (configResponse.ok) {
-          const agentConfig = await configResponse.json();
-          // Merge config data with agent
-          this.expandedAgent = {
-            ...agent,
-            config: agentConfig
-          };
-        } else {
-          // Use agent without detailed config if fetch fails (workspace agents may not be in global store)
-          console.log(`Agent ${agent.name} config not found in global store - using workspace data`);
-          this.expandedAgent = {
-            ...agent,
-            config: null
-          };
-        }
-      } catch (error) {
-        console.log('Using workspace agent data without global config:', error.message);
-        this.expandedAgent = {
-          ...agent,
-          config: null
-        };
-      }
-
-      this.expandedAgentPanelAnimating = true;
-      this.animateAgentPanel(true);
-    }
-  }
-
-
 
 
 
