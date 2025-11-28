@@ -635,6 +635,63 @@ class AgentCanvas {
 
   calculateTaskLevels() { return this.layout.calculateTaskLevels(); }
 
+  // Helper methods delegated to helpers module
+  getAgentColor(index) { return this.helpers.getAgentColor(index); }
+  getNodeById(nodeId) { return this.helpers.getNodeById(nodeId); }
+  getPortPosition(nodeId, portId) { return this.helpers.getPortPosition(nodeId, portId); }
+  getPortAtPosition(x, y) { return this.helpers.getPortAtPosition(x, y); }
+  getConnectionAtPosition(x, y, threshold = 10) { return this.helpers.getConnectionAtPosition(x, y, threshold); }
+  getLatestTaskForAgent(agentName) { return this.helpers.getLatestTaskForAgent(agentName); }
+  lightenColor(color, percent) { return this.helpers.lightenColor(color, percent); }
+  darkenColor(color, percent) { return this.helpers.darkenColor(color, percent); }
+
+  // Combiner operations delegated to combiner ops module
+  ensureCombinerInputPort(combiner, portId) { return this.combinerOps.ensureCombinerInputPort(combiner, portId); }
+  createConnection(fromNodeId, fromPort, toNodeId, toPort) { return this.combinerOps.createConnection(fromNodeId, fromPort, toNodeId, toPort); }
+  deleteCombinerNode(nodeId) { return this.combinerOps.deleteCombinerNode(nodeId); }
+  deleteConnection(connectionId) { return this.combinerOps.deleteConnection(connectionId); }
+  cleanupCombinerInputPorts(combiner, silent = false) { return this.combinerOps.cleanupCombinerInputPorts(combiner, silent); }
+  buildCombinerResultPreview(combiner) { return this.combinerOps.buildCombinerResultPreview(combiner); }
+
+  // Metrics methods delegated to metrics module
+  updateMetrics() { return this.metrics.updateMetrics(); }
+  updateAgentStats(agentStats) { return this.metrics.updateAgentStats(agentStats); }
+
+  // Notification methods delegated to notifications module
+  showNotification(message, type = 'info') { return this.notifications.showNotification(message, type); }
+  dismissNotification(id) { return this.notifications.dismissNotification(id); }
+  addExecutionLog(taskId, type, message) { return this.notifications.addExecutionLog(taskId, type, message); }
+  showExecutionLog(task) { return this.notifications.showExecutionLog(task); }
+  getEventIcon(type) { return this.notifications.getEventIcon(type); }
+  getEventColor(type) { return this.notifications.getEventColor(type); }
+  getEventMessage(event) { return this.notifications.getEventMessage(event); }
+
+  // Panel methods delegated to panels module
+  toggleTaskPanel(task) { return this.panels.toggleTaskPanel(task); }
+  closeTaskPanel() { return this.panels.closeTaskPanel(); }
+  animatePanel(expanding) { return this.panels.animatePanel(expanding); }
+  toggleAgentPanel(agent) { return this.panels.toggleAgentPanel(agent); }
+  closeAgentPanel() { return this.panels.closeAgentPanel(); }
+  animateAgentPanel(expanding) { return this.panels.animateAgentPanel(expanding); }
+  toggleCombinerPanel(combiner) { return this.panels.toggleCombinerPanel(combiner); }
+  closeCombinerPanel() { return this.panels.closeCombinerPanel(); }
+  animateCombinerPanel(expanding) { return this.panels.animateCombinerPanel(expanding); }
+  toggleHelpOverlay() { return this.panels.toggleHelpOverlay(); }
+
+  // Context menu methods delegated to context menu module
+  toggleAssignmentMode(task) { return this.contextMenu.toggleAssignmentMode(task); }
+  handleContextMenuAction(action, agent) { return this.contextMenu.handleContextMenuAction(action, agent); }
+
+  // Event handler methods delegated to event handler module
+  connectEventStream() { return this.eventHandler.connectEventStream(); }
+  handleTaskEvent(eventData) { return this.eventHandler.handleTaskEvent(eventData); }
+  handleEvent(event) { return this.eventHandler.handleEvent(event); }
+  addTask(taskData) { return this.eventHandler.addTask(taskData); }
+  updateTaskStatus(taskId, status) { return this.eventHandler.updateTaskStatus(taskId, status); }
+  setAgentStatus(agentName, status) { return this.eventHandler.setAgentStatus(agentName, status); }
+  addMessage(messageData) { return this.eventHandler.addMessage(messageData); }
+  setMission(missionText) { return this.eventHandler.setMission(missionText); }
+
   async assignTaskToAgent(agent) {
     // Update task assignment via API
     try {
