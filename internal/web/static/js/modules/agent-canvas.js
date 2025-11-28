@@ -444,17 +444,17 @@ class AgentCanvas {
     this.renderer.drawMission();
 
     // Draw expanded task panel OUTSIDE the transform context (fixed position)
-    if (this.expandedPanelWidth > 0) {
+    if (this.state.expandedPanelWidth > 0) {
       this.renderer.drawExpandedTaskPanel();
     }
 
     // Draw expanded agent panel OUTSIDE the transform context (fixed position)
-    if (this.expandedAgentPanelWidth > 0) {
+    if (this.state.expandedAgentPanelWidth > 0) {
       this.renderer.drawExpandedAgentPanel();
     }
 
     // Draw expanded combiner panel OUTSIDE the transform context (fixed position)
-    if (this.expandedCombinerPanelWidth > 0) {
+    if (this.state.expandedCombinerPanelWidth > 0) {
       this.renderer.drawExpandedCombinerPanel();
     }
 

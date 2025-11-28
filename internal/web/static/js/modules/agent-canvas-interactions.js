@@ -652,8 +652,17 @@ export class AgentCanvasInteractionHandler {
    * @param {MouseEvent} e - The mouse event
    */
   onClick(e) {
+    console.log('[CANVAS CLICK] onClick called', {
+      isDragging: this.state.isDragging,
+      isDraggingAgent: this.state.isDraggingAgent,
+      isDraggingTask: this.state.isDraggingTask
+    });
+
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask) return;
+    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask) {
+      console.log('[CANVAS CLICK] Ignoring click - drag operation in progress');
+      return;
+    }
 
     const rect = this.canvas.getBoundingClientRect();
     // Screen coordinates (for UI elements like the panel)
@@ -921,8 +930,20 @@ export class AgentCanvasInteractionHandler {
     }
 
     // Convert screen coordinates to canvas coordinates
+    console.log('[CANVAS CLICK] Converting coords:', {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      'rect.left': rect.left,
+      'rect.top': rect.top,
+      offsetX: this.state.offsetX,
+      offsetY: this.state.offsetY,
+      scale: this.state.scale
+    });
+
     const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
     const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+
+    console.log('[CANVAS CLICK] Converted canvas coords:', { x, y });
 
     // Check if click is on any task first (tasks are on top)
     for (let i = this.state.tasks.length - 1; i >= 0; i--) {
@@ -998,16 +1019,33 @@ export class AgentCanvasInteractionHandler {
     }
 
     // Check if click is on any agent
+    console.log('[CANVAS CLICK] Checking agents:', this.state.agents.length, 'agents');
+    console.log('[CANVAS CLICK] Click coords (canvas):', { x, y });
+
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;
-      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
-          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+      const bounds = {
+        left: agent.x - halfWidth,
+        right: agent.x + halfWidth,
+        top: agent.y - halfHeight,
+        bottom: agent.y + halfHeight
+      };
+      const inBounds = x >= bounds.left && x <= bounds.right &&
+          y >= bounds.top && y <= bounds.bottom;
+
+      console.log(`[CANVAS CLICK] Agent ${agent.name}:`, {
+        position: { x: agent.x, y: agent.y },
+        bounds,
+        inBounds
+      });
+
+      if (inBounds) {
         // Agent clicked
-        console.log('Agent clicked:', agent.name, 'assignmentMode:', this.state.assignmentMode, 'combinerAssignMode:', this.state.combinerAssignMode);
+        console.log('[CANVAS CLICK] Agent clicked:', agent.name, 'assignmentMode:', this.state.assignmentMode, 'combinerAssignMode:', this.state.combinerAssignMode);
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           // In assignment mode - assign task to agent
-          console.log('Assigning task to agent:', agent.name);
+          console.log('[CANVAS CLICK] Assigning task to agent:', agent.name);
           this.parent.assignTaskToAgent(agent);
           return;
         } else if (this.state.combinerAssignMode && this.state.combinerAssignmentSource) {
@@ -1022,6 +1060,7 @@ export class AgentCanvasInteractionHandler {
           return;
         } else {
           // Toggle agent panel
+          console.log('[CANVAS CLICK] Calling toggleAgentPanel for:', agent.name);
           this.parent.toggleAgentPanel(agent);
         }
         return;

@@ -85,27 +85,36 @@ export class AgentCanvasPanelManager {
    * Toggle agent panel - opens panel for given agent or closes if already open
    */
   async toggleAgentPanel(agent) {
+    console.log('[PANEL] toggleAgentPanel called for:', agent.name);
+    console.log('[PANEL] Current expandedAgent:', this.state.expandedAgent);
+
     // Close task panel if open
     if (this.state.expandedTask) {
+      console.log('[PANEL] Closing task panel');
       this.closeTaskPanel();
     }
     if (this.state.expandedCombiner) {
+      console.log('[PANEL] Closing combiner panel');
       this.closeCombinerPanel();
     }
 
     if (this.state.expandedAgent && this.state.expandedAgent.name === agent.name) {
       // Clicking the same agent - close panel
+      console.log('[PANEL] Same agent clicked, closing panel');
       this.closeAgentPanel();
     } else {
+      console.log('[PANEL] Opening panel for new agent');
       // Reset scroll offset when opening new agent
       this.state.agentPanelScrollOffset = 0;
       this.state.agentPanelMaxScroll = 0;
 
       // Fetch agent configuration before expanding (optional - doesn't block panel)
       try {
+        console.log('[PANEL] Fetching agent config for:', agent.name);
         const configResponse = await apiGet(`/api/agents/${agent.name}`);
         if (configResponse.ok) {
           const agentConfig = await configResponse.json();
+          console.log('[PANEL] Got agent config:', agentConfig);
           // Merge config data with agent
           this.state.expandedAgent = {
             ...agent,
@@ -113,20 +122,22 @@ export class AgentCanvasPanelManager {
           };
         } else {
           // Use agent without detailed config if fetch fails (workspace agents may not be in global store)
-          console.log(`Agent ${agent.name} config not found in global store - using workspace data`);
+          console.log(`[PANEL] Agent ${agent.name} config not found in global store - using workspace data`);
           this.state.expandedAgent = {
             ...agent,
             config: null
           };
         }
       } catch (error) {
-        console.log('Using workspace agent data without global config:', error.message);
+        console.log('[PANEL] Error fetching config, using workspace agent data:', error.message);
         this.state.expandedAgent = {
           ...agent,
           config: null
         };
       }
 
+      console.log('[PANEL] Setting expandedAgent to:', this.state.expandedAgent);
+      console.log('[PANEL] Starting animation, expandedAgentPanelAnimating = true');
       this.state.expandedAgentPanelAnimating = true;
       this.animateAgentPanel(true);
     }
@@ -144,6 +155,9 @@ export class AgentCanvasPanelManager {
    * Animate agent panel opening/closing
    */
   animateAgentPanel(expanding) {
+    console.log('[PANEL ANIM] animateAgentPanel called, expanding:', expanding);
+    console.log('[PANEL ANIM] Initial width:', this.state.expandedAgentPanelWidth, 'Target:', this.state.expandedAgentPanelTargetWidth);
+
     const animate = () => {
       const speed = 30; // pixels per frame
 
@@ -156,6 +170,7 @@ export class AgentCanvasPanelManager {
         this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedAgentPanelWidth >= this.state.expandedAgentPanelTargetWidth) {
+          console.log('[PANEL ANIM] Animation complete, width:', this.state.expandedAgentPanelWidth);
           this.state.expandedAgentPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
@@ -166,6 +181,7 @@ export class AgentCanvasPanelManager {
         this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedAgentPanelWidth <= 0) {
+          console.log('[PANEL ANIM] Close animation complete');
           this.state.expandedAgentPanelAnimating = false;
           this.state.expandedAgent = null;
           this.state.agentPanelScrollOffset = 0; // Reset scroll when closing panel
