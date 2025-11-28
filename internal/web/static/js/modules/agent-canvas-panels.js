@@ -15,22 +15,22 @@ export class AgentCanvasPanelManager {
    */
   toggleTaskPanel(task) {
     // Close agent panel if open
-    if (this.parent.expandedAgent) {
+    if (this.state.expandedAgent) {
       this.closeAgentPanel();
     }
-    if (this.parent.expandedCombiner) {
+    if (this.state.expandedCombiner) {
       this.closeCombinerPanel();
     }
 
-    if (this.parent.expandedTask && this.parent.expandedTask.id === task.id) {
+    if (this.state.expandedTask && this.state.expandedTask.id === task.id) {
       // Clicking the same task - close panel
       this.closeTaskPanel();
     } else {
       // Expand panel for this task
-      this.parent.expandedTask = task;
+      this.state.expandedTask = task;
       this.parent.resultScrollOffset = 0; // Reset scroll when opening a new task
       this.parent.copyButtonState = 'idle'; // Reset copy button state
-      this.parent.expandedPanelAnimating = true;
+      this.state.expandedPanelAnimating = true;
       this.animatePanel(true);
     }
   }
@@ -39,7 +39,7 @@ export class AgentCanvasPanelManager {
    * Close task panel with animation
    */
   closeTaskPanel() {
-    this.parent.expandedPanelAnimating = true;
+    this.state.expandedPanelAnimating = true;
     this.animatePanel(false);
   }
 
@@ -51,22 +51,22 @@ export class AgentCanvasPanelManager {
       const speed = 30; // pixels per frame
 
       if (expanding) {
-        this.parent.expandedPanelWidth = Math.min(
-          this.parent.expandedPanelWidth + speed,
-          this.parent.expandedPanelTargetWidth
+        this.state.expandedPanelWidth = Math.min(
+          this.state.expandedPanelWidth + speed,
+          this.state.expandedPanelTargetWidth
         );
 
-        if (this.parent.expandedPanelWidth >= this.parent.expandedPanelTargetWidth) {
-          this.parent.expandedPanelAnimating = false;
+        if (this.state.expandedPanelWidth >= this.state.expandedPanelTargetWidth) {
+          this.state.expandedPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
         }
       } else {
-        this.parent.expandedPanelWidth = Math.max(this.parent.expandedPanelWidth - speed, 0);
+        this.state.expandedPanelWidth = Math.max(this.state.expandedPanelWidth - speed, 0);
 
-        if (this.parent.expandedPanelWidth <= 0) {
-          this.parent.expandedPanelAnimating = false;
-          this.parent.expandedTask = null;
+        if (this.state.expandedPanelWidth <= 0) {
+          this.state.expandedPanelAnimating = false;
+          this.state.expandedTask = null;
           this.parent.resultScrollOffset = 0; // Reset scroll when closing panel
         } else {
           requestAnimationFrame(animate);
@@ -82,20 +82,20 @@ export class AgentCanvasPanelManager {
    */
   async toggleAgentPanel(agent) {
     // Close task panel if open
-    if (this.parent.expandedTask) {
+    if (this.state.expandedTask) {
       this.closeTaskPanel();
     }
-    if (this.parent.expandedCombiner) {
+    if (this.state.expandedCombiner) {
       this.closeCombinerPanel();
     }
 
-    if (this.parent.expandedAgent && this.parent.expandedAgent.name === agent.name) {
+    if (this.state.expandedAgent && this.state.expandedAgent.name === agent.name) {
       // Clicking the same agent - close panel
       this.closeAgentPanel();
     } else {
       // Reset scroll offset when opening new agent
-      this.parent.agentPanelScrollOffset = 0;
-      this.parent.agentPanelMaxScroll = 0;
+      this.state.agentPanelScrollOffset = 0;
+      this.state.agentPanelMaxScroll = 0;
 
       // Fetch agent configuration before expanding (optional - doesn't block panel)
       try {
@@ -103,27 +103,27 @@ export class AgentCanvasPanelManager {
         if (configResponse.ok) {
           const agentConfig = await configResponse.json();
           // Merge config data with agent
-          this.parent.expandedAgent = {
+          this.state.expandedAgent = {
             ...agent,
             config: agentConfig
           };
         } else {
           // Use agent without detailed config if fetch fails (workspace agents may not be in global store)
           console.log(`Agent ${agent.name} config not found in global store - using workspace data`);
-          this.parent.expandedAgent = {
+          this.state.expandedAgent = {
             ...agent,
             config: null
           };
         }
       } catch (error) {
         console.log('Using workspace agent data without global config:', error.message);
-        this.parent.expandedAgent = {
+        this.state.expandedAgent = {
           ...agent,
           config: null
         };
       }
 
-      this.parent.expandedAgentPanelAnimating = true;
+      this.state.expandedAgentPanelAnimating = true;
       this.animateAgentPanel(true);
     }
   }
@@ -132,7 +132,7 @@ export class AgentCanvasPanelManager {
    * Close agent panel with animation
    */
   closeAgentPanel() {
-    this.parent.expandedAgentPanelAnimating = true;
+    this.state.expandedAgentPanelAnimating = true;
     this.animateAgentPanel(false);
   }
 
@@ -144,24 +144,24 @@ export class AgentCanvasPanelManager {
       const speed = 30; // pixels per frame
 
       if (expanding) {
-        this.parent.expandedAgentPanelWidth = Math.min(
-          this.parent.expandedAgentPanelWidth + speed,
-          this.parent.expandedAgentPanelTargetWidth
+        this.state.expandedAgentPanelWidth = Math.min(
+          this.state.expandedAgentPanelWidth + speed,
+          this.state.expandedAgentPanelTargetWidth
         );
 
-        if (this.parent.expandedAgentPanelWidth >= this.parent.expandedAgentPanelTargetWidth) {
-          this.parent.expandedAgentPanelAnimating = false;
+        if (this.state.expandedAgentPanelWidth >= this.state.expandedAgentPanelTargetWidth) {
+          this.state.expandedAgentPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
         }
       } else {
-        this.parent.expandedAgentPanelWidth = Math.max(this.parent.expandedAgentPanelWidth - speed, 0);
+        this.state.expandedAgentPanelWidth = Math.max(this.state.expandedAgentPanelWidth - speed, 0);
 
-        if (this.parent.expandedAgentPanelWidth <= 0) {
-          this.parent.expandedAgentPanelAnimating = false;
-          this.parent.expandedAgent = null;
-          this.parent.agentPanelScrollOffset = 0; // Reset scroll when closing panel
-          this.parent.agentPanelMaxScroll = 0; // Reset max scroll when closing panel
+        if (this.state.expandedAgentPanelWidth <= 0) {
+          this.state.expandedAgentPanelAnimating = false;
+          this.state.expandedAgent = null;
+          this.state.agentPanelScrollOffset = 0; // Reset scroll when closing panel
+          this.state.agentPanelMaxScroll = 0; // Reset max scroll when closing panel
         } else {
           requestAnimationFrame(animate);
         }
@@ -176,16 +176,16 @@ export class AgentCanvasPanelManager {
    */
   toggleCombinerPanel(combiner) {
     // Close other panels
-    if (this.parent.expandedTask) this.closeTaskPanel();
-    if (this.parent.expandedAgent) this.closeAgentPanel();
+    if (this.state.expandedTask) this.closeTaskPanel();
+    if (this.state.expandedAgent) this.closeAgentPanel();
 
-    if (this.parent.expandedCombiner && this.parent.expandedCombiner.id === combiner.id) {
+    if (this.state.expandedCombiner && this.state.expandedCombiner.id === combiner.id) {
       this.closeCombinerPanel();
       return;
     }
 
-    this.parent.expandedCombiner = combiner;
-    this.parent.expandedCombinerPanelAnimating = true;
+    this.state.expandedCombiner = combiner;
+    this.state.expandedCombinerPanelAnimating = true;
     this.animateCombinerPanel(true);
   }
 
@@ -193,7 +193,7 @@ export class AgentCanvasPanelManager {
    * Close combiner panel with animation
    */
   closeCombinerPanel() {
-    this.parent.expandedCombinerPanelAnimating = true;
+    this.state.expandedCombinerPanelAnimating = true;
     this.animateCombinerPanel(false);
   }
 
@@ -204,20 +204,20 @@ export class AgentCanvasPanelManager {
     const animate = () => {
       const speed = 30;
       if (expanding) {
-        this.parent.expandedCombinerPanelWidth = Math.min(
-          this.parent.expandedCombinerPanelWidth + speed,
-          this.parent.expandedCombinerPanelTargetWidth
+        this.state.expandedCombinerPanelWidth = Math.min(
+          this.state.expandedCombinerPanelWidth + speed,
+          this.state.expandedCombinerPanelTargetWidth
         );
-        if (this.parent.expandedCombinerPanelWidth >= this.parent.expandedCombinerPanelTargetWidth) {
-          this.parent.expandedCombinerPanelAnimating = false;
+        if (this.state.expandedCombinerPanelWidth >= this.state.expandedCombinerPanelTargetWidth) {
+          this.state.expandedCombinerPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
         }
       } else {
-        this.parent.expandedCombinerPanelWidth = Math.max(this.parent.expandedCombinerPanelWidth - speed, 0);
-        if (this.parent.expandedCombinerPanelWidth <= 0) {
-          this.parent.expandedCombinerPanelAnimating = false;
-          this.parent.expandedCombiner = null;
+        this.state.expandedCombinerPanelWidth = Math.max(this.state.expandedCombinerPanelWidth - speed, 0);
+        if (this.state.expandedCombinerPanelWidth <= 0) {
+          this.state.expandedCombinerPanelAnimating = false;
+          this.state.expandedCombiner = null;
         } else {
           requestAnimationFrame(animate);
         }
