@@ -68,9 +68,11 @@ export class AgentCanvasInitialization {
       // Initialize agent positions
       this.initializeAgents();
 
-      // Load saved layout (positions and zoom)
-      // TEMPORARILY DISABLED to fix zoom issue - will re-enable after testing
-      // this.parent.layout.loadLayout();
+      // Load saved layout (positions only)
+      this.parent.layout.loadLayout();
+
+      // Immediately reset zoom to fit content (ignore saved zoom values)
+      this.parent.layout.zoomToFit();
 
       // Detect and initialize chains
       this.parent.animation.updateChains();
@@ -87,11 +89,6 @@ export class AgentCanvasInitialization {
 
       // Initialize metrics
       this.parent.metrics.updateMetrics();
-
-      // Always reset view to fit content (overrides any bad saved layout)
-      setTimeout(() => {
-        this.parent.layout.zoomToFit();
-      }, 100);
 
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
