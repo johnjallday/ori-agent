@@ -641,6 +641,35 @@ async function addCombinerNode(type) {
     }
 }
 
+/**
+ * Toggle canvas sidebar visibility
+ */
+function toggleCanvasSidebar() {
+  const sidebar = document.getElementById('canvas-sidebar');
+  const mainArea = document.getElementById('canvas-main-area');
+
+  if (!sidebar || !mainArea) return;
+
+  if (sidebar.style.display === 'none') {
+    // Show sidebar
+    sidebar.style.display = 'block';
+    mainArea.classList.remove('col-lg-12');
+    mainArea.classList.add('col-lg-9');
+  } else {
+    // Hide sidebar
+    sidebar.style.display = 'none';
+    mainArea.classList.remove('col-lg-9');
+    mainArea.classList.add('col-lg-12');
+  }
+
+  // Trigger canvas resize if canvas exists
+  if (window.currentCanvas) {
+    setTimeout(() => {
+      window.currentCanvas.handleResize();
+    }, 100);
+  }
+}
+
 // Export functions for global access
 window.viewWorkspace = viewWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
@@ -654,3 +683,4 @@ window.changeCanvasBackground = changeCanvasBackground;
 window.connectToMerge = connectToMerge;
 window.createMergeWorkflowTasks = createMergeWorkflowTasks;
 window.addCombinerNode = addCombinerNode;
+window.toggleCanvasSidebar = toggleCanvasSidebar;
