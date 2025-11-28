@@ -20,7 +20,8 @@ export class AgentCanvasInitialization {
     this.parent.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
     this.parent.width = rect.width;
     this.parent.height = rect.height;
-    this.parent.draw();
+    console.log('📐 Canvas resized:', rect.width, 'x', rect.height);
+    // Don't call draw() here - let caller decide when to redraw
   }
 
   /**
@@ -29,6 +30,10 @@ export class AgentCanvasInitialization {
   async init() {
     console.log('🚀 AgentCanvas.init() called');
     try {
+      // First, resize canvas to set width/height properties
+      this.resize();
+      console.log('AgentCanvas.init() - canvas resized, width:', this.parent.width, 'height:', this.parent.height);
+
       console.log('AgentCanvas.init() - studioId:', this.parent.studioId);
 
       // Load studio data
