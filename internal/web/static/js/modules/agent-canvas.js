@@ -10,6 +10,9 @@ import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTas
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 import { AgentCanvasRenderer } from './agent-canvas-renderer.js';
 import { AgentCanvasInteractionHandler } from './agent-canvas-interactions.js';
+import { AgentCanvasLayoutManager } from './agent-canvas-layout.js';
+import { AgentCanvasAnimationController } from './agent-canvas-animation.js';
+import { AgentCanvasTimelineManager } from './agent-canvas-timeline.js';
 
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
@@ -41,9 +44,17 @@ class AgentCanvas {
     // Initialize interaction handler module
     this.interactions = new AgentCanvasInteractionHandler(canvas, this.state, this);
 
-    // Setup canvas
-    this.resize();
-    window.addEventListener('resize', () => this.resize());
+    // Initialize layout manager
+    this.layout = new AgentCanvasLayoutManager(this.state, this);
+
+    // Initialize animation controller
+    this.animation = new AgentCanvasAnimationController(this.state, this);
+
+    // Initialize timeline manager
+    this.timeline = new AgentCanvasTimelineManager(this.state, this);
+
+    // Initialize layout manager module
+    this.layout = new AgentCanvasLayoutManager(this.state, this);
 
     // Mouse interactions - delegate to interaction handler
     this.canvas.addEventListener('mousedown', (e) => this.interactions.onMouseDown(e));
@@ -627,81 +638,10 @@ class AgentCanvas {
     this.updateChains();
   }
 
-  /**
-   * Detect and update active task chains
-   */
-  updateChains() {
-    if (!this.tasks || this.tasks.length === 0) {
-      this.activeChains = [];
-      return;
-    }
-
-    const chains = [];
-
-    // Find all tasks that are part of chains (have input_task_ids)
-    this.tasks.forEach(task => {
-      if (task.input_task_ids && task.input_task_ids.length > 0) {
-        // This task depends on other tasks - it's part of a chain
-        task.input_task_ids.forEach(inputTaskId => {
-          const inputTask = this.tasks.find(t => t.id === inputTaskId);
-          if (inputTask) {
-            // Found a link in the chain
-            chains.push({
-              from: inputTask,
-              to: task,
-              active: task.status === 'in_progress' || task.status === 'pending',
-              completed: task.status === 'completed',
-              failed: task.status === 'failed'
-            });
-          }
-        });
-      }
-    });
-
-    this.activeChains = chains;
-  }
-
-  /**
-   * Create chain particles for active chains
-   */
-  createChainParticle(fromTask, toTask) {
-    if (!fromTask || !toTask || fromTask.x == null || toTask.x == null) return;
-
-    const particle = {
-      x: fromTask.x,
-      y: fromTask.y,
-      targetX: toTask.x,
-      targetY: toTask.y,
-      progress: 0,
-      speed: 0.01 + Math.random() * 0.01,
-      alpha: 1,
-      size: 4,
-      color: toTask.status === 'in_progress' ? '#3b82f6' : '#6b7280'
-    };
-
-    this.chainParticles.push(particle);
-  }
-
-  /**
-   * Update chain particles animation
-   */
-  updateChainParticles() {
-    // Update existing particles
-    this.chainParticles = this.chainParticles.filter(p => {
-      p.progress += p.speed;
-      p.x = p.x + (p.targetX - p.x) * p.progress;
-      p.y = p.y + (p.targetY - p.y) * p.progress;
-      p.alpha = 1 - p.progress;
-      return p.progress < 1;
-    });
-
-    // Generate new particles for active chains
-    this.activeChains.forEach(chain => {
-      if (chain.active && !chain.completed && Math.random() < 0.1) {
-        this.createChainParticle(chain.from, chain.to);
-      }
-    });
-  }
+  // Animation methods delegated to animation module
+  updateChains() { return this.animation.updateChains(); }
+  createChainParticle(fromTask, toTask) { return this.animation.createChainParticle(fromTask, toTask); }
+  updateChainParticles() { return this.animation.updateChainParticles(); }
 
   showNotification(message, type = 'info') {
     const notification = {
@@ -726,23 +666,10 @@ class AgentCanvas {
     this.draw();
   }
 
-  addTimelineEvent(eventData) {
-    // Add event to timeline (prepend to show newest first)
-    this.timelineEvents.unshift({
-      id: eventData.id || Date.now() + Math.random(),
-      type: eventData.type,
-      timestamp: eventData.timestamp || new Date().toISOString(),
-      data: eventData.data || {},
-      source: eventData.source || 'system'
-    });
-
-    // Limit timeline events to max
-    if (this.timelineEvents.length > this.timelineMaxEvents) {
-      this.timelineEvents = this.timelineEvents.slice(0, this.timelineMaxEvents);
-    }
-
-    this.draw();
-  }
+  // Timeline methods delegated to timeline module
+  addTimelineEvent(eventData) { return this.timeline.addTimelineEvent(eventData); }
+  toggleTimeline() { return this.timeline.toggleTimeline(); }
+  animateTimelinePanel(expanding) { return this.timeline.animateTimelinePanel(expanding); }
 
   addExecutionLog(taskId, type, message) {
     if (!this.executionLogs[taskId]) {
@@ -761,43 +688,6 @@ class AgentCanvas {
     }
 
     this.draw();
-  }
-
-  toggleTimeline() {
-    this.timelineVisible = !this.timelineVisible;
-    this.timelinePanelAnimating = true;
-    this.animateTimelinePanel(this.timelineVisible);
-  }
-
-  animateTimelinePanel(expanding) {
-    const animate = () => {
-      const speed = 30; // pixels per frame
-
-      if (expanding) {
-        this.timelinePanelWidth = Math.min(
-          this.timelinePanelWidth + speed,
-          this.timelinePanelTargetWidth
-        );
-
-        if (this.timelinePanelWidth >= this.timelinePanelTargetWidth) {
-          this.timelinePanelAnimating = false;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      } else {
-        this.timelinePanelWidth = Math.max(this.timelinePanelWidth - speed, 0);
-
-        if (this.timelinePanelWidth <= 0) {
-          this.timelinePanelAnimating = false;
-        } else {
-          requestAnimationFrame(animate);
-        }
-      }
-
-      this.draw();
-    };
-
-    requestAnimationFrame(animate);
   }
 
   handleEvent(event) {
@@ -895,64 +785,10 @@ class AgentCanvas {
     console.log('Mission set on canvas:', missionText);
   }
 
-  createTaskParticles(task) {
-    const fromAgent = this.agents.find(a => a.name === task.from);
-    const toAgent = this.agents.find(a => a.name === task.to);
-
-    if (fromAgent && toAgent) {
-      for (let i = 0; i < 20; i++) {
-        this.particles.push({
-          x: fromAgent.x,
-          y: fromAgent.y,
-          targetX: toAgent.x,
-          targetY: toAgent.y,
-          progress: 0,
-          speed: 0.01 + Math.random() * 0.02,
-          size: 2 + Math.random() * 3,
-          color: fromAgent.color,
-          alpha: 1
-        });
-      }
-    }
-  }
-
-  startAnimation() {
-    const animate = () => {
-      this.update();
-      this.draw();
-      this.animationFrame = requestAnimationFrame(animate);
-    };
-    animate();
-  }
-
-  update() {
-    // Skip updates if animation is paused
-    if (this.animationPaused) return;
-
-    // Update task progress
-    this.tasks.forEach(task => {
-      if (task.status === 'in_progress' && task.progress < 100) {
-        task.progress += 0.5;
-      }
-    });
-
-    // Update particles
-    this.particles = this.particles.filter(p => {
-      p.progress += p.speed;
-      p.x = p.x + (p.targetX - p.x) * p.progress;
-      p.y = p.y + (p.targetY - p.y) * p.progress;
-      p.alpha = 1 - p.progress;
-      return p.progress < 1;
-    });
-
-    // Update chain particles
-    this.updateChainParticles();
-
-    // Update agent pulse
-    this.agents.forEach(agent => {
-      agent.pulsePhase += 0.05;
-    });
-  }
+  // Animation methods delegated to animation module (continued)
+  createTaskParticles(task) { return this.animation.createTaskParticles(task); }
+  startAnimation() { return this.animation.startAnimation(); }
+  update() { return this.animation.update(); }
 
   draw() {
     // Clear canvas with selected background color
@@ -1363,172 +1199,13 @@ class AgentCanvas {
   }
 
 
-  /**
-   * Auto-layout tasks in a hierarchical flow (top to bottom)
-   */
-  autoLayoutTasks() {
-    if (!this.tasks || this.tasks.length === 0) return;
+  // Layout methods delegated to layout module
+  autoLayoutTasks() { return this.layout.autoLayoutTasks(); }
 
-    // Calculate dependency levels (topological sort)
-    const levels = this.calculateTaskLevels();
+  zoomToFitContent() { return this.layout.zoomToFitContent(); }
 
-    // Get canvas dimensions
-    const canvasWidth = this.width / this.scale;
-    const canvasHeight = this.height / this.scale;
 
-    // Vertical flow layout: tasks on the left, agents on the right
-    const taskColumnX = 300; // X position for tasks (left side)
-    const agentColumnX = 700; // X position for agents (right side)
-    const verticalSpacing = 250; // Space between task levels
-    const startY = 150; // Start position from top
-
-    // Position tasks level by level (vertically)
-    levels.forEach((taskGroup, levelIndex) => {
-      const baseY = startY + (levelIndex * verticalSpacing);
-
-      taskGroup.forEach((task, taskIndex) => {
-        // Tasks in same level: stack vertically with slight offset
-        const yOffset = taskIndex * 100; // Multiple tasks in same level
-        task.x = taskColumnX;
-        task.y = baseY + yOffset;
-
-        // Position the agent for this task to the right
-        const agentName = task.to;
-        if (agentName) {
-          const agent = this.agents.find(a => a.name === agentName);
-          if (agent) {
-            agent.x = agentColumnX;
-            agent.y = task.y; // Align agent with its task
-          }
-        }
-      });
-    });
-
-    // Auto-zoom to fit all content
-    this.zoomToFitContent();
-
-    this.draw();
-    this.showNotification('✨ Tasks auto-arranged', 'success');
-
-    // Save the new layout
-    this.saveLayout();
-  }
-
-  /**
-   * Zoom and pan to fit all tasks and agents in view
-   */
-  zoomToFitContent() {
-    if ((!this.tasks || this.tasks.length === 0) && (!this.agents || this.agents.length === 0)) {
-      return;
-    }
-
-    // Calculate bounding box of all content
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
-
-    // Include tasks
-    this.tasks.forEach(task => {
-      const taskWidth = 180;
-      const taskHeight = 100;
-      minX = Math.min(minX, task.x - taskWidth / 2);
-      maxX = Math.max(maxX, task.x + taskWidth / 2);
-      minY = Math.min(minY, task.y - taskHeight / 2);
-      maxY = Math.max(maxY, task.y + taskHeight / 2);
-    });
-
-    // Include agents
-    this.agents.forEach(agent => {
-      const halfW = (agent.width || 120) / 2;
-      const halfH = (agent.height || 70) / 2;
-      minX = Math.min(minX, agent.x - halfW);
-      maxX = Math.max(maxX, agent.x + halfW);
-      minY = Math.min(minY, agent.y - halfH);
-      maxY = Math.max(maxY, agent.y + halfH);
-    });
-
-    // Calculate content dimensions
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    const contentCenterX = (minX + maxX) / 2;
-    const contentCenterY = (minY + maxY) / 2;
-
-    // Calculate required scale to fit content with padding
-    const padding = 100; // Padding around content
-    const scaleX = this.width / (contentWidth + padding * 2);
-    const scaleY = this.height / (contentHeight + padding * 2);
-    const newScale = Math.min(scaleX, scaleY, 1.0); // Don't zoom in beyond 100%
-
-    // Clamp scale to reasonable limits
-    this.scale = Math.max(0.3, Math.min(1.0, newScale));
-
-    // Calculate offset to center content
-    this.offsetX = (this.width / 2) - (contentCenterX * this.scale);
-    this.offsetY = (this.height / 2) - (contentCenterY * this.scale);
-  }
-
-  /**
-   * Arrange agents at the bottom of the canvas
-   */
-  arrangeAgentsAtBottom(canvasWidth, canvasHeight, tasksBottomY) {
-    if (!this.agents || this.agents.length === 0) return;
-
-    const agentSpacing = 200; // Space between agents
-    const bottomMargin = 150; // Space from bottom
-
-    // Calculate horizontal positions
-    const totalWidth = (this.agents.length - 1) * agentSpacing;
-    const startX = (canvasWidth / 2) - (totalWidth / 2);
-    const y = Math.max(tasksBottomY + 150, canvasHeight - bottomMargin); // Below tasks or at bottom
-
-    this.agents.forEach((agent, index) => {
-      const x = startX + (index * agentSpacing);
-      agent.x = x;
-      agent.y = y;
-    });
-  }
-
-  /**
-   * Calculate task dependency levels using topological sort
-   */
-  calculateTaskLevels() {
-    const levels = [];
-    const visited = new Set();
-    const taskMap = new Map(this.tasks.map(t => [t.id, t]));
-
-    // Helper to calculate task level recursively
-    const getLevel = (task) => {
-      if (visited.has(task.id)) {
-        return task.level || 0;
-      }
-
-      visited.add(task.id);
-
-      // If task has input tasks, its level is max(input levels) + 1
-      if (task.input_task_ids && task.input_task_ids.length > 0) {
-        const inputLevels = task.input_task_ids
-          .map(id => taskMap.get(id))
-          .filter(t => t)
-          .map(t => getLevel(t));
-
-        task.level = Math.max(...inputLevels, 0) + 1;
-      } else {
-        task.level = 0;
-      }
-
-      return task.level;
-    };
-
-    // Calculate levels for all tasks
-    this.tasks.forEach(task => getLevel(task));
-
-    // Group tasks by level
-    const maxLevel = Math.max(...this.tasks.map(t => t.level || 0));
-    for (let i = 0; i <= maxLevel; i++) {
-      levels[i] = this.tasks.filter(t => (t.level || 0) === i);
-    }
-
-    return levels;
-  }
+  calculateTaskLevels() { return this.layout.calculateTaskLevels(); }
 
   async assignTaskToAgent(agent) {
     // Update task assignment via API
@@ -1897,232 +1574,13 @@ class AgentCanvas {
     }
   }
 
-  /**
-   * Save the current layout (positions and zoom) to the server
-   */
-  async saveLayout() {
-    if (!this.studioId) {
-      console.log('❌ Cannot save layout: no studioId');
-      return;
-    }
+  async saveLayout() { return this.layout.saveLayout(); }
 
-    try {
-      // Keep combiner input ports in sync with actual connections before persisting
-      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node));
-
-      // Collect task positions
-      const taskPositions = {};
-      this.tasks.forEach(task => {
-        console.log(`  📍 Task ${task.id}: (${task.x}, ${task.y})`);
-        taskPositions[task.id] = { x: task.x, y: task.y };
-      });
-
-      // Collect agent positions
-      const agentPositions = {};
-      this.agents.forEach(agent => {
-        console.log(`  📍 Agent ${agent.name}: (${agent.x}, ${agent.y})`);
-        agentPositions[agent.name] = { x: agent.x, y: agent.y };
-      });
-
-      // Collect combiner nodes
-      const combinerNodes = this.combinerNodes.map(node => ({
-        id: node.id,
-        type: node.type,
-        combinerType: node.combinerType,
-        name: node.name,
-        icon: node.icon,
-        color: node.color,
-        description: node.description,
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height,
-        inputPorts: node.inputPorts || [],
-        outputPort: node.outputPort || { id: 'output' },
-        resultCombinationMode: node.resultCombinationMode,
-        customInstruction: node.customInstruction,
-        config: node.config || {},
-        taskId: node.taskId // Include taskId for backend task association
-      }));
-
-      // Collect workflow connections (agents/tasks/combiners)
-      const workflowConnections = this.connections.map(conn => ({
-        id: conn.id,
-        from: conn.from,
-        fromPort: conn.fromPort,
-        to: conn.to,
-        toPort: conn.toPort,
-        color: conn.color,
-        animated: conn.animated
-      }));
-
-      console.log(`💾 Saving layout for workspace ${this.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Combiners: ${combinerNodes.length}, Connections: ${workflowConnections.length}`);
-      console.log(`  Scale: ${this.scale}, Offset: (${this.offsetX}, ${this.offsetY})`);
-      console.log(`  Task positions:`, taskPositions);
-      console.log(`  Agent positions:`, agentPositions);
-
-      await apiPut('/api/orchestration/workspace/layout', {
-        workspace_id: this.studioId,
-        task_positions: taskPositions,
-        agent_positions: agentPositions,
-        combiner_nodes: combinerNodes,
-        workflow_connections: workflowConnections,
-        scale: this.scale,
-        offset_x: this.offsetX,
-        offset_y: this.offsetY,
-      });
-
-      console.log('✅ Layout saved successfully');
-    } catch (error) {
-      console.error('❌ Error saving layout:', error);
-    }
-  }
-
-  /**
-   * Load the saved layout from the server
-   */
-  loadLayout() {
-    if (!this.studio) {
-      console.log('❌ No studio object, cannot load layout');
-      return;
-    }
-
-    if (!this.studio.layout) {
-      console.log('❌ No layout saved for this workspace');
-      return;
-    }
-
-    const layout = this.studio.layout;
-    console.log('📂 Loading layout:', layout);
-
-    let tasksRestored = 0;
-    let agentsRestored = 0;
-    let combinersRestored = 0;
-    let connectionsRestored = 0;
-
-    // Restore task positions
-    if (layout.task_positions) {
-      this.tasks.forEach(task => {
-        const savedPos = layout.task_positions[task.id];
-        if (savedPos) {
-          console.log(`  Restoring task ${task.id} to (${savedPos.x}, ${savedPos.y})`);
-          task.x = savedPos.x;
-          task.y = savedPos.y;
-          tasksRestored++;
-        }
-      });
-    }
-
-    // Restore agent positions
-    if (layout.agent_positions) {
-      this.agents.forEach(agent => {
-        const savedPos = layout.agent_positions[agent.name];
-        if (savedPos) {
-          console.log(`  Restoring agent ${agent.name} to (${savedPos.x}, ${savedPos.y})`);
-          agent.x = savedPos.x;
-          agent.y = savedPos.y;
-          agentsRestored++;
-        }
-      });
-    }
-
-    // Restore combiner nodes
-    if (layout.combiner_nodes && Array.isArray(layout.combiner_nodes)) {
-      this.combinerNodes = layout.combiner_nodes.map(node => ({
-        ...node,
-        width: node.width || 120,
-        height: node.height || 80,
-        inputPorts: node.inputPorts || [],
-        outputPort: node.outputPort || { id: 'output', x: 0, y: 40 }
-      }));
-      combinersRestored = this.combinerNodes.length;
-    }
-
-    // Restore workflow connections
-    if (layout.workflow_connections && Array.isArray(layout.workflow_connections)) {
-      this.connections = layout.workflow_connections;
-      // Ensure combiner port state matches restored connections
-      this.connections.forEach(conn => {
-        const targetNode = this.getNodeById(conn.to);
-        if (targetNode && targetNode.type === 'combiner' && conn.toPort && conn.toPort.startsWith('input')) {
-          this.ensureCombinerInputPort(targetNode.node, conn.toPort);
-        }
-      });
-      connectionsRestored = this.connections.length;
-    }
-
-    // Remove stale combiner input ports so only active connections are shown
-    if (this.combinerNodes.length > 0) {
-      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node));
-    }
-
-    // Restore zoom and pan
-    if (layout.scale) {
-      this.scale = layout.scale;
-      console.log(`  Restoring scale: ${layout.scale}`);
-    }
-    if (layout.offset_x !== undefined) {
-      this.offsetX = layout.offset_x;
-      console.log(`  Restoring offsetX: ${layout.offset_x}`);
-    }
-    if (layout.offset_y !== undefined) {
-      this.offsetY = layout.offset_y;
-      console.log(`  Restoring offsetY: ${layout.offset_y}`);
-    }
-
-    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents, ${combinersRestored} combiners, ${connectionsRestored} connections)`);
-    this.draw();
-  }
+  loadLayout() { return this.layout.loadLayout(); }
 
   // === NEW FEATURES ===
 
-  // Keyboard shortcut: onKeyUp handler
-
-  // Zoom to fit all agents in viewport
-  zoomToFit() {
-    if (this.agents.length === 0) {
-      // No agents, just reset to default
-      this.offsetX = 0;
-      this.offsetY = 0;
-      this.scale = 1;
-      this.draw();
-      return;
-    }
-
-    // Find bounding box of all agents
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-
-    this.agents.forEach(agent => {
-      const halfW = (agent.width || 120) / 2;
-      const halfH = (agent.height || 70) / 2;
-      minX = Math.min(minX, agent.x - halfW);
-      minY = Math.min(minY, agent.y - halfH);
-      maxX = Math.max(maxX, agent.x + halfW);
-      maxY = Math.max(maxY, agent.y + halfH);
-    });
-
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    const padding = 100; // Padding around edges
-
-    // Calculate scale to fit content
-    const scaleX = (this.width - 2 * padding) / contentWidth;
-    const scaleY = (this.height - 2 * padding) / contentHeight;
-    const newScale = Math.min(scaleX, scaleY, 2); // Max zoom of 2x
-
-    // Center the content
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    this.scale = newScale;
-    this.offsetX = this.width / 2 - centerX * newScale;
-    this.offsetY = this.height / 2 - centerY * newScale;
-
-    this.draw();
-    console.log('🎯 Zoomed to fit all agents');
-  }
+  zoomToFit() { return this.layout.zoomToFit(); }
 
   // Context menu for agents
 
