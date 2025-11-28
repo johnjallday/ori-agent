@@ -28,6 +28,8 @@ import { AgentCanvasInitialization } from './agent-canvas-init.js';
  */
 class AgentCanvas {
   constructor(canvasId, studioId) {
+    console.log('🎨 AgentCanvas constructor called', { canvasId, studioId });
+
     // Initialize state module (centralized state management)
     this.state = new AgentCanvasState();
 

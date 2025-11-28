@@ -27,6 +27,7 @@ export class AgentCanvasInitialization {
    * Initialize canvas with studio data
    */
   async init() {
+    console.log('🚀 AgentCanvas.init() called');
     try {
       console.log('AgentCanvas.init() - studioId:', this.parent.studioId);
 
