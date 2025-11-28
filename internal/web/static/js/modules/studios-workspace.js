@@ -494,7 +494,7 @@ function populateCanvasStudioSelect() {
  * View workspace details
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/workspace-dashboard?id=${workspaceId}`;
+    window.location.href = `/studios/${workspaceId}`;
 }
 
 // Export functions for global access

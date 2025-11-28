@@ -10,7 +10,7 @@ let currentWorkspaceDashboard = null;
  * View workspace (redirect to workspace dashboard)
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/workspace-dashboard?id=${workspaceId}`;
+    window.location.href = `/studios/${workspaceId}`;
 }
 
 /**
