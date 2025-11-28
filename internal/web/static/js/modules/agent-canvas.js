@@ -20,6 +20,7 @@ import { AgentCanvasNotifications } from './agent-canvas-notifications.js';
 import { AgentCanvasMetrics } from './agent-canvas-metrics.js';
 import { AgentCanvasContextMenu } from './agent-canvas-context-menu.js';
 import { AgentCanvasEventHandler } from './agent-canvas-event-handler.js';
+import { AgentCanvasInitialization } from './agent-canvas-init.js';
 
 /**
  * AgentCanvas - Visual canvas for real-time agent collaboration
@@ -80,6 +81,9 @@ class AgentCanvas {
 
     // Initialize event handler module
     this.eventHandler = new AgentCanvasEventHandler(this.state, this);
+
+    // Initialize initialization module
+    this.initModule = new AgentCanvasInitialization(this.state, this);
 
     // Initialize layout manager module
     this.layout = new AgentCanvasLayoutManager(this.state, this);
@@ -354,149 +358,8 @@ class AgentCanvas {
   // ==================== METHODS ====================
 
 
-  resize() {
-    const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width * window.devicePixelRatio;
-    this.canvas.height = rect.height * window.devicePixelRatio;
-    this.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    this.width = rect.width;
-    this.height = rect.height;
-    this.draw();
-  }
 
-  async init() {
-    try {
-      console.log('AgentCanvas.init() - studioId:', this.studioId);
 
-      // Load studio data
-      this.studio = await apiGet(`/api/studios/${this.studioId}`);
-
-      console.log('AgentCanvas.init() - studio data loaded:', this.studio);
-
-      // Load workspace progress
-      this.workspaceProgress = this.studio.workspace_progress || {
-        total_tasks: 0,
-        completed_tasks: 0,
-        in_progress_tasks: 0,
-        pending_tasks: 0,
-        failed_tasks: 0,
-        percentage: 0,
-        active_agents: 0,
-        idle_agents: 0,
-        total_agents: 0
-      };
-
-      // Load mission from shared data if it exists
-      if (this.studio.shared_data && this.studio.shared_data.mission) {
-        this.mission = this.studio.shared_data.mission;
-      }
-
-      // Load tasks from studio
-      if (this.studio.tasks) {
-        this.tasks = this.studio.tasks.map(task => {
-          // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
-          return {
-            ...task,
-            x: task.x ?? null,
-            y: task.y ?? null
-          };
-        });
-      }
-
-      // Initialize agent positions
-      this.initializeAgents();
-
-      // Load saved layout (positions and zoom)
-      this.loadLayout();
-
-      // Detect and initialize chains
-      this.updateChains();
-
-      // Connect to real-time events
-      this.connectEventStream();
-
-      // Start animation loop
-      this.startAnimation();
-
-      // Update canvas info
-      document.getElementById('canvas-info').textContent =
-        `Studio: ${this.studio.name || this.studioId} | Agents: ${this.agents.length}`;
-
-      // Initialize metrics
-      this.updateMetrics();
-
-    } catch (error) {
-      console.error('Failed to initialize canvas:', error);
-      document.getElementById('canvas-info').textContent = 'Error loading studio';
-    }
-  }
-
-  initializeAgents() {
-    if (!this.studio || !this.studio.agents) return;
-
-    const agentCount = this.studio.agents.length;
-    const centerY = this.height * 0.6; // Position lower to avoid mission box
-    const spacing = Math.min(150, (this.width * 0.8) / Math.max(agentCount - 1, 1));
-    const totalWidth = spacing * (agentCount - 1);
-    const startX = (this.width - totalWidth) / 2;
-
-    // Get agent stats from studio data
-    const agentStats = this.studio.agent_stats || {};
-
-    this.agents = this.studio.agents.map((agentName, index) => {
-      // Get stats for this agent
-      const stats = agentStats[agentName] || {
-        status: 'idle',
-        current_tasks: [],
-        queued_tasks: [],
-        completed_tasks: 0,
-        failed_tasks: 0,
-        total_executions: 0
-      };
-
-      return {
-        name: agentName,
-        x: startX + (index * spacing),
-        y: centerY,
-        width: 120,
-        height: 70,
-        color: this.getAgentColor(index),
-        status: stats.status, // Use status from backend
-        currentTasks: stats.current_tasks || [],
-        queuedTasks: stats.queued_tasks || [],
-        completedTasks: stats.completed_tasks || 0,
-        failedTasks: stats.failed_tasks || 0,
-        totalExecutions: stats.total_executions || 0,
-        tasks: [], // Legacy field, keep for compatibility
-        pulsePhase: Math.random() * Math.PI * 2
-      };
-    });
-
-    // Load tasks if available
-    if (this.studio.tasks) {
-      // Preserve existing positions when updating tasks
-      const existingPositions = {};
-      this.tasks.forEach(t => {
-        if (t.x !== null && t.y !== null) {
-          existingPositions[t.id] = { x: t.x, y: t.y };
-        }
-      });
-
-      this.tasks = this.studio.tasks.map(task => {
-        const existing = existingPositions[task.id];
-        return {
-          id: task.id,
-          from: task.from,
-          to: task.to,
-          description: task.description,
-          status: task.status,
-          progress: 0,
-          x: existing ? existing.x : null,
-          y: existing ? existing.y : null
-        };
-      });
-    }
-  }
 
 
 
