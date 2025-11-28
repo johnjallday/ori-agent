@@ -56,6 +56,8 @@ export class AgentCanvasPanelManager {
           this.state.expandedPanelTargetWidth
         );
 
+        this.parent.draw(); // Redraw canvas to show animation
+
         if (this.state.expandedPanelWidth >= this.state.expandedPanelTargetWidth) {
           this.state.expandedPanelAnimating = false;
         } else {
@@ -63,6 +65,8 @@ export class AgentCanvasPanelManager {
         }
       } else {
         this.state.expandedPanelWidth = Math.max(this.state.expandedPanelWidth - speed, 0);
+
+        this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedPanelWidth <= 0) {
           this.state.expandedPanelAnimating = false;
@@ -149,6 +153,8 @@ export class AgentCanvasPanelManager {
           this.state.expandedAgentPanelTargetWidth
         );
 
+        this.parent.draw(); // Redraw canvas to show animation
+
         if (this.state.expandedAgentPanelWidth >= this.state.expandedAgentPanelTargetWidth) {
           this.state.expandedAgentPanelAnimating = false;
         } else {
@@ -156,6 +162,8 @@ export class AgentCanvasPanelManager {
         }
       } else {
         this.state.expandedAgentPanelWidth = Math.max(this.state.expandedAgentPanelWidth - speed, 0);
+
+        this.parent.draw(); // Redraw canvas to show animation
 
         if (this.state.expandedAgentPanelWidth <= 0) {
           this.state.expandedAgentPanelAnimating = false;
@@ -208,6 +216,7 @@ export class AgentCanvasPanelManager {
           this.state.expandedCombinerPanelWidth + speed,
           this.state.expandedCombinerPanelTargetWidth
         );
+        this.parent.draw(); // Redraw canvas to show animation
         if (this.state.expandedCombinerPanelWidth >= this.state.expandedCombinerPanelTargetWidth) {
           this.state.expandedCombinerPanelAnimating = false;
         } else {
@@ -215,6 +224,7 @@ export class AgentCanvasPanelManager {
         }
       } else {
         this.state.expandedCombinerPanelWidth = Math.max(this.state.expandedCombinerPanelWidth - speed, 0);
+        this.parent.draw(); // Redraw canvas to show animation
         if (this.state.expandedCombinerPanelWidth <= 0) {
           this.state.expandedCombinerPanelAnimating = false;
           this.state.expandedCombiner = null;
