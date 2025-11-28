@@ -56,8 +56,6 @@ class AgentCanvas {
     // Initialize layout manager module
     this.layout = new AgentCanvasLayoutManager(this.state, this);
 
-    // Mouse interactions - delegate to interaction handler
-    this.canvas.addEventListener('mousedown', (e) => this.interactions.onMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.interactions.onMouseMove(e));
     this.canvas.addEventListener('mouseup', (e) => this.interactions.onMouseUp(e));
     this.canvas.addEventListener('mouseleave', (e) => this.interactions.onMouseUp(e));
