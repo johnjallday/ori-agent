@@ -32,6 +32,12 @@
                 </div>
               </div>
               <div class="d-flex align-items-center gap-2">
+                <button class="modern-btn modern-btn-primary" onclick="showAddAgentModal()" title="Add Agent">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M1,10V12H9V10M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12Z"/>
+                  </svg>
+                  Add Agent
+                </button>
                 <button class="modern-btn modern-btn-primary" onclick="showAddTaskModal()" title="Add Task">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -240,6 +246,11 @@
 
       console.log('✅ Workspace canvas initialized');
     });
+
+    // Add agent - navigate to workspace dashboard
+    function showAddAgentModal() {
+      window.location.href = `/studios/${workspaceId}`;
+    }
   </script>
   <script src="/js/modules/themeManager.js"></script>
   <script>
