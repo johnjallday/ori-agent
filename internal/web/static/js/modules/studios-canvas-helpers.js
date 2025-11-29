@@ -167,6 +167,34 @@ function showTaskDetails(task) {
         <strong style="color: var(--text-primary);">Status:</strong>
         <div>${statusBadge}</div>
       </div>
+      ${task.input_task_ids && task.input_task_ids.length > 0 ? `
+        <div class="mb-3">
+          <strong style="color: var(--text-primary);">Input Tasks (${task.input_task_ids.length}):</strong>
+          <div style="color: var(--text-secondary); font-size: 0.85rem;">
+            ${task.input_task_ids.map((id, idx) => {
+              const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+              return `<div class="mb-1">🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</div>`;
+            }).join('')}
+          </div>
+          <button class="btn btn-sm btn-outline-primary mt-2 w-100" onclick="addTaskInput('${task.id}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Another Input
+          </button>
+        </div>
+      ` : `
+        <div class="mb-3">
+          <button class="btn btn-sm btn-outline-primary w-100" onclick="addTaskInput('${task.id}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Input Task
+          </button>
+        </div>
+      `}
       ${combinerAssignment}
       ${task.to ? `
         <div class="mb-3">
@@ -611,6 +639,99 @@ async function addCombinerInput(combinerTaskId) {
 }
 
 window.addCombinerInput = addCombinerInput;
+
+/**
+ * Add input task to any task (regular or combiner)
+ * This is a unified function that works for all task types
+ */
+async function addTaskInput(taskId) {
+  if (!window.agentCanvas) {
+    alert('Canvas not initialized');
+    return;
+  }
+
+  const task = window.agentCanvas.state.tasks.find(t => t.id === taskId);
+  if (!task) {
+    alert('Task not found');
+    return;
+  }
+
+  // Get list of all other tasks (exclude self)
+  const availableTasks = window.agentCanvas.state.tasks.filter(t => t.id !== taskId);
+
+  if (availableTasks.length === 0) {
+    alert('No other tasks available to add as input. Create some tasks first.');
+    return;
+  }
+
+  // Show selection UI
+  const taskList = availableTasks.map((t, i) =>
+    `${i + 1}. ${t.description.substring(0, 50)}${t.description.length > 50 ? '...' : ''} (${t.status})`
+  ).join('\n');
+
+  const choice = prompt(
+    `Select task to add as input:\n\n${taskList}\n\nEnter task number:`,
+    ''
+  );
+
+  if (!choice) return;
+
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= availableTasks.length) {
+    alert('Invalid selection');
+    return;
+  }
+
+  const selectedTask = availableTasks[index];
+
+  // Update task with new input
+  const currentInputs = task.input_task_ids || [];
+  if (currentInputs.includes(selectedTask.id)) {
+    alert('This task is already an input');
+    return;
+  }
+
+  const newInputs = [...currentInputs, selectedTask.id];
+
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: task.description,
+        to: task.to || '',
+        from: task.from || '',
+        input_task_ids: newInputs,
+        ...(task.combiner_type && { combiner_type: task.combiner_type }),
+        ...(task.result_combination_mode && { result_combination_mode: task.result_combination_mode })
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update task: ${response.statusText}`);
+    }
+
+    // Update local state
+    task.input_task_ids = newInputs;
+
+    // Refresh task details
+    if (window.showTaskDetails) {
+      window.showTaskDetails(task);
+    }
+
+    // Redraw canvas
+    if (window.agentCanvas && window.agentCanvas.draw) {
+      window.agentCanvas.draw();
+    }
+
+    alert(`Added "${selectedTask.description.substring(0, 30)}..." as input`);
+  } catch (error) {
+    console.error('Failed to add input:', error);
+    alert(`Failed to add input: ${error.message}`);
+  }
+}
+
+window.addTaskInput = addTaskInput;
 
 /**
  * Assign current task to an agent
