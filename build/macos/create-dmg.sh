@@ -184,6 +184,14 @@ mkdir -p "${DMG_STAGING}"
 echo "📋 Copying .app to staging area..."
 ditto "${APP_PATH}" "${DMG_STAGING}/OriAgent.app"
 
+# Ad-hoc code signing (better than nothing for GitHub releases)
+echo "🔐 Applying ad-hoc code signature..."
+if codesign -s - --force --deep "${DMG_STAGING}/OriAgent.app" 2>/dev/null; then
+  echo "  ✓ Ad-hoc signature applied"
+else
+  echo "  ⚠️  Ad-hoc signing failed (continuing anyway)"
+fi
+
 # Create Applications symlink (remove if exists)
 rm -f "${DMG_STAGING}/Applications"
 ln -s /Applications "${DMG_STAGING}/Applications"
@@ -193,10 +201,18 @@ cat >"${DMG_STAGING}/README.txt" <<'README'
 Ori Agent Installation
 ======================
 
-To install:
+⚠️  IMPORTANT - First Time Installation:
+macOS will show "OriAgent is damaged" because this app is not
+notarized by Apple. This is normal for open-source software.
+
+To install safely:
 1. Drag "OriAgent.app" to the Applications folder
-2. Double-click "Ori Agent" in Applications to start
-3. A menu bar icon will appear - click it to start the server
+2. Right-click (or Control+click) on "OriAgent.app" in Applications
+3. Select "Open" from the menu
+4. Click "Open" in the dialog that appears
+5. The app will now launch - the menu bar icon will appear
+
+After the first launch, you can open normally by double-clicking.
 
 Features:
 • Menu bar app with Start/Stop server controls
@@ -210,6 +226,10 @@ http://localhost:8765
 Logs are stored at:
 ~/Library/Logs/ori-menubar.log
 ~/Library/Logs/ori-agent.log
+
+Alternative Installation (if right-click doesn't work):
+Run this command in Terminal:
+xattr -rc /Applications/OriAgent.app
 
 Command Line (Advanced):
 For advanced users, a CLI version is also available:

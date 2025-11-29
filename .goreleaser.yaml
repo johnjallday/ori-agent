@@ -260,6 +260,13 @@ release:
       - Apple Silicon (M1/M2/M3): `OriAgent-{{ .Version }}-arm64.dmg`
       - Intel: `OriAgent-{{ .Version }}-amd64.dmg`
 
+      ⚠️ **macOS Users**: The app is not notarized by Apple. When you first open it, macOS may show "OriAgent is damaged". This is normal for open-source software. To install:
+      1. Drag to Applications folder
+      2. **Right-click** the app and select "Open"
+      3. Click "Open" in the dialog
+
+      Alternative: Run `xattr -rc /Applications/OriAgent.app` in Terminal
+
     - **Windows**:
       - `ori-agent-{{ .Version }}-amd64.msi` (recommended - full installer)
       - `ori-agent_{{ .Version }}_windows_amd64.exe` (standalone binary)
