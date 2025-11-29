@@ -192,6 +192,27 @@ function showTaskDetails(task) {
     `;
   } else {
     // Regular task details
+    // Check if this task is an input to any combiner
+    let combinerAssignment = '';
+    if (window.agentCanvas && window.agentCanvas.state && window.agentCanvas.state.tasks) {
+      const combinersUsingThisTask = window.agentCanvas.state.tasks.filter(t =>
+        (t.combiner_type || t.combinerType) &&
+        (t.input_task_ids || []).includes(task.id)
+      );
+
+      if (combinersUsingThisTask.length > 0) {
+        const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
+        combinerAssignment = `
+          <div class="mb-3">
+            <strong style="color: var(--text-primary);">Input to Combiner:</strong>
+            <div style="color: var(--text-secondary);">
+              <span style="color: #8b5cf6;">🔀 ${combinerNames}</span>
+            </div>
+          </div>
+        `;
+      }
+    }
+
     html = `
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Description:</strong>
@@ -201,6 +222,7 @@ function showTaskDetails(task) {
         <strong style="color: var(--text-primary);">Status:</strong>
         <div>${statusBadge}</div>
       </div>
+      ${combinerAssignment}
       ${task.to ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Assigned To:</strong>
