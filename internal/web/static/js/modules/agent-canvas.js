@@ -409,10 +409,10 @@ class AgentCanvas {
     this.renderer.drawTaskFlows();
 
     // Draw particles
-    this.renderer.drawParticles();
+    // this.renderer.drawParticles();
 
-    // Draw chain particles
-    this.renderer.drawChainParticles();
+    // Draw chain particles (disabled - grey shooting animation)
+    // this.renderer.drawChainParticles();
 
     // Draw agents
     this.renderer.drawAgents();
