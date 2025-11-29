@@ -118,53 +118,6 @@ export class AgentCanvasLayoutManager {
   }
 
   /**
-   * Zoom to fit all agents in viewport
-   */
-  zoomToFit() {
-    if (this.state.agents.length === 0) {
-      // No agents, just reset to default
-      this.state.offsetX = 0;
-      this.state.offsetY = 0;
-      this.state.scale = 1;
-      this.parent.draw();
-      return;
-    }
-
-    // Find bounding box of all agents
-    let minX = Infinity, minY = Infinity;
-    let maxX = -Infinity, maxY = -Infinity;
-
-    this.state.agents.forEach(agent => {
-      const halfW = (agent.width || 120) / 2;
-      const halfH = (agent.height || 70) / 2;
-      minX = Math.min(minX, agent.x - halfW);
-      minY = Math.min(minY, agent.y - halfH);
-      maxX = Math.max(maxX, agent.x + halfW);
-      maxY = Math.max(maxY, agent.y + halfH);
-    });
-
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    const padding = 100; // Padding around edges
-
-    // Calculate scale to fit content
-    const scaleX = (this.parent.width - 2 * padding) / contentWidth;
-    const scaleY = (this.parent.height - 2 * padding) / contentHeight;
-    const newScale = Math.min(scaleX, scaleY, 2); // Max zoom of 2x
-
-    // Center the content
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    this.state.scale = newScale;
-    this.state.offsetX = this.parent.width / 2 - centerX * newScale;
-    this.state.offsetY = this.parent.height / 2 - centerY * newScale;
-
-    this.parent.draw();
-    console.log('🎯 Zoomed to fit all agents');
-  }
-
-  /**
    * Calculate task dependency levels using topological sort
    * @returns {Array<Array>} Array of task groups by level
    */

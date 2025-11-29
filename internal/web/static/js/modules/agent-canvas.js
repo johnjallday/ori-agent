@@ -854,8 +854,6 @@ class AgentCanvas {
 
   // === NEW FEATURES ===
 
-  zoomToFit() { return this.layout.zoomToFit(); }
-
   // Context menu for agents
 
   // Toggle help overlay

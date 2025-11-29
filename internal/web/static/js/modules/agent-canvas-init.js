@@ -85,8 +85,8 @@ export class AgentCanvasInitialization {
       // Sync combiner nodes with their tasks
       this.syncCombinerTasks();
 
-      // Immediately reset zoom to fit content (ignore saved zoom values)
-      this.parent.layout.zoomToFit();
+      // Immediately reset zoom to fit all content (ignore saved zoom values)
+      this.parent.layout.zoomToFitContent();
 
       // Detect and initialize chains
       this.parent.animation.updateChains();
