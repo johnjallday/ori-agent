@@ -231,11 +231,11 @@
         console.error('Failed to load workspace info:', error);
       }
 
-      // Import and initialize the canvas module
-      const { AgentCanvas } = await import('/js/modules/agent-canvas.js');
+      // Wait for AgentCanvas module to load (it sets window.AgentCanvas)
+      await import('/js/modules/agent-canvas.js');
 
       // Create canvas instance for this specific workspace
-      window.agentCanvas = new AgentCanvas('agent-canvas', workspaceId);
+      window.agentCanvas = new window.AgentCanvas('agent-canvas', workspaceId);
       await window.agentCanvas.init();
 
       console.log('✅ Workspace canvas initialized');
