@@ -453,7 +453,7 @@ function showError(message) {
  * Open workspace canvas view
  */
 function openWorkspaceCanvas(workspaceId) {
-    window.location.href = `/studios?view=canvas&workspace=${workspaceId}`;
+    window.location.href = `/studios/${workspaceId}/canvas`;
 }
 
 /**
