@@ -147,12 +147,14 @@ func isChatModel(modelID string) bool {
 // getFallbackModels returns a hardcoded list of common models as fallback
 func (p *OpenAIProvider) getFallbackModels() []string {
 	return []string{
-		// Tool-calling tier (cheapest to most expensive)
-		"gpt-3.5-turbo", // Cheapest: $0.50/$1.50 per 1M tokens
-		"gpt-4o-mini",   // Best value: $0.15/$0.60 per 1M tokens
+		// Tool-calling tier (cheapest)
+		"gpt-5-nano",
+		"gpt-4o-mini",
 		// General purpose tier
-		"gpt-4o", // Most capable: $2.50/$10 per 1M tokens
-		// Research tier (future models)
+		"gpt-5-mini",
+		"gpt-4o",
+		// Research tier
+		"gpt-5",
 		"gpt-4-turbo",
 		"gpt-4.1",
 		"o1-preview",

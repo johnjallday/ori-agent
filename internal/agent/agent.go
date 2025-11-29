@@ -16,21 +16,23 @@ const (
 // Models are listed from cheapest/fastest to most expensive/capable
 var TypeModels = map[string][]string{
 	TypeToolCalling: {
-		"gpt-3.5-turbo",           // $0.50/$1.50 per 1M tokens (cheapest)
-		"gpt-4o-mini",             // $0.15/$0.60 per 1M tokens (best value)
-		"claude-3-haiku-20240307", // Fast and cheap
+		"gpt-5-nano",
+		"gpt-4o-mini",
+		"claude-3-haiku-20240307",
 	},
 	TypeGeneral: {
-		"gpt-4o-mini",                // Best value for general use
-		"gpt-4o",                     // $2.50/$10 per 1M tokens
-		"claude-3-5-sonnet-20241022", // Latest Sonnet
-		"claude-3-sonnet-20240229",   // Previous Sonnet
+		"gpt-5-mini",
+		"gpt-4o-mini",
+		"gpt-4o",
+		"claude-3-5-sonnet-20241022",
+		"claude-3-sonnet-20240229",
 	},
 	TypeResearch: {
-		"gpt-4o",                     // Most capable OpenAI model
-		"claude-3-5-sonnet-20241022", // Latest Claude (best for complex tasks)
-		"claude-sonnet-4-5",          // Future model placeholder
-		"claude-opus-4-1",            // Future model placeholder
+		"gpt-5",
+		"gpt-4o",
+		"claude-3-5-sonnet-20241022",
+		"claude-sonnet-4-5",
+		"claude-opus-4-1",
 	},
 }
 

@@ -88,20 +88,19 @@ if [ "$HAS_OPENAI" = true ]; then
     "https://api.openai.com/v1/models" | grep -q "200"; then
     echo -e "${GREEN}✓ OpenAI API is accessible${NC}"
 
-    # Check specific model availability (use cheapest model for testing)
+    # Check specific model availability
     echo "Checking model availability..."
     MODELS_RESPONSE=$(curl -s -H "Authorization: Bearer $OPENAI_API_KEY" \
       "https://api.openai.com/v1/models")
 
-    # Prefer gpt-3.5-turbo for testing (cheapest and fastest)
-    if echo "$MODELS_RESPONSE" | grep -q "gpt-3.5-turbo"; then
-      echo -e "${GREEN}✓ gpt-3.5-turbo is available (cheapest model for testing)${NC}"
+    # Prefer gpt-5-nano for testing
+    if echo "$MODELS_RESPONSE" | grep -q "gpt-5-nano"; then
+      echo -e "${GREEN}✓ gpt-5-nano is available${NC}"
     elif echo "$MODELS_RESPONSE" | grep -q "gpt-4o-mini"; then
       echo -e "${GREEN}✓ gpt-4o-mini is available${NC}"
-      echo -e "${BLUE}  Note: gpt-3.5-turbo is cheaper for testing${NC}"
     elif echo "$MODELS_RESPONSE" | grep -q "gpt-4o"; then
-      echo -e "${YELLOW}⚠️  gpt-3.5-turbo not found, but gpt-4o is available${NC}"
-      CONNECTIVITY_ISSUES+=("Cheaper models not available")
+      echo -e "${YELLOW}⚠️  gpt-5-nano not found, but gpt-4o is available${NC}"
+      CONNECTIVITY_ISSUES+=("Preferred models not available")
     else
       echo -e "${YELLOW}⚠️  No suitable GPT models found${NC}"
       echo -e "${BLUE}Available GPT models:${NC}"
@@ -160,21 +159,21 @@ if grep -q "404" "$TEST_OUTPUT"; then
   echo -e "${YELLOW}Issue: 404 Not Found (Model or endpoint doesn't exist)${NC}"
   echo ""
   echo "Possible fixes:"
-  echo "  1. Update to a cheaper/available model (gpt-3.5-turbo is cheapest)"
+  echo "  1. Update to available model (gpt-5-nano preferred)"
   echo "  2. Use Ollama instead (local, free)"
   echo "  3. Exit and check OpenAI account"
   echo ""
 
-  read -p "Would you like to: [1] Update to cheaper model, [2] Use Ollama, [3] Exit: " -n 1 -r
+  read -p "Would you like to: [1] Update to available model, [2] Use Ollama, [3] Exit: " -n 1 -r
   echo ""
 
   case $REPLY in
     1)
       echo ""
-      echo "Trying different model variants (cheapest first)..."
+      echo "Trying different model variants..."
 
-      # Try models in order of cost (cheapest to most expensive)
-      MODELS_TO_TRY=("gpt-3.5-turbo" "gpt-4o-mini" "gpt-4o" "gpt-4-turbo")
+      # Try models in order of preference
+      MODELS_TO_TRY=("gpt-5-nano" "gpt-4o-mini" "gpt-4o" "gpt-4-turbo")
       SUCCESS=false
 
       for MODEL in "${MODELS_TO_TRY[@]}"; do
@@ -192,8 +191,8 @@ if grep -q "404" "$TEST_OUTPUT"; then
           echo "Updating tests to use $MODEL..."
 
           # Update all test files to use the working model
-          find ./tests -name "*.go" -exec sed -i.bak "s/gpt-4o-mini/$MODEL/g;s/gpt-4\.1-nano/$MODEL/g;s/gpt-3\.5-turbo-[0-9]*/$MODEL/g" {} \;
-          find ./internal -name "*.go" -exec sed -i.bak "s/gpt-4o-mini/$MODEL/g;s/gpt-4\.1-nano/$MODEL/g;s/gpt-3\.5-turbo-[0-9]*/$MODEL/g" {} \;
+          find ./tests -name "*.go" -exec sed -i.bak "s/gpt-4o-mini/$MODEL/g;s/gpt-5-nano/$MODEL/g;s/gpt-4\.1-nano/$MODEL/g" {} \;
+          find ./internal -name "*.go" -exec sed -i.bak "s/gpt-4o-mini/$MODEL/g;s/gpt-5-nano/$MODEL/g;s/gpt-4\.1-nano/$MODEL/g" {} \;
           find . -name "*.go.bak" -delete
 
           echo -e "${GREEN}✓ Updated model references to $MODEL${NC}"

@@ -158,7 +158,7 @@ func GetDefaultData() TemplateData {
 		Title:        "Ori Agent",
 		Theme:        "light",
 		CurrentAgent: "Default Agent",
-		Model:        "gpt-3.5-turbo", // Cheapest OpenAI model for testing
+		Model:        "gpt-5-nano",
 		Version:      version.GetVersion(),
 		Extra:        make(map[string]interface{}), // Initialize Extra map
 
