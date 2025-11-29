@@ -127,11 +127,12 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	fmt.Printf("✓ Agent has %d plugins\n", len(ag.Plugins))
+	// Reduced logging - only log when plugin doesn't exist
+	// fmt.Printf("✓ Agent has %d plugins\n", len(ag.Plugins))
 
 	// Find the plugin
 	plugin, exists := ag.Plugins[pluginName]
-	fmt.Printf("🔍 Plugin '%s' exists in agent: %v\n", pluginName, exists)
+	// fmt.Printf("🔍 Plugin '%s' exists in agent: %v\n", pluginName, exists)
 
 	// For default-settings and config, also check local registry if plugin not loaded in agent
 	// OR if plugin exists but tool is nil (failed to load)

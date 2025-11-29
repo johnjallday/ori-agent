@@ -405,8 +405,9 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, combiners: %d, conns: %d, scale: %.2f)",
-		req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), len(req.CombinerNodes), len(req.WorkflowConnections), req.Scale)
+	// Log layout saves only at debug level (commented out to reduce noise)
+	// log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, combiners: %d, conns: %d, scale: %.2f)",
+	// 	req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), len(req.CombinerNodes), len(req.WorkflowConnections), req.Scale)
 
 	// Broadcast workspace update event to notify all connected clients
 	wh.eventBus.Publish(agentstudio.Event{
