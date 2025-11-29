@@ -60,9 +60,8 @@ builds:
       - arm64
 
 # Archives configuration
-# Note: Archives are created for all platforms, but the main distribution
-# happens through platform-specific installers (DMG, MSI, deb/rpm)
-# Only archive the server binary (menubar is bundled separately in DMG)
+# macOS archives excluded - users should download DMG installers instead
+# Linux and Windows get .tar.gz/.zip archives
 archives:
   - id: default
     ids:
@@ -77,9 +76,6 @@ archives:
     files:
       - LICENSE
       - README.md
-      # Note: Plugin binaries excluded to reduce archive size
-      # Users can build plugins with: ./scripts/build-plugins.sh
-      # Or use platform-specific installers (DMG, deb, rpm) which include plugins
 
 # macOS DMG installers - created via custom publisher
 publishers:
