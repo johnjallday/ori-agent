@@ -42,7 +42,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
-	mux.HandleFunc("/studios/", s.serveWorkspaceDashboard) // Dynamic route for /studios/:id
+	mux.HandleFunc("/studios/", s.handleStudiosRoutes) // Dynamic route handler
 	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
 

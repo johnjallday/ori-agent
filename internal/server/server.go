@@ -456,9 +456,9 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request) {
-	// Extract workspace ID from URL path
-	// URL format: /studios/:workspaceId
+// handleStudiosRoutes handles all /studios/* routes
+func (s *Server) handleStudiosRoutes(w http.ResponseWriter, r *http.Request) {
+	// Extract path after /studios/
 	path := strings.TrimPrefix(r.URL.Path, "/studios/")
 	if path == "" || path == r.URL.Path {
 		// No ID provided, redirect to studios list
@@ -466,8 +466,21 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	workspaceID := path
+	// Split path into segments
+	parts := strings.Split(path, "/")
+	workspaceID := parts[0]
 
+	// Check if this is a canvas route: /studios/{id}/canvas
+	if len(parts) == 2 && parts[1] == "canvas" {
+		s.serveWorkspaceCanvas(w, r, workspaceID)
+		return
+	}
+
+	// Otherwise, serve the workspace dashboard
+	s.serveWorkspaceDashboard(w, r, workspaceID)
+}
+
+func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	data := web.GetDefaultData()
 	data.Title = "Workspace Dashboard - Ori Agent"
 	data.CurrentPage = "workspaces"
@@ -497,6 +510,46 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request)
 	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
 	if err != nil {
 		log.Printf("Failed to render workspace dashboard template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
+}
+
+func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	data := web.GetDefaultData()
+	data.Title = "Workspace Canvas - Ori Agent"
+	data.CurrentPage = "workspaces"
+	data.ShowSidebarToggle = true
+
+	// Add workspace ID to template data
+	data.Extra = map[string]interface{}{
+		"WorkspaceID": workspaceID,
+	}
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("workspace-canvas", data)
+	if err != nil {
+		log.Printf("Failed to render workspace canvas template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

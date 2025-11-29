@@ -415,8 +415,8 @@
 
     // View canvas
     function viewCanvas() {
-      // Navigate to studios page with canvas view and workspace selected
-      window.location.href = `/studios?view=canvas&workspace=${workspaceId}`;
+      // Navigate to workspace-specific canvas page
+      window.location.href = `/studios/${workspaceId}/canvas`;
     }
 
     // HTML escape function
