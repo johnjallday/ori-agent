@@ -7,66 +7,6 @@ let currentStudioId = null;
 let currentWorkspaceDashboard = null;
 
 /**
- * Show agent details in the sidebar
- */
-function showAgentDetails(agent) {
-  console.log('[SIDEBAR] showAgentDetails called for:', agent.name);
-
-  // Hide task details if showing
-  hideTaskDetails();
-
-  // Force close all canvas panels
-  if (window.agentCanvas && window.agentCanvas.state) {
-    console.log('[SIDEBAR] Closing canvas panels');
-    window.agentCanvas.state.expandedPanelWidth = 0;
-    window.agentCanvas.state.expandedTask = null;
-    window.agentCanvas.state.expandedAgentPanelWidth = 0;
-    window.agentCanvas.state.expandedAgent = null;
-    window.agentCanvas.state.expandedCombinerPanelWidth = 0;
-    window.agentCanvas.state.expandedCombiner = null;
-    if (window.agentCanvas.draw) window.agentCanvas.draw();
-  }
-
-  const panel = document.getElementById('agent-details-panel');
-  const content = document.getElementById('agent-details-content');
-
-  if (!panel || !content) {
-    console.error('[SIDEBAR] Panel or content not found!');
-    return;
-  }
-
-  // Show panel and populate immediately
-  panel.style.display = 'block';
-
-  const html = `
-    <div class="mb-3">
-      <strong style="color: var(--text-primary);">Name:</strong>
-      <div style="color: var(--text-secondary);">${agent.name || 'Unknown'}</div>
-    </div>
-    <div class="mb-3">
-      <strong style="color: var(--text-primary);">Status:</strong>
-      <div>
-        <span class="badge ${agent.status === 'active' ? 'bg-success' : 'bg-secondary'}">
-          ${agent.status || 'idle'}
-        </span>
-      </div>
-    </div>
-    <div class="mb-3">
-      <strong style="color: var(--text-primary);">Position:</strong>
-      <div style="color: var(--text-secondary);">x: ${Math.round(agent.x || 0)}, y: ${Math.round(agent.y || 0)}</div>
-    </div>
-    ${agent.config ? `
-      <div class="mb-3">
-        <strong style="color: var(--text-primary);">Model:</strong>
-        <div style="color: var(--text-secondary);">${agent.config.model || 'default'}</div>
-      </div>
-    ` : ''}
-  `;
-  content.innerHTML = html;
-  console.log('[SIDEBAR] Agent details populated');
-}
-
-/**
  * Hide agent details panel
  */
 function hideAgentDetails() {
@@ -1135,6 +1075,16 @@ async function createTask() {
  * Show agent details panel
  */
 async function showAgentDetails(agent) {
+    console.log('[SIDEBAR] showAgentDetails (async) called for:', agent.name);
+
+    // Hide task details if showing
+    hideTaskDetails();
+
+    // Hide combiner details if showing
+    if (typeof hideCombinerDetails === 'function') {
+        hideCombinerDetails();
+    }
+
     const panel = document.getElementById('agent-details-panel');
     const content = document.getElementById('agent-details-content');
 
