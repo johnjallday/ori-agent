@@ -1358,6 +1358,36 @@ function toggleCanvasSidebar() {
   }
 }
 
+/**
+ * Zoom to fit all nodes (agents and tasks) on canvas
+ */
+function zoomToFitCanvas() {
+  if (!window.agentCanvas) {
+    console.error('Canvas not initialized');
+    return;
+  }
+
+  // Use zoomToFitContent which includes both tasks and agents
+  window.agentCanvas.zoomToFitContent();
+  console.log('🔍 Zoomed to fit all nodes');
+}
+
+/**
+ * Reset canvas view to default zoom and position
+ */
+function resetCanvasView() {
+  if (!window.agentCanvas) {
+    console.error('Canvas not initialized');
+    return;
+  }
+
+  window.agentCanvas.state.offsetX = 0;
+  window.agentCanvas.state.offsetY = 0;
+  window.agentCanvas.state.scale = 1;
+  window.agentCanvas.draw();
+  console.log('🔄 Reset canvas view to default');
+}
+
 // Export functions for global access
 window.viewWorkspace = viewWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
@@ -1372,3 +1402,5 @@ window.connectToMerge = connectToMerge;
 window.createMergeWorkflowTasks = createMergeWorkflowTasks;
 window.addCombinerNode = addCombinerNode;
 window.toggleCanvasSidebar = toggleCanvasSidebar;
+window.zoomToFitCanvas = zoomToFitCanvas;
+window.resetCanvasView = resetCanvasView;
