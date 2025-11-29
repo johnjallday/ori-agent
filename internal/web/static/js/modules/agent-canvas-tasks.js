@@ -65,53 +65,56 @@ export async function rerunTask(canvas, task) {
 export async function assignTaskToCombiner(canvas, combiner) {
   if (!combiner || !canvas.assignmentSourceTask) return;
 
-  const outputConnection = canvas.connections.find(c => c.from === combiner.id && c.fromPort === 'output');
-  const existingInputConns = canvas.connections.filter(c => c.to === combiner.id && c.toPort.startsWith('input'));
+  const sourceTask = canvas.assignmentSourceTask;
 
-  let targetInputPortId = null;
-  const existingForTask = existingInputConns.find(c => c.from === canvas.assignmentSourceTask.id);
-  if (existingForTask) {
-    targetInputPortId = existingForTask.toPort;
-  } else {
-    const nextIndex = existingInputConns.length;
-    targetInputPortId = `input-${nextIndex}`;
-    canvas.ensureCombinerInputPort(combiner, targetInputPortId);
-    canvas.createConnection(canvas.assignmentSourceTask.id, 'output', combiner.id, targetInputPortId);
+  // Check if source task is already in combiner's inputs
+  const currentInputs = combiner.input_task_ids || [];
+  if (currentInputs.includes(sourceTask.id)) {
+    canvas.showNotification('This task is already an input to the combiner', 'warning');
+    canvas.assignmentMode = false;
+    canvas.assignmentSourceTask = null;
+    canvas.canvas.style.cursor = 'grab';
+    return;
   }
 
-  const targetAgentName = outputConnection ? outputConnection.to : (canvas.assignmentSourceTask?.to || 'unassigned');
+  // Add source task to combiner's input_task_ids array
+  const newInputs = [...currentInputs, sourceTask.id];
 
-  const inputConnections = canvas.connections.filter(c => c.to === combiner.id);
-  const inputTaskIds = [];
-  for (const conn of inputConnections) {
-    const nodeData = canvas.getNodeById(conn.from);
-    if (nodeData && nodeData.type === 'task') {
-      inputTaskIds.push(conn.from);
-    }
+  try {
+    // Update the combiner task to include the new input
+    const response = await apiPut(`/api/orchestration/tasks`, {
+      task_id: combiner.id,
+      description: combiner.description,
+      to: combiner.to || '',
+      from: combiner.from || '',
+      input_task_ids: newInputs,
+      result_combination_mode: combiner.result_combination_mode || combiner.resultCombinationMode || 'merge'
+    });
+
+    console.log('✅ Added task to combiner inputs:', response);
+
+    // Update local state
+    combiner.input_task_ids = newInputs;
+
+    // Exit assignment mode
+    canvas.assignmentMode = false;
+    canvas.assignmentSourceTask = null;
+    canvas.assignmentMouseX = 0;
+    canvas.assignmentMouseY = 0;
+    canvas.canvas.style.cursor = 'grab';
+
+    // Redraw canvas
+    canvas.draw();
+
+    const combinerName = combiner.name || combiner.description || 'Merge';
+    const sourceDesc = sourceTask.description?.substring(0, 30) || sourceTask.id;
+    canvas.showNotification(`✅ Added "${sourceDesc}" as input to ${combinerName}`, 'success');
+    console.log(`📊 Combiner now has ${newInputs.length} input task(s)`);
+  } catch (error) {
+    console.error('Failed to add task to combiner:', error);
+    canvas.showNotification(`Failed to add input: ${error.message}`, 'error');
+    canvas.assignmentMode = false;
+    canvas.assignmentSourceTask = null;
+    canvas.canvas.style.cursor = 'grab';
   }
-
-  const result = await apiPut(`/api/orchestration/tasks`, {
-    task_id: canvas.assignmentSourceTask.id,
-    to: targetAgentName,
-    input_task_ids: inputTaskIds,
-    result_combination_mode: combiner.resultCombinationMode || 'merge'
-  });
-  console.log('✅ Task assigned to combiner → agent:', result);
-
-  canvas.assignmentMode = false;
-  canvas.assignmentSourceTask = null;
-  canvas.assignmentMouseX = 0;
-  canvas.assignmentMouseY = 0;
-  canvas.canvas.style.cursor = 'grab';
-
-  const task = canvas.tasks.find(t => t.id === (result.id || canvas.assignmentSourceTask?.id));
-  if (task) {
-    task.to = targetAgentName;
-    task.input_task_ids = inputTaskIds;
-  }
-
-  canvas.draw();
-  const combinerName = combiner.name || combiner.description || 'Merge';
-  canvas.addNotification(`✅ Task assigned via ${combinerName} → ${targetAgentName}`, 'success');
-  console.log(`📊 Task will receive combined results from: ${inputTaskIds.join(', ')}`);
 }
