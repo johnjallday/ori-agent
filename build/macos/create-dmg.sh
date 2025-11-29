@@ -252,6 +252,7 @@ shasum -a 256 "${DIST_DIR}/${DMG_NAME}"
 echo ""
 
 # Upload DMG to GitHub release so users can download it from the assets list
+# This section uses || true to prevent failures from breaking the build
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   TAG="$VERSION"
   if [[ "$TAG" != v* ]]; then
@@ -260,7 +261,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
 
   if command -v gh >/dev/null 2>&1; then
     echo "☁️  Uploading DMG via gh to release ${TAG}..."
-    if gh release upload "$TAG" "${DIST_DIR}/${DMG_NAME}" --clobber; then
+    if gh release upload "$TAG" "${DIST_DIR}/${DMG_NAME}" --clobber 2>/dev/null; then
       echo "✅ DMG uploaded to GitHub release (gh)"
     else
       echo "⚠️  gh upload failed, will attempt direct API upload..."
@@ -270,18 +271,22 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   # If gh failed or is unavailable, fall back to GitHub API
   if ! command -v gh >/dev/null 2>&1 || ! gh release view "$TAG" >/dev/null 2>&1 || ! gh release view "$TAG" --json assets >/dev/null 2>&1; then
     echo "☁️  Uploading DMG via GitHub API to release ${TAG}..."
-    UPLOAD_URL=$(python3 - <<'PY'
+    UPLOAD_URL=$(export TAG="${TAG}" && python3 - <<'PY' || true
 import json, os, sys, urllib.request
-tag = os.environ["TAG"]
-token = os.environ["GITHUB_TOKEN"]
-req = urllib.request.Request(f"https://api.github.com/repos/johnjallday/ori-agent/releases/tags/{tag}")
-req.add_header("Authorization", f"Bearer {token}")
-req.add_header("Accept", "application/vnd.github+json")
-with urllib.request.urlopen(req) as resp:
-    data = json.load(resp)
-upload_url = data.get("upload_url", "")
-if upload_url:
-    print(upload_url.split("{")[0])
+try:
+    tag = os.environ["TAG"]
+    token = os.environ["GITHUB_TOKEN"]
+    req = urllib.request.Request(f"https://api.github.com/repos/johnjallday/ori-agent/releases/tags/{tag}")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/vnd.github+json")
+    with urllib.request.urlopen(req) as resp:
+        data = json.load(resp)
+    upload_url = data.get("upload_url", "")
+    if upload_url:
+        print(upload_url.split("{")[0])
+except Exception as e:
+    # Silently fail - this is optional functionality
+    sys.exit(1)
 PY
 )
 
@@ -292,9 +297,9 @@ PY
         -H "Authorization: Bearer $GITHUB_TOKEN" \
         -H "Content-Type: application/octet-stream" \
         --data-binary @"${DIST_DIR}/${DMG_NAME}" \
-        "${UPLOAD_URL}?name=${DMG_NAME}&label=${APP_NAME}%20${ARCH}" >/dev/null && echo "✅ DMG uploaded to GitHub release (API)"
+        "${UPLOAD_URL}?name=${DMG_NAME}&label=${APP_NAME}%20${ARCH}" >/dev/null 2>&1 && echo "✅ DMG uploaded to GitHub release (API)" || echo "⚠️  API upload failed (release may not exist yet)"
     else
-      echo "⚠️  Could not resolve upload URL for release ${TAG}"
+      echo "⚠️  Could not resolve upload URL for release ${TAG} (release may not exist yet)"
     fi
   fi
 else

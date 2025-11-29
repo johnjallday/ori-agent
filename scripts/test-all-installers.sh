@@ -135,85 +135,119 @@ echo "==================================="
 echo "2. Testing Linux .deb (Ubuntu)"
 echo "==================================="
 
-docker run --rm -v "$(pwd)/dist:/dist" ubuntu:22.04 bash -c "
-  set -e
-  apt-get update -qq 2>&1 > /dev/null
-  echo '📦 Installing package...'
-  dpkg -i /dist/ori-agent_*_linux_amd64.deb 2>&1 | grep -q 'Unpacking' || apt-get install -f -y -qq
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+  echo "⚠️  Docker not installed, skipping Linux .deb test"
+  echo "   Install Docker to run: https://docs.docker.com/get-docker/"
+  DEB_SKIPPED=true
+elif ! docker info &> /dev/null; then
+  echo "⚠️  Docker daemon not running, skipping Linux .deb test"
+  echo "   Start Docker and re-run tests"
+  DEB_SKIPPED=true
+else
+  if docker run --rm -v "$(pwd)/dist:/dist" ubuntu:22.04 bash -c "
+    set -e
+    apt-get update -qq 2>&1 > /dev/null
+    echo '📦 Installing package...'
+    dpkg -i /dist/ori-agent_*_linux_amd64.deb 2>&1 | grep -q 'Unpacking' || apt-get install -f -y -qq
 
-  echo '🧪 Running smoke test...'
-  # Start server in background
-  /usr/bin/ori-agent --port=18765 > /tmp/ori-agent.log 2>&1 &
-  SERVER_PID=\$!
+    echo '🧪 Running smoke test...'
+    # Start server in background
+    /usr/bin/ori-agent --port=18765 > /tmp/ori-agent.log 2>&1 &
+    SERVER_PID=\$!
 
-  # Wait for server to start (max 10 seconds)
-  echo '  → Starting server...'
-  apt-get install -y -qq curl > /dev/null 2>&1
-  for i in {1..20}; do
-    if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
-      echo '  ✓ Server responded to HTTP'
-      break
+    # Wait for server to start (max 10 seconds)
+    echo '  → Starting server...'
+    apt-get install -y -qq curl > /dev/null 2>&1
+    for i in {1..20}; do
+      if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
+        echo '  ✓ Server responded to HTTP'
+        break
+      fi
+      sleep 0.5
+    done
+
+    # Test health endpoint
+    if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
+      echo '  ✓ Health check passed'
+    else
+      echo '  ⚠️  Health check failed (may need API key)'
     fi
-    sleep 0.5
-  done
 
-  # Test health endpoint
-  if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
-    echo '  ✓ Health check passed'
+    # Cleanup
+    kill \$SERVER_PID 2>/dev/null || true
+    echo '  → Server stopped'
+
+    echo '📋 Verifying installed files...'
+    test -f /lib/systemd/system/ori-agent.service && echo '  ✓ systemd service'
+    test -d /etc/ori-agent && echo '  ✓ Config directory'
+    test -f /usr/share/applications/ori-agent.desktop && echo '  ✓ Desktop entry'
+  "; then
+    echo "✅ Linux .deb: PASSED (with smoke test)"
+    DEB_PASSED=true
   else
-    echo '  ⚠️  Health check failed (may need API key)'
+    echo "❌ Linux .deb: FAILED"
+    DEB_PASSED=false
   fi
-
-  # Cleanup
-  kill \$SERVER_PID 2>/dev/null || true
-  echo '  → Server stopped'
-
-  echo '📋 Verifying installed files...'
-  test -f /lib/systemd/system/ori-agent.service && echo '  ✓ systemd service'
-  test -d /etc/ori-agent && echo '  ✓ Config directory'
-  test -f /usr/share/applications/ori-agent.desktop && echo '  ✓ Desktop entry'
-" && echo "✅ Linux .deb: PASSED (with smoke test)" || echo "❌ Linux .deb: FAILED"
+fi
 
 echo ""
 echo "==================================="
 echo "3. Testing Linux .rpm (Fedora)"
 echo "==================================="
 
-docker run --rm -v "$(pwd)/dist:/dist" fedora:38 bash -c "
-  set -e
-  echo '📦 Installing package...'
-  dnf install -y -q /dist/ori-agent-*-linux-amd64.rpm 2>&1 > /dev/null
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+  echo "⚠️  Docker not installed, skipping Linux .rpm test"
+  echo "   Install Docker to run: https://docs.docker.com/get-docker/"
+  RPM_SKIPPED=true
+elif ! docker info &> /dev/null; then
+  echo "⚠️  Docker daemon not running, skipping Linux .rpm test"
+  echo "   Start Docker and re-run tests"
+  RPM_SKIPPED=true
+else
+  if docker run --rm -v "$(pwd)/dist:/dist" fedora:38 bash -c "
+    set -e
+    echo '📦 Installing package...'
+    dnf install -y -q /dist/ori-agent-*-linux-amd64.rpm 2>&1 > /dev/null
 
-  echo '🧪 Running smoke test...'
-  # Start server in background
-  /usr/bin/ori-agent --port=18765 > /tmp/ori-agent.log 2>&1 &
-  SERVER_PID=\$!
+    echo '🧪 Running smoke test...'
+    # Start server in background
+    /usr/bin/ori-agent --port=18765 > /tmp/ori-agent.log 2>&1 &
+    SERVER_PID=\$!
 
-  # Wait for server to start (max 10 seconds)
-  echo '  → Starting server...'
-  for i in {1..20}; do
-    if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
-      echo '  ✓ Server responded to HTTP'
-      break
+    # Wait for server to start (max 10 seconds)
+    echo '  → Starting server...'
+    for i in {1..20}; do
+      if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
+        echo '  ✓ Server responded to HTTP'
+        break
+      fi
+      sleep 0.5
+    done
+
+    # Test health endpoint
+    if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
+      echo '  ✓ Health check passed'
+    else
+      echo '  ⚠️  Health check failed (may need API key)'
     fi
-    sleep 0.5
-  done
 
-  # Test health endpoint
-  if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
-    echo '  ✓ Health check passed'
+    # Cleanup
+    kill \$SERVER_PID 2>/dev/null || true
+    echo '  → Server stopped'
+
+    echo '📋 Verifying installed files...'
+    test -f /lib/systemd/system/ori-agent.service && echo '  ✓ systemd service'
+    test -d /etc/ori-agent && echo '  ✓ Config directory'
+  "; then
+    echo "✅ Linux .rpm: PASSED (with smoke test)"
+    RPM_PASSED=true
   else
-    echo '  ⚠️  Health check failed (may need API key)'
+    echo "❌ Linux .rpm: FAILED"
+    RPM_PASSED=false
   fi
-
-  # Cleanup
-  kill \$SERVER_PID 2>/dev/null || true
-  echo '  → Server stopped'
-
-  echo '📋 Verifying installed files...'
-  test -f /lib/systemd/system/ori-agent.service && echo '  ✓ systemd service'
-  test -d /etc/ori-agent && echo '  ✓ Config directory'
-" && echo "✅ Linux .rpm: PASSED (with smoke test)" || echo "❌ Linux .rpm: FAILED"
+fi
 
 echo ""
 echo "==================================="
@@ -222,8 +256,20 @@ echo "==================================="
 echo ""
 echo "Platform Coverage:"
 echo "  ✅ macOS DMG ($ARCH)"
-echo "  ✅ Linux .deb (Debian/Ubuntu)"
-echo "  ✅ Linux .rpm (Red Hat/Fedora)"
+if [ "$DEB_SKIPPED" = true ]; then
+  echo "  ⏭️  Linux .deb (Skipped - Docker not available)"
+elif [ "$DEB_PASSED" = true ]; then
+  echo "  ✅ Linux .deb (Debian/Ubuntu)"
+else
+  echo "  ❌ Linux .deb (FAILED)"
+fi
+if [ "$RPM_SKIPPED" = true ]; then
+  echo "  ⏭️  Linux .rpm (Skipped - Docker not available)"
+elif [ "$RPM_PASSED" = true ]; then
+  echo "  ✅ Linux .rpm (Red Hat/Fedora)"
+else
+  echo "  ❌ Linux .rpm (FAILED)"
+fi
 echo "  ⏳ Windows MSI (requires Windows VM or CI/CD)"
 echo ""
 echo "Files Tested:"
@@ -231,17 +277,49 @@ ls -lh dist/*.dmg 2>/dev/null | awk '{print "  •", $9, "(" $5 ")"}'
 ls -lh dist/*.deb 2>/dev/null | awk '{print "  •", $9, "(" $5 ")"}'
 ls -lh dist/*.rpm 2>/dev/null | awk '{print "  •", $9, "(" $5 ")"}'
 echo ""
-echo "🎉 All installer and smoke tests passed!"
-echo ""
-echo "What was tested:"
-echo "  ✅ Installer packages build correctly"
-echo "  ✅ Installers can be installed"
-echo "  ✅ Server binary starts successfully"
-echo "  ✅ Server responds to HTTP requests"
-echo "  ✅ Health check endpoint works"
-echo ""
-echo "Next steps:"
-echo "  • Run in CI/CD: .github/workflows/smoke-tests.yml"
-echo "  • Install macOS DMG: open $DMG_FILE"
-echo "  • Configure API keys for full functionality"
-echo ""
+
+# Determine overall test status
+if [ "$DEB_PASSED" = false ] || [ "$RPM_PASSED" = false ]; then
+  echo "❌ Some tests failed!"
+  echo ""
+  echo "Failed tests:"
+  [ "$DEB_PASSED" = false ] && echo "  • Linux .deb"
+  [ "$RPM_PASSED" = false ] && echo "  • Linux .rpm"
+  echo ""
+  exit 1
+elif [ "$DEB_SKIPPED" = true ] || [ "$RPM_SKIPPED" = true ]; then
+  echo "✅ All available tests passed!"
+  echo "⚠️  Some tests were skipped (Docker not available)"
+  echo ""
+  echo "What was tested:"
+  echo "  ✅ Installer packages build correctly"
+  echo "  ✅ macOS DMG mounts and contains required files"
+  echo "  ✅ Server binary starts successfully"
+  echo "  ✅ Server responds to HTTP requests"
+  echo ""
+  echo "Skipped tests:"
+  [ "$DEB_SKIPPED" = true ] && echo "  • Linux .deb (requires Docker)"
+  [ "$RPM_SKIPPED" = true ] && echo "  • Linux .rpm (requires Docker)"
+  echo ""
+  echo "Next steps:"
+  echo "  • Install Docker to run full test suite"
+  echo "  • Run in CI/CD: .github/workflows/smoke-tests.yml"
+  echo "  • Install macOS DMG: open $DMG_FILE"
+  echo "  • Configure API keys for full functionality"
+  echo ""
+else
+  echo "🎉 All installer and smoke tests passed!"
+  echo ""
+  echo "What was tested:"
+  echo "  ✅ Installer packages build correctly"
+  echo "  ✅ Installers can be installed"
+  echo "  ✅ Server binary starts successfully"
+  echo "  ✅ Server responds to HTTP requests"
+  echo "  ✅ Health check endpoint works"
+  echo ""
+  echo "Next steps:"
+  echo "  • Run in CI/CD: .github/workflows/smoke-tests.yml"
+  echo "  • Install macOS DMG: open $DMG_FILE"
+  echo "  • Configure API keys for full functionality"
+  echo ""
+fi
