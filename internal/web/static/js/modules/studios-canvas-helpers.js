@@ -70,9 +70,14 @@ function showAgentDetails(agent) {
  * Hide agent details panel
  */
 function hideAgentDetails() {
+  console.log('[SIDEBAR] hideAgentDetails called');
   const panel = document.getElementById('agent-details-panel');
   if (panel) {
+    console.log('[SIDEBAR] Hiding agent panel, current display:', panel.style.display);
     panel.style.display = 'none';
+    console.log('[SIDEBAR] Agent panel hidden');
+  } else {
+    console.error('[SIDEBAR] Agent panel not found!');
   }
 }
 
@@ -270,9 +275,14 @@ function showTaskDetails(task) {
  * Hide task details panel
  */
 function hideTaskDetails() {
+  console.log('[SIDEBAR] hideTaskDetails called');
   const panel = document.getElementById('task-details-panel');
   if (panel) {
+    console.log('[SIDEBAR] Hiding task panel, current display:', panel.style.display);
     panel.style.display = 'none';
+    console.log('[SIDEBAR] Task panel hidden');
+  } else {
+    console.error('[SIDEBAR] Task panel not found!');
   }
 
   // Hide task action buttons
