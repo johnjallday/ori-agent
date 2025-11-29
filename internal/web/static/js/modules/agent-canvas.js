@@ -905,39 +905,6 @@ class AgentCanvas {
       color: '#8b5cf6',
       description: 'Combine multiple inputs into single context',
       resultCombinationMode: 'merge'
-    },
-    APPEND: {
-      id: 'append',
-      name: 'Append',
-      icon: '📎',
-      color: '#3b82f6',
-      description: 'Concatenate outputs sequentially',
-      resultCombinationMode: 'append'
-    },
-    SUMMARIZE: {
-      id: 'summarize',
-      name: 'Summarize',
-      icon: '📝',
-      color: '#10b981',
-      description: 'Create executive summary of inputs',
-      resultCombinationMode: 'summarize'
-    },
-    COMPARE: {
-      id: 'compare',
-      name: 'Compare',
-      icon: '⚖️',
-      color: '#f59e0b',
-      description: 'Side-by-side comparison of inputs',
-      resultCombinationMode: 'compare'
-    },
-    VOTE: {
-      id: 'vote',
-      name: 'Vote',
-      icon: '🗳️',
-      color: '#ef4444',
-      description: 'Select best result via voting',
-      resultCombinationMode: 'custom',
-      customInstruction: 'Analyze all inputs and select the best result based on quality, accuracy, and completeness.'
     }
   };
 
