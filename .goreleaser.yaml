@@ -77,8 +77,9 @@ archives:
     files:
       - LICENSE
       - README.md
-      - example_plugins/**/*
-      - plugins/**/*
+      # Note: Plugin binaries excluded to reduce archive size
+      # Users can build plugins with: ./scripts/build-plugins.sh
+      # Or use platform-specific installers (DMG, deb, rpm) which include plugins
 
 # macOS DMG installers - created via custom publisher
 publishers:
@@ -241,6 +242,11 @@ release:
   draft: false
   prerelease: auto
   mode: replace
+  # Disable parallel uploads to prevent rate limiting and timeouts
+  disable: false
+  # Upload files sequentially with retries
+  extra_files:
+    - glob: ./dist/*.dmg
   header: |
     ## Ori Agent {{ .Tag }}
 
