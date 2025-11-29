@@ -19,7 +19,12 @@ export class AgentCanvasNotifications {
       timestamp: Date.now()
     };
 
-    this.parent.notifications.push(notification);
+    // Initialize notifications array if needed
+    if (!this.state.notifications) {
+      this.state.notifications = [];
+    }
+
+    this.state.notifications.push(notification);
 
     // Auto-dismiss after 5 seconds
     setTimeout(() => {
@@ -33,8 +38,10 @@ export class AgentCanvasNotifications {
    * Dismiss a notification
    */
   dismissNotification(id) {
-    this.parent.notifications = this.parent.notifications.filter(n => n.id !== id);
-    this.parent.draw();
+    if (this.state.notifications) {
+      this.state.notifications = this.state.notifications.filter(n => n.id !== id);
+      this.parent.draw();
+    }
   }
 
   /**
