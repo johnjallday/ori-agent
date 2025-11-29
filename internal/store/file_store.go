@@ -480,7 +480,7 @@ func (s *fileStore) migrateAgentTypesUnlocked() {
 
 		// If model wasn't found in any tier, set it to default cheap model
 		if ag.Type == agent.TypeToolCalling && !agent.IsModelAllowedForType(ag.Settings.Model, agent.TypeToolCalling) {
-			ag.Settings.Model = "gpt-5-nano"
+			ag.Settings.Model = "gpt-3.5-turbo" // Cheapest OpenAI model
 		}
 	}
 }
