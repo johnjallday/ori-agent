@@ -856,6 +856,37 @@ export class RendererNodes {
       height: deleteSize
     };
 
+    // Draw Assign button (bottom-center)
+    const assignButtonWidth = 60;
+    const assignButtonHeight = 18;
+    const assignX = x + (cardWidth - assignButtonWidth) / 2;
+    const assignY = y + cardHeight - assignButtonHeight - 6;
+
+    task.assignBtnBounds = {
+      x: assignX,
+      y: assignY,
+      width: assignButtonWidth,
+      height: assignButtonHeight
+    };
+
+    // Check if this task is the active assignment source
+    const isActiveAssignment = this.state.assignmentMode &&
+                               this.state.assignmentSourceTask &&
+                               this.state.assignmentSourceTask.id === task.id;
+
+    this.ctx.fillStyle = isActiveAssignment ? '#10b981' : '#3b82f6';
+    this.ctx.strokeStyle = isActiveAssignment ? '#059669' : '#1d4ed8';
+    this.ctx.lineWidth = 1.5;
+    this.primitives.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 10px Inter, sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(isActiveAssignment ? '✓ Active' : 'Assign', assignX + assignButtonWidth / 2, assignY + assignButtonHeight / 2);
+
     // Store bounds for click detection
     task.bounds = { x, y, width: cardWidth, height: cardHeight };
   }
