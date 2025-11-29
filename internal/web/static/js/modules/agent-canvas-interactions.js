@@ -963,10 +963,21 @@ export class AgentCanvasInteractionHandler {
     for (let i = this.state.tasks.length - 1; i >= 0; i--) {
       const task = this.state.tasks[i];
       if (task && task.x != null && task.y != null) {
-        const cardWidth = 160;
-        const cardHeight = 60;
-        const cardX = task.x - cardWidth / 2;
-        const cardY = task.y - cardHeight / 2;
+        // Use stored bounds if available, otherwise calculate for regular tasks
+        let cardWidth, cardHeight, cardX, cardY;
+        if (task.bounds) {
+          // Use pre-calculated bounds (works for both regular and combiner tasks)
+          cardWidth = task.bounds.width;
+          cardHeight = task.bounds.height;
+          cardX = task.bounds.x;
+          cardY = task.bounds.y;
+        } else {
+          // Fallback for tasks without bounds
+          cardWidth = 160;
+          cardHeight = 60;
+          cardX = task.x - cardWidth / 2;
+          cardY = task.y - cardHeight / 2;
+        }
 
         // Check if click is on delete button first
         if (task.deleteBtnBounds) {

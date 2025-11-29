@@ -120,8 +120,8 @@ export class RendererNodes {
       const cardX = task.x - cardWidth / 2;
       const cardY = task.y - cardHeight / 2;
 
-      // Store card bounds for hit testing
-      task.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+      // Store card bounds for hit testing (use 'bounds' for consistency with combiner tasks)
+      task.bounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
 
       // Card background
       this.ctx.save();
