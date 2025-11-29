@@ -111,6 +111,7 @@ export async function assignTaskToCombiner(canvas, combiner) {
   }
 
   canvas.draw();
-  canvas.addNotification(`✅ Task assigned via ${combiner.name} → ${targetAgentName}`, 'success');
+  const combinerName = combiner.name || combiner.description || 'Merge';
+  canvas.addNotification(`✅ Task assigned via ${combinerName} → ${targetAgentName}`, 'success');
   console.log(`📊 Task will receive combined results from: ${inputTaskIds.join(', ')}`);
 }

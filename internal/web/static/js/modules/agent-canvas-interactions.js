@@ -1025,6 +1025,14 @@ export class AgentCanvasInteractionHandler {
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
+          // Check if this is a combiner task and we're in assignment mode
+          if ((task.combiner_type || task.combinerType) && this.state.assignmentMode && this.state.assignmentSourceTask) {
+            // In assignment mode - assign source task to this combiner task
+            console.log('[CANVAS CLICK] Assigning task to combiner task:', task.id);
+            this.parent.assignTaskToCombiner(task);
+            return;
+          }
+
           // Task clicked - show details in sidebar
           console.log('[CANVAS CLICK] Task clicked:', task.description, 'showing details');
           if (window.showTaskDetails) {
