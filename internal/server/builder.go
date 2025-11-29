@@ -1,3 +1,6 @@
+// Package server provides the HTTP server for the Ori Agent application.
+// This file implements the ServerBuilder pattern for constructing server instances
+// with proper dependency injection and testability.
 package server
 
 import (

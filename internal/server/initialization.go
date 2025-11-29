@@ -1,3 +1,6 @@
+// Package server provides the HTTP server for the Ori Agent application.
+// This file contains initialization helper functions used by the ServerBuilder
+// to construct and configure server components.
 package server
 
 import (
