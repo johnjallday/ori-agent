@@ -719,9 +719,14 @@ async function addTaskInput(taskId) {
       window.showTaskDetails(task);
     }
 
-    // Redraw canvas
+    // Immediate redraw
     if (window.agentCanvas && window.agentCanvas.draw) {
       window.agentCanvas.draw();
+
+      // Force another redraw after a short delay to ensure connections are visible
+      setTimeout(() => {
+        window.agentCanvas.draw();
+      }, 100);
     }
 
     alert(`Added "${selectedTask.description.substring(0, 30)}..." as input`);

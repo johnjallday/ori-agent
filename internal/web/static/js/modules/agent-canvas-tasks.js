@@ -103,8 +103,13 @@ export async function assignTaskToCombiner(canvas, combiner) {
     canvas.assignmentMouseY = 0;
     canvas.canvas.style.cursor = 'grab';
 
-    // Redraw canvas
+    // Immediate redraw
     canvas.draw();
+
+    // Force another redraw after a short delay to ensure connections are visible
+    setTimeout(() => {
+      canvas.draw();
+    }, 100);
 
     const combinerName = combiner.name || combiner.description || 'Merge';
     const sourceDesc = sourceTask.description?.substring(0, 30) || sourceTask.id;
