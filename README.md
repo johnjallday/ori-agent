@@ -46,19 +46,25 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 
 3. **Handle macOS Security Warning**
 
-   When first opening OriAgent, you may see: *"Apple cannot verify OriAgent is free of malware"*
+   When first opening OriAgent, macOS may show one of these warnings:
+   - *"OriAgent is damaged and can't be opened"* (most common)
+   - *"Apple cannot verify OriAgent is free of malware"*
 
-   This is normal for unsigned apps. To open safely:
+   **This is normal for open-source apps not notarized by Apple.** To install safely:
 
-   **Method 1 (Easy):**
-   - Right-click `OriAgent.app` → Select "Open"
-   - Click "Open" in the security dialog
+   **Method 1 - Right-Click (Easiest):**
+   1. Drag `OriAgent.app` to Applications folder
+   2. Right-click (or Control+click) `OriAgent.app` in Applications
+   3. Select "Open" from the menu
+   4. Click "Open" in the dialog that appears
 
-   **Method 2 (Terminal):**
+   **Method 2 - Terminal Command:**
    ```bash
-   xattr -cr /Applications/OriAgent.app
+   xattr -rc /Applications/OriAgent.app
    open /Applications/OriAgent.app
    ```
+
+   After the first launch, you can open normally by double-clicking.
 
 4. **Configure your API key** through the Settings panel in the app, or export it:
    ```bash
