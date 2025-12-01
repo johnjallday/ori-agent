@@ -241,6 +241,14 @@ export class DashboardRenderer {
                       ${this.renderCompletedTaskOptions()}
                     </select>
                     <small class="text-muted">Hold Ctrl/Cmd to select multiple tasks</small>
+                    <!-- Template hints container (populated dynamically) -->
+                    <div id="template-hints-container" class="mt-2" style="display: none;">
+                      <div style="background: #f8f9fa; border-left: 3px solid #6c757d; padding: 8px 12px; border-radius: 4px;">
+                        <small class="text-muted d-block mb-1"><strong>Available placeholders:</strong></small>
+                        <div id="template-hints-content"></div>
+                        <small class="text-muted d-block mt-1"><em>Or use natural language - inputs are automatically in context</em></small>
+                      </div>
+                    </div>
                   </div>
                   <div class="mb-3" id="combination-mode-container" style="display: none;">
                     <label class="form-label small" style="color: var(--text-primary);">

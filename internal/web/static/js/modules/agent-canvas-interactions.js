@@ -111,6 +111,15 @@ export class AgentCanvasInteractionHandler {
         // Close the create task form
         e.preventDefault();
         this.state.forms.hideCreateTaskForm();
+      } else if (this.state.resultConnectionMode) {
+        // Cancel result connection mode
+        this.state.resultConnectionMode = false;
+        this.state.resultSourceAgent = null;
+        this.state.resultConnectionMouseX = 0;
+        this.state.resultConnectionMouseY = 0;
+        this.canvas.style.cursor = 'grab';
+        this.parent.draw();
+        console.log('Result connection mode cancelled');
       } else if (this.state.assignmentMode) {
         this.state.assignmentMode = false;
         this.state.assignmentSourceTask = null;
@@ -362,6 +371,20 @@ export class AgentCanvasInteractionHandler {
 
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+        // Check if Ctrl/Cmd is pressed for result connection mode
+        if (this.state.ctrlPressed) {
+          // Enable result connection mode - link agent's latest task to target
+          e.stopPropagation();
+          e.preventDefault();
+          this.state.resultConnectionMode = true;
+          this.state.resultSourceAgent = agent;
+          this.state.resultConnectionStartX = x;
+          this.state.resultConnectionStartY = y;
+          this.canvas.style.cursor = 'crosshair';
+          console.log(`🔗 Started result connection from agent: ${agent.name}`);
+          return;
+        }
+
         // Start dragging this agent
         this.state.isDraggingAgent = true;
         this.state.draggedAgent = agent;
@@ -409,6 +432,16 @@ export class AgentCanvasInteractionHandler {
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
       this.state.draggedCombiner.x = x;
       this.state.draggedCombiner.y = y;
+      this.parent.draw();
+      return;
+    }
+
+    // Track mouse position for result connection mode
+    if (this.state.resultConnectionMode && this.state.resultSourceAgent) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.resultConnectionMouseX = x;
+      this.state.resultConnectionMouseY = y;
       this.parent.draw();
       return;
     }
@@ -486,6 +519,61 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingTask = this.state.isDraggingTask;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
+
+    // Handle result connection drop from agent to task
+    if (this.state.resultConnectionMode && this.state.resultSourceAgent) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+
+      // Find task at drop position
+      let targetTask = null;
+      for (let i = this.state.tasks.length - 1; i >= 0; i--) {
+        const task = this.state.tasks[i];
+        if (task && task.x != null && task.y != null) {
+          const cardWidth = task.bounds ? task.bounds.width : 160;
+          const cardHeight = task.bounds ? task.bounds.height : 60;
+          const cardX = task.bounds ? task.bounds.x : task.x - cardWidth / 2;
+          const cardY = task.bounds ? task.bounds.y : task.y - cardHeight / 2;
+
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            targetTask = task;
+            break;
+          }
+        }
+      }
+
+      if (targetTask) {
+        // Find agent's most recent completed task
+        const agentTasks = this.state.tasks.filter(t =>
+          t.to === this.state.resultSourceAgent.name &&
+          t.assigned_node_id === this.state.resultSourceAgent.nodeId &&
+          t.status === 'completed'
+        ).sort((a, b) =>
+          new Date(b.completed_at) - new Date(a.completed_at)
+        );
+
+        if (agentTasks.length > 0) {
+          const latestTask = agentTasks[0];
+          console.log(`🔗 Linking agent task ${latestTask.id} to target task ${targetTask.id}`);
+          // Use existing linkTaskResult function from parent
+          this.parent.linkTaskResult(latestTask.id, targetTask.id);
+          this.parent.showNotification(`Linked ${this.state.resultSourceAgent.name}'s latest result to task`, 'success');
+        } else {
+          this.parent.showNotification(`Agent ${this.state.resultSourceAgent.name} has no completed tasks`, 'warning');
+        }
+      }
+
+      // Clear result connection mode
+      this.state.resultConnectionMode = false;
+      this.state.resultSourceAgent = null;
+      this.state.resultConnectionMouseX = 0;
+      this.state.resultConnectionMouseY = 0;
+      this.canvas.style.cursor = 'grab';
+      this.parent.draw();
+      return;
+    }
 
     // Handle connection drop
     if (wasDraggingConnection && this.state.connectionDragStart) {

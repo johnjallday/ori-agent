@@ -209,6 +209,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Parse update request
 		var req struct {
+			// Core fields
+			Name         *string  `json:"name,omitempty"`
+			Type         *string  `json:"type,omitempty"`
+			Role         *string  `json:"role,omitempty"`
+			Model        *string  `json:"model,omitempty"`
+			Temperature  *float64 `json:"temperature,omitempty"`
+			SystemPrompt *string  `json:"system_prompt,omitempty"`
+			// Metadata
 			Description *string   `json:"description,omitempty"`
 			Tags        *[]string `json:"tags,omitempty"`
 			AvatarColor *string   `json:"avatar_color,omitempty"`
@@ -224,7 +232,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agent.Metadata = &types.AgentMetadata{}
 		}
 
-		// Update fields if provided (partial update)
+		// Update core fields if provided (partial update)
+		if req.Type != nil {
+			agent.Type = *req.Type
+		}
+		if req.Role != nil {
+			agent.Role = types.AgentRole(*req.Role)
+		}
+		if req.Model != nil {
+			agent.Settings.Model = *req.Model
+		}
+		if req.Temperature != nil {
+			agent.Settings.Temperature = *req.Temperature
+		}
+		if req.SystemPrompt != nil {
+			agent.Settings.SystemPrompt = *req.SystemPrompt
+		}
+
+		// Update metadata fields if provided (partial update)
 		if req.Description != nil {
 			agent.Metadata.Description = *req.Description
 		}
@@ -238,23 +263,66 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agent.Metadata.Favorite = *req.Favorite
 		}
 
+		// Track if this was the current agent (for rename handling)
+		_, currentAgent := h.State.ListAgents()
+		wasCurrent := currentAgent == agentName
+		newName := agentName
+
 		// Update timestamp if statistics exist
 		if agent.Statistics != nil {
 			agent.Statistics.UpdatedAt = time.Now()
 		}
 
-		// Save updated agent
-		if err := h.State.SetAgent(agentName, agent); err != nil {
-			log.Printf("❌ Failed to update agent metadata: %v", err)
-			http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
-			return
+		// Save updated agent (handle rename if needed)
+		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
+			if _, exists := h.State.GetAgent(*req.Name); exists {
+				http.Error(w, "Agent with that name already exists", http.StatusConflict)
+				return
+			}
+
+			if err := h.State.SetAgent(*req.Name, agent); err != nil {
+				log.Printf("❌ Failed to save renamed agent: %v", err)
+				http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := h.State.DeleteAgent(agentName); err != nil {
+				log.Printf("⚠️  Failed to delete old agent record %s after rename: %v", agentName, err)
+			}
+			newName = *req.Name
+			if wasCurrent {
+				_ = h.State.SwitchAgent(newName)
+			}
+		} else {
+			if err := h.State.SetAgent(agentName, agent); err != nil {
+				log.Printf("❌ Failed to update agent metadata: %v", err)
+				http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
 
-		log.Printf("✅ Agent metadata updated: %s", agentName)
+		log.Printf("✅ Agent metadata updated: %s", newName)
 
 		// Log activity
 		if h.ActivityLogger != nil {
 			updatedFields := []string{}
+			if req.Name != nil {
+				updatedFields = append(updatedFields, "name")
+			}
+			if req.Type != nil {
+				updatedFields = append(updatedFields, "type")
+			}
+			if req.Role != nil {
+				updatedFields = append(updatedFields, "role")
+			}
+			if req.Model != nil {
+				updatedFields = append(updatedFields, "model")
+			}
+			if req.Temperature != nil {
+				updatedFields = append(updatedFields, "temperature")
+			}
+			if req.SystemPrompt != nil {
+				updatedFields = append(updatedFields, "system_prompt")
+			}
 			if req.Description != nil {
 				updatedFields = append(updatedFields, "description")
 			}
@@ -271,7 +339,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			details := map[string]interface{}{
 				"fields": updatedFields,
 			}
-			if err := h.ActivityLogger.LogActivity(agentName, types.ActivityEventUpdated, details, ""); err != nil {
+			if err := h.ActivityLogger.LogActivity(newName, types.ActivityEventUpdated, details, ""); err != nil {
 				log.Printf("⚠️  Failed to log activity: %v", err)
 			}
 		}
@@ -279,7 +347,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
-			"message": "Agent metadata updated successfully",
+			"name":    newName,
+			"message": "Agent updated successfully",
 		}); err != nil {
 			log.Printf("Failed to encode response: %v", err)
 		}

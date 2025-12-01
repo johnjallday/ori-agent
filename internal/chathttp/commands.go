@@ -587,7 +587,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			statusStr := string(status)
 			capitalizedStatus := statusStr
 			if len(statusStr) > 0 && statusStr[0] >= 'a' && statusStr[0] <= 'z' {
-				capitalizedStatus = string(statusStr[0]-32) + statusStr[1:]
+				capitalizedStatus = strings.ToUpper(statusStr[:1]) + statusStr[1:]
 			}
 			sb.WriteString(fmt.Sprintf("### %s (%d)\n\n", capitalizedStatus, len(tasks)))
 			for i, task := range tasks {

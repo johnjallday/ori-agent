@@ -49,10 +49,22 @@ export class RendererConnections {
       // Check if this task has input tasks
       if (!task.input_task_ids || task.input_task_ids.length === 0) return;
 
-      // Draw connection from each input task to this task
+      // Draw connection from agent that executed each input task to this task
       task.input_task_ids.forEach(inputTaskId => {
         const inputTask = this.state.tasks.find(t => t.id === inputTaskId);
-        if (!inputTask || !inputTask.x || !inputTask.y || !task.x || !task.y) {
+        if (!inputTask || !task.x || !task.y) {
+          hasUnpositionedTasks = true;
+          return;
+        }
+
+        // Find the agent that executed the input task
+        // First try to match by nodeId, then fall back to id (for backward compatibility)
+        const sourceAgent = this.state.agents.find(agent =>
+          (agent.nodeId === inputTask.assigned_node_id || agent.id === inputTask.assigned_node_id) &&
+          agent.name === inputTask.to
+        );
+
+        if (!sourceAgent || !sourceAgent.x || !sourceAgent.y) {
           hasUnpositionedTasks = true;
           return;
         }
@@ -61,11 +73,11 @@ export class RendererConnections {
         this.ctx.save();
 
         // Offset arrow so the head doesn't sit on top of the task card
-        const angle = Math.atan2(task.y - inputTask.y, task.x - inputTask.x);
-        const startOffset = 30; // move start off input task center a bit
+        const angle = Math.atan2(task.y - sourceAgent.y, task.x - sourceAgent.x);
+        const startOffset = 50; // move start off agent node center
         const endOffset = 80;   // stop before target card center
-        const startX = inputTask.x + startOffset * Math.cos(angle);
-        const startY = inputTask.y + startOffset * Math.sin(angle);
+        const startX = sourceAgent.x + startOffset * Math.cos(angle);
+        const startY = sourceAgent.y + startOffset * Math.sin(angle);
         const endX = task.x - endOffset * Math.cos(angle);
         const endY = task.y - endOffset * Math.sin(angle);
 

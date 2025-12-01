@@ -433,6 +433,9 @@ export class DashboardTasks {
       if (!hasInputTasks) {
         combinationInstructionContainer.style.display = 'none';
       }
+
+      // Update template hints
+      this.updateTemplateHints(inputTasksSelect.selectedOptions.length);
     });
 
     // Show/hide custom instruction field based on combination mode
@@ -441,6 +444,36 @@ export class DashboardTasks {
       const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
       combinationInstructionContainer.style.display = (isCustomMode && hasInputTasks) ? 'block' : 'none';
     });
+  }
+
+  updateTemplateHints(inputCount) {
+    const hintsContainer = document.getElementById('template-hints-container');
+    const hintsContent = document.getElementById('template-hints-content');
+
+    if (!hintsContainer || !hintsContent) {
+      return;
+    }
+
+    // Hide hints if no input tasks selected
+    if (inputCount === 0) {
+      hintsContainer.style.display = 'none';
+      return;
+    }
+
+    // Show hints and populate content
+    hintsContainer.style.display = 'block';
+
+    let hintsHTML = '';
+
+    // Shortcuts (always available when there are inputs)
+    hintsHTML += '<small class="d-block" style="font-family: monospace; color: #495057;"><code>{previous}</code> or <code>{result}</code> - most recent input</small>';
+
+    // Numbered placeholders
+    for (let i = 1; i <= inputCount; i++) {
+      hintsHTML += `<small class="d-block" style="font-family: monospace; color: #495057;"><code>{input${i}}</code> - input #${i}</small>`;
+    }
+
+    hintsContent.innerHTML = hintsHTML;
   }
 
 }

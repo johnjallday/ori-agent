@@ -324,8 +324,7 @@ function chatWithAgent() {
 }
 
 function editAgent() {
-    // TODO: Implement edit page in Task 5.0
-    alert('Edit functionality will be available after implementing the agent creation/edit form');
+    window.location.href = `/agents-edit.html?name=${encodeURIComponent(agentName)}`;
 }
 
 async function confirmDelete() {
