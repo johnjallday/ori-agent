@@ -108,16 +108,16 @@ export class AgentCanvasHelpers {
    * Get node by ID (searches both agents and combiners)
    */
   getNodeById(nodeId) {
-    // Check if it's an agent
-    const agent = this.state.agents.find(a => a.name === nodeId || a.id === nodeId);
+    // Check if it's an agent (support both nodeId and legacy name lookups)
+    const agent = this.state.agents.find(a => a.nodeId === nodeId || a.name === nodeId || a.id === nodeId);
     if (agent) return { type: 'agent', node: agent };
 
     // Check if it's a task
     const task = this.state.tasks.find(t => t.id === nodeId);
     if (task) return { type: 'task', node: task };
 
-    // Check if it's a combiner
-    const combiner = this.parent.combinerNodes.find(c => c.id === nodeId);
+    // Check if it's a combiner (check state first, then parent as fallback)
+    const combiner = (this.state.combinerNodes || this.parent.combinerNodes || []).find(c => c.id === nodeId);
     if (combiner) return { type: 'combiner', node: combiner };
 
     return null;
@@ -146,11 +146,21 @@ export class AgentCanvasHelpers {
         y: (node.y + halfHeight + 10) * this.parent.scale + this.parent.offsetY
       };
     } else if (type === 'task') {
-      // Tasks have a single output port at the bottom center
-      if (node.cardBounds) {
+      // Tasks have input ports at top and output port at bottom
+      const taskHeight = node.cardBounds ? node.cardBounds.height : 80; // Fallback height if cardBounds not yet calculated
+      const taskY = node.cardBounds ? node.cardBounds.y : node.y;
+
+      if (portId === 'output') {
+        // Output port at bottom center
         return {
           x: node.x * this.parent.scale + this.parent.offsetX,
-          y: (node.cardBounds.y + node.cardBounds.height + 5) * this.parent.scale + this.parent.offsetY
+          y: (taskY + taskHeight + 5) * this.parent.scale + this.parent.offsetY
+        };
+      } else if (portId && portId.startsWith('input-')) {
+        // Input ports at top center (can support multiple input ports if needed)
+        return {
+          x: node.x * this.parent.scale + this.parent.offsetX,
+          y: (taskY - 10) * this.parent.scale + this.parent.offsetY
         };
       }
       return null;
@@ -203,6 +213,18 @@ export class AgentCanvasHelpers {
           type: 'output'
         };
       }
+
+      // Input port at top center of task card
+      const inputPortY = task.cardBounds.y - 5;
+      const inputDist = Math.sqrt((x - portX) ** 2 + (y - inputPortY) ** 2);
+      if (inputDist <= portRadius) {
+        return {
+          nodeId: task.id,
+          nodeType: 'task',
+          portId: 'input-0',
+          type: 'input'
+        };
+      }
     }
 
     // Check agent output ports
@@ -213,7 +235,7 @@ export class AgentCanvasHelpers {
       const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
       if (dist <= portRadius) {
         return {
-          nodeId: agent.name,
+          nodeId: agent.nodeId || agent.name,
           nodeType: 'agent',
           portId: 'output',
           type: 'output'
@@ -225,7 +247,7 @@ export class AgentCanvasHelpers {
       const inputDist = Math.sqrt((x - portX) ** 2 + (y - inputPortY) ** 2);
       if (inputDist <= portRadius) {
         return {
-          nodeId: agent.name,
+          nodeId: agent.nodeId || agent.name,
           nodeType: 'agent',
           portId: 'input',
           type: 'input'

@@ -51,7 +51,7 @@ type Workspace struct {
 // CanvasLayout stores positions of tasks and agents on the canvas
 type CanvasLayout struct {
 	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
-	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent name -> position
+	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
 	CombinerNodes       []CombinerNodeLayout       `json:"combiner_nodes,omitempty"`       // combiner (merge/append/etc) nodes on canvas
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents/combiners
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
@@ -115,18 +115,19 @@ type AgentMessage struct {
 
 // Task represents a delegated task within a workspace
 type Task struct {
-	ID          string                 `json:"id"`
-	WorkspaceID string                 `json:"studio_id"`
-	From        string                 `json:"from"`
-	To          string                 `json:"to"`
-	Description string                 `json:"description"`
-	Priority    int                    `json:"priority"`
-	Context     map[string]interface{} `json:"context"`
-	Timeout     time.Duration          `json:"timeout"`
-	Status      TaskStatus             `json:"status"`
-	Result      string                 `json:"result,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	Progress    *TaskProgress          `json:"progress,omitempty"`
+	ID             string                 `json:"id"`
+	WorkspaceID    string                 `json:"studio_id"`
+	From           string                 `json:"from"`
+	To             string                 `json:"to"`
+	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
+	Description    string                 `json:"description"`
+	Priority       int                    `json:"priority"`
+	Context        map[string]interface{} `json:"context"`
+	Timeout        time.Duration          `json:"timeout"`
+	Status         TaskStatus             `json:"status"`
+	Result         string                 `json:"result,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	Progress       *TaskProgress          `json:"progress,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
 	InputTaskIDs []string `json:"input_task_ids,omitempty"`
 	// ResultCombinationMode specifies how to combine results from input tasks with the new task
@@ -367,10 +368,6 @@ func (w *Workspace) GetSharedData(key string) (interface{}, bool) {
 func (w *Workspace) AddAgent(agentName string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	if w.hasAgent(agentName) {
-		return fmt.Errorf("agent %s already in workspace", agentName)
-	}
 
 	w.Agents = append(w.Agents, agentName)
 	w.UpdatedAt = time.Now()

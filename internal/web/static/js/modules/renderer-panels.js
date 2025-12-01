@@ -62,7 +62,14 @@ export class RendererPanels {
     this.ctx.font = 'bold 16px system-ui';
     this.ctx.textAlign = 'left';
     this.ctx.fillText('Task Details', contentX, currentY);
-    currentY += 30;
+    currentY += 25;
+
+    // Task ID
+    this.ctx.fillStyle = '#6b7280';
+    this.ctx.font = '11px monospace';
+    const taskId = this.state.expandedTask.id || 'N/A';
+    this.ctx.fillText(`ID: ${taskId}`, contentX, currentY);
+    currentY += 20;
 
     // Status badge
     let statusColor = '#6b7280';

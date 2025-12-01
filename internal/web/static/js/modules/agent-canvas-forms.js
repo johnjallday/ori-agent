@@ -326,10 +326,7 @@ export class AgentCanvasForms {
       const data = await response.json();
       this.availableAgentsForAdd = data.agents || data || [];
 
-      const currentAgentNames = this.canvas.agents.map(a => a.name);
-      this.availableAgentsForAdd = this.availableAgentsForAdd.filter(
-        agent => !currentAgentNames.includes(agent.name)
-      );
+      // Allow adding same agent multiple times for multiple instances (removed filter)
 
       this.selectedAgentToAdd = null;
       this.addAgentFormVisible = true;

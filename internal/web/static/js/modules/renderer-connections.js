@@ -43,6 +43,8 @@ export class RendererConnections {
   drawResultConnections() {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
+    let hasUnpositionedTasks = false;
+
     this.state.tasks.forEach(task => {
       // Check if this task has input tasks
       if (!task.input_task_ids || task.input_task_ids.length === 0) return;
@@ -50,7 +52,10 @@ export class RendererConnections {
       // Draw connection from each input task to this task
       task.input_task_ids.forEach(inputTaskId => {
         const inputTask = this.state.tasks.find(t => t.id === inputTaskId);
-        if (!inputTask || !inputTask.x || !inputTask.y) return;
+        if (!inputTask || !inputTask.x || !inputTask.y || !task.x || !task.y) {
+          hasUnpositionedTasks = true;
+          return;
+        }
 
         // Draw a more prominent line with glow effect to indicate result flow
         this.ctx.save();
@@ -76,6 +81,9 @@ export class RendererConnections {
         this.ctx.restore();
       });
     });
+
+    // Note: No retry mechanism needed - the animation loop already redraws every frame.
+    // Connections will appear automatically once tasks are positioned.
   }
 
   drawParticles() {
@@ -250,11 +258,24 @@ export class RendererConnections {
     const mouseCanvasX = this.state.lastMouseX ? (this.state.lastMouseX - this.state.offsetX) / this.state.scale : -9999;
     const mouseCanvasY = this.state.lastMouseY ? (this.state.lastMouseY - this.state.offsetY) / this.state.scale : -9999;
 
-    this.state.connections.forEach(conn => {
+    let hasMissingPositions = false;
+
+    this.state.connections.forEach((conn, idx) => {
+      // Skip task-to-combiner connections (already shown as purple dotted result lines)
+      const fromNode = this.parent.getNodeById(conn.from);
+      const toNode = this.parent.getNodeById(conn.to);
+
+      if (fromNode?.type === 'task' && toNode?.type === 'combiner') {
+        return; // Skip - use purple dotted line instead
+      }
+
       const fromPos = this.parent.getPortPosition(conn.from, conn.fromPort);
       const toPos = this.parent.getPortPosition(conn.to, conn.toPort);
 
-      if (!fromPos || !toPos) return;
+      if (!fromPos || !toPos) {
+        hasMissingPositions = true;
+        return;
+      }
 
       // Convert back to canvas coordinates
       const fromX = (fromPos.x - this.state.offsetX) / this.state.scale;
@@ -350,6 +371,9 @@ export class RendererConnections {
         this.ctx.restore();
       }
     });
+
+    // Note: No retry mechanism needed - the animation loop already redraws every frame.
+    // Connections will appear automatically once combiner nodes/tasks are positioned.
   }
 
   drawDraggingConnection() {

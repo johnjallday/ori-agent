@@ -158,7 +158,7 @@
                     </svg>
                     Execute Task
                   </button>
-                  <div class="d-flex gap-2">
+                  <div class="d-flex gap-2 mb-2">
                     <button class="btn btn-sm btn-secondary flex-fill" onclick="editCurrentTask()">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -172,6 +172,12 @@
                       Delete
                     </button>
                   </div>
+                  <button id="unassign-task-btn" class="btn btn-sm btn-warning w-100" onclick="unassignCurrentTask()" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+                    </svg>
+                    Unassign from Agent
+                  </button>
                 </div>
               </div>
 
@@ -189,6 +195,36 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Agent Modal -->
+  <div class="modal fade" id="addAgentModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M1,10V12H9V10M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12Z"/>
+            </svg>
+            Add Agent to Workspace
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select an agent to add to this workspace:</p>
+          <div id="available-agents-list" style="max-height: 400px; overflow-y: auto;">
+            <div class="text-center py-3">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
         </div>
       </div>
     </div>
@@ -221,6 +257,11 @@
   <script>
     // Workspace-specific canvas initialization
     const workspaceId = '{{.Extra.WorkspaceID}}';
+    // Set global studio id for helper scripts that rely on currentStudioId
+    if (typeof currentStudioId !== 'undefined') {
+      currentStudioId = workspaceId;
+    }
+    window.currentStudioId = workspaceId;
 
     // Initialize canvas directly with this workspace
     document.addEventListener('DOMContentLoaded', async function() {
@@ -247,9 +288,119 @@
       console.log('✅ Workspace canvas initialized');
     });
 
-    // Add agent - navigate to workspace dashboard
-    function showAddAgentModal() {
-      window.location.href = `/studios/${workspaceId}`;
+    // Show add agent modal with available agents
+    async function showAddAgentModal() {
+      const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
+      const agentsList = document.getElementById('available-agents-list');
+
+      // Show modal
+      modal.show();
+      agentsList.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      `;
+
+      // Load available agents
+      try {
+        // Get all system agents
+        const agentsResponse = await fetch('/api/agents');
+        const agentsData = await agentsResponse.json();
+        const allAgents = agentsData.agents || []; // Array of {name, type} objects
+
+        // Get workspace to see which agents are already added
+        const workspaceResponse = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
+        const workspace = await workspaceResponse.json();
+        const workspaceAgents = workspace.agents || [];
+
+        // Track how many instances of each agent are already on the canvas
+        const agentCounts = workspaceAgents.reduce((acc, name) => {
+          acc[name] = (acc[name] || 0) + 1;
+          return acc;
+        }, {});
+
+        if (allAgents.length === 0) {
+          agentsList.innerHTML = `
+            <div class="text-center py-4">
+              <p style="color: var(--text-muted);">No agents available. Create one to get started.</p>
+              <a href="/agents" class="modern-btn modern-btn-primary mt-2">Create New Agent</a>
+            </div>
+          `;
+          return;
+        }
+
+        // Display all agents as clickable cards so users can add additional instances
+        agentsList.innerHTML = allAgents.map(agent => {
+          const count = agentCounts[agent.name] || 0;
+          const badgeText = count > 0 ? `${count} in workspace` : 'Not in workspace yet';
+          const badgeColor = count > 0 ? 'rgba(46, 204, 113, 0.15)' : 'rgba(52, 152, 219, 0.15)';
+
+          return `
+            <div class="modern-card p-3 mb-2" style="cursor: pointer; border-left: 3px solid var(--primary-color);"
+                 onclick="addAgentToWorkspace('${agent.name}')">
+              <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color);">
+                    <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                  </svg>
+                  <div>
+                    <strong style="color: var(--text-primary);">${agent.name}</strong>
+                    ${count > 0 ? '<div class="text-muted small">Add another instance to the canvas</div>' : ''}
+                  </div>
+                </div>
+                <div class="text-end">
+                  <span class="badge rounded-pill" style="background:${badgeColor}; color: var(--text-primary);">
+                    ${badgeText}
+                  </span>
+                  <div style="color: var(--success-color);">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+      } catch (error) {
+        console.error('Error loading agents:', error);
+        agentsList.innerHTML = `
+          <div class="alert alert-danger">Failed to load agents: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Add agent to workspace
+    async function addAgentToWorkspace(agentName) {
+      try {
+        const response = await fetch('/api/orchestration/workspace/agents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studio_id: workspaceId,
+            agent_name: agentName
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error);
+        }
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
+        modal.hide();
+
+        // Reload canvas to show new agent
+        window.location.reload();
+
+      } catch (error) {
+        console.error('Error adding agent:', error);
+        alert(`Failed to add agent: ${error.message}`);
+      }
     }
   </script>
   <script src="/js/modules/themeManager.js"></script>

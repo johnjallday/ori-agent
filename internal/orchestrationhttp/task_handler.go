@@ -103,6 +103,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WorkspaceID            string   `json:"studio_id"`
 		From                   string   `json:"from"`
 		To                     string   `json:"to"`
+		AssignedNodeID         string   `json:"assigned_node_id"`
 		Description            string   `json:"description"`
 		Priority               int      `json:"priority"`
 		InputTaskIDs           []string `json:"input_task_ids"`
@@ -146,6 +147,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WorkspaceID:            req.WorkspaceID,
 		From:                   req.From,
 		To:                     req.To,
+		AssignedNodeID:         req.AssignedNodeID,
 		Description:            req.Description,
 		Priority:               req.Priority,
 		InputTaskIDs:           req.InputTaskIDs,
@@ -205,6 +207,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		Result                 string   `json:"result"`
 		Error                  string   `json:"error"`
 		To                     *string  `json:"to"`                      // Optional: reassign task to different agent
+		AssignedNodeID         *string  `json:"assigned_node_id"`        // Optional: target specific agent instance/node
 		InputTaskIDs           []string `json:"input_task_ids"`          // Optional: update input task connections
 		ResultCombinationMode  *string  `json:"result_combination_mode"` // Optional: update combination mode
 		CombinationInstruction *string  `json:"combination_instruction"` // Optional: update combination instruction
@@ -262,6 +265,12 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 				}
 				if req.To != nil {
 					ws.Tasks[i].To = *req.To
+					// If a specific agent instance is provided, store it; otherwise clear to avoid stale linkage
+					if req.AssignedNodeID != nil {
+						ws.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+					} else {
+						ws.Tasks[i].AssignedNodeID = ""
+					}
 					log.Printf("📝 Reassigned task %s to %s", req.TaskID, *req.To)
 				}
 				taskFound = true
@@ -295,6 +304,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			}
 			if req.To != nil {
 				eventData["to"] = *req.To
+			}
+			if req.AssignedNodeID != nil {
+				eventData["assigned_node_id"] = *req.AssignedNodeID
 			}
 
 			th.eventBus.Publish(agentstudio.Event{
@@ -335,6 +347,11 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == req.TaskID {
 				ws.Tasks[i].To = *req.To
+				if req.AssignedNodeID != nil {
+					ws.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+				} else {
+					ws.Tasks[i].AssignedNodeID = ""
+				}
 				taskFound = true
 				log.Printf("📝 Updated task in workspace: %s -> %s", req.TaskID, *req.To)
 				break
@@ -550,8 +567,25 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	// Check if task is in a state that can be executed
 	if foundTask.Status == agentstudio.TaskStatusCompleted {
-		http.Error(w, "Task already completed", http.StatusBadRequest)
-		return
+		// Allow rerun of completed tasks by resetting status
+		log.Printf("🔄 Rerunning completed task %s", req.TaskID)
+		foundTask.Status = agentstudio.TaskStatusPending
+		foundTask.Result = ""
+		foundTask.Error = ""
+		foundTask.StartedAt = nil
+		foundTask.CompletedAt = nil
+
+		// Save the reset task status
+		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
+			log.Printf("❌ Failed to reset task status: %v", err)
+			http.Error(w, "Failed to reset task for rerun", http.StatusInternalServerError)
+			return
+		}
+		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
+			log.Printf("❌ Failed to save workspace: %v", err)
+			http.Error(w, "Failed to save workspace", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if foundTask.Status == agentstudio.TaskStatusInProgress {

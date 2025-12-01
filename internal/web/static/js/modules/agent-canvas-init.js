@@ -73,7 +73,22 @@ export class AgentCanvasInitialization {
             combinerNodeID: task.combiner_node_id
           };
         });
+        // Ensure tasks are placed in the current viewport if missing or off-screen
+        if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+          tasks.forEach(t => this.parent.eventHandler.ensureTaskPosition(t));
+        }
+        // Preserve assigned_node_id hints from existing state (if any)
+        tasks.forEach(t => {
+          const existing = this.state.tasks.find(et => et.id === t.id);
+          if (existing && existing.assigned_node_id) {
+            t.assigned_node_id = existing.assigned_node_id;
+          }
+        });
         this.state.setTasks(tasks);
+        // Seed agent lastResult based on any completed tasks with results
+        if (this.parent.eventHandler && typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function') {
+          this.parent.eventHandler.updateAgentResultsFromTasks(tasks);
+        }
       }
 
       // Initialize agent positions
@@ -123,7 +138,20 @@ export class AgentCanvasInitialization {
     // Get agent stats from studio data
     const agentStats = this.parent.studio.agent_stats || {};
 
+    // Track instance numbers per agent type
+    const instanceCounters = {};
+
     const agents = this.parent.studio.agents.map((agentName, index) => {
+      // Increment instance counter for this agent type
+      if (!instanceCounters[agentName]) {
+        instanceCounters[agentName] = 0;
+      }
+      instanceCounters[agentName]++;
+      const instanceNumber = instanceCounters[agentName];
+
+      // Generate unique nodeId (e.g., "default-node-1", "default-node-2")
+      const nodeId = `${agentName}-node-${instanceNumber}`;
+
       // Get stats for this agent
       const stats = agentStats[agentName] || {
         status: 'idle',
@@ -136,6 +164,8 @@ export class AgentCanvasInitialization {
 
       return {
         name: agentName,
+        nodeId: nodeId,
+        instanceNumber: instanceNumber,
         x: startX + (index * spacing),
         y: centerY,
         width: 120,

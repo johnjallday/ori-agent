@@ -184,8 +184,9 @@ export class AgentCanvasLayoutManager {
       // Collect agent positions
       const agentPositions = {};
       this.state.agents.forEach(agent => {
-        console.log(`  📍 Agent ${agent.name}: (${agent.x}, ${agent.y})`);
-        agentPositions[agent.name] = { x: agent.x, y: agent.y };
+        const key = agent.nodeId || agent.name;
+        console.log(`  📍 Agent ${key}: (${agent.x}, ${agent.y})`);
+        agentPositions[key] = { x: agent.x, y: agent.y };
       });
 
       // Collect combiner nodes
@@ -281,9 +282,10 @@ export class AgentCanvasLayoutManager {
     // Restore agent positions
     if (layout.agent_positions) {
       this.state.agents.forEach(agent => {
-        const savedPos = layout.agent_positions[agent.name];
+        const key = agent.nodeId || agent.name;
+        const savedPos = layout.agent_positions[key] || layout.agent_positions[agent.name];
         if (savedPos) {
-          console.log(`  Restoring agent ${agent.name} to (${savedPos.x}, ${savedPos.y})`);
+          console.log(`  Restoring agent ${key} to (${savedPos.x}, ${savedPos.y})`);
           agent.x = savedPos.x;
           agent.y = savedPos.y;
           agentsRestored++;

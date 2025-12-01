@@ -828,21 +828,13 @@ function setupSidebarToggle() {
 
     // Close sidebar when clicking outside on mobile
     document.addEventListener('click', function(event) {
-      console.log('[DOCUMENT CLICK] Click detected at:', event.target);
-      console.log('[DOCUMENT CLICK] Window width:', window.innerWidth);
-
       const isClickInSidebar = sidebar.contains(event.target);
       const isClickOnToggle = sidebarToggle.contains(event.target);
-
-      console.log('[DOCUMENT CLICK] Click in sidebar?', isClickInSidebar);
-      console.log('[DOCUMENT CLICK] Click on toggle?', isClickOnToggle);
-      console.log('[DOCUMENT CLICK] Sidebar hidden?', sidebar.classList.contains('d-none'));
 
       // Only close if sidebar is visible and click is outside
       if (!isClickInSidebar && !isClickOnToggle &&
           !sidebar.classList.contains('d-none') &&
           window.innerWidth < 992) { // lg breakpoint
-        console.log('[DOCUMENT CLICK] Closing sidebar (mobile)');
         sidebar.classList.add('d-none');
         sidebar.classList.remove('sidebar-mobile-show');
         // Set sidebar width to 0 to remove the empty space

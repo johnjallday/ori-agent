@@ -139,8 +139,9 @@ function showTaskDetails(task) {
     // Regular task details
     // Check if this task is an input to any combiner
     let combinerAssignment = '';
+    let combinersUsingThisTask = [];
     if (window.agentCanvas && window.agentCanvas.state && window.agentCanvas.state.tasks) {
-      const combinersUsingThisTask = window.agentCanvas.state.tasks.filter(t =>
+      combinersUsingThisTask = window.agentCanvas.state.tasks.filter(t =>
         (t.combiner_type || t.combinerType) &&
         (t.input_task_ids || []).includes(task.id)
       );
@@ -159,6 +160,10 @@ function showTaskDetails(task) {
     }
 
     html = `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Task ID:</strong>
+        <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.85rem;">${task.id || 'N/A'}</div>
+      </div>
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Description:</strong>
         <div style="color: var(--text-secondary);">${task.description || 'No description'}</div>
@@ -196,12 +201,63 @@ function showTaskDetails(task) {
         </div>
       `}
       ${combinerAssignment}
-      ${task.to ? `
-        <div class="mb-3">
-          <strong style="color: var(--text-primary);">Assigned To:</strong>
-          <div style="color: var(--text-secondary);">${task.to}</div>
-        </div>
-      ` : ''}
+      ${(() => {
+        // Determine what to show for "Assigned To"
+        let assignedTo = null;
+
+        // Priority 1: If task has a regular agent assignment (not "unassigned")
+        if (task.to && task.to !== 'unassigned') {
+          // Try to find the specific agent node instance
+          const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+
+          if (window.agentCanvas && window.agentCanvas.agents) {
+            let agentNode = null;
+
+            // First, try to find by nodeId (for tasks assigned after nodeId feature)
+            if (assignedNodeId) {
+              agentNode = window.agentCanvas.agents.find(a => a.nodeId === assignedNodeId);
+            }
+
+            // If no nodeId or not found, try to match by agent name (for old tasks)
+            if (!agentNode) {
+              // Find all agents with matching name
+              const matchingAgents = window.agentCanvas.agents.filter(a => a.name === task.to);
+              if (matchingAgents.length > 0) {
+                // Use the first matching agent (by instance number)
+                matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
+                agentNode = matchingAgents[0];
+              }
+            }
+
+            if (agentNode && agentNode.instanceNumber) {
+              // Show agent name with instance number (e.g., "default #1")
+              assignedTo = `${agentNode.name} #${agentNode.instanceNumber}`;
+            } else if (agentNode) {
+              // Agent found but no instance number
+              assignedTo = agentNode.name;
+            } else {
+              // No matching agent node found, show agent name
+              assignedTo = task.to;
+            }
+          } else {
+            // Canvas not available, just show agent name
+            assignedTo = task.to;
+          }
+        }
+        // Priority 2: If task is feeding into a combiner, show combiner name
+        else if (combinersUsingThisTask.length > 0) {
+          const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
+          assignedTo = `<span style="color: #8b5cf6;">🔀 ${combinerNames}</span>`;
+        }
+
+        // Only show "Assigned To" if we have something to show
+        return assignedTo ? `
+          <div class="mb-3">
+            <strong style="color: var(--text-primary);">Assigned To:</strong>
+            <div style="color: var(--text-secondary);">${assignedTo}</div>
+          </div>
+        ` : '';
+      })()}
       ${task.result ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Result:</strong>
@@ -229,6 +285,23 @@ function showTaskDetails(task) {
   const actionsDiv = document.getElementById('task-actions');
   if (actionsDiv) {
     actionsDiv.style.display = 'block';
+  }
+
+  // Show/hide unassign button based on task assignment
+  const unassignBtn = document.getElementById('unassign-task-btn');
+  if (unassignBtn) {
+    // Check if this task is feeding into a combiner
+    const isCombinerInput = window.agentCanvas?.state?.tasks?.some(t =>
+      (t.combiner_type || t.combinerType) &&
+      (t.input_task_ids || []).includes(task.id)
+    );
+
+    // Show button only if task is assigned to an agent (not empty, not 'unassigned', and not a combiner input)
+    if (task.to && task.to !== 'unassigned' && !isCombinerInput) {
+      unassignBtn.style.display = 'block';
+    } else {
+      unassignBtn.style.display = 'none';
+    }
   }
 
   // Store the current task for actions (edit, delete, etc.)
@@ -374,7 +447,10 @@ async function showAddTaskModal() {
     return;
   }
 
-  if (!currentStudioId) {
+  // Get studio ID from currentStudioId or from AgentCanvas instance
+  const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+
+  if (!studioId) {
     alert('No studio loaded');
     return;
   }
@@ -389,7 +465,7 @@ async function showAddTaskModal() {
   };
 
   try {
-    const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
+    const response = await fetch(`/api/studios/${studioId}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(task)
@@ -537,6 +613,64 @@ async function editCurrentTask() {
   }
 }
 
+/**
+ * Unassign current task
+ */
+async function unassignCurrentTask() {
+  if (!window.agentCanvas) {
+    alert('Canvas not initialized');
+    return;
+  }
+
+  const task = window.agentCanvas.state.expandedTask;
+  if (!task) {
+    alert('No task selected');
+    return;
+  }
+
+  if (!task.to || task.to === 'unassigned') {
+    alert('Task is not assigned to any agent');
+    return;
+  }
+
+  try {
+    // Use orchestration endpoint so subsequent assignments work the same way
+    const response = await fetch('/api/orchestration/tasks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task_id: task.id,
+        to: 'unassigned'
+      })
+    });
+
+    if (response.ok) {
+      console.log('Task unassigned successfully');
+      // Update the task locally
+      task.to = 'unassigned';
+      task.status = 'pending';
+      // Keep state array in sync in case we're not holding the same object
+      const stateTask = window.agentCanvas?.state?.tasks?.find(t => t.id === task.id);
+      if (stateTask) {
+        stateTask.to = 'unassigned';
+        stateTask.status = 'pending';
+      }
+
+      // Refresh the task details panel
+      showTaskDetails(task);
+
+      // Redraw canvas
+      window.agentCanvas.draw();
+    } else {
+      const error = await response.text();
+      alert(`Failed to unassign task: ${error}`);
+    }
+  } catch (error) {
+    console.error('Error unassigning task:', error);
+    alert(`Error unassigning task: ${error.message}`);
+  }
+}
+
 // Make functions globally available
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
@@ -547,6 +681,7 @@ window.hideCombinerDetails = hideCombinerDetails;
 window.showAddTaskModal = showAddTaskModal;
 window.editCurrentTask = editCurrentTask;
 window.deleteCurrentTask = deleteCurrentTask;
+window.unassignCurrentTask = unassignCurrentTask;
 
 /**
  * Add input task to combiner
@@ -1000,14 +1135,9 @@ async function loadAvailableAgents() {
         const response = await fetch('/api/agents');
         const data = await response.json();
 
-        // Get current workspace agents
-        const currentAgents = window.agentCanvas ? window.agentCanvas.agents.map(a => a.name) : [];
-
-        // Filter out already added agents
-        const availableAgents = (data.agents || []).filter(agent => !currentAgents.includes(agent.name));
-
+        // Show all available agents (allow adding same agent multiple times for multiple instances)
         select.innerHTML = '<option value="">Select agent to add...</option>' +
-            availableAgents.map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
+            (data.agents || []).map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
     } catch (error) {
         console.error('Failed to load agents:', error);
     }
@@ -1201,7 +1331,7 @@ async function createTask() {
  * Show agent details panel
  */
 async function showAgentDetails(agent) {
-    console.log('[SIDEBAR] showAgentDetails (async) called for:', agent.name);
+  console.log('[SIDEBAR] showAgentDetails (async) called for:', agent.name);
 
     // Hide task details if showing
     hideTaskDetails();
@@ -1221,73 +1351,120 @@ async function showAgentDetails(agent) {
     const statusBadge = agent.status === 'active' ? 'badge-success' :
                        agent.status === 'busy' ? 'badge-warning' : 'badge-secondary';
 
-    // Show loading state
-    content.innerHTML = `
-        <div class="text-center py-3">
-            <div class="spinner-border spinner-border-sm text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+  // Show loading state
+  content.innerHTML = `
+    <div class="text-center py-3">
+      <div class="spinner-border spinner-border-sm text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
             </div>
             <p class="mt-2 small" style="color: var(--text-muted);">Loading agent details...</p>
-        </div>
-    `;
+    </div>
+  `;
 
-    try {
-        // Fetch full agent details from settings file
-        const response = await fetch(`/agents/${agent.name}/agent_settings.json`);
-        let agentSettings = null;
-        if (response.ok) {
-            agentSettings = await response.json();
-        }
+  // Defaults to keep UI responsive even if fetch fails
+  let agentSettings = null;
+  let enabledPlugins = [];
+  let agentType = 'tool-calling';
+  let model = 'N/A';
+  let temperature = 1.0;
+  const lastResult = agent.lastResult || '';
 
-        // Fetch enabled plugins
-        let enabledPlugins = [];
-        if (agentSettings && agentSettings.Plugins) {
-            enabledPlugins = Object.keys(agentSettings.Plugins);
-        }
-
-        const agentType = agentSettings?.type || 'tool-calling';
-        const model = agentSettings?.Settings?.model || 'N/A';
-        const temperature = agentSettings?.Settings?.temperature || 1.0;
-
-        content.innerHTML = `
-            <div class="mb-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <strong style="color: var(--text-primary); font-size: 1rem;">${escapeHtml(agent.name)}</strong>
-                    <span class="modern-badge ${statusBadge}">${agent.status}</span>
-                </div>
-                <div class="small mb-2" style="color: var(--text-secondary); font-style: italic;">
-                    Color: <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: ${agent.color}; vertical-align: middle; border: 1px solid rgba(0,0,0,0.2);"></span>
-                </div>
-            </div>
-
-            <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
-                <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Agent Configuration</h6>
-                <div class="small" style="color: var(--text-secondary);">
-                    <div class="mb-1"><strong>Type:</strong> ${escapeHtml(agentType)}</div>
-                    <div class="mb-1"><strong>Model:</strong> ${escapeHtml(model)}</div>
-                    <div class="mb-1"><strong>Temperature:</strong> ${temperature}</div>
-                </div>
-            </div>
-
-            ${enabledPlugins.length > 0 ? `
-                <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
-                    <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Enabled Plugins (${enabledPlugins.length})</h6>
-                    <div class="small" style="color: var(--text-secondary);">
-                        ${enabledPlugins.map(plugin => `
-                            <div class="mb-1 p-1" style="background: rgba(255,255,255,0.05); border-radius: 3px;">
-                                ${escapeHtml(plugin)}
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            ` : ''}
-        `;
-    } catch (error) {
-        console.error('Failed to load agent details:', error);
-        content.innerHTML = `
-            <div class="alert alert-danger small">Failed to load agent details</div>
-        `;
+  try {
+    // Fetch full agent details from settings file
+    const response = await fetch(`/agents/${encodeURIComponent(agent.name)}/agent_settings.json`);
+    if (response.ok) {
+      agentSettings = await response.json();
     }
+
+    // Fetch enabled plugins
+    if (agentSettings && agentSettings.Plugins) {
+      enabledPlugins = Object.keys(agentSettings.Plugins);
+    }
+
+    agentType = agentSettings?.type || 'tool-calling';
+    model = agentSettings?.Settings?.model || 'N/A';
+    temperature = agentSettings?.Settings?.temperature || 1.0;
+  } catch (error) {
+    console.error('Failed to load agent details:', error);
+  }
+
+  // Always render content (even if fetch failed)
+  content.innerHTML = `
+    <div class="mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong style="color: var(--text-primary); font-size: 1rem;">${escapeHtml(agent.name)}</strong>
+        <span class="modern-badge ${statusBadge}">${agent.status}</span>
+      </div>
+      <div class="small mb-2" style="color: var(--text-secondary); font-style: italic;">
+        Color: <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: ${agent.color}; vertical-align: middle; border: 1px solid rgba(0,0,0,0.2);"></span>
+      </div>
+      ${agent.nodeId ? `
+        <div class="small mb-1" style="color: var(--text-secondary);">
+          Node ID: <span style="font-family: monospace;">${escapeHtml(agent.nodeId)}</span>
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin: 0;">Agent Configuration</h6>
+        <button class="modern-btn modern-btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="editAgentSettings('${escapeHtml(agent.name)}', '${escapeHtml(agentType)}', '${escapeHtml(model)}', ${temperature})">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+          </svg>
+          Edit
+        </button>
+      </div>
+      <div class="small" style="color: var(--text-secondary);" id="agent-config-display">
+        <div class="mb-1"><strong>Type:</strong> ${escapeHtml(agentType)}</div>
+        <div class="mb-1"><strong>Model:</strong> ${escapeHtml(model)}</div>
+        <div class="mb-1"><strong>Temperature:</strong> ${temperature}</div>
+      </div>
+      <div id="agent-config-edit" style="display: none;">
+        <div class="mb-2">
+          <label class="form-label small" style="color: var(--text-primary); margin-bottom: 0.25rem;">Type:</label>
+          <select class="form-select form-select-sm" id="edit-agent-type">
+            <option value="tool-calling" ${agentType === 'tool-calling' ? 'selected' : ''}>Tool-Calling</option>
+            <option value="conversational" ${agentType === 'conversational' ? 'selected' : ''}>Conversational</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small" style="color: var(--text-primary); margin-bottom: 0.25rem;">Model:</label>
+          <input type="text" class="form-control form-control-sm" id="edit-agent-model" value="${escapeHtml(model)}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small" style="color: var(--text-primary); margin-bottom: 0.25rem;">Temperature (0-2):</label>
+          <input type="number" class="form-control form-control-sm" id="edit-agent-temperature" value="${temperature}" min="0" max="2" step="0.1">
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="modern-btn modern-btn-primary" style="padding: 4px 12px; font-size: 0.75rem; flex: 1;" onclick="saveAgentSettings('${escapeHtml(agent.name)}')">Save</button>
+          <button class="modern-btn modern-btn-secondary" style="padding: 4px 12px; font-size: 0.75rem; flex: 1;" onclick="cancelEditAgentSettings()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    ${lastResult ? `
+      <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Last Result</h6>
+        <div class="p-2" style="background: #0b1525; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto;">
+          ${escapeHtml(lastResult.toString())}
+        </div>
+      </div>
+    ` : ''}
+
+    ${enabledPlugins.length > 0 ? `
+      <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Enabled Plugins (${enabledPlugins.length})</h6>
+        <div class="small" style="color: var(--text-secondary);">
+          ${enabledPlugins.map(plugin => `
+            <div class="mb-1 p-1" style="background: rgba(255,255,255,0.05); border-radius: 3px;">
+              ${escapeHtml(plugin)}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
 }
 
 
@@ -1518,6 +1695,107 @@ function resetCanvasView() {
 window.viewWorkspace = viewWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
 window.switchView = switchView;
+/**
+ * Edit agent settings
+ */
+function editAgentSettings(agentName, currentType, currentModel, currentTemp) {
+    console.log('Editing agent settings:', agentName);
+    const displayDiv = document.getElementById('agent-config-display');
+    const editDiv = document.getElementById('agent-config-edit');
+
+    if (displayDiv && editDiv) {
+        displayDiv.style.display = 'none';
+        editDiv.style.display = 'block';
+    }
+}
+
+/**
+ * Cancel editing agent settings
+ */
+function cancelEditAgentSettings() {
+    const displayDiv = document.getElementById('agent-config-display');
+    const editDiv = document.getElementById('agent-config-edit');
+
+    if (displayDiv && editDiv) {
+        displayDiv.style.display = 'block';
+        editDiv.style.display = 'none';
+    }
+}
+
+/**
+ * Save agent settings
+ */
+async function saveAgentSettings(agentName) {
+    const typeInput = document.getElementById('edit-agent-type');
+    const modelInput = document.getElementById('edit-agent-model');
+    const tempInput = document.getElementById('edit-agent-temperature');
+
+    if (!typeInput || !modelInput || !tempInput) {
+        alert('Error: Could not find input fields');
+        return;
+    }
+
+    const newType = typeInput.value;
+    const newModel = modelInput.value.trim();
+    const newTemp = parseFloat(tempInput.value);
+
+    // Validate inputs
+    if (!newModel) {
+        alert('Model cannot be empty');
+        return;
+    }
+
+    if (isNaN(newTemp) || newTemp < 0 || newTemp > 2) {
+        alert('Temperature must be between 0 and 2');
+        return;
+    }
+
+    try {
+        // Update agent via API
+        const response = await fetch('/api/agents', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: agentName,
+                type: newType,
+                settings: {
+                    model: newModel,
+                    temperature: newTemp
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error);
+        }
+
+        // Success - update the display
+        const displayDiv = document.getElementById('agent-config-display');
+        if (displayDiv) {
+            displayDiv.innerHTML = `
+                <div class="mb-1"><strong>Type:</strong> ${escapeHtml(newType)}</div>
+                <div class="mb-1"><strong>Model:</strong> ${escapeHtml(newModel)}</div>
+                <div class="mb-1"><strong>Temperature:</strong> ${newTemp}</div>
+            `;
+        }
+
+        // Hide edit form, show display
+        cancelEditAgentSettings();
+
+        // Show success notification if canvas is available
+        if (window.agentCanvas && window.agentCanvas.showNotification) {
+            window.agentCanvas.showNotification(`✅ Updated ${agentName} settings`, 'success');
+        } else {
+            alert(`Successfully updated ${agentName} settings`);
+        }
+
+    } catch (error) {
+        console.error('Failed to update agent settings:', error);
+        alert(`Failed to update agent: ${error.message}`);
+    }
+}
+
 window.loadCanvasStudio = loadCanvasStudio;
 window.executeMission = executeMission;
 window.addAgentToCanvas = addAgentToCanvas;
@@ -1530,3 +1808,6 @@ window.addCombinerNode = addCombinerNode;
 window.toggleCanvasSidebar = toggleCanvasSidebar;
 window.zoomToFitCanvas = zoomToFitCanvas;
 window.resetCanvasView = resetCanvasView;
+window.editAgentSettings = editAgentSettings;
+window.cancelEditAgentSettings = cancelEditAgentSettings;
+window.saveAgentSettings = saveAgentSettings;

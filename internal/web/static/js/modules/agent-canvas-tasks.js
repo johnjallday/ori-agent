@@ -36,6 +36,8 @@ export async function executeTask(canvas, task) {
 }
 
 export async function rerunTask(canvas, task) {
+  console.log('🔄 RERUN button clicked for task:', task.id, 'status:', task.status);
+
   if (!task || !task.id) {
     console.error('Invalid task:', task);
     return;
@@ -43,17 +45,21 @@ export async function rerunTask(canvas, task) {
   const confirmMsg = task.status === 'failed'
     ? `Rerun this failed task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again.`
     : `Rerun this task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again with the same parameters.`;
-  if (!confirm(confirmMsg)) return;
 
-  await apiPut(`/api/orchestration/tasks/${task.id}`, {
-    status: 'pending',
-    result: null
-  });
+  console.log('🔄 Showing confirm dialog...');
+  if (!confirm(confirmMsg)) {
+    console.log('🔄 User cancelled rerun');
+    return;
+  }
+  console.log('🔄 User confirmed rerun');
 
+  // Update local task state
   task.status = 'pending';
   task.result = null;
   canvas.draw();
 
+  // Execute the task (backend will handle status reset)
+  console.log('🔄 Calling execute API...');
   const result = await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
   console.log('✅ Task rerun started:', result);
   task.status = 'in_progress';
@@ -121,5 +127,40 @@ export async function assignTaskToCombiner(canvas, combiner) {
     canvas.assignmentMode = false;
     canvas.assignmentSourceTask = null;
     canvas.canvas.style.cursor = 'grab';
+  }
+}
+
+/**
+ * Link a source task's result to a target task by adding it to input_task_ids.
+ */
+export async function linkTaskResult(canvas, sourceTaskId, targetTaskId) {
+  if (!sourceTaskId || !targetTaskId || sourceTaskId === targetTaskId) return;
+
+  const targetTask = canvas.tasks.find(t => t.id === targetTaskId);
+  if (!targetTask) {
+    canvas.showNotification('Target task not found', 'error');
+    return;
+  }
+
+  const currentInputs = Array.isArray(targetTask.input_task_ids) ? [...targetTask.input_task_ids] : [];
+  if (currentInputs.includes(sourceTaskId)) {
+    canvas.showNotification('This task is already connected as an input', 'info');
+    return;
+  }
+
+  const newInputs = [...currentInputs, sourceTaskId];
+
+  try {
+    await apiPut('/api/orchestration/tasks', {
+      task_id: targetTaskId,
+      input_task_ids: newInputs
+    });
+
+    targetTask.input_task_ids = newInputs;
+    canvas.draw();
+    canvas.showNotification('Linked task result to target task', 'success');
+  } catch (error) {
+    console.error('Failed to link task result:', error);
+    canvas.showNotification('Failed to link tasks: ' + error.message, 'error');
   }
 }

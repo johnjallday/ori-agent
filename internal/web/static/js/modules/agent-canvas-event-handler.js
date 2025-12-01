@@ -38,15 +38,24 @@ export class AgentCanvasEventHandler {
             }
           });
 
-          const tasks = data.tasks.map(task => {
-            const existing = existingPositions[task.id];
-            return {
-              ...task,
-              x: existing ? existing.x : (task.x ?? null),
-              y: existing ? existing.y : (task.y ?? null)
-            };
-          });
+        const tasks = data.tasks.map(task => {
+          const existing = existingPositions[task.id];
+          const mapped = {
+            ...task,
+            x: existing ? existing.x : (task.x ?? null),
+            y: existing ? existing.y : (task.y ?? null)
+          };
+          // Preserve assigned node hint if present on local task
+          const local = this.state.tasks.find(t => t.id === task.id);
+          if (local && local.assigned_node_id) {
+            mapped.assigned_node_id = local.assigned_node_id;
+          }
+          this.ensureTaskPosition(mapped);
+          return mapped;
+        });
           this.state.setTasks(tasks);
+          // Seed agent lastResult from any completed tasks with results
+          this.updateAgentResultsFromTasks(tasks);
         }
         this.parent.draw();
       },
@@ -57,6 +66,11 @@ export class AgentCanvasEventHandler {
         }
         if (data.agent_stats) {
           this.updateAgentStats(data.agent_stats);
+        }
+        // Keep agent results in sync if tasks array arrives with updates
+        if (data.tasks) {
+          data.tasks.forEach(t => this.ensureTaskPosition(t));
+          this.updateAgentResultsFromTasks(data.tasks);
         }
         this.parent.draw();
       },
@@ -131,13 +145,7 @@ export class AgentCanvasEventHandler {
           task.result = eventData.data.result;
 
           // Update the agent's lastResult
-          if (task.to) {
-            const agent = this.state.agents.find(a => a.name === task.to);
-            if (agent) {
-              agent.lastResult = eventData.data.result;
-              console.log(`✅ Updated lastResult for agent ${agent.name}:`, eventData.data.result);
-            }
-          }
+          this.updateAgentResultsFromTasks([task]);
         }
       } else if (eventData.type === 'task.failed') {
         task.status = 'failed';
@@ -196,6 +204,7 @@ export class AgentCanvasEventHandler {
       y: taskData.y ?? null,
       status: taskData.status || 'pending'
     };
+    this.ensureTaskPosition(task);
     this.state.addTask(task);
     this.parent.draw();
   }
@@ -220,6 +229,95 @@ export class AgentCanvasEventHandler {
       agent.status = status;
       this.parent.draw();
     }
+  }
+
+  /**
+   * Update agents' lastResult fields based on completed task results.
+   * Uses latest timestamp (completed_at > updated_at > created_at) per agent.
+   */
+  updateAgentResultsFromTasks(tasks = this.state.tasks) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return;
+
+    const latestByAgent = {};
+    tasks.forEach(t => {
+      if (!t || !t.to || t.to === 'unassigned' || !t.result) return;
+      const agent = this.resolveAgentForTask(t);
+      if (!agent) return;
+      const agentKey = agent.nodeId || agent.name;
+      const completed = t.completed_at ? new Date(t.completed_at).getTime() : 0;
+      const updated = t.updated_at ? new Date(t.updated_at).getTime() : 0;
+      const created = t.created_at ? new Date(t.created_at).getTime() : 0;
+      const ts = Math.max(completed, updated, created);
+      if (!latestByAgent[agentKey] || ts > latestByAgent[agentKey].ts) {
+        latestByAgent[agentKey] = { ts, result: t.result };
+      }
+    });
+
+    Object.entries(latestByAgent).forEach(([agentKey, info]) => {
+      const agent = this.state.agents.find(a => (a.nodeId || a.name) === agentKey);
+      if (agent) {
+        agent.lastResult = info.result;
+      }
+    });
+  }
+
+  /**
+   * Resolve the specific agent instance for a task (prefers assigned_node_id, falls back to name).
+   */
+  resolveAgentForTask(task) {
+    if (!task || !task.to || task.to === 'unassigned') return null;
+    // Prefer explicit assignment to a specific node id
+    if (task.assigned_node_id) {
+      const matchByNode = this.state.agents.find(a =>
+        a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id);
+      if (matchByNode) return matchByNode;
+    }
+
+    // Fallback: pick the closest agent with matching name to the task position
+    const candidates = this.state.agents.filter(a => a.name === task.to);
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1 || task.x == null || task.y == null) return candidates[0];
+
+    let best = candidates[0];
+    let bestDist = Infinity;
+    candidates.forEach(a => {
+      const d = Math.hypot((a.x || 0) - task.x, (a.y || 0) - task.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = a;
+      }
+    });
+    return best;
+  }
+
+  /**
+   * Ensure a task has a sensible on-screen position near the current viewport.
+   */
+  ensureTaskPosition(task) {
+    if (!task) return;
+
+    const centerX = (this.parent.width / 2 - this.parent.offsetX) / this.parent.scale;
+    const centerY = (this.parent.height / 2 - this.parent.offsetY) / this.parent.scale;
+
+    // Define a generous viewport bounds to detect off-screen items
+    const halfW = (this.parent.width / this.parent.scale) / 2;
+    const halfH = (this.parent.height / this.parent.scale) / 2;
+    const left = centerX - halfW * 1.5;
+    const right = centerX + halfW * 1.5;
+    const top = centerY - halfH * 1.5;
+    const bottom = centerY + halfH * 1.5;
+
+    const needsPlacement =
+      task.x == null || task.y == null || task.x < left || task.x > right || task.y < top || task.y > bottom;
+
+    if (!needsPlacement) return;
+
+    // Spread new/off-screen tasks around the center to reduce overlap
+    const jitterX = (Math.random() - 0.5) * 120;
+    const jitterY = (Math.random() - 0.5) * 120;
+
+    task.x = centerX + jitterX;
+    task.y = centerY + jitterY;
   }
 
   /**

@@ -6,7 +6,7 @@ import {
   ensureCombinerTask as combinerEnsureTask,
   executeCombiner as combinerExecute
 } from './agent-canvas-combiners.js';
-import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTaskToCombiner as tasksAssignToCombiner } from './agent-canvas-tasks.js';
+import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTaskToCombiner as tasksAssignToCombiner, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 import { AgentCanvasRenderer } from './agent-canvas-renderer.js';
 import { AgentCanvasInteractionHandler } from './agent-canvas-interactions.js';
@@ -408,6 +408,9 @@ class AgentCanvas {
     // Draw task flows
     this.renderer.drawTaskFlows();
 
+    // Draw task input connections (task-to-task and task-to-merge)
+    this.renderer.drawResultConnections();
+
     // Draw particles
     // this.renderer.drawParticles();
 
@@ -643,7 +646,8 @@ class AgentCanvas {
     try {
       const result = await apiPut(`/api/orchestration/tasks`, {
         task_id: this.assignmentSourceTask.id,
-        to: agent.name
+        to: agent.name,
+        assigned_node_id: agent.nodeId || agent.name
       });
       console.log('✅ Task assigned:', result);
 
@@ -658,6 +662,7 @@ class AgentCanvas {
       const task = this.tasks.find(t => t.id === result.id);
       if (task) {
         task.to = agent.name;
+        task.assigned_node_id = agent.nodeId || agent.name; // track which instance was chosen
       }
 
       this.draw();
@@ -678,6 +683,10 @@ class AgentCanvas {
 
   async assignTaskToCombiner(combiner) {
     return tasksAssignToCombiner(this, combiner);
+  }
+
+  async linkTaskResult(sourceTaskId, targetTaskId) {
+    return tasksLinkTaskResult(this, sourceTaskId, targetTaskId);
   }
 
 

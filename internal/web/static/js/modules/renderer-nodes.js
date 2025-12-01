@@ -36,8 +36,33 @@ export class RendererNodes {
         return;
       }
 
-      const fromAgent = this.state.agents.find(a => a.name === task.from);
-      const toAgent = this.state.agents.find(a => a.name === task.to);
+      const fromCandidates = this.state.agents.filter(a => a.name === task.from);
+      const toCandidates = this.state.agents.filter(a => a.name === task.to);
+
+      const fromAgent = fromCandidates[0];
+
+      // Resolve target agent instance (prefer assigned_node_id, else closest)
+      let toAgent = null;
+      if (task.assigned_node_id && toCandidates.length) {
+        toAgent = toCandidates.find(a => a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id) || null;
+      }
+      // Only use proximity/fallback if no assigned_node_id was specified
+      if (!toAgent && !task.assigned_node_id && toCandidates.length) {
+        if (task.x != null && task.y != null) {
+          let best = null;
+          let bestDist = Infinity;
+          toCandidates.forEach(a => {
+            const d = Math.hypot((a.x || 0) - task.x, (a.y || 0) - task.y);
+            if (d < bestDist) {
+              bestDist = d;
+              best = a;
+            }
+          });
+          toAgent = best;
+        } else {
+          toAgent = toCandidates[0];
+        }
+      }
 
       // Handle unassigned tasks (to: "unassigned" or empty string)
       const isUnassigned = task.to === 'unassigned' || task.to === '' || !task.to;
@@ -50,18 +75,24 @@ export class RendererNodes {
 
       // Calculate default position if task doesn't have one
       if (task.x == null || task.y == null) {  // Use == to catch both null and undefined
+        // Visible center of current viewport in canvas coordinates
+        const viewCenterX = (this.parent.width / 2 - this.state.offsetX) / this.state.scale;
+        const viewCenterY = (this.parent.height / 2 - this.state.offsetY) / this.state.scale;
+
         if (isUnassigned) {
-          // Position unassigned tasks in the top-left area
-          const offsetX = 100 + (index % 3) * 180;
-          const offsetY = 100 + (Math.floor(index / 3) % 3) * 80;
-          task.x = offsetX;
-          task.y = offsetY;
+            // Position unassigned tasks near the current viewport center
+          const offsetX = (index % 2 === 0 ? -80 : 80);
+          const offsetY = (Math.floor(index / 2) % 3 - 1) * 60;
+          task.x = viewCenterX + offsetX;
+          task.y = viewCenterY + offsetY;
         } else if (isSystemTask) {
-          // Position near the target agent
+          // Position near the target agent, but if off-screen, fall back toward view center
           const offsetX = 100 + (index % 3) * 50;
           const offsetY = -100 + (Math.floor(index / 3) % 3) * 70;
-          task.x = toAgent.x + offsetX;
-          task.y = toAgent.y + offsetY;
+          const candidateX = toAgent ? toAgent.x + offsetX : viewCenterX;
+          const candidateY = toAgent ? toAgent.y + offsetY : viewCenterY;
+          task.x = candidateX;
+          task.y = candidateY;
         } else {
           // Position task card between agents, but higher up to avoid overlap
           const midX = (fromAgent.x + toAgent.x) / 2;
@@ -120,8 +151,10 @@ export class RendererNodes {
       const cardX = task.x - cardWidth / 2;
       const cardY = task.y - cardHeight / 2;
 
-      // Store card bounds for hit testing (use 'bounds' for consistency with combiner tasks)
-      task.bounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+      // Store card bounds for hit testing and port position calculations
+      task.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+      // Also keep 'bounds' for backward compatibility
+      task.bounds = task.cardBounds;
 
       // Card background
       this.ctx.save();
@@ -146,15 +179,28 @@ export class RendererNodes {
       this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
       this.ctx.stroke();
 
-      // Task description (use built-in maxWidth for reliable clipping)
+      // Task input port (top center) and output port (bottom center) for result wiring
+      this.primitives.drawPort(task.x, cardY - 8, 'input', borderColor, 'up');
+      this.primitives.drawPort(task.x, cardY + cardHeight + 8, 'output', borderColor, 'down');
+
+      // Task description - manually truncate with ellipsis to prevent overflow
       this.ctx.fillStyle = '#212529';
       this.ctx.font = 'bold 11px system-ui';
       const maxTextWidth = cardWidth - 32; // Reserve space for padding and delete button
-      const description = task.description || 'Task';
+      let description = task.description || 'Task';
 
-      // Use canvas maxWidth parameter for automatic text truncation
+      // Manually truncate text if it exceeds maxWidth
+      let textWidth = this.ctx.measureText(description).width;
+      if (textWidth > maxTextWidth) {
+        while (textWidth > maxTextWidth && description.length > 3) {
+          description = description.substring(0, description.length - 1);
+          textWidth = this.ctx.measureText(description + '...').width;
+        }
+        description = description + '...';
+      }
+
       this.ctx.save();
-      this.ctx.fillText(description, cardX + 8, cardY + 18, maxTextWidth);
+      this.ctx.fillText(description, cardX + 8, cardY + 18);
       this.ctx.restore();
 
       // Task status - show connected node if unassigned, otherwise show from → to
@@ -180,14 +226,50 @@ export class RendererNodes {
           statusText = '⚠️ UNASSIGNED';
         }
       } else {
-        statusText = `${task.from} → ${task.to}`;
+        // Find the assigned agent node to show instance number
+        let toDisplay = task.to;
+        if (task.to && this.state.agents) {
+          const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+          let agentNode = null;
+
+          // First, try to find by nodeId
+          if (assignedNodeId) {
+            agentNode = this.state.agents.find(a => a.nodeId === assignedNodeId);
+          }
+
+          // If no nodeId or not found, try to match by agent name
+          if (!agentNode) {
+            const matchingAgents = this.state.agents.filter(a => a.name === task.to);
+            if (matchingAgents.length > 0) {
+              // Use the first matching agent (sorted by instance number)
+              matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
+              agentNode = matchingAgents[0];
+            }
+          }
+
+          // If we found an agent node with instance number, use it
+          if (agentNode && agentNode.instanceNumber) {
+            toDisplay = `${agentNode.name} #${agentNode.instanceNumber}`;
+          }
+        }
+
+        statusText = `${task.from} → ${toDisplay}`;
       }
 
       const maxStatusWidth = cardWidth - 16;
 
-      // Use canvas maxWidth parameter for automatic text truncation
+      // Manually truncate status text if it exceeds maxWidth
+      let statusTextWidth = this.ctx.measureText(statusText).width;
+      if (statusTextWidth > maxStatusWidth) {
+        while (statusTextWidth > maxStatusWidth && statusText.length > 3) {
+          statusText = statusText.substring(0, statusText.length - 1);
+          statusTextWidth = this.ctx.measureText(statusText + '...').width;
+        }
+        statusText = statusText + '...';
+      }
+
       this.ctx.save();
-      this.ctx.fillText(statusText, cardX + 8, cardY + 34, maxStatusWidth);
+      this.ctx.fillText(statusText, cardX + 8, cardY + 34);
       this.ctx.restore();
 
       // Status badge (left aligned)
@@ -466,10 +548,11 @@ export class RendererNodes {
       }
       this.ctx.fillStyle = statusColor;
       this.ctx.beginPath();
-      this.ctx.arc(agent.x + halfWidth - 10, agent.y - halfHeight + 10, 6, 0, Math.PI * 2);
+      // Position on top-left to leave room for delete button on the right
+      this.ctx.arc(agent.x - halfWidth + 12, agent.y - halfHeight + 12, 6, 0, Math.PI * 2);
       this.ctx.fill();
 
-      // Draw agent name
+      // Draw agent name with instance badge
       this.ctx.fillStyle = '#ffffff';
       this.ctx.font = 'bold 14px system-ui';
       this.ctx.textAlign = 'center';
@@ -477,7 +560,10 @@ export class RendererNodes {
 
       // If there's a result, move name up to make room
       const nameY = agent.lastResult ? agent.y - 15 : agent.y;
-      this.ctx.fillText(agent.name, agent.x, nameY);
+
+      // Display name with instance number badge (e.g., "default #1")
+      const displayName = agent.instanceNumber ? `${agent.name} #${agent.instanceNumber}` : agent.name;
+      this.ctx.fillText(displayName, agent.x, nameY);
 
       // Draw last result (if available) - PROMINENT DISPLAY
       if (agent.lastResult) {
@@ -574,9 +660,9 @@ export class RendererNodes {
         }
       }
 
-      // Draw delete button (X) in top-left corner
+      // Draw delete button (X) in top-right corner to match task nodes
       const deleteSize = 22;
-      const deleteX = agent.x - halfWidth + 5;
+      const deleteX = agent.x + halfWidth - deleteSize - 5;
       const deleteY = agent.y - halfHeight + 5;
 
       // Delete button background (red circle)

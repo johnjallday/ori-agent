@@ -505,7 +505,7 @@ export class AgentCanvasInteractionHandler {
           if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
               y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
             resolvedPort = {
-              nodeId: agent.name,
+              nodeId: agent.nodeId || agent.name,
               nodeType: 'agent',
               portId: 'input',
               type: 'input'
@@ -545,7 +545,7 @@ export class AgentCanvasInteractionHandler {
           const dist = Math.hypot(portX - x, portY - y);
           if (dist < closestDist) {
             closestDist = dist;
-            closest = { nodeId: agent.name, nodeType: 'agent', portId: 'input', type: 'input', x: portX, y: portY };
+            closest = { nodeId: agent.nodeId || agent.name, nodeType: 'agent', portId: 'input', type: 'input', x: portX, y: portY };
           }
         });
         // Accept if within 80px to make drops forgiving
@@ -556,12 +556,19 @@ export class AgentCanvasInteractionHandler {
 
       if (resolvedPort && resolvedPort.nodeId !== this.state.connectionDragStart.nodeId) {
         // Create connection
-        this.parent.createConnection(
+        const connection = this.parent.createConnection(
           this.state.connectionDragStart.nodeId,
           this.state.connectionDragStart.portId,
           resolvedPort.nodeId,
           resolvedPort.portId
         );
+        // If connecting task output to task input, persist as input_task_ids link
+        if (connection &&
+            this.state.connectionDragStart.nodeType === 'task' &&
+            resolvedPort.nodeType === 'task' &&
+            resolvedPort.type === 'input') {
+          this.parent.linkTaskResult(this.state.connectionDragStart.nodeId, resolvedPort.nodeId);
+        }
         this.parent.showNotification('Connection created', 'success');
       }
 
@@ -666,15 +673,8 @@ export class AgentCanvasInteractionHandler {
    * @param {MouseEvent} e - The mouse event
    */
   onClick(e) {
-    console.log('[CANVAS CLICK] onClick called', {
-      isDragging: this.state.isDragging,
-      isDraggingAgent: this.state.isDraggingAgent,
-      isDraggingTask: this.state.isDraggingTask
-    });
-
     // Ignore clicks during drag operations
     if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask) {
-      console.log('[CANVAS CLICK] Ignoring click - drag operation in progress');
       return;
     }
 
@@ -944,20 +944,8 @@ export class AgentCanvasInteractionHandler {
     }
 
     // Convert screen coordinates to canvas coordinates
-    console.log('[CANVAS CLICK] Converting coords:', {
-      clientX: e.clientX,
-      clientY: e.clientY,
-      'rect.left': rect.left,
-      'rect.top': rect.top,
-      offsetX: this.state.offsetX,
-      offsetY: this.state.offsetY,
-      scale: this.state.scale
-    });
-
     const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
     const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
-
-    console.log('[CANVAS CLICK] Converted canvas coords:', { x, y });
 
     // Check if click is on any task first (tasks are on top)
     for (let i = this.state.tasks.length - 1; i >= 0; i--) {
@@ -1007,6 +995,7 @@ export class AgentCanvasInteractionHandler {
           if (x >= btn.x && x <= btn.x + btn.width &&
               y >= btn.y && y <= btn.y + btn.height) {
             // Rerun button clicked
+            console.log('🔄 RERUN button click detected for task:', task.id);
             this.parent.rerunTask(task);
             return;
           }
@@ -1041,19 +1030,13 @@ export class AgentCanvasInteractionHandler {
           if (this.state.assignmentMode && this.state.assignmentSourceTask &&
               this.state.assignmentSourceTask.id !== task.id) {
             // In assignment mode - assign source task as input to this task
-            console.log('[CANVAS CLICK] Task clicked in assignment mode!');
-            console.log('[CANVAS CLICK] Source task:', this.state.assignmentSourceTask.id);
-            console.log('[CANVAS CLICK] Target task:', task.id);
-            console.log('[CANVAS CLICK] Is combiner?:', isCombinerTask);
             this.parent.assignTaskToCombiner(task);
             return;
           }
 
           // Task clicked - show details in sidebar
-          console.log('[CANVAS CLICK] Task clicked:', task.description, 'isCombiner:', isCombinerTask, 'assignmentMode:', this.state.assignmentMode);
           if (window.showTaskDetails) {
             window.showTaskDetails(task);
-            console.log('[CANVAS CLICK] showTaskDetails called');
           } else {
             console.error('[CANVAS CLICK] window.showTaskDetails is not available!');
           }
@@ -1063,9 +1046,6 @@ export class AgentCanvasInteractionHandler {
     }
 
     // Check if click is on any agent
-    console.log('[CANVAS CLICK] Checking agents:', this.state.agents.length, 'agents');
-    console.log('[CANVAS CLICK] Click coords (canvas):', { x, y });
-
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;
@@ -1078,18 +1058,10 @@ export class AgentCanvasInteractionHandler {
       const inBounds = x >= bounds.left && x <= bounds.right &&
           y >= bounds.top && y <= bounds.bottom;
 
-      console.log(`[CANVAS CLICK] Agent ${agent.name}:`, {
-        position: { x: agent.x, y: agent.y },
-        bounds,
-        inBounds
-      });
-
       if (inBounds) {
         // Agent clicked
-        console.log('[CANVAS CLICK] Agent clicked:', agent.name, 'assignmentMode:', this.state.assignmentMode, 'combinerAssignMode:', this.state.combinerAssignMode);
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           // In assignment mode - assign task to agent
-          console.log('[CANVAS CLICK] Assigning task to agent:', agent.name);
           this.parent.assignTaskToAgent(agent);
           return;
         } else if (this.state.combinerAssignMode && this.state.combinerAssignmentSource) {
@@ -1104,7 +1076,6 @@ export class AgentCanvasInteractionHandler {
           return;
         } else {
           // Show agent details in sidebar
-          console.log('[CANVAS CLICK] Showing agent details in sidebar for:', agent.name);
           if (window.showAgentDetails) {
             window.showAgentDetails(agent);
           }

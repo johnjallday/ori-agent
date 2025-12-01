@@ -201,6 +201,9 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	// Get workspace progress
 	workspaceProgress := studio.GetWorkspaceProgress()
 
+	// Ensure combiner nodes referenced in connections exist in the layout
+	layout := ensureCombinerNodesExist(studio.Layout)
+
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -214,12 +217,67 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"tasks":              studio.Tasks,
 		"messages":           studio.Messages,
 		"shared_data":        studio.SharedData,
-		"layout":             studio.Layout,
+		"layout":             layout,
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
 	}); err != nil {
 		log.Printf("Failed to encode response: %v", err)
 	}
+}
+
+// ensureCombinerNodesExist checks if all combiner nodes referenced in workflow connections
+// exist in the layout, and creates placeholder nodes if they're missing
+func ensureCombinerNodesExist(layout *CanvasLayout) *CanvasLayout {
+	if layout == nil {
+		return nil
+	}
+
+	// Build a set of existing combiner node IDs
+	existingCombinerIDs := make(map[string]bool)
+	for _, node := range layout.CombinerNodes {
+		existingCombinerIDs[node.ID] = true
+	}
+
+	// Check all workflow connections for missing combiner nodes
+	missingCombinerIDs := make(map[string]bool)
+	for _, conn := range layout.WorkflowConnections {
+		// Check if "from" is a combiner node that doesn't exist
+		if strings.HasPrefix(conn.From, "combiner-") && !existingCombinerIDs[conn.From] {
+			missingCombinerIDs[conn.From] = true
+		}
+		// Check if "to" is a combiner node that doesn't exist
+		if strings.HasPrefix(conn.To, "combiner-") && !existingCombinerIDs[conn.To] {
+			missingCombinerIDs[conn.To] = true
+		}
+	}
+
+	// Create placeholder combiner nodes for missing IDs
+	if len(missingCombinerIDs) > 0 {
+		log.Printf("Found %d missing combiner nodes in layout, creating placeholders", len(missingCombinerIDs))
+
+		for combinerID := range missingCombinerIDs {
+			// Create a placeholder combiner node with default properties
+			placeholder := CombinerNodeLayout{
+				ID:           combinerID,
+				Type:         "combiner",
+				CombinerType: "merge", // default type
+				Name:         "Merge",
+				Icon:         "🔀",
+				Color:        "#8b5cf6",
+				X:            300, // default position
+				Y:            200,
+				Width:        120,
+				Height:       80,
+				InputPorts:   []CombinerPort{{ID: "input-0"}, {ID: "input-1"}},
+				OutputPort:   CombinerPort{ID: "output"},
+			}
+
+			layout.CombinerNodes = append(layout.CombinerNodes, placeholder)
+			log.Printf("Created placeholder combiner node: %s", combinerID)
+		}
+	}
+
+	return layout
 }
 
 // ListStudios handles GET /api/studios
@@ -364,14 +422,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if agent already exists
-	for _, agent := range studio.Agents {
-		if agent == req.AgentName {
-			http.Error(w, "Agent already in workspace", http.StatusConflict)
-			return
-		}
-	}
-
+	// Allow multiple instances of the same agent (removed duplicate check)
 	// Add agent to workspace
 	studio.Agents = append(studio.Agents, req.AgentName)
 
@@ -572,10 +623,11 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body
 	var req struct {
-		Description  string   `json:"description"`
-		To           string   `json:"to"`
-		From         string   `json:"from"`
-		InputTaskIDs []string `json:"input_task_ids"`
+		Description    string   `json:"description"`
+		To             string   `json:"to"`
+		From           string   `json:"from"`
+		InputTaskIDs   []string `json:"input_task_ids"`
+		AssignedNodeID string   `json:"assigned_node_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
@@ -600,6 +652,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			// Allow updating to/from even if empty (for unassigning)
 			studio.Tasks[i].To = req.To
 			studio.Tasks[i].From = req.From
+			studio.Tasks[i].AssignedNodeID = req.AssignedNodeID
 			// Update input task IDs if provided
 			if req.InputTaskIDs != nil {
 				studio.Tasks[i].InputTaskIDs = req.InputTaskIDs
