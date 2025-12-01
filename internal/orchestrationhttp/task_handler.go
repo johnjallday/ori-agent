@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1150,7 +1151,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		// Capitalize first letter manually (strings.Title is deprecated)
 		capitalizedAction := action
 		if len(action) > 0 {
-			capitalizedAction = string(action[0]-32) + action[1:]
+			capitalizedAction = strings.ToUpper(action[:1]) + action[1:]
 		}
 		log.Printf("✅ %s scheduled task %s", capitalizedAction, id)
 
@@ -1248,12 +1249,8 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 		return &next
 
 	case agentstudio.ScheduleDaily:
-		if config.TimeOfDay == "" {
-			return nil
-		}
-
-		var hour, minute int
-		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
+		hour, minute, err := parseScheduleTime(config.TimeOfDay)
+		if err != nil {
 			return nil
 		}
 
@@ -1267,12 +1264,12 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 		return &next
 
 	case agentstudio.ScheduleWeekly:
-		if config.TimeOfDay == "" {
+		if config.DayOfWeek < 0 || config.DayOfWeek > 6 {
 			return nil
 		}
 
-		var hour, minute int
-		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
+		hour, minute, err := parseScheduleTime(config.TimeOfDay)
+		if err != nil {
 			return nil
 		}
 
@@ -1308,11 +1305,43 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 	}
 }
 
+// parseScheduleTime converts "HH:MM" strings into hour/minute integers and rejects invalid ranges.
+func parseScheduleTime(timeOfDay string) (int, int, error) {
+	if timeOfDay == "" {
+		return 0, 0, fmt.Errorf("time of day is empty")
+	}
+
+	parts := strings.Split(timeOfDay, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("time of day must be in HH:MM format")
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid hour value")
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid minute value")
+	}
+
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, fmt.Errorf("time of day out of range")
+	}
+
+	return hour, minute, nil
+}
+
 // substituteInputPlaceholders replaces {inputN}, {previous}, {result} with actual values
 // from input task results. This enables task description templating for chaining operations.
 // Example: "{input1} * 2" with inputs ["4"] becomes "4 * 2"
 func substituteInputPlaceholders(description string, inputs []string) string {
-	if len(inputs) == 0 {
+	if description == "" || len(inputs) == 0 {
+		return description
+	}
+
+	if !strings.Contains(description, "{") {
 		return description
 	}
 
