@@ -630,31 +630,50 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		log.Printf("▶️  Manually executing task %s for agent %s: %s", foundTask.ID, foundTask.To, foundTask.Description)
 
-		// Inject input task results into task context if InputTaskIDs are specified
+		// Gather input task results and substitute placeholders in description
+		var inputResults []string
 		if len(foundTask.InputTaskIDs) > 0 {
 			log.Printf("🔗 Task %s has %d input task IDs: %v", foundTask.ID, len(foundTask.InputTaskIDs), foundTask.InputTaskIDs)
+
+			// Get input context (includes results map)
 			enrichedContext := foundWorkspace.GetInputContext(foundTask)
 			foundTask.Context = enrichedContext
 
-			// Debug: Check what was added to context
-			if inputResults, ok := enrichedContext["input_task_results"]; ok {
-				resultsMap := inputResults.(map[string]string)
+			// Extract results for placeholder substitution (in order of InputTaskIDs)
+			if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
+				resultsMap := inputResultsMap.(map[string]string)
 				log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), foundTask.ID)
-				for taskID, result := range resultsMap {
-					preview := result
-					if len(preview) > 100 {
-						preview = preview[:100] + "..."
+
+				// Build ordered results array matching InputTaskIDs order
+				for _, inputTaskID := range foundTask.InputTaskIDs {
+					if result, exists := resultsMap[inputTaskID]; exists {
+						inputResults = append(inputResults, result)
+						preview := result
+						if len(preview) > 100 {
+							preview = preview[:100] + "..."
+						}
+						log.Printf("   - Task %s result: %s", inputTaskID, preview)
 					}
-					log.Printf("   - Task %s result: %s", taskID, preview)
 				}
 			} else {
 				log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", foundTask.ID)
+			}
+
+			// Substitute placeholders in task description
+			if len(inputResults) > 0 {
+				originalDesc := foundTask.Description
+				foundTask.Description = substituteInputPlaceholders(foundTask.Description, inputResults)
+				if originalDesc != foundTask.Description {
+					log.Printf("🔄 Substituted placeholders in description:")
+					log.Printf("   Original: %s", originalDesc)
+					log.Printf("   Processed: %s", foundTask.Description)
+				}
 			}
 		} else {
 			log.Printf("ℹ️  Task %s has no input task IDs", foundTask.ID)
 		}
 
-		// Execute the task
+		// Execute the task (with processed description if placeholders were substituted)
 		result, execErr := th.taskHandler.ExecuteTask(ctx, foundTask.To, *foundTask)
 
 		// Reload workspace (may have changed)
@@ -1287,4 +1306,27 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 	default:
 		return nil
 	}
+}
+
+// substituteInputPlaceholders replaces {inputN}, {previous}, {result} with actual values
+// from input task results. This enables task description templating for chaining operations.
+// Example: "{input1} * 2" with inputs ["4"] becomes "4 * 2"
+func substituteInputPlaceholders(description string, inputs []string) string {
+	if len(inputs) == 0 {
+		return description
+	}
+
+	result := description
+
+	// Replace numbered placeholders: {input1}, {input2}, etc.
+	for i, input := range inputs {
+		placeholder := fmt.Sprintf("{input%d}", i+1)
+		result = strings.ReplaceAll(result, placeholder, input)
+	}
+
+	// Replace shortcuts: {previous} and {result} (both map to first input)
+	result = strings.ReplaceAll(result, "{previous}", inputs[0])
+	result = strings.ReplaceAll(result, "{result}", inputs[0])
+
+	return result
 }
