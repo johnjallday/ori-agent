@@ -58,9 +58,10 @@ export class RendererConnections {
         }
 
         // Find the agent that executed the input task
+        // First try to match by nodeId, then fall back to id (for backward compatibility)
         const sourceAgent = this.state.agents.find(agent =>
-          agent.name === inputTask.to &&
-          agent.nodeId === inputTask.assigned_node_id
+          (agent.nodeId === inputTask.assigned_node_id || agent.id === inputTask.assigned_node_id) &&
+          agent.name === inputTask.to
         );
 
         if (!sourceAgent || !sourceAgent.x || !sourceAgent.y) {
