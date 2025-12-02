@@ -362,7 +362,6 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		WorkspaceID         string                                 `json:"workspace_id"`
 		TaskPositions       map[string]agentstudio.Position        `json:"task_positions"`
 		AgentPositions      map[string]agentstudio.Position        `json:"agent_positions"`
-		CombinerNodes       []agentstudio.CombinerNodeLayout       `json:"combiner_nodes"`
 		WorkflowConnections []agentstudio.WorkflowConnectionLayout `json:"workflow_connections"`
 		Scale               float64                                `json:"scale"`
 		OffsetX             float64                                `json:"offset_x"`
@@ -393,7 +392,6 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 
 	ws.Layout.TaskPositions = req.TaskPositions
 	ws.Layout.AgentPositions = req.AgentPositions
-	ws.Layout.CombinerNodes = req.CombinerNodes
 	ws.Layout.WorkflowConnections = req.WorkflowConnections
 	ws.Layout.Scale = req.Scale
 	ws.Layout.OffsetX = req.OffsetX

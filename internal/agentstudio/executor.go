@@ -71,8 +71,51 @@ func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
 func (te *TaskExecutor) Start() {
 	log.Printf("🚀 Task executor started (poll interval: %v, max concurrent: %d)", te.pollInterval, te.maxConcurrent)
 
+	// Clean up orphaned tasks before starting
+	te.cleanupOrphanedTasks()
+
 	te.wg.Add(1)
 	go te.pollLoop()
+}
+
+// cleanupOrphanedTasks resets tasks that were left in "in_progress" state from a previous server run
+func (te *TaskExecutor) cleanupOrphanedTasks() {
+	workspaceIDs, err := te.workspaceStore.List()
+	if err != nil {
+		log.Printf("⚠️  Failed to list workspaces for orphaned task cleanup: %v", err)
+		return
+	}
+
+	totalReset := 0
+	for _, wsID := range workspaceIDs {
+		ws, err := te.workspaceStore.Get(wsID)
+		if err != nil {
+			continue
+		}
+
+		resetCount := 0
+		for i := range ws.Tasks {
+			task := &ws.Tasks[i]
+			if task.Status == TaskStatusInProgress {
+				task.Status = TaskStatusPending
+				task.StartedAt = nil
+				resetCount++
+			}
+		}
+
+		if resetCount > 0 {
+			if err := te.workspaceStore.Save(ws); err != nil {
+				log.Printf("⚠️  Failed to save workspace %s after orphaned task cleanup: %v", wsID, err)
+			} else {
+				totalReset += resetCount
+				log.Printf("🔄 Reset %d orphaned task(s) in workspace %s", resetCount, wsID)
+			}
+		}
+	}
+
+	if totalReset > 0 {
+		log.Printf("✅ Cleaned up %d orphaned task(s) across all workspaces", totalReset)
+	}
 }
 
 // Stop gracefully stops the task executor

@@ -70,14 +70,6 @@
                 <div id="canvas-info" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
                   Loading workspace...
                 </div>
-                <!-- Combiner Nodes Palette -->
-                <div style="position: absolute; top: 60px; left: 10px; display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px;">
-                  <div style="color: white; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Combiner Nodes</div>
-                  <button class="modern-btn modern-btn-secondary" onclick="addCombinerNode('merge')" title="Merge - Combine multiple inputs" style="padding: 8px 12px; font-size: 14px; line-height: 1; display: flex; align-items: center; gap: 6px;">
-                    <span style="font-size: 18px;">🔀</span>
-                    <span>Merge</span>
-                  </button>
-                </div>
 
                 <!-- Controls overlay -->
                 <div style="position: absolute; bottom: 10px; left: 10px; display: flex; gap: 8px; align-items: center;">
@@ -120,21 +112,6 @@
                 </div>
                 <div id="agent-details-content" style="font-size: 0.875rem;">
                   Click an agent to see details
-                </div>
-              </div>
-
-              <!-- Combiner Details -->
-              <div class="modern-card p-3 mb-3" id="combiner-details-panel" style="display: none;">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Combiner Node</h6>
-                  <button class="btn btn-sm btn-link p-0" onclick="hideCombinerDetails()" style="color: var(--text-secondary);">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
-                    </svg>
-                  </button>
-                </div>
-                <div id="combiner-details-content" style="font-size: 0.875rem;">
-                  Click a combiner node to see details
                 </div>
               </div>
 

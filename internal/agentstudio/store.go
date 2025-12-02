@@ -1,7 +1,9 @@
 package agentstudio
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,10 +59,22 @@ func (s *FileStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// DEBUG: Log task assigned_node_id values before serialization
+	for i, task := range ws.Tasks {
+		if task.AssignedNodeID != "" {
+			log.Printf("🔍 [BEFORE SAVE] Task %d (%s): to=%s, assigned_node_id=%s", i, task.ID[:8], task.To, task.AssignedNodeID)
+		}
+	}
+
 	// Serialize workspace
 	data, err := ws.ToJSON()
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
+	}
+
+	// DEBUG: Check if assigned_node_id is in the JSON
+	if len(ws.Tasks) > 0 && ws.Tasks[0].AssignedNodeID != "" {
+		log.Printf("🔍 [JSON DATA] Contains 'assigned_node_id': %t", bytes.Contains(data, []byte("assigned_node_id")))
 	}
 
 	// Write to file
@@ -73,6 +87,13 @@ func (s *FileStore) Save(ws *Workspace) error {
 	freshWS, err := FromJSON(data)
 	if err != nil {
 		return fmt.Errorf("failed to reload workspace after save: %w", err)
+	}
+
+	// DEBUG: Log task assigned_node_id values after deserialization
+	for i, task := range freshWS.Tasks {
+		if task.AssignedNodeID != "" {
+			log.Printf("🔍 [AFTER RELOAD] Task %d (%s): to=%s, assigned_node_id=%s", i, task.ID[:8], task.To, task.AssignedNodeID)
+		}
 	}
 
 	// Update cache with fresh copy
@@ -108,6 +129,23 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	ws, err := FromJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize workspace: %w", err)
+	}
+
+	// If migration created AgentInstances, save back to disk
+	if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
+		// Migration happened - persist it
+		// We already hold the lock, so inline the save logic without locking again
+		migratedData, err := ws.ToJSON()
+		if err != nil {
+			log.Printf("Warning: failed to serialize migrated workspace %s: %v", id, err)
+		} else {
+			filePath := s.getFilePath(ws.ID)
+			if err := os.WriteFile(filePath, migratedData, 0644); err != nil {
+				log.Printf("Warning: failed to persist migrated workspace %s: %v", id, err)
+			} else {
+				log.Printf("Successfully persisted migration for workspace %s", id)
+			}
+		}
 	}
 
 	// Update cache
@@ -203,6 +241,21 @@ func (s *FileStore) loadCache() error {
 			ws, err := FromJSON(data)
 			if err != nil {
 				continue // Skip files that can't be deserialized
+			}
+
+			// If migration created AgentInstances, save back to disk
+			if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
+				// Migration happened - persist it
+				migratedData, err := ws.ToJSON()
+				if err != nil {
+					log.Printf("Warning: failed to serialize migrated workspace %s: %v", ws.ID, err)
+				} else {
+					if err := os.WriteFile(filePath, migratedData, 0644); err != nil {
+						log.Printf("Warning: failed to persist migrated workspace %s: %v", ws.ID, err)
+					} else {
+						log.Printf("Successfully persisted migration for workspace %s", ws.ID)
+					}
+				}
 			}
 
 			s.cache[ws.ID] = ws

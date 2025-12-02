@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -201,9 +202,6 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	// Get workspace progress
 	workspaceProgress := studio.GetWorkspaceProgress()
 
-	// Ensure combiner nodes referenced in connections exist in the layout
-	layout := ensureCombinerNodesExist(studio.Layout)
-
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -211,73 +209,19 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"name":               studio.Name,
 		"description":        studio.Description,
 		"agents":             studio.Agents,
+		"agent_instances":    studio.AgentInstances, // NEW: Stable agent instances
 		"agent_stats":        agentStats,
 		"workspace_progress": workspaceProgress,
 		"status":             studio.Status,
 		"tasks":              studio.Tasks,
 		"messages":           studio.Messages,
 		"shared_data":        studio.SharedData,
-		"layout":             layout,
+		"layout":             studio.Layout,
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
 	}); err != nil {
 		log.Printf("Failed to encode response: %v", err)
 	}
-}
-
-// ensureCombinerNodesExist checks if all combiner nodes referenced in workflow connections
-// exist in the layout, and creates placeholder nodes if they're missing
-func ensureCombinerNodesExist(layout *CanvasLayout) *CanvasLayout {
-	if layout == nil {
-		return nil
-	}
-
-	// Build a set of existing combiner node IDs
-	existingCombinerIDs := make(map[string]bool)
-	for _, node := range layout.CombinerNodes {
-		existingCombinerIDs[node.ID] = true
-	}
-
-	// Check all workflow connections for missing combiner nodes
-	missingCombinerIDs := make(map[string]bool)
-	for _, conn := range layout.WorkflowConnections {
-		// Check if "from" is a combiner node that doesn't exist
-		if strings.HasPrefix(conn.From, "combiner-") && !existingCombinerIDs[conn.From] {
-			missingCombinerIDs[conn.From] = true
-		}
-		// Check if "to" is a combiner node that doesn't exist
-		if strings.HasPrefix(conn.To, "combiner-") && !existingCombinerIDs[conn.To] {
-			missingCombinerIDs[conn.To] = true
-		}
-	}
-
-	// Create placeholder combiner nodes for missing IDs
-	if len(missingCombinerIDs) > 0 {
-		log.Printf("Found %d missing combiner nodes in layout, creating placeholders", len(missingCombinerIDs))
-
-		for combinerID := range missingCombinerIDs {
-			// Create a placeholder combiner node with default properties
-			placeholder := CombinerNodeLayout{
-				ID:           combinerID,
-				Type:         "combiner",
-				CombinerType: "merge", // default type
-				Name:         "Merge",
-				Icon:         "🔀",
-				Color:        "#8b5cf6",
-				X:            300, // default position
-				Y:            200,
-				Width:        120,
-				Height:       80,
-				InputPorts:   []CombinerPort{{ID: "input-0"}, {ID: "input-1"}},
-				OutputPort:   CombinerPort{ID: "output"},
-			}
-
-			layout.CombinerNodes = append(layout.CombinerNodes, placeholder)
-			log.Printf("Created placeholder combiner node: %s", combinerID)
-		}
-	}
-
-	return layout
 }
 
 // ListStudios handles GET /api/studios
@@ -422,9 +366,11 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Allow multiple instances of the same agent (removed duplicate check)
-	// Add agent to workspace
-	studio.Agents = append(studio.Agents, req.AgentName)
+	// Add agent using workspace method (creates stable AgentInstance)
+	if err := studio.AddAgent(req.AgentName); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to add agent: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
@@ -452,7 +398,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract studio ID and agent name from URL path
+	// Extract studio ID and agent identifier from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
@@ -460,7 +406,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	studioID := parts[0]
-	agentName := parts[2]
+	agentIdentifier := parts[2] // Format: "name" or "name:instanceNumber"
 
 	// Get studio
 	studio, err := h.store.Get(studioID)
@@ -469,31 +415,61 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find and remove agent
-	found := false
-	newAgents := make([]string, 0)
-	for _, agent := range studio.Agents {
-		if agent != agentName {
-			newAgents = append(newAgents, agent)
-		} else {
-			found = true
+	// Parse agent identifier to extract name and instance number
+	var agentName string
+	var instanceNumber int
+	if strings.Contains(agentIdentifier, ":") {
+		identParts := strings.SplitN(agentIdentifier, ":", 2)
+		agentName = identParts[0]
+		instanceNumber, err = strconv.Atoi(identParts[1])
+		if err != nil {
+			http.Error(w, "Invalid instance number format", http.StatusBadRequest)
+			return
+		}
+	} else {
+		agentName = agentIdentifier
+		instanceNumber = 0 // Legacy: remove first occurrence
+	}
+
+	// Find the specific agent instance to remove
+	var targetInstanceID string
+	if instanceNumber > 0 {
+		// NEW: Find by name and instance number using stable AgentInstances
+		for _, inst := range studio.AgentInstances {
+			if inst.Name == agentName && inst.InstanceNumber == instanceNumber {
+				targetInstanceID = inst.ID
+				break
+			}
+		}
+		if targetInstanceID == "" {
+			http.Error(w, fmt.Sprintf("Agent instance %s #%d not found", agentName, instanceNumber), http.StatusNotFound)
+			return
+		}
+
+		// Remove using new method (maintains stable node IDs)
+		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to remove agent instance: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// LEGACY: Remove by name (removes first occurrence)
+		if err := studio.RemoveAgent(agentName); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to remove agent: %v", err), http.StatusNotFound)
+			return
 		}
 	}
 
-	if !found {
-		http.Error(w, "Agent not found in workspace", http.StatusNotFound)
-		return
-	}
-
-	studio.Agents = newAgents
-
 	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Removed agent %s from studio %s", agentName, studioID)
+	if instanceNumber > 0 {
+		log.Printf("Removed agent %s instance #%d from studio %s", agentName, instanceNumber, studioID)
+	} else {
+		log.Printf("Removed agent %s from studio %s", agentName, studioID)
+	}
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -508,14 +484,10 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description            string `json:"description"`
-	From                   string `json:"from"`
-	To                     string `json:"to"`
-	Priority               int    `json:"priority"`
-	CombinerType           string `json:"combiner_type,omitempty"`
-	CombinerNodeID         string `json:"combiner_node_id,omitempty"`
-	ResultCombinationMode  string `json:"result_combination_mode,omitempty"`
-	CombinationInstruction string `json:"combination_instruction,omitempty"`
+	Description string `json:"description"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Priority    int    `json:"priority"`
 }
 
 // CreateTask handles POST /api/studios/:id/tasks
@@ -560,19 +532,15 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := Task{
-		ID:                     uuid.New().String(),
-		WorkspaceID:            studioID,
-		From:                   req.From,
-		To:                     req.To,
-		Description:            req.Description,
-		Priority:               req.Priority,
-		Context:                make(map[string]interface{}),
-		Status:                 TaskStatusPending,
-		CombinerType:           req.CombinerType,
-		CombinerNodeID:         req.CombinerNodeID,
-		ResultCombinationMode:  req.ResultCombinationMode,
-		CombinationInstruction: req.CombinationInstruction,
-		CreatedAt:              time.Now(),
+		ID:          uuid.New().String(),
+		WorkspaceID: studioID,
+		From:        req.From,
+		To:          req.To,
+		Description: req.Description,
+		Priority:    req.Priority,
+		Context:     make(map[string]interface{}),
+		Status:      TaskStatusPending,
+		CreatedAt:   time.Now(),
 	}
 
 	// Add task to studio

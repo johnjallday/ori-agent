@@ -1,12 +1,7 @@
 import { AgentCanvasForms } from './agent-canvas-forms.js';
 import { apiGet, apiPost, apiPut, apiDelete } from './agent-canvas-api.js';
 import { connectProgressStream } from './agent-canvas-events.js';
-import {
-  createCombinerTask as combinerCreateTask,
-  ensureCombinerTask as combinerEnsureTask,
-  executeCombiner as combinerExecute
-} from './agent-canvas-combiners.js';
-import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, assignTaskToCombiner as tasksAssignToCombiner, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
+import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 import { AgentCanvasRenderer } from './agent-canvas-renderer.js';
 import { AgentCanvasInteractionHandler } from './agent-canvas-interactions.js';
@@ -14,7 +9,6 @@ import { AgentCanvasLayoutManager } from './agent-canvas-layout.js';
 import { AgentCanvasAnimationController } from './agent-canvas-animation.js';
 import { AgentCanvasTimelineManager } from './agent-canvas-timeline.js';
 import { AgentCanvasHelpers } from './agent-canvas-helpers.js';
-import { AgentCanvasCombinerOperations } from './agent-canvas-combiner-ops.js';
 import { AgentCanvasPanelManager } from './agent-canvas-panels.js';
 import { AgentCanvasNotifications } from './agent-canvas-notifications.js';
 import { AgentCanvasContextMenu } from './agent-canvas-context-menu.js';
@@ -64,9 +58,6 @@ class AgentCanvas {
 
     // Initialize helpers module
     this.helpers = new AgentCanvasHelpers(this.state, this);
-
-    // Initialize combiner operations module
-    this.combinerOps = new AgentCanvasCombinerOperations(this.state, this);
 
     // Initialize panel manager
     this.panels = new AgentCanvasPanelManager(this.state, this);
@@ -161,11 +152,6 @@ class AgentCanvas {
   get connectionDragStart() { return this.state.connectionDragStart; }
   set connectionDragStart(value) { this.state.connectionDragStart = value; }
 
-  get isDraggingCombiner() { return this.state.isDraggingCombiner; }
-  set isDraggingCombiner(value) { this.state.isDraggingCombiner = value; }
-
-  get draggedCombiner() { return this.state.draggedCombiner; }
-  set draggedCombiner(value) { this.state.draggedCombiner = value; }
 
   get dragStartX() { return this.state.dragStartX; }
   set dragStartX(value) { this.state.dragStartX = value; }
@@ -254,17 +240,6 @@ class AgentCanvas {
   get agentPanelMaxScroll() { return this.state.agentPanelMaxScroll; }
   set agentPanelMaxScroll(value) { this.state.agentPanelMaxScroll = value; }
 
-  get expandedCombiner() { return this.state.expandedCombiner; }
-  set expandedCombiner(value) { this.state.expandedCombiner = value; }
-
-  get expandedCombinerPanelWidth() { return this.state.expandedCombinerPanelWidth; }
-  set expandedCombinerPanelWidth(value) { this.state.expandedCombinerPanelWidth = value; }
-
-  get expandedCombinerPanelTargetWidth() { return this.state.expandedCombinerPanelTargetWidth; }
-  set expandedCombinerPanelTargetWidth(value) { this.state.expandedCombinerPanelTargetWidth = value; }
-
-  get expandedCombinerPanelAnimating() { return this.state.expandedCombinerPanelAnimating; }
-  set expandedCombinerPanelAnimating(value) { this.state.expandedCombinerPanelAnimating = value; }
 
   // Modes
   get connectionMode() { return this.state.connectionMode; }
@@ -326,18 +301,9 @@ class AgentCanvas {
   get chainParticles() { return this.state.chainParticles; }
   set chainParticles(value) { this.state.chainParticles = value; }
 
-  // Combiner nodes
-  get combinerNodes() { return this.state.combinerNodes; }
-  set combinerNodes(value) { this.state.combinerNodes = value; }
-
+  // Connections
   get connections() { return this.state.connections; }
   set connections(value) { this.state.connections = value; }
-
-  get selectedCombiner() { return this.state.selectedCombiner; }
-  set selectedCombiner(value) { this.state.selectedCombiner = value; }
-
-  get hoveredCombiner() { return this.state.hoveredCombiner; }
-  set hoveredCombiner(value) { this.state.hoveredCombiner = value; }
 
   // Execution logs
   get executionLogs() { return this.state.executionLogs; }
@@ -420,16 +386,8 @@ class AgentCanvas {
     // Draw agents
     this.renderer.drawAgents();
 
-    // Normalize combiner inputs before drawing connections/nodes
-    if (this.combinerNodes.length) {
-      this.combinerNodes.forEach(node => this.cleanupCombinerInputPorts(node, true));
-    }
-
-    // Draw workflow connections (between agents and combiners)
+    // Draw workflow connections
     this.renderer.drawWorkflowConnections();
-
-    // Draw combiner nodes
-    this.renderer.drawCombinerNodes();
 
     // Draw dragging connection line (if dragging)
     if (this.isDraggingConnection && this.connectionDragStart) {
@@ -449,11 +407,6 @@ class AgentCanvas {
     // Draw expanded agent panel OUTSIDE the transform context (fixed position)
     if (this.state.expandedAgentPanelWidth > 0) {
       this.renderer.drawExpandedAgentPanel();
-    }
-
-    // Draw expanded combiner panel OUTSIDE the transform context (fixed position)
-    if (this.state.expandedCombinerPanelWidth > 0) {
-      this.renderer.drawExpandedCombinerPanel();
     }
 
     // Draw assignment line
@@ -598,14 +551,6 @@ class AgentCanvas {
   lightenColor(color, percent) { return this.helpers.lightenColor(color, percent); }
   darkenColor(color, percent) { return this.helpers.darkenColor(color, percent); }
 
-  // Combiner operations delegated to combiner ops module
-  ensureCombinerInputPort(combiner, portId) { return this.combinerOps.ensureCombinerInputPort(combiner, portId); }
-  createConnection(fromNodeId, fromPort, toNodeId, toPort) { return this.combinerOps.createConnection(fromNodeId, fromPort, toNodeId, toPort); }
-  deleteCombinerNode(nodeId) { return this.combinerOps.deleteCombinerNode(nodeId); }
-  deleteConnection(connectionId) { return this.combinerOps.deleteConnection(connectionId); }
-  cleanupCombinerInputPorts(combiner, silent = false) { return this.combinerOps.cleanupCombinerInputPorts(combiner, silent); }
-  buildCombinerResultPreview(combiner) { return this.combinerOps.buildCombinerResultPreview(combiner); }
-
   // Notification methods delegated to notifications module
   showNotification(message, type = 'info') { return this.notifications.showNotification(message, type); }
   dismissNotification(id) { return this.notifications.dismissNotification(id); }
@@ -622,9 +567,6 @@ class AgentCanvas {
   toggleAgentPanel(agent) { return this.panels.toggleAgentPanel(agent); }
   closeAgentPanel() { return this.panels.closeAgentPanel(); }
   animateAgentPanel(expanding) { return this.panels.animateAgentPanel(expanding); }
-  toggleCombinerPanel(combiner) { return this.panels.toggleCombinerPanel(combiner); }
-  closeCombinerPanel() { return this.panels.closeCombinerPanel(); }
-  animateCombinerPanel(expanding) { return this.panels.animateCombinerPanel(expanding); }
   toggleHelpOverlay() { return this.panels.toggleHelpOverlay(); }
 
   // Context menu methods delegated to context menu module
@@ -783,21 +725,26 @@ class AgentCanvas {
   /**
    * Remove an agent from the studio
    */
-  async removeAgentFromStudio(agentName) {
-    if (!confirm(`Remove agent "${agentName}" from this studio?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
+  async removeAgentFromStudio(nodeId, instanceNumber) {
+    // Extract agent name from nodeId (e.g., "default-node-2" -> "default")
+    const agentName = nodeId.split('-node-')[0];
+
+    if (!confirm(`Remove agent "${agentName} #${instanceNumber}" from this studio?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/studios/${this.studioId}/agents/${agentName}`, {
+      // Use name:instanceNumber format for specific instance removal
+      const agentIdentifier = `${agentName}:${instanceNumber}`;
+      const response = await fetch(`/api/studios/${this.studioId}/agents/${agentIdentifier}`, {
         method: 'DELETE'
       });
 
       if (response.ok) {
-        console.log('✅ Agent removed from studio:', agentName);
+        console.log('✅ Agent instance removed from studio:', agentIdentifier);
 
-        // Remove agent from local state
-        const agents = this.state.agents.filter(a => a.name !== agentName);
+        // Remove only this specific agent instance from local state
+        const agents = this.state.agents.filter(a => a.nodeId !== nodeId);
         this.state.setAgents(agents);
 
         // Redraw canvas

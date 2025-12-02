@@ -127,32 +127,71 @@ export class AgentCanvasInitialization {
    * Initialize agent positions and stats from studio data
    */
   initializeAgents() {
-    if (!this.parent.studio || !this.parent.studio.agents) return;
+    if (!this.parent.studio) return;
+
+    const agentStats = this.parent.studio.agent_stats || {};
+
+    // Use AgentInstances if available (new stable system)
+    if (this.parent.studio.agent_instances && this.parent.studio.agent_instances.length > 0) {
+      const agentCount = this.parent.studio.agent_instances.length;
+      const centerY = this.parent.height * 0.6;
+      const spacing = Math.min(150, (this.parent.width * 0.8) / Math.max(agentCount - 1, 1));
+      const totalWidth = spacing * (agentCount - 1);
+      const startX = (this.parent.width - totalWidth) / 2;
+
+      const agents = this.parent.studio.agent_instances.map((instance, index) => {
+        const stats = agentStats[instance.name] || {
+          status: 'idle',
+          current_tasks: [],
+          queued_tasks: [],
+          completed_tasks: 0,
+          failed_tasks: 0,
+          total_executions: 0
+        };
+
+        return {
+          name: instance.name,
+          id: instance.id,                    // Stable UUID
+          nodeId: instance.node_id,            // Stable node ID (e.g., "default-node-1")
+          instanceNumber: instance.instance_number,
+          x: startX + (index * spacing),
+          y: centerY,
+          width: 120,
+          height: 70,
+          color: this.parent.helpers.getAgentColor(index),
+          status: stats.status,
+          currentTasks: stats.current_tasks || [],
+          queuedTasks: stats.queued_tasks || [],
+          completedTasks: stats.completed_tasks || 0,
+          failedTasks: stats.failed_tasks || 0,
+          totalExecutions: stats.total_executions || 0,
+          tasks: [],
+          pulsePhase: Math.random() * Math.PI * 2
+        };
+      });
+      this.state.setAgents(agents);
+      return;
+    }
+
+    // FALLBACK: Legacy system (agent names only, no stable instances)
+    if (!this.parent.studio.agents || this.parent.studio.agents.length === 0) return;
 
     const agentCount = this.parent.studio.agents.length;
-    const centerY = this.parent.height * 0.6; // Position lower to avoid mission box
+    const centerY = this.parent.height * 0.6;
     const spacing = Math.min(150, (this.parent.width * 0.8) / Math.max(agentCount - 1, 1));
     const totalWidth = spacing * (agentCount - 1);
     const startX = (this.parent.width - totalWidth) / 2;
 
-    // Get agent stats from studio data
-    const agentStats = this.parent.studio.agent_stats || {};
-
-    // Track instance numbers per agent type
     const instanceCounters = {};
 
     const agents = this.parent.studio.agents.map((agentName, index) => {
-      // Increment instance counter for this agent type
       if (!instanceCounters[agentName]) {
         instanceCounters[agentName] = 0;
       }
       instanceCounters[agentName]++;
       const instanceNumber = instanceCounters[agentName];
-
-      // Generate unique nodeId (e.g., "default-node-1", "default-node-2")
       const nodeId = `${agentName}-node-${instanceNumber}`;
 
-      // Get stats for this agent
       const stats = agentStats[agentName] || {
         status: 'idle',
         current_tasks: [],
@@ -171,13 +210,13 @@ export class AgentCanvasInitialization {
         width: 120,
         height: 70,
         color: this.parent.helpers.getAgentColor(index),
-        status: stats.status, // Use status from backend
+        status: stats.status,
         currentTasks: stats.current_tasks || [],
         queuedTasks: stats.queued_tasks || [],
         completedTasks: stats.completed_tasks || 0,
         failedTasks: stats.failed_tasks || 0,
         totalExecutions: stats.total_executions || 0,
-        tasks: [], // Legacy field, keep for compatibility
+        tasks: [],
         pulsePhase: Math.random() * Math.PI * 2
       };
     });

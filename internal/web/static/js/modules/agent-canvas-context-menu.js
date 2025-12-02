@@ -59,19 +59,24 @@ export class AgentCanvasContextMenu {
 
       case 'remove':
         // Remove agent (with confirmation)
-        if (confirm(`Remove agent "${agent.name}"?`)) {
-          // Call backend to remove agent from studio
-          apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/agents/${encodeURIComponent(agent.name)}`)
+        const displayName = agent.instanceNumber ? `${agent.name} #${agent.instanceNumber}` : agent.name;
+        if (confirm(`Remove agent "${displayName}"?`)) {
+          // Call backend to remove agent from studio, sending instance number if available
+          const agentId = agent.instanceNumber ? `${agent.name}:${agent.instanceNumber}` : agent.name;
+          apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/agents/${encodeURIComponent(agentId)}`)
             .then(() => {
-              // Remove from local state
-              const filteredAgents = this.state.agents.filter(a => a.name !== agent.name);
+              // Remove only THIS specific agent node from local state (by nodeId)
+              const filteredAgents = this.state.agents.filter(a => a.nodeId !== agent.nodeId);
               this.state.setAgents(filteredAgents);
 
-              // Unassign tasks targeting this agent
-              const updatedTasks = this.state.tasks.map(t => ({
-                ...t,
-                to: t.to === agent.name ? 'unassigned' : t.to
-              }));
+              // Unassign tasks targeting THIS specific agent node
+              const updatedTasks = this.state.tasks.map(t => {
+                // Only unassign if task was assigned to this specific node instance
+                if (t.assigned_node_id === agent.nodeId) {
+                  return { ...t, to: 'unassigned', assigned_node_id: '' };
+                }
+                return t;
+              });
               this.state.setTasks(updatedTasks);
 
               // Remove any workflow connections involving this agent

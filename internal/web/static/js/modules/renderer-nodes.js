@@ -27,15 +27,6 @@ export class RendererNodes {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
     this.state.tasks.forEach((task, index) => {
-      // Check if this is a combiner task
-      const isCombinerTask = task.combiner_type || task.combinerType;
-
-      if (isCombinerTask) {
-        // Draw combiner task with special visual
-        this.drawCombinerTask(task);
-        return;
-      }
-
       const fromCandidates = this.state.agents.filter(a => a.name === task.from);
       const toCandidates = this.state.agents.filter(a => a.name === task.to);
 
@@ -46,8 +37,8 @@ export class RendererNodes {
       if (task.assigned_node_id && toCandidates.length) {
         toAgent = toCandidates.find(a => a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id) || null;
       }
-      // Only use proximity/fallback if no assigned_node_id was specified
-      if (!toAgent && !task.assigned_node_id && toCandidates.length) {
+      // Fallback: if assigned_node_id didn't match OR wasn't specified, use proximity/first agent
+      if (!toAgent && toCandidates.length) {
         if (task.x != null && task.y != null) {
           let best = null;
           let bestDist = Infinity;
@@ -178,10 +169,6 @@ export class RendererNodes {
       this.ctx.beginPath();
       this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 6);
       this.ctx.stroke();
-
-      // Task input port (top center) and output port (bottom center) for result wiring
-      this.primitives.drawPort(task.x, cardY - 8, 'input', borderColor, 'up');
-      this.primitives.drawPort(task.x, cardY + cardHeight + 8, 'output', borderColor, 'down');
 
       // Task description - manually truncate with ellipsis to prevent overflow
       this.ctx.fillStyle = '#212529';
@@ -532,11 +519,6 @@ export class RendererNodes {
       this.ctx.fill();
       this.ctx.shadowColor = 'transparent';
 
-      // Draw workflow ports to support incoming/outgoing connections
-      // Inputs point into the agent (down), outputs point outward (down from the node)
-      this.primitives.drawPort(agent.x, agent.y - halfHeight - 10, 'input', agent.color, 'down');
-      this.primitives.drawPort(agent.x, agent.y + halfHeight + 10, 'output', agent.color, 'down');
-
       // Draw status indicator
       let statusColor;
       switch (agent.status) {
@@ -691,290 +673,4 @@ export class RendererNodes {
       };
     });
   }
-
-  drawCombinerNodes() {
-    this.state.combinerNodes.forEach(node => {
-      this.ctx.save();
-
-      // Draw diamond/rectangle shape
-      const x = node.x;
-      const y = node.y;
-      const w = node.width;
-      const h = node.height;
-
-      // Background with gradient
-      const gradient = this.ctx.createLinearGradient(x, y, x, y + h);
-      gradient.addColorStop(0, node.color);
-      gradient.addColorStop(1, this.parent.lightenColor(node.color, 20));
-
-      this.ctx.fillStyle = gradient;
-      this.ctx.strokeStyle = this.parent.darkenColor(node.color, 20);
-      this.ctx.lineWidth = 2;
-
-      // Draw rounded rectangle
-      const radius = 8;
-      this.ctx.beginPath();
-      this.ctx.moveTo(x + radius, y);
-      this.ctx.lineTo(x + w - radius, y);
-      this.ctx.arcTo(x + w, y, x + w, y + radius, radius);
-      this.ctx.lineTo(x + w, y + h - radius);
-      this.ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
-      this.ctx.lineTo(x + radius, y + h);
-      this.ctx.arcTo(x, y + h, x, y + h - radius, radius);
-      this.ctx.lineTo(x, y + radius);
-      this.ctx.arcTo(x, y, x + radius, y, radius);
-      this.ctx.closePath();
-      this.ctx.fill();
-      this.ctx.stroke();
-
-      // Draw icon
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = '24px Arial';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      this.ctx.fillText(node.icon, x + w / 2, y + h / 2 - 10);
-
-      // Draw label
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 12px Inter, sans-serif';
-      this.ctx.fillText(node.name.toUpperCase(), x + w / 2, y + h / 2 + 15);
-
-      // Draw input ports (top)
-      const numInputs = Math.max(node.inputPorts.length, 1); // At least 1 input port when empty
-      const portSpacing = w / (numInputs + 1);
-      for (let i = 0; i < numInputs; i++) {
-        const portX = x + portSpacing * (i + 1);
-        const portY = y - 5;
-        this.primitives.drawPort(portX, portY, 'input', node.color, 'down');
-      }
-
-      // Draw output port (bottom)
-      const outputX = x + w / 2;
-      const outputY = y + h + 5;
-      this.primitives.drawPort(outputX, outputY, 'output', node.color);
-
-      // Draw delete button (always visible in top-right corner)
-      const deleteButtonSize = 20;
-      const deleteButtonX = x + w - deleteButtonSize / 2;
-      const deleteButtonY = y - deleteButtonSize / 2;
-
-      // Store bounds for click detection
-      if (!node.deleteButtonBounds) node.deleteButtonBounds = {};
-      node.deleteButtonBounds = {
-        x: deleteButtonX - deleteButtonSize / 2,
-        y: deleteButtonY - deleteButtonSize / 2,
-        width: deleteButtonSize,
-        height: deleteButtonSize
-      };
-
-      // Draw delete button background
-      this.ctx.fillStyle = '#ef4444';
-      this.ctx.beginPath();
-      this.ctx.arc(deleteButtonX, deleteButtonY, deleteButtonSize / 2, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      // Draw X icon
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = 2;
-      this.ctx.lineCap = 'round';
-      const crossSize = 6;
-      this.ctx.beginPath();
-      this.ctx.moveTo(deleteButtonX - crossSize / 2, deleteButtonY - crossSize / 2);
-      this.ctx.lineTo(deleteButtonX + crossSize / 2, deleteButtonY + crossSize / 2);
-      this.ctx.moveTo(deleteButtonX + crossSize / 2, deleteButtonY - crossSize / 2);
-      this.ctx.lineTo(deleteButtonX - crossSize / 2, deleteButtonY + crossSize / 2);
-      this.ctx.stroke();
-
-      // RUN button (bottom-left corner)
-      const runButtonWidth = 50;
-      const runButtonHeight = 18;
-      const runX = x + 8;
-      const runY = y + h - runButtonHeight - 6;
-
-      node.runButtonBounds = {
-        x: runX,
-        y: runY,
-        width: runButtonWidth,
-        height: runButtonHeight
-      };
-
-      this.ctx.fillStyle = '#10b981';
-      this.ctx.strokeStyle = '#059669';
-      this.ctx.lineWidth = 1.5;
-      this.primitives.roundRect(runX, runY, runButtonWidth, runButtonHeight, 6);
-      this.ctx.fill();
-      this.ctx.stroke();
-
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 10px Inter, sans-serif';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      this.ctx.fillText('▶ RUN', runX + runButtonWidth / 2, runY + runButtonHeight / 2);
-
-      // Assign output button (bottom-right corner)
-      const assignButtonWidth = 60;
-      const assignButtonHeight = 18;
-      const assignX = x + w - assignButtonWidth - 8;
-      const assignY = y + h - assignButtonHeight - 6;
-
-      node.assignButtonBounds = {
-        x: assignX,
-        y: assignY,
-        width: assignButtonWidth,
-        height: assignButtonHeight
-      };
-
-      this.ctx.fillStyle = '#3b82f6';
-      this.ctx.strokeStyle = '#1d4ed8';
-      this.ctx.lineWidth = 1.5;
-      this.primitives.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
-      this.ctx.fill();
-      this.ctx.stroke();
-
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 10px Inter, sans-serif';
-      this.ctx.textAlign = 'center';
-      this.ctx.textBaseline = 'middle';
-      this.ctx.fillText('Assign', assignX + assignButtonWidth / 2, assignY + assignButtonHeight / 2);
-
-      this.ctx.restore();
-    });
-  }
-
-  /**
-   * Draw a combiner task as a special task card
-   */
-  drawCombinerTask(task) {
-    // Get combiner type info
-    const combinerTypes = {
-      'merge': { icon: '🔀', name: 'Merge', color: '#8b5cf6' },
-      'sequence': { icon: '⛓️', name: 'Sequence', color: '#06b6d4' },
-      'parallel': { icon: '⚡', name: 'Parallel', color: '#f59e0b' },
-      'vote': { icon: '🗳️', name: 'Vote', color: '#ef4444' }
-    };
-
-    const combinerType = combinerTypes[task.combiner_type || task.combinerType] ||
-                        { icon: '🔧', name: 'Combiner', color: '#8b5cf6' };
-
-    // Calculate position if not set
-    if (task.x == null || task.y == null) {
-      task.x = 200 + (Math.random() * 200);
-      task.y = 200 + (Math.random() * 200);
-    }
-
-    const cardWidth = 160;
-    const cardHeight = 100;
-    const x = task.x - cardWidth / 2;
-    const y = task.y - cardHeight / 2;
-
-    // Draw card background with combiner color
-    this.ctx.fillStyle = combinerType.color + '20'; // Light background
-    this.ctx.strokeStyle = combinerType.color;
-    this.ctx.lineWidth = 2;
-    this.primitives.roundRect(x, y, cardWidth, cardHeight, 8);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    // Draw combiner icon and type
-    this.ctx.font = 'bold 24px Arial';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.fillStyle = combinerType.color;
-    this.ctx.fillText(combinerType.icon, task.x, task.y - 20);
-
-    // Draw combiner name
-    this.ctx.font = 'bold 12px Arial';
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.fillText(combinerType.name, task.x, task.y + 5);
-
-    // Draw status
-    const statusText = task.status || 'pending';
-    this.ctx.font = '10px Arial';
-    this.ctx.fillStyle = '#9ca3af';
-    this.ctx.fillText(statusText, task.x, task.y + 25);
-
-    // Draw connection to target agent if assigned
-    if (task.to && task.to !== '' && task.to !== 'unassigned') {
-      const toAgent = this.state.agents.find(a => a.name === task.to);
-      if (toAgent) {
-        const color = combinerType.color + 'DD';
-        this.ctx.setLineDash([5, 5]);
-        const angle = Math.atan2(toAgent.y - task.y, toAgent.x - task.x);
-        const cardRadius = 80;
-        const agentHalfW = (toAgent.width || 120) / 2;
-        const agentHalfH = (toAgent.height || 70) / 2;
-        const agentRadius = Math.hypot(agentHalfW, agentHalfH);
-        const x1 = task.x + cardRadius * Math.cos(angle);
-        const y1 = task.y + cardRadius * Math.sin(angle);
-        const x2 = toAgent.x - agentRadius * Math.cos(angle);
-        const y2 = toAgent.y - agentRadius * Math.sin(angle);
-        this.primitives.drawArrow(x1, y1, x2, y2, color, 3);
-        this.ctx.setLineDash([]);
-      }
-    }
-
-    // Draw delete button (X) in top-right corner
-    const deleteSize = 20;
-    const deleteX = x + cardWidth - deleteSize - 5;
-    const deleteY = y + 5;
-
-    // Delete button background
-    this.ctx.fillStyle = 'rgba(239, 68, 68, 0.9)'; // Red background
-    this.ctx.beginPath();
-    this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
-    this.ctx.fill();
-
-    // Delete button X
-    this.ctx.strokeStyle = '#ffffff';
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.moveTo(deleteX + 5, deleteY + 5);
-    this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
-    this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
-    this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
-    this.ctx.stroke();
-
-    // Store delete button bounds for click detection (use deleteBtnBounds to match task cards)
-    task.deleteBtnBounds = {
-      x: deleteX,
-      y: deleteY,
-      width: deleteSize,
-      height: deleteSize
-    };
-
-    // Draw Assign button (bottom-center)
-    const assignButtonWidth = 60;
-    const assignButtonHeight = 18;
-    const assignX = x + (cardWidth - assignButtonWidth) / 2;
-    const assignY = y + cardHeight - assignButtonHeight - 6;
-
-    task.assignBtnBounds = {
-      x: assignX,
-      y: assignY,
-      width: assignButtonWidth,
-      height: assignButtonHeight
-    };
-
-    // Check if this task is the active assignment source
-    const isActiveAssignment = this.state.assignmentMode &&
-                               this.state.assignmentSourceTask &&
-                               this.state.assignmentSourceTask.id === task.id;
-
-    this.ctx.fillStyle = isActiveAssignment ? '#10b981' : '#3b82f6';
-    this.ctx.strokeStyle = isActiveAssignment ? '#059669' : '#1d4ed8';
-    this.ctx.lineWidth = 1.5;
-    this.primitives.roundRect(assignX, assignY, assignButtonWidth, assignButtonHeight, 6);
-    this.ctx.fill();
-    this.ctx.stroke();
-
-    this.ctx.fillStyle = '#ffffff';
-    this.ctx.font = 'bold 10px Inter, sans-serif';
-    this.ctx.textAlign = 'center';
-    this.ctx.textBaseline = 'middle';
-    this.ctx.fillText(isActiveAssignment ? '✓ Active' : 'Assign', assignX + assignButtonWidth / 2, assignY + assignButtonHeight / 2);
-
-    // Store bounds for click detection
-    task.bounds = { x, y, width: cardWidth, height: cardHeight };
-  }
-
 }

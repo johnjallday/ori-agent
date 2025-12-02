@@ -145,16 +145,14 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Create task
 	task := agentstudio.Task{
-		WorkspaceID:            req.WorkspaceID,
-		From:                   req.From,
-		To:                     req.To,
-		AssignedNodeID:         req.AssignedNodeID,
-		Description:            req.Description,
-		Priority:               req.Priority,
-		InputTaskIDs:           req.InputTaskIDs,
-		ResultCombinationMode:  req.ResultCombinationMode,
-		CombinationInstruction: req.CombinationInstruction,
-		Status:                 agentstudio.TaskStatusPending,
+		WorkspaceID:    req.WorkspaceID,
+		From:           req.From,
+		To:             req.To,
+		AssignedNodeID: req.AssignedNodeID,
+		Description:    req.Description,
+		Priority:       req.Priority,
+		InputTaskIDs:   req.InputTaskIDs,
+		Status:         agentstudio.TaskStatusPending,
 	}
 
 	// Add task to workspace
@@ -257,22 +255,16 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
 					log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
 				}
-				if req.ResultCombinationMode != nil {
-					ws.Tasks[i].ResultCombinationMode = *req.ResultCombinationMode
-					log.Printf("📝 Updated task %s combination mode: %s", req.TaskID, *req.ResultCombinationMode)
-				}
-				if req.CombinationInstruction != nil {
-					ws.Tasks[i].CombinationInstruction = *req.CombinationInstruction
-				}
 				if req.To != nil {
 					ws.Tasks[i].To = *req.To
 					// If a specific agent instance is provided, store it; otherwise clear to avoid stale linkage
 					if req.AssignedNodeID != nil {
 						ws.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+						log.Printf("📝 Reassigned task %s to %s (node: %s)", req.TaskID, *req.To, *req.AssignedNodeID)
 					} else {
 						ws.Tasks[i].AssignedNodeID = ""
+						log.Printf("📝 Reassigned task %s to %s (no node id)", req.TaskID, *req.To)
 					}
-					log.Printf("📝 Reassigned task %s to %s", req.TaskID, *req.To)
 				}
 				taskFound = true
 				break

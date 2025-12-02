@@ -307,6 +307,7 @@
 
   <script>
     const workspaceId = '{{.Extra.WorkspaceID}}';
+    let workspaceLayout = null; // Store layout data for agent instance lookup
 
     // Load workspace data on page load
     async function loadWorkspaceData() {
@@ -315,6 +316,9 @@
         if (!response.ok) throw new Error('Failed to load workspace');
 
         const workspace = await response.json();
+
+        // Store layout for agent instance lookup
+        workspaceLayout = workspace.layout;
 
         // Update workspace details
         document.getElementById('workspace-name').textContent = workspace.name || 'Unnamed Workspace';
@@ -377,29 +381,32 @@
         if (tasks.length === 0) {
           tasksList.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No tasks yet</p>';
         } else {
-          tasksList.innerHTML = tasks.map(task => `
-            <div class="task-item">
-              <div class="task-header">
-                <div class="task-title">${escapeHtml(task.name || task.id)}</div>
-                <span class="task-status ${task.status || 'pending'}">${task.status || 'pending'}</span>
+          tasksList.innerHTML = tasks.map(task => {
+            const assignedTo = getFormattedAgentAssignment(task);
+            return `
+              <div class="task-item">
+                <div class="task-header">
+                  <div class="task-title">${escapeHtml(task.name || task.id)}</div>
+                  <span class="task-status ${task.status || 'pending'}">${task.status || 'pending'}</span>
+                </div>
+                ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
+                <div class="task-meta">
+                  <span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom;">
+                      <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                    </svg>
+                    ${escapeHtml(assignedTo)}
+                  </span>
+                  <span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom;">
+                      <path d="M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z"/>
+                    </svg>
+                    ${task.created_at ? new Date(task.created_at).toLocaleString() : '--'}
+                  </span>
+                </div>
               </div>
-              ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
-              <div class="task-meta">
-                <span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom;">
-                    <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                  </svg>
-                  ${escapeHtml(task.assigned_to || 'Unassigned')}
-                </span>
-                <span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom;">
-                    <path d="M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z"/>
-                  </svg>
-                  ${task.created_at ? new Date(task.created_at).toLocaleString() : '--'}
-                </span>
-              </div>
-            </div>
-          `).join('');
+            `;
+          }).join('');
         }
 
       } catch (error) {
@@ -425,6 +432,51 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Get formatted agent assignment with instance number (e.g., "default #1")
+    function getFormattedAgentAssignment(task) {
+      if (!task.to || task.to === 'unassigned') {
+        return 'Unassigned';
+      }
+
+      // Check if task has assigned_node_id (e.g., "default-node-2")
+      if (task.assigned_node_id) {
+        // Parse the nodeId format: {agentName}-node-{instanceNumber}
+        const match = task.assigned_node_id.match(/^(.+)-node-(\d+)$/);
+        if (match) {
+          const agentName = match[1];
+          const instanceNumber = match[2];
+          return `${agentName} #${instanceNumber}`;
+        }
+      }
+
+      // If no assigned_node_id or couldn't parse, check if there are agent positions
+      if (workspaceLayout && workspaceLayout.agent_positions) {
+        // Find all agent positions that start with the agent name
+        const agentPositionKeys = Object.keys(workspaceLayout.agent_positions);
+        const matchingKeys = agentPositionKeys.filter(key => key.startsWith(task.to + '-node-'));
+
+        if (matchingKeys.length > 0) {
+          // Sort by instance number and use the first one
+          matchingKeys.sort((a, b) => {
+            const aMatch = a.match(/-node-(\d+)$/);
+            const bMatch = b.match(/-node-(\d+)$/);
+            const aNum = aMatch ? parseInt(aMatch[1]) : 0;
+            const bNum = bMatch ? parseInt(bMatch[1]) : 0;
+            return aNum - bNum;
+          });
+
+          const firstKey = matchingKeys[0];
+          const match = firstKey.match(/^(.+)-node-(\d+)$/);
+          if (match) {
+            return `${match[1]} #${match[2]}`;
+          }
+        }
+      }
+
+      // Fallback to task.to
+      return task.to;
     }
 
     // Load data when page loads

@@ -116,10 +116,6 @@ export class AgentCanvasHelpers {
     const task = this.state.tasks.find(t => t.id === nodeId);
     if (task) return { type: 'task', node: task };
 
-    // Check if it's a combiner (check state first, then parent as fallback)
-    const combiner = (this.state.combinerNodes || this.parent.combinerNodes || []).find(c => c.id === nodeId);
-    if (combiner) return { type: 'combiner', node: combiner };
-
     return null;
   }
 
@@ -164,28 +160,6 @@ export class AgentCanvasHelpers {
         };
       }
       return null;
-    } else if (type === 'combiner') {
-      // Combiner nodes have multiple input ports at top, one output at bottom
-      if (portId === 'output') {
-        return {
-          x: (node.x + node.width / 2) * this.parent.scale + this.parent.offsetX,
-          y: (node.y + node.height + 10) * this.parent.scale + this.parent.offsetY
-        };
-      } else {
-        // Input ports are distributed across the top. Use the provided id to derive index.
-        const match = /input-(\d+)/.exec(portId);
-        const numericIndex = match ? parseInt(match[1], 10) : -1;
-        const inputIndex = node.inputPorts.findIndex(p => p.id === portId);
-        const resolvedIndex = numericIndex >= 0 ? numericIndex : inputIndex;
-
-        // Total inputs based on known ports and requested index, minimum 1 for usability
-        const totalInputs = Math.max(node.inputPorts.length, resolvedIndex + 1, 1);
-        const portSpacing = node.width / (totalInputs + 1);
-        return {
-          x: (node.x + portSpacing * (resolvedIndex + 1)) * this.parent.scale + this.parent.offsetX,
-          y: (node.y - 10) * this.parent.scale + this.parent.offsetY
-        };
-      }
     }
 
     return null;
@@ -251,37 +225,6 @@ export class AgentCanvasHelpers {
           nodeType: 'agent',
           portId: 'input',
           type: 'input'
-        };
-      }
-    }
-
-    // Check combiner ports
-    for (const combiner of this.parent.combinerNodes) {
-      // Check input ports (top)
-      const numInputs = Math.max(combiner.inputPorts.length, 2);
-      const portSpacing = combiner.width / (numInputs + 1);
-      for (let i = 0; i < numInputs; i++) {
-        const portX = combiner.x + portSpacing * (i + 1);
-        const portY = combiner.y - 5;
-        const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
-        if (dist <= portRadius) {
-          return {
-            nodeId: combiner.id,
-            portId: `input-${i}`,
-            type: 'input'
-          };
-        }
-      }
-
-      // Check output port (bottom)
-      const outputX = combiner.x + combiner.width / 2;
-      const outputY = combiner.y + combiner.height + 5;
-      const dist = Math.sqrt((x - outputX) ** 2 + (y - outputY) ** 2);
-      if (dist <= portRadius) {
-        return {
-          nodeId: combiner.id,
-          portId: 'output',
-          type: 'output'
         };
       }
     }

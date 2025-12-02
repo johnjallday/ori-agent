@@ -31,11 +31,21 @@ const (
 )
 
 // Workspace stores shared context between collaborating agents
+// AgentInstance represents a specific instance of an agent with a stable identifier
+type AgentInstance struct {
+	ID             string    `json:"id"`              // Stable UUID for this agent instance
+	Name           string    `json:"name"`            // Agent type name (e.g., "default", "writer")
+	InstanceNumber int       `json:"instance_number"` // Instance number for display (e.g., 1, 2, 3)
+	NodeID         string    `json:"node_id"`         // Stable node ID (e.g., "default-node-1")
+	CreatedAt      time.Time `json:"created_at"`      // When this instance was added
+}
+
 type Workspace struct {
 	ID             string                 `json:"id"`
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description,omitempty"`
-	Agents         []string               `json:"agents"`
+	Agents         []string               `json:"agents,omitempty"`          // DEPRECATED: Legacy agent list for backward compatibility
+	AgentInstances []AgentInstance        `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
 	SharedData     map[string]interface{} `json:"shared_data"`
 	Messages       []AgentMessage         `json:"messages"`
 	Tasks          []Task                 `json:"tasks"`
@@ -52,8 +62,7 @@ type Workspace struct {
 type CanvasLayout struct {
 	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
 	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
-	CombinerNodes       []CombinerNodeLayout       `json:"combiner_nodes,omitempty"`       // combiner (merge/append/etc) nodes on canvas
-	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents/combiners
+	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
 	OffsetY             float64                    `json:"offset_y,omitempty"`             // pan offset Y
@@ -65,33 +74,7 @@ type Position struct {
 	Y float64 `json:"y"`
 }
 
-// CombinerNodeLayout represents a combiner (e.g., merge) node on the canvas
-type CombinerNodeLayout struct {
-	ID                    string                 `json:"id"`
-	Type                  string                 `json:"type,omitempty"`
-	CombinerType          string                 `json:"combinerType,omitempty"`
-	Name                  string                 `json:"name,omitempty"`
-	Icon                  string                 `json:"icon,omitempty"`
-	Color                 string                 `json:"color,omitempty"`
-	Description           string                 `json:"description,omitempty"`
-	X                     float64                `json:"x"`
-	Y                     float64                `json:"y"`
-	Width                 float64                `json:"width,omitempty"`
-	Height                float64                `json:"height,omitempty"`
-	InputPorts            []CombinerPort         `json:"inputPorts,omitempty"`
-	OutputPort            CombinerPort           `json:"outputPort,omitempty"`
-	ResultCombinationMode string                 `json:"resultCombinationMode,omitempty"`
-	CustomInstruction     string                 `json:"customInstruction,omitempty"`
-	Config                map[string]interface{} `json:"config,omitempty"`
-	TaskID                string                 `json:"taskId,omitempty"` // Backend task associated with this combiner
-}
-
-// CombinerPort represents a single port on a combiner node
-type CombinerPort struct {
-	ID string `json:"id"`
-}
-
-// WorkflowConnectionLayout represents a connection between nodes (task/agent/combiner)
+// WorkflowConnectionLayout represents a connection between nodes (task/agent)
 type WorkflowConnectionLayout struct {
 	ID       string `json:"id"`
 	From     string `json:"from"`
@@ -129,18 +112,10 @@ type Task struct {
 	Error          string                 `json:"error,omitempty"`
 	Progress       *TaskProgress          `json:"progress,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
-	InputTaskIDs []string `json:"input_task_ids,omitempty"`
-	// ResultCombinationMode specifies how to combine results from input tasks with the new task
-	ResultCombinationMode string `json:"result_combination_mode,omitempty"`
-	// CombinationInstruction provides custom instructions for how to combine results (used when mode is "custom")
-	CombinationInstruction string `json:"combination_instruction,omitempty"`
-	// CombinerType indicates if this task is a combiner node (merge, sequence, parallel, vote)
-	CombinerType string `json:"combiner_type,omitempty"`
-	// CombinerNodeID links this task to a combiner node on the canvas
-	CombinerNodeID string     `json:"combiner_node_id,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	InputTaskIDs []string   `json:"input_task_ids,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
@@ -154,24 +129,6 @@ const (
 	TaskStatusFailed     TaskStatus = "failed"
 	TaskStatusCancelled  TaskStatus = "cancelled"
 	TaskStatusTimeout    TaskStatus = "timeout"
-)
-
-// ResultCombinationMode specifies how to combine results from input tasks
-type ResultCombinationMode string
-
-const (
-	// CombineModeDefault - Simply include input task results as context (existing behavior)
-	CombineModeDefault ResultCombinationMode = "default"
-	// CombineModeAppend - Append input results to the new task prompt
-	CombineModeAppend ResultCombinationMode = "append"
-	// CombineModeMerge - Ask the agent to merge/synthesize all input results
-	CombineModeMerge ResultCombinationMode = "merge"
-	// CombineModeSummarize - Ask the agent to create a summary of all input results
-	CombineModeSummarize ResultCombinationMode = "summarize"
-	// CombineModeCompare - Ask the agent to compare and contrast input results
-	CombineModeCompare ResultCombinationMode = "compare"
-	// CombineModeCustom - Use custom combination instruction provided by user
-	CombineModeCustom ResultCombinationMode = "custom"
 )
 
 // TaskProgress tracks the execution progress of a task
@@ -364,17 +321,38 @@ func (w *Workspace) GetSharedData(key string) (interface{}, bool) {
 	return val, ok
 }
 
-// AddAgent adds an agent to the workspace
+// AddAgent adds an agent to the workspace with a stable instance ID
 func (w *Workspace) AddAgent(agentName string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// Count existing instances of this agent type to get next instance number
+	instanceNumber := 1
+	for _, inst := range w.AgentInstances {
+		if inst.Name == agentName && inst.InstanceNumber >= instanceNumber {
+			instanceNumber = inst.InstanceNumber + 1
+		}
+	}
+
+	// Create new agent instance with stable ID
+	instance := AgentInstance{
+		ID:             uuid.New().String(),
+		Name:           agentName,
+		InstanceNumber: instanceNumber,
+		NodeID:         fmt.Sprintf("%s-node-%d", agentName, instanceNumber),
+		CreatedAt:      time.Now(),
+	}
+
+	w.AgentInstances = append(w.AgentInstances, instance)
+
+	// Also update legacy Agents array for backward compatibility
 	w.Agents = append(w.Agents, agentName)
+
 	w.UpdatedAt = time.Now()
 	return nil
 }
 
-// RemoveAgent removes an agent from the workspace
+// RemoveAgent removes an agent from the workspace (legacy method)
 func (w *Workspace) RemoveAgent(agentName string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -382,12 +360,92 @@ func (w *Workspace) RemoveAgent(agentName string) error {
 	for i, agent := range w.Agents {
 		if agent == agentName {
 			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
+
+			// Clean up tasks assigned to this agent
+			for j := range w.Tasks {
+				if w.Tasks[j].To == agentName {
+					// Unassign tasks that were assigned to this agent
+					w.Tasks[j].To = "unassigned"
+					w.Tasks[j].AssignedNodeID = ""
+				}
+				if w.Tasks[j].From == agentName {
+					// Clear from field for tasks created by this agent
+					w.Tasks[j].From = ""
+				}
+			}
+
+			// Clean up canvas layout agent positions for this agent
+			if w.Layout != nil && w.Layout.AgentPositions != nil {
+				// Remove all agent node positions for this agent name
+				for nodeID := range w.Layout.AgentPositions {
+					// Check if this position belongs to the removed agent
+					// NodeID format: "agentname-node-#"
+					if len(nodeID) > len(agentName) && nodeID[:len(agentName)] == agentName {
+						delete(w.Layout.AgentPositions, nodeID)
+					}
+				}
+			}
+
 			w.UpdatedAt = time.Now()
 			return nil
 		}
 	}
 
 	return fmt.Errorf("agent %s not found in workspace", agentName)
+}
+
+// RemoveAgentInstance removes a specific agent instance by its stable ID or NodeID
+func (w *Workspace) RemoveAgentInstance(instanceID string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Find and remove the agent instance
+	foundIndex := -1
+	var removedInstance AgentInstance
+	for i, inst := range w.AgentInstances {
+		if inst.ID == instanceID || inst.NodeID == instanceID {
+			foundIndex = i
+			removedInstance = inst
+			break
+		}
+	}
+
+	if foundIndex == -1 {
+		return fmt.Errorf("agent instance %s not found", instanceID)
+	}
+
+	// Remove from AgentInstances
+	w.AgentInstances = append(w.AgentInstances[:foundIndex], w.AgentInstances[foundIndex+1:]...)
+
+	// Also remove from legacy Agents array (first occurrence of this name)
+	for i, agent := range w.Agents {
+		if agent == removedInstance.Name {
+			w.Agents = append(w.Agents[:i], w.Agents[i+1:]...)
+			break
+		}
+	}
+
+	// Unassign tasks that were specifically assigned to this agent instance
+	for j := range w.Tasks {
+		if w.Tasks[j].AssignedNodeID == removedInstance.NodeID {
+			w.Tasks[j].To = "unassigned"
+			w.Tasks[j].AssignedNodeID = ""
+			// Clear input connections for unassigned tasks
+			w.Tasks[j].InputTaskIDs = nil
+		}
+		if w.Tasks[j].From == removedInstance.Name {
+			w.Tasks[j].From = ""
+		}
+	}
+
+	// Clean up canvas layout position for this specific node
+	if w.Layout != nil && w.Layout.AgentPositions != nil {
+		delete(w.Layout.AgentPositions, removedInstance.NodeID)
+	}
+
+	w.UpdatedAt = time.Now()
+	log.Printf("Removed agent instance %s (%s #%d)", removedInstance.ID, removedInstance.Name, removedInstance.InstanceNumber)
+	return nil
 }
 
 // SetStatus updates the workspace status
@@ -439,7 +497,38 @@ func FromJSON(data []byte) (*Workspace, error) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
 	}
+	ws.MigrateToAgentInstances() // Auto-migrate legacy format
 	return &ws, nil
+}
+
+// MigrateToAgentInstances migrates legacy Agents []string to AgentInstances
+func (w *Workspace) MigrateToAgentInstances() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Skip if already migrated or no legacy agents
+	if len(w.AgentInstances) > 0 || len(w.Agents) == 0 {
+		return
+	}
+
+	// Count instances of each agent type to assign instance numbers
+	instanceCounts := make(map[string]int)
+
+	for _, agentName := range w.Agents {
+		instanceCounts[agentName]++
+		instanceNumber := instanceCounts[agentName]
+
+		instance := AgentInstance{
+			ID:             uuid.New().String(),
+			Name:           agentName,
+			InstanceNumber: instanceNumber,
+			NodeID:         fmt.Sprintf("%s-node-%d", agentName, instanceNumber),
+			CreatedAt:      time.Now(),
+		}
+		w.AgentInstances = append(w.AgentInstances, instance)
+	}
+
+	log.Printf("Migrated workspace %s: %d legacy agents -> %d agent instances", w.ID, len(w.Agents), len(w.AgentInstances))
 }
 
 // GetSummary returns a summary of the workspace

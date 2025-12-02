@@ -12,7 +12,10 @@ export async function executeTask(canvas, task) {
       alert('No agents available. Please add agents to the workspace first.');
       return;
     }
-    let agentOptions = canvas.agents.map((a, i) => `${i + 1}. ${a.name}`).join('\n');
+    let agentOptions = canvas.agents.map((a, i) => {
+      const displayName = a.instanceNumber ? `${a.name} #${a.instanceNumber}` : a.name;
+      return `${i + 1}. ${displayName}`;
+    }).join('\n');
     const selection = prompt(`This task is unassigned. Select an agent to execute it:\n\n${agentOptions}\n\nEnter agent number (1-${canvas.agents.length}):`);
     if (!selection) return;
     const agentIndex = parseInt(selection) - 1;

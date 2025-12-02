@@ -364,7 +364,7 @@ export class AgentCanvasInteractionHandler {
           // Remove agent from studio
           e.stopPropagation();
           e.preventDefault();
-          this.parent.removeAgentFromStudio(agent.name);
+          this.parent.removeAgentFromStudio(agent.nodeId, agent.instanceNumber);
           return;
         }
       }

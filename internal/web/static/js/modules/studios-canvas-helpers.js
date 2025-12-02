@@ -558,11 +558,15 @@ async function editCurrentTask() {
   }
 
   // Prompt for agent assignment (optional)
-  const agents = window.agentCanvas.state.agents.map(a => a.name);
+  const agents = window.agentCanvas.state.agents;
   let assignTo = task.to || '';
+  let assignedNodeId = task.assigned_node_id || '';
 
   if (agents.length > 0) {
-    const agentList = agents.map((a, i) => `${i + 1}. ${a}`).join('\n');
+    const agentList = agents.map((a, i) => {
+      const displayName = a.instanceNumber ? `${a.name} #${a.instanceNumber}` : a.name;
+      return `${i + 1}. ${displayName}`;
+    }).join('\n');
     const choice = prompt(
       `Assign to agent (leave empty for unassigned):\n\n${agentList}\n\nEnter agent number or name:`,
       assignTo
@@ -572,11 +576,32 @@ async function editCurrentTask() {
       // Check if it's a number (agent index)
       const index = parseInt(choice);
       if (!isNaN(index) && index > 0 && index <= agents.length) {
-        assignTo = agents[index - 1];
+        const selectedAgent = agents[index - 1];
+        assignTo = selectedAgent.name;
+        assignedNodeId = selectedAgent.nodeId || selectedAgent.id || '';
       } else if (choice.trim() === '') {
         assignTo = '';
+        assignedNodeId = '';
       } else {
-        assignTo = choice.trim();
+        // Parse input like "default #3" to extract agent name and instance number
+        const trimmed = choice.trim();
+        const match = trimmed.match(/^(.+?)\s*#(\d+)$/);
+        if (match) {
+          // User entered "name #number", find the matching agent
+          const agentName = match[1].trim();
+          const instanceNum = parseInt(match[2]);
+          const matchingAgent = agents.find(a => a.name === agentName && a.instanceNumber === instanceNum);
+          if (matchingAgent) {
+            assignTo = matchingAgent.name;
+            assignedNodeId = matchingAgent.nodeId || matchingAgent.id || '';
+          } else {
+            assignTo = agentName;
+            assignedNodeId = '';
+          }
+        } else {
+          assignTo = trimmed;
+          assignedNodeId = '';
+        }
       }
     }
   }
@@ -588,6 +613,7 @@ async function editCurrentTask() {
       body: JSON.stringify({
         description: newDescription.trim(),
         to: assignTo,
+        assigned_node_id: assignedNodeId,
         from: task.from || ''
       })
     });
@@ -597,12 +623,13 @@ async function editCurrentTask() {
       // Update the task locally
       task.description = newDescription.trim();
       task.to = assignTo;
+      task.assigned_node_id = assignedNodeId;
 
       // Refresh the task details panel
       showTaskDetails(task);
 
-      // Redraw canvas
-      window.agentCanvas.draw();
+      // Re-initialize canvas to fetch updated task data from backend
+      window.agentCanvas.init();
     } else {
       const error = await response.text();
       alert(`Failed to update task: ${error}`);
