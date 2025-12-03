@@ -97,7 +97,20 @@ function showTaskDetails(task) {
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Input Tasks:</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
-            ${task.input_task_ids.map((id, idx) => `Input ${idx + 1}: ${id.substring(0, 8)}...`).join('<br>')}
+            ${task.input_task_ids.map((id, idx) => {
+              const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+              return `
+                <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
+                  <span>🔗 Input ${idx + 1}: ${inputTask ? inputTask.description.substring(0, 30) : id.substring(0, 8)}...</span>
+                  <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              `;
+            }).join('')}
           </div>
         </div>
       ` : ''}
@@ -178,7 +191,17 @@ function showTaskDetails(task) {
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
             ${task.input_task_ids.map((id, idx) => {
               const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
-              return `<div class="mb-1">🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</div>`;
+              return `
+                <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
+                  <span>🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</span>
+                  <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              `;
             }).join('')}
           </div>
           <button class="btn btn-sm btn-outline-primary mt-2 w-100" onclick="addTaskInput('${task.id}')">
@@ -868,6 +891,87 @@ async function addTaskInput(taskId) {
 }
 
 window.addTaskInput = addTaskInput;
+
+/**
+ * Remove an input task from a task's input_task_ids array
+ */
+async function removeTaskInput(taskId, inputTaskIdToRemove) {
+  if (!currentStudioId) {
+    alert('No studio selected');
+    return;
+  }
+
+  if (!window.agentCanvas || !window.agentCanvas.state || !window.agentCanvas.state.tasks) {
+    alert('Canvas not initialized');
+    return;
+  }
+
+  const task = window.agentCanvas.state.tasks.find(t => t.id === taskId);
+  if (!task) {
+    alert('Task not found');
+    return;
+  }
+
+  if (!task.input_task_ids || !task.input_task_ids.includes(inputTaskIdToRemove)) {
+    alert('Input task not found in task inputs');
+    return;
+  }
+
+  // Confirm removal
+  const inputTask = window.agentCanvas.state.tasks.find(t => t.id === inputTaskIdToRemove);
+  const inputDesc = inputTask ? inputTask.description.substring(0, 40) : inputTaskIdToRemove.substring(0, 8);
+  if (!confirm(`Remove input connection?\n\n"${inputDesc}..."\n\nThis will disconnect this input from the task.`)) {
+    return;
+  }
+
+  // Remove the input task from the array
+  const currentInputs = task.input_task_ids || [];
+  const newInputs = currentInputs.filter(id => id !== inputTaskIdToRemove);
+
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: task.description,
+        to: task.to || '',
+        from: task.from || '',
+        input_task_ids: newInputs,
+        ...(task.combiner_type && { combiner_type: task.combiner_type }),
+        ...(task.result_combination_mode && { result_combination_mode: task.result_combination_mode })
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update task: ${response.statusText}`);
+    }
+
+    // Update local state
+    task.input_task_ids = newInputs;
+
+    // Refresh task details
+    if (window.showTaskDetails) {
+      window.showTaskDetails(task);
+    }
+
+    // Immediate redraw to remove the connection line
+    if (window.agentCanvas && window.agentCanvas.draw) {
+      window.agentCanvas.draw();
+
+      // Force another redraw after a short delay to ensure connections are updated
+      setTimeout(() => {
+        window.agentCanvas.draw();
+      }, 100);
+    }
+
+    console.log(`Removed input "${inputDesc}..." from task`);
+  } catch (error) {
+    console.error('Failed to remove input:', error);
+    alert(`Failed to remove input: ${error.message}`);
+  }
+}
+
+window.removeTaskInput = removeTaskInput;
 
 /**
  * Assign current task to an agent

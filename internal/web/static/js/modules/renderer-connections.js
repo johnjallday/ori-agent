@@ -138,7 +138,46 @@ export class RendererConnections {
         glow = 0;
       }
 
-      // Draw glowing line
+      // Calculate angle from source to target
+      const angle = Math.atan2(toY - fromY, toX - fromX);
+
+      // Calculate task card dimensions (typical task card is 160x60, centered at x,y)
+      const cardWidth = 160;
+      const cardHeight = 60;
+
+      // Calculate the edge point where arrow should stop
+      // Use the bounds object if available (for accurate sizing)
+      const targetBounds = chain.to.bounds || {
+        width: cardWidth,
+        height: cardHeight,
+        x: toX - cardWidth / 2,
+        y: toY - cardHeight / 2
+      };
+
+      // Calculate intersection point on card edge
+      // We need to find where the line intersects the rectangle
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+
+      // Calculate distance from center to edge along the angle
+      const halfWidth = targetBounds.width / 2;
+      const halfHeight = targetBounds.height / 2;
+
+      // Calculate which edge we're hitting
+      let edgeOffset;
+      if (Math.abs(dx) > Math.abs(dy) * (halfWidth / halfHeight)) {
+        // Hitting left or right edge
+        edgeOffset = Math.abs(halfWidth / dx);
+      } else {
+        // Hitting top or bottom edge
+        edgeOffset = Math.abs(halfHeight / dy);
+      }
+
+      // Calculate the point at the edge of the card
+      const edgeX = toX - edgeOffset * dx;
+      const edgeY = toY - edgeOffset * dy;
+
+      // Draw glowing line to the edge of the card
       if (glow > 0) {
         this.ctx.shadowColor = color;
         this.ctx.shadowBlur = glow;
@@ -148,40 +187,43 @@ export class RendererConnections {
       this.ctx.lineWidth = width;
       this.ctx.lineCap = 'round';
 
-      // Draw straight line
+      // Draw straight line to edge of card
       this.ctx.beginPath();
       this.ctx.moveTo(fromX, fromY);
-      this.ctx.lineTo(toX, toY);
+      this.ctx.lineTo(edgeX, edgeY);
       this.ctx.stroke();
 
       this.ctx.shadowColor = 'transparent';
       this.ctx.shadowBlur = 0;
 
-      // Draw arrow head at destination
-      const angle = Math.atan2(toY - fromY, toX - fromX);
+      // Draw arrow head at the edge
       const arrowSize = 10;
 
       this.ctx.fillStyle = color;
       this.ctx.beginPath();
-      this.ctx.moveTo(toX, toY);
+      this.ctx.moveTo(edgeX, edgeY);
       this.ctx.lineTo(
-        toX - arrowSize * Math.cos(angle - Math.PI / 6),
-        toY - arrowSize * Math.sin(angle - Math.PI / 6)
+        edgeX - arrowSize * Math.cos(angle - Math.PI / 6),
+        edgeY - arrowSize * Math.sin(angle - Math.PI / 6)
       );
       this.ctx.lineTo(
-        toX - arrowSize * Math.cos(angle + Math.PI / 6),
-        toY - arrowSize * Math.sin(angle + Math.PI / 6)
+        edgeX - arrowSize * Math.cos(angle + Math.PI / 6),
+        edgeY - arrowSize * Math.sin(angle + Math.PI / 6)
       );
       this.ctx.closePath();
       this.ctx.fill();
 
       // Draw chain progress indicator for active chains
       if (chain.active && !chain.completed) {
+        // Calculate midpoint for progress indicator
+        const midX = (fromX + toX) / 2;
+        const midY = (fromY + toY) / 2;
+
         this.ctx.fillStyle = color;
         this.ctx.font = 'bold 10px system-ui';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
-        this.ctx.fillText('⚡', midX + perpX, midY + perpY);
+        this.ctx.fillText('⚡', midX, midY);
       }
     });
   }

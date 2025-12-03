@@ -115,6 +115,9 @@ export class AgentCanvasInitialization {
       // Detect and initialize chains
       this.parent.animation.updateChains();
 
+      // Fetch initial progress data immediately before connecting to SSE
+      await this.fetchInitialProgressData();
+
       // Connect to real-time events
       this.parent.eventHandler.connectEventStream();
 
@@ -289,5 +292,97 @@ export class AgentCanvasInitialization {
         console.log(`⚠️ No task found for combiner node ${combiner.id}`);
       }
     });
+  }
+
+  /**
+   * Fetch initial progress data immediately after initialization
+   * This ensures the canvas is fully functional without waiting for SSE
+   */
+  async fetchInitialProgressData() {
+    try {
+      console.log('📊 Fetching initial progress data for studio:', this.parent.studioId);
+
+      // Fetch fresh studio data with progress
+      const response = await fetch(`/api/studios/${this.parent.studioId}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to fetch initial progress data:', response.statusText);
+        return;
+      }
+
+      const data = await response.json();
+      console.log('📊 Initial progress data fetched:', data);
+
+      // Process the data using the same logic as SSE onInitial
+      if (data.workspace_progress) {
+        this.parent.workspaceProgress = data.workspace_progress;
+        console.log('✅ Updated workspace progress:', data.workspace_progress);
+      }
+
+      if (data.agent_stats && this.parent.eventHandler &&
+          typeof this.parent.eventHandler.updateAgentStats === 'function') {
+        this.parent.eventHandler.updateAgentStats(data.agent_stats);
+        console.log('✅ Updated agent stats');
+      }
+
+      if (data.tasks) {
+        // Preserve existing positions
+        const existingPositions = {};
+        this.state.tasks.forEach(t => {
+          if (t.x !== null && t.y !== null) {
+            existingPositions[t.id] = { x: t.x, y: t.y };
+          }
+        });
+
+        const tasks = data.tasks.map(task => {
+          const existing = existingPositions[task.id];
+          const mapped = {
+            ...task,
+            x: existing ? existing.x : (task.x ?? null),
+            y: existing ? existing.y : (task.y ?? null)
+          };
+
+          // Ensure task has a position
+          if (this.parent.eventHandler &&
+              typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+            this.parent.eventHandler.ensureTaskPosition(mapped);
+          }
+
+          return mapped;
+        });
+
+        // Normalize unassigned tasks
+        tasks.forEach(t => {
+          if (t.to === 'unassigned' || !t.to) {
+            t.status = 'pending';
+            t.result = null;
+            t.error = null;
+            t.progress = 0;
+            t.completed_at = null;
+            t.started_at = null;
+          }
+        });
+
+        this.state.setTasks(tasks);
+
+        // Update agent results from tasks
+        if (this.parent.eventHandler &&
+            typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function') {
+          this.parent.eventHandler.updateAgentResultsFromTasks(tasks);
+        }
+
+        console.log('✅ Updated tasks:', tasks.length);
+      }
+
+      // Redraw canvas with updated data
+      this.parent.draw();
+      console.log('✅ Initial progress data processed successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to fetch initial progress data:', error);
+    }
   }
 }

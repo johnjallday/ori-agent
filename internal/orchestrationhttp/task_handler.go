@@ -579,6 +579,17 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Execute any pending input tasks first (cascading execution)
+	if len(foundTask.InputTaskIDs) > 0 {
+		logger.Info("🔗 Task has input tasks, checking if they need execution first", logger.Fields{"task_id": foundTask.ID, "input_count": len(foundTask.InputTaskIDs)})
+
+		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
+			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
+			http.Error(w, fmt.Sprintf("Failed to execute input tasks: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// Execute the task immediately in a goroutine
 	go func() {
 		ctx := context.Background()
@@ -730,6 +741,143 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		"message": "Task execution started",
 		"task_id": req.TaskID,
 	})
+}
+
+// executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks
+// before executing the main task. This ensures fresh results for all inputs.
+func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task *agentstudio.Task) error {
+	if len(task.InputTaskIDs) == 0 {
+		return nil
+	}
+
+	logger.Info("🔍 Checking input tasks for execution", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
+
+	for _, inputTaskID := range task.InputTaskIDs {
+		inputTask, err := ws.GetTask(inputTaskID)
+		if err != nil {
+			logger.Warn("Input task not found, skipping", logger.Fields{"input_task_id": inputTaskID})
+			continue
+		}
+
+		// Check if input task needs execution
+		needsExecution := inputTask.Status == agentstudio.TaskStatusPending ||
+			inputTask.Status == "" ||
+			inputTask.To == "unassigned" ||
+			inputTask.To == "" ||
+			inputTask.Status == agentstudio.TaskStatusFailed
+
+		if !needsExecution {
+			logger.Debug("✅ Input task already completed, skipping", logger.Fields{"input_task_id": inputTaskID, "status": inputTask.Status})
+			continue
+		}
+
+		logger.Info("🚀 Auto-executing input task", logger.Fields{"input_task_id": inputTaskID, "description": inputTask.Description})
+
+		// Recursively execute this input task's inputs first
+		if err := th.executeInputTasksIfNeeded(ws, inputTask); err != nil {
+			return fmt.Errorf("failed to execute nested input task %s: %w", inputTaskID, err)
+		}
+
+		// Auto-assign unassigned input tasks to the parent task's agent
+		if inputTask.To == "unassigned" || inputTask.To == "" {
+			if task.To == "unassigned" || task.To == "" {
+				logger.Error("Cannot auto-execute input task: both input and parent are unassigned", logger.Fields{"input_task_id": inputTaskID})
+				return fmt.Errorf("input task %s is unassigned and parent task has no agent to inherit", inputTaskID)
+			}
+
+			logger.Info("🔄 Auto-assigning input task to parent's agent", logger.Fields{
+				"input_task_id": inputTaskID,
+				"agent":         task.To,
+				"assigned_node": task.AssignedNodeID,
+			})
+
+			inputTask.To = task.To
+			inputTask.AssignedNodeID = task.AssignedNodeID
+			inputTask.Status = agentstudio.TaskStatusPending
+
+			// Save the assignment
+			if err := ws.UpdateTask(*inputTask); err != nil {
+				return fmt.Errorf("failed to auto-assign input task: %w", err)
+			}
+			if err := th.workspaceStore.Save(ws); err != nil {
+				return fmt.Errorf("failed to save workspace after auto-assignment: %w", err)
+			}
+		}
+
+		// Execute the input task synchronously
+		ctx := context.Background()
+
+		// Update status to in_progress
+		inputTask.Status = agentstudio.TaskStatusInProgress
+		now := time.Now()
+		inputTask.StartedAt = &now
+
+		if err := ws.UpdateTask(*inputTask); err != nil {
+			return fmt.Errorf("failed to update input task status: %w", err)
+		}
+		if err := th.workspaceStore.Save(ws); err != nil {
+			return fmt.Errorf("failed to save workspace: %w", err)
+		}
+
+		// Gather input context for this task
+		if len(inputTask.InputTaskIDs) > 0 {
+			enrichedContext := ws.GetInputContext(inputTask)
+			inputTask.Context = enrichedContext
+		}
+
+		// Execute the task
+		logger.Debug("▶️ Executing input task", logger.Fields{"input_task_id": inputTaskID, "agent": inputTask.To})
+		result, err := th.taskHandler.ExecuteTask(ctx, inputTask.To, *inputTask)
+
+		// Update task with result
+		completed := time.Now()
+		inputTask.CompletedAt = &completed
+
+		if err != nil {
+			logger.Error("Input task execution failed", logger.Fields{"input_task_id": inputTaskID, "error": err})
+			inputTask.Status = agentstudio.TaskStatusFailed
+			inputTask.Error = err.Error()
+		} else {
+			logger.Info("✅ Input task completed successfully", logger.Fields{"input_task_id": inputTaskID})
+			inputTask.Status = agentstudio.TaskStatusCompleted
+			inputTask.Result = result
+		}
+
+		// Save updated task
+		if err := ws.UpdateTask(*inputTask); err != nil {
+			return fmt.Errorf("failed to save input task result: %w", err)
+		}
+		if err := th.workspaceStore.Save(ws); err != nil {
+			return fmt.Errorf("failed to save workspace after input task: %w", err)
+		}
+
+		// Publish events
+		if th.eventBus != nil {
+			if inputTask.Status == agentstudio.TaskStatusFailed {
+				event := agentstudio.NewTaskEvent(agentstudio.EventTaskFailed, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+					"description": inputTask.Description,
+					"error":       inputTask.Error,
+					"auto":        true,
+				})
+				th.eventBus.Publish(event)
+			} else {
+				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+					"description": inputTask.Description,
+					"result":      inputTask.Result,
+					"auto":        true,
+				})
+				th.eventBus.Publish(event)
+			}
+		}
+
+		// If input task failed, don't continue
+		if inputTask.Status == agentstudio.TaskStatusFailed {
+			return fmt.Errorf("input task %s failed: %s", inputTaskID, inputTask.Error)
+		}
+	}
+
+	logger.Info("✅ All input tasks executed successfully", logger.Fields{"task_id": task.ID})
+	return nil
 }
 
 // ScheduledTasksHandler handles listing and creating scheduled tasks
