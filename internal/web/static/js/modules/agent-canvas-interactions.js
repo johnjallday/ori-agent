@@ -519,6 +519,7 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingTask = this.state.isDraggingTask;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
+    const wasAssigning = this.state.assignmentMode && this.state.assignmentSourceTask;
 
     // Handle result connection drop from agent to task
     if (this.state.resultConnectionMode && this.state.resultSourceAgent) {
@@ -666,6 +667,29 @@ export class AgentCanvasInteractionHandler {
       this.canvas.style.cursor = 'grab';
       this.parent.draw();
       return;
+    }
+
+    // If we were in assignment mode, check if mouse up occurred over an agent to assign
+    if (wasAssigning && this.state.assignmentSourceTask) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+
+      const targetAgent = this.state.agents.find(a => {
+        const halfW = (a.width || 120) / 2;
+        const halfH = (a.height || 70) / 2;
+        return x >= a.x - halfW && x <= a.x + halfW && y >= a.y - halfH && y <= a.y + halfH;
+      });
+
+      if (targetAgent) {
+        this.parent.assignTaskToAgent(targetAgent);
+      }
+
+      // Exit assignment mode regardless
+      this.state.assignmentMode = false;
+      this.state.assignmentSourceTask = null;
+      this.state.assignmentMouseX = 0;
+      this.state.assignmentMouseY = 0;
     }
 
     this.state.isDragging = false;
