@@ -58,6 +58,14 @@ If you downloaded the DMG and see the warning, you can also:
 4. Click **"Open Anyway"**
 5. Click **"Open"** in the confirmation dialog
 
+### Method 2A: System Settings (with screenshots)
+1. Open **System Settings → Privacy & Security** and scroll to the security section.
+2. Click **Open Anyway** when you see the block notice:  
+   ![Allow from Privacy & Security](images/AddPrivacy.png)
+3. Confirm by clicking **Open** in the follow-up dialog:  
+   ![Confirm Open](images/Open.png)
+4. Relaunch OriAgent (macOS will remember this choice going forward).
+
 ### Method 3: Terminal Command
 ```bash
 # Remove quarantine attribute
