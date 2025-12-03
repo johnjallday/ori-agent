@@ -697,13 +697,12 @@ export class AgentCanvasInteractionHandler {
 
       if (targetAgent) {
         this.parent.assignTaskToAgent(targetAgent);
+        // Exit assignment mode after assigning
+        this.state.assignmentMode = false;
+        this.state.assignmentSourceTask = null;
+        this.state.assignmentMouseX = 0;
+        this.state.assignmentMouseY = 0;
       }
-
-      // Exit assignment mode regardless
-      this.state.assignmentMode = false;
-      this.state.assignmentSourceTask = null;
-      this.state.assignmentMouseX = 0;
-      this.state.assignmentMouseY = 0;
     }
 
     this.state.isDragging = false;
@@ -1132,8 +1131,21 @@ export class AgentCanvasInteractionHandler {
           const btn = task.assignBtnBounds;
           if (x >= btn.x && x <= btn.x + btn.width &&
               y >= btn.y && y <= btn.y + btn.height) {
-            // Assign button clicked - toggle assignment mode
-            this.parent.toggleAssignmentMode(task);
+            // If already assigning from another task, treat this as target
+            if (this.state.assignmentMode && this.state.assignmentSourceTask &&
+                this.state.assignmentSourceTask.id !== task.id) {
+              this.parent.linkTaskResult(this.state.assignmentSourceTask.id, task.id);
+              this.state.assignmentMode = false;
+              this.state.assignmentSourceTask = null;
+              this.state.assignmentMouseX = 0;
+              this.state.assignmentMouseY = 0;
+              this.canvas.style.cursor = 'grab';
+              this.parent.showNotification('Connected task output as input', 'success');
+              this.parent.draw();
+            } else {
+              // Otherwise start assignment from this task
+              this.parent.toggleAssignmentMode(task);
+            }
             return;
           }
         }
@@ -1152,11 +1164,17 @@ export class AgentCanvasInteractionHandler {
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
           // Check if we're in assignment mode and this is a different task
-          const isCombinerTask = task.combiner_type || task.combinerType;
           if (this.state.assignmentMode && this.state.assignmentSourceTask &&
               this.state.assignmentSourceTask.id !== task.id) {
-            // In assignment mode - assign source task as input to this task
-            this.parent.assignTaskToCombiner(task);
+            // Link source task output to this task as an input
+            this.parent.linkTaskResult(this.state.assignmentSourceTask.id, task.id);
+            this.state.assignmentMode = false;
+            this.state.assignmentSourceTask = null;
+            this.state.assignmentMouseX = 0;
+            this.state.assignmentMouseY = 0;
+            this.canvas.style.cursor = 'grab';
+            this.parent.showNotification('Connected task output as input', 'success');
+            this.parent.draw();
             return;
           }
 
