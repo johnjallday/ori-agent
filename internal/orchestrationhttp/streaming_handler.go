@@ -318,6 +318,8 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 
 	// Send initial workspace progress
 	sh.sendInitialProgress(w, flusher, workspaceID)
+	// Immediately follow with a workspace.progress event so clients don't wait for the ticker
+	sh.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
 
 	// Create ticker for periodic workspace progress updates (every 10 seconds)
 	ticker := time.NewTicker(10 * time.Second)

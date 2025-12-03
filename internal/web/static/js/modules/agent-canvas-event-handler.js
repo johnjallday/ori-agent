@@ -24,77 +24,10 @@ export class AgentCanvasEventHandler {
     this.parent.eventSource = connectProgressStream(this.parent.studioId, {
       onInitial: (data) => {
         console.log('📊 Initial progress state:', data);
-        if (data.workspace_progress) {
-          this.parent.workspaceProgress = data.workspace_progress;
-        }
-        if (data.agent_stats) {
-          this.updateAgentStats(data.agent_stats);
-        }
-        if (data.tasks) {
-          const existingPositions = {};
-          this.state.tasks.forEach(t => {
-            if (t.x !== null && t.y !== null) {
-              existingPositions[t.id] = { x: t.x, y: t.y };
-            }
-          });
-
-        const tasks = data.tasks.map(task => {
-          const existing = existingPositions[task.id];
-          const mapped = {
-            ...task,
-            x: existing ? existing.x : (task.x ?? null),
-            y: existing ? existing.y : (task.y ?? null)
-          };
-          // Preserve assigned node hint if present on local task
-          const local = this.state.tasks.find(t => t.id === task.id);
-          if (local && local.assigned_node_id) {
-            mapped.assigned_node_id = local.assigned_node_id;
-          }
-          this.ensureTaskPosition(mapped);
-          return mapped;
-        });
-          // Normalize unassigned tasks to a clean pending state
-          tasks.forEach(t => {
-            if (t.to === 'unassigned' || !t.to) {
-              t.status = 'pending';
-              t.result = null;
-              t.error = null;
-              t.progress = 0;
-              t.completed_at = null;
-              t.started_at = null;
-            }
-          });
-
-          this.state.setTasks(tasks);
-          // Seed agent lastResult from any completed tasks with results
-          this.updateAgentResultsFromTasks(tasks);
-        }
-        this.parent.draw();
+        this.processWorkspacePayload(data, { setTasks: true, source: 'initial' });
       },
       onWorkspaceProgress: (data) => {
-        console.log('📊 Workspace progress update:', data);
-        if (data.workspace_progress) {
-          this.parent.workspaceProgress = data.workspace_progress;
-        }
-        if (data.agent_stats) {
-          this.updateAgentStats(data.agent_stats);
-        }
-        // Keep agent results in sync if tasks array arrives with updates
-        if (data.tasks) {
-          data.tasks.forEach(t => {
-            this.ensureTaskPosition(t);
-            if (t.to === 'unassigned' || !t.to) {
-              t.status = 'pending';
-              t.result = null;
-              t.error = null;
-              t.progress = 0;
-              t.completed_at = null;
-              t.started_at = null;
-            }
-          });
-          this.updateAgentResultsFromTasks(data.tasks);
-        }
-        this.parent.draw();
+        this.processWorkspacePayload(data, { setTasks: false, source: 'workspace.progress' });
       },
       onTaskEvent: (type, data) => {
         const evt = { type, data };
@@ -144,6 +77,104 @@ export class AgentCanvasEventHandler {
     });
 
     console.log('🔄 Connected to progress stream');
+    // Emit a synthetic workspace snapshot immediately so UI reacts without waiting for server tick
+    this.emitImmediateWorkspaceProgress();
+  }
+
+  /**
+   * Process workspace progress payloads from SSE or initial fetch.
+   */
+  processWorkspacePayload(data, { setTasks = false, source = 'workspace.progress' } = {}) {
+    if (!data) return;
+
+    const payloadForLog = {
+      ...data,
+      type: data.type || source || 'workspace.progress',
+      timestamp: data.timestamp || new Date().toISOString()
+    };
+    console.log('📊 Workspace progress update:', payloadForLog);
+
+    if (data.workspace_progress) {
+      this.parent.workspaceProgress = data.workspace_progress;
+    }
+    if (data.agent_stats) {
+      this.updateAgentStats(data.agent_stats);
+    }
+
+    if (data.tasks && Array.isArray(data.tasks)) {
+      const tasks = setTasks
+        ? this.normalizeTasksForState(data.tasks)
+        : data.tasks.map(task => this.normalizeTaskWithPosition({ ...task }));
+
+      if (setTasks) {
+        this.state.setTasks(tasks);
+      }
+      this.updateAgentResultsFromTasks(tasks);
+    }
+
+    this.parent.draw();
+  }
+
+  /**
+   * Normalize task fields and ensure a sane position.
+   */
+  normalizeTaskWithPosition(task) {
+    if (!task) return task;
+
+    this.ensureTaskPosition(task);
+    if (task.to === 'unassigned' || !task.to) {
+      task.status = 'pending';
+      task.result = null;
+      task.error = null;
+      task.progress = 0;
+      task.completed_at = null;
+      task.started_at = null;
+    }
+    return task;
+  }
+
+  /**
+   * Normalize tasks while preserving known positions and assignments from state.
+   */
+  normalizeTasksForState(tasks) {
+    const existingPositions = {};
+    this.state.tasks.forEach(t => {
+      if (t.x !== null && t.y !== null) {
+        existingPositions[t.id] = { x: t.x, y: t.y };
+      }
+    });
+
+    return tasks.map(task => {
+      const existing = existingPositions[task.id];
+      const mapped = {
+        ...task,
+        x: existing ? existing.x : (task.x ?? null),
+        y: existing ? existing.y : (task.y ?? null)
+      };
+
+      // Preserve assigned node hint if present on local task
+      const local = this.state.tasks.find(t => t.id === task.id);
+      if (local && local.assigned_node_id && !mapped.assigned_node_id) {
+        mapped.assigned_node_id = local.assigned_node_id;
+      }
+
+      return this.normalizeTaskWithPosition(mapped);
+    });
+  }
+
+  /**
+   * Immediately feed the current state back through the workspace processor so
+   * the canvas updates without waiting for the first SSE tick.
+   */
+  emitImmediateWorkspaceProgress() {
+    const snapshot = {
+      type: 'workspace.progress',
+      workspace_id: this.parent.studioId,
+      workspace_progress: this.parent.workspaceProgress || null,
+      agent_stats: (this.parent.studio && this.parent.studio.agent_stats) || null,
+      tasks: this.state.tasks
+    };
+    this.processWorkspacePayload(snapshot, { setTasks: false, source: 'client.snapshot' });
   }
 
   /**

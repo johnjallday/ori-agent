@@ -316,7 +316,17 @@ export class AgentCanvasInitialization {
       const data = await response.json();
       console.log('📊 Initial progress data fetched:', data);
 
-      // Process the data using the same logic as SSE onInitial
+      if (this.parent.eventHandler &&
+          typeof this.parent.eventHandler.processWorkspacePayload === 'function') {
+        this.parent.eventHandler.processWorkspacePayload(
+          { ...data, type: data.type || 'workspace.progress' },
+          { setTasks: true, source: 'initial.fetch' }
+        );
+        console.log('✅ Initial progress data processed successfully');
+        return;
+      }
+
+      // Fallback if event handler is unavailable
       if (data.workspace_progress) {
         this.parent.workspaceProgress = data.workspace_progress;
         console.log('✅ Updated workspace progress:', data.workspace_progress);
