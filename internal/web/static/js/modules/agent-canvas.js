@@ -747,11 +747,40 @@ class AgentCanvas {
         const agents = this.state.agents.filter(a => a.nodeId !== nodeId);
         this.state.setAgents(agents);
 
+        // Unassign any tasks that were targeting this agent or nodeId
+        const affectedTasks = [];
+        const updatedTasks = this.state.tasks.map(t => {
+          if (!t) return t;
+          const targetMatches = t.assigned_node_id === nodeId || t.to === agentName;
+          if (targetMatches) {
+            affectedTasks.push(t.id);
+            return { ...t, to: 'unassigned', assigned_node_id: '' };
+          }
+          return t;
+        });
+        if (affectedTasks.length > 0) {
+          this.state.setTasks(updatedTasks);
+
+          // Persist unassignment in the backend (fire-and-forget)
+          affectedTasks.forEach(taskId => {
+            fetch('/api/orchestration/tasks', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                task_id: taskId,
+                to: 'unassigned',
+                assigned_node_id: ''
+              })
+            }).catch(err => console.error('Failed to unassign task after agent removal:', err));
+          });
+        }
+
         // Redraw canvas
         this.draw();
 
         // Show notification
-        this.showNotification(`Agent "${agentName}" removed from studio`, 'success');
+        const unassignNote = affectedTasks.length > 0 ? ` and unassigned ${affectedTasks.length} task(s)` : '';
+        this.showNotification(`Agent "${agentName}" removed${unassignNote}`, 'success');
 
         // Reload to ensure consistency
         setTimeout(() => this.init(), 500);
