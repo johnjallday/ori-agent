@@ -168,6 +168,8 @@
     </div>
   </div>
 
+  {{template "modals.tmpl" .}}
+
   <style>
     /* Better text contrast for light mode */
     [data-bs-theme="light"] .form-label,
@@ -188,6 +190,8 @@
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/modules/update-checker.js"></script>
+  <script src="/js/modules/plugin-update-checker.js"></script>
   <script src="/js/modules/themeManager.js"></script>
   <script>
     // Initialize theme on page load
