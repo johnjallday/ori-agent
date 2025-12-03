@@ -371,6 +371,20 @@ export class AgentCanvasInteractionHandler {
 
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+        // If we're assigning a task, clicking an agent should assign immediately
+        if (this.state.assignmentMode && this.state.assignmentSourceTask) {
+          e.stopPropagation();
+          e.preventDefault();
+          this.parent.assignTaskToAgent(agent);
+          this.state.assignmentMode = false;
+          this.state.assignmentSourceTask = null;
+          this.state.assignmentMouseX = 0;
+          this.state.assignmentMouseY = 0;
+          this.canvas.style.cursor = 'grab';
+          this.parent.draw();
+          return;
+        }
+
         // Check if Ctrl/Cmd is pressed for result connection mode
         if (this.state.ctrlPressed) {
           // Enable result connection mode - link agent's latest task to target
