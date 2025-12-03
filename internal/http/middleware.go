@@ -3,10 +3,10 @@ package http
 import (
 	"log"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"runtime/debug"
 	"time"
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ErrorRecovery returns middleware that recovers from panics in HTTP handlers.
@@ -72,8 +72,13 @@ func RequestLogger() func(http.Handler) http.Handler {
 
 			// Log request with appropriate emoji based on status code
 			emoji := getStatusEmoji(lrw.statusCode)
-			logger.Debug("- (", logger.Fields{})
-				emoji, r.Method, r.URL.Path, lrw.statusCode, duration)
+			logger.Debug("HTTP Request", logger.Fields{
+				"emoji":    emoji,
+				"method":   r.Method,
+				"path":     r.URL.Path,
+				"status":   lrw.statusCode,
+				"duration": duration,
+			})
 		})
 	}
 }

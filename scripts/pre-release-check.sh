@@ -75,8 +75,52 @@ echo "1. CODE QUALITY CHECKS"
 echo "════════════════════════════════════════════"
 echo ""
 
-run_check "Format Check" "make fmt" || true
-run_check "Go Vet" "make vet" || true
+run_check "Format Check" "make fmt" || {
+  # Format check failed - offer to auto-fix syntax errors
+  echo -e "${YELLOW}💡 Tip: Automated syntax error fixing is available${NC}"
+  echo ""
+  read -p "Run automated syntax fixer? [y/N]: " -n 1 -r
+  echo ""
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    if [ -f "./scripts/auto-fix-syntax.sh" ]; then
+      ./scripts/auto-fix-syntax.sh
+      echo ""
+      echo -e "${BLUE}Re-running format check after fixes...${NC}"
+      echo ""
+      # Re-run format check after fixes
+      if run_check "Format Check (after fixes)" "make fmt"; then
+        # Remove the original failure from FAILED_CHECKS
+        FAILED_CHECKS=("${FAILED_CHECKS[@]/Format Check/}")
+      fi
+    else
+      echo -e "${RED}❌ auto-fix-syntax.sh not found in ./scripts/${NC}"
+    fi
+  fi
+}
+run_check "Go Vet" "make vet" || {
+  # Go vet failed - offer to auto-fix
+  echo -e "${YELLOW}💡 Tip: Automated go vet fixing is available${NC}"
+  echo ""
+  read -p "Run automated go vet fixer? [y/N]: " -n 1 -r
+  echo ""
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    if [ -f "./scripts/auto-fix-syntax.sh" ]; then
+      ./scripts/auto-fix-syntax.sh
+      echo ""
+      echo -e "${BLUE}Re-running go vet after fixes...${NC}"
+      echo ""
+      # Re-run go vet after fixes
+      if run_check "Go Vet (after fixes)" "make vet"; then
+        # Remove the original failure from FAILED_CHECKS
+        FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Vet/}")
+      fi
+    else
+      echo -e "${RED}❌ auto-fix-syntax.sh not found in ./scripts/${NC}"
+    fi
+  fi
+}
 
 # Check if golangci-lint is installed (check PATH and ~/go/bin)
 if command -v golangci-lint &> /dev/null; then
@@ -133,15 +177,42 @@ else
   echo ""
 fi
 
+# Check Go version first (some vulnerabilities require Go upgrades)
+if [ -f "./scripts/check-go-version.sh" ]; then
+  run_check "Go Version Check" "./scripts/check-go-version.sh" || {
+    echo -e "${YELLOW}💡 Tip: Upgrade Go to fix standard library vulnerabilities${NC}"
+    echo ""
+    read -p "Skip security scan (will fail due to Go version)? [y/N]: " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (outdated Go version)${NC}"
+      echo ""
+      # Remove Go Version Check from failures since user acknowledged
+      FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Version Check/}")
+      SKIP_SECURITY_SCAN=true
+    fi
+  }
+fi
+
 # Check if govulncheck is installed (check PATH and ~/go/bin)
-if command -v govulncheck &> /dev/null; then
-  run_check "Security Scan" "make security" || true
-elif [ -x "$HOME/go/bin/govulncheck" ]; then
-  run_check "Security Scan" "$HOME/go/bin/govulncheck ./..." || true
-else
-  echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (govulncheck not installed)${NC}"
-  echo -e "${YELLOW}   Install with: make install-tools${NC}"
-  echo ""
+if [ "${SKIP_SECURITY_SCAN}" != "true" ]; then
+  if command -v govulncheck &> /dev/null; then
+    run_check "Security Scan" "make security" || {
+      echo -e "${YELLOW}💡 Tip: If failure is due to Go version, upgrade Go${NC}"
+      echo -e "${YELLOW}   See instructions above or run: ./scripts/check-go-version.sh${NC}"
+      echo ""
+    }
+  elif [ -x "$HOME/go/bin/govulncheck" ]; then
+    run_check "Security Scan" "$HOME/go/bin/govulncheck ./..." || {
+      echo -e "${YELLOW}💡 Tip: If failure is due to Go version, upgrade Go${NC}"
+      echo -e "${YELLOW}   See instructions above or run: ./scripts/check-go-version.sh${NC}"
+      echo ""
+    }
+  else
+    echo -e "${YELLOW}⚠️  Security Scan: SKIPPED (govulncheck not installed)${NC}"
+    echo -e "${YELLOW}   Install with: make install-tools${NC}"
+    echo ""
+  fi
 fi
 
 # 2. TESTS (ALL)

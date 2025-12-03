@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 )
 
