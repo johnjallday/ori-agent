@@ -19,7 +19,7 @@ before:
 
 # Build configuration
 builds:
-  # Server binary (main application)
+  # Server binary (main application) - Linux/Windows only to avoid macOS tarballs
   - id: server
     main: ./cmd/server
     binary: ori-agent
@@ -32,7 +32,6 @@ builds:
       - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
     goos:
       - linux
-      - darwin
       - windows
     goarch:
       - amd64
@@ -41,6 +40,23 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64  # Windows ARM64 support is experimental
+
+  # Server binary for macOS (not archived; used for DMG creation)
+  - id: server-macos
+    main: ./cmd/server
+    binary: ori-agent
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X 'github.com/johnjallday/ori-agent/internal/version.Version={{.Version}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate={{.Date}}'
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
 
   # Menu bar app (macOS only)
   - id: menubar
