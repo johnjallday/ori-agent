@@ -1,3 +1,6 @@
+//go:build darwin
+// +build darwin
+
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 
