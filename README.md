@@ -232,17 +232,6 @@ Restart Ori Agent, and your plugin will be automatically loaded!
 | webapp | Example tool with web interface. Manages a simple list of items. | Example |
 <!-- AUTO:PLUGINS_END -->
 
-#### Installing Development Tools
-
-```bash
-# Install all development tools (linter + security scanner)
-make install-tools
-```
-
-This installs:
-- `golangci-lint` - Go linter
-- `govulncheck` - Vulnerability scanner
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -254,7 +243,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/ori-agent/discussions)
 
 While this app is very functional, there will be a lot of breaking changes. Feel free to give feedbacks.
-MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99 
+MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
 
 ## 🛣️Roadmap
 - blockchain integration

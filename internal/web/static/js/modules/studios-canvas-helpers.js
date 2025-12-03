@@ -622,7 +622,11 @@ async function unassignCurrentTask() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         task_id: task.id,
-        to: 'unassigned'
+        to: 'unassigned',
+        status: 'pending',
+        result: null,
+        error: null,
+        progress: 0
       })
     });
 
@@ -631,11 +635,21 @@ async function unassignCurrentTask() {
       // Update the task locally
       task.to = 'unassigned';
       task.status = 'pending';
+      task.result = null;
+      task.error = null;
+      task.progress = 0;
+      task.started_at = null;
+      task.completed_at = null;
       // Keep state array in sync in case we're not holding the same object
       const stateTask = window.agentCanvas?.state?.tasks?.find(t => t.id === task.id);
       if (stateTask) {
         stateTask.to = 'unassigned';
         stateTask.status = 'pending';
+        stateTask.result = null;
+        stateTask.error = null;
+        stateTask.progress = 0;
+        stateTask.started_at = null;
+        stateTask.completed_at = null;
       }
 
       // Refresh the task details panel

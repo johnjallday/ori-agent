@@ -53,6 +53,18 @@ export class AgentCanvasEventHandler {
           this.ensureTaskPosition(mapped);
           return mapped;
         });
+          // Normalize unassigned tasks to a clean pending state
+          tasks.forEach(t => {
+            if (t.to === 'unassigned' || !t.to) {
+              t.status = 'pending';
+              t.result = null;
+              t.error = null;
+              t.progress = 0;
+              t.completed_at = null;
+              t.started_at = null;
+            }
+          });
+
           this.state.setTasks(tasks);
           // Seed agent lastResult from any completed tasks with results
           this.updateAgentResultsFromTasks(tasks);
@@ -69,7 +81,17 @@ export class AgentCanvasEventHandler {
         }
         // Keep agent results in sync if tasks array arrives with updates
         if (data.tasks) {
-          data.tasks.forEach(t => this.ensureTaskPosition(t));
+          data.tasks.forEach(t => {
+            this.ensureTaskPosition(t);
+            if (t.to === 'unassigned' || !t.to) {
+              t.status = 'pending';
+              t.result = null;
+              t.error = null;
+              t.progress = 0;
+              t.completed_at = null;
+              t.started_at = null;
+            }
+          });
           this.updateAgentResultsFromTasks(data.tasks);
         }
         this.parent.draw();

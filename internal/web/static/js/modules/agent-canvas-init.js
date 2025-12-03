@@ -63,7 +63,7 @@ export class AgentCanvasInitialization {
       if (this.parent.studio.tasks) {
         const tasks = this.parent.studio.tasks.map(task => {
           // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
-          return {
+          const normalized = {
             ...task,
             x: task.x ?? null,
             y: task.y ?? null,
@@ -72,6 +72,15 @@ export class AgentCanvasInitialization {
             combiner_node_id: task.combiner_node_id,
             combinerNodeID: task.combiner_node_id
           };
+          if (normalized.to === 'unassigned' || !normalized.to) {
+            normalized.status = 'pending';
+            normalized.result = null;
+            normalized.error = null;
+            normalized.progress = 0;
+            normalized.completed_at = null;
+            normalized.started_at = null;
+          }
+          return normalized;
         });
         // Ensure tasks are placed in the current viewport if missing or off-screen
         if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureTaskPosition === 'function') {

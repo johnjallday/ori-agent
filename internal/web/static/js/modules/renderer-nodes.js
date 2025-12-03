@@ -323,8 +323,11 @@ export class RendererNodes {
       const outputConn = this.state.connections.find(c => c.from === task.id);
       const outputsToCombiner = outputConn ? this.parent.getNodeById(outputConn.to)?.type === 'combiner' : false;
 
+      // Skip action controls when task is unassigned to avoid clutter
+      const showActions = !isUnassigned;
+
       // Execute button for pending tasks (hide if outputs to combiner)
-      if (task.status === 'pending' && !outputsToCombiner) {
+      if (showActions && task.status === 'pending' && !outputsToCombiner) {
         const btnWidth = 50;
         const btnHeight = 14;
         const btnX = cardX + cardWidth - btnWidth - 6;
@@ -347,7 +350,7 @@ export class RendererNodes {
       }
 
       // Rerun button for completed or failed tasks
-      if (task.status === 'completed' || task.status === 'failed') {
+      if (showActions && (task.status === 'completed' || task.status === 'failed')) {
         const rerunBtnWidth = 50;
         const rerunBtnHeight = 14;
         const rerunBtnX = cardX + cardWidth - rerunBtnWidth - 6;
@@ -397,7 +400,7 @@ export class RendererNodes {
 
       // View Log button (show if task has execution logs)
       const hasLogs = this.state.executionLogs[task.id] && this.state.executionLogs[task.id].length > 0;
-      if (hasLogs || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed') {
+      if (showActions && (hasLogs || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed')) {
         const logBtnWidth = 50;
         const logBtnHeight = 14;
         const logBtnX = cardX + 60; // After ASSIGN button
