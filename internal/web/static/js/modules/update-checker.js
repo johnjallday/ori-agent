@@ -96,6 +96,10 @@ function displayUpdateInfo(updateInfo) {
   // Detect current platform
   const platform = detectPlatform();
   const asset = findAssetForPlatform(updateInfo.assets, platform);
+  const assetName = asset ? asset.name || asset.Name || '' : '';
+  const assetSize = asset ? asset.size ?? asset.Size ?? 0 : 0;
+  const assetURL = asset ? asset.url || asset.URL || '' : '';
+  const githubReleaseUrl = `https://github.com/${updateInfo.repository}/releases/tag/${updateInfo.latestVersion}`;
 
   // Format release date
   const releaseDate = new Date(updateInfo.releaseDate).toLocaleDateString('en-US', {
@@ -105,7 +109,8 @@ function displayUpdateInfo(updateInfo) {
   });
 
   // Format file size
-  const fileSize = asset ? formatFileSize(asset.size) : 'N/A';
+  const fileSize = asset ? formatFileSize(assetSize) : 'N/A';
+  const assetLabel = asset ? describeAsset(assetName, platform) : '';
 
   modalBody.innerHTML = `
     <div class="mb-4">
@@ -142,14 +147,15 @@ function displayUpdateInfo(updateInfo) {
     </div>
 
     ${asset ? `
-      <div id="downloadStatus"></div>
-      <div class="alert alert-warning" role="alert">
+      <div class="alert alert-success" role="alert">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-          <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+          <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
         </svg>
-        <strong>Platform detected:</strong> ${platform}
-        <br>
-        <small>The update will be downloaded to the current directory. After download completes, restart ori-agent to use the new version.</small>
+        <div>
+          <strong>Installer available for your platform (${platform}).</strong><br>
+          ${assetLabel ? `${assetLabel}<br>` : ''}
+          <small class="text-muted">File: ${assetName} (${fileSize})</small>
+        </div>
       </div>
     ` : `
       <div class="alert alert-warning" role="alert">
@@ -163,12 +169,15 @@ function displayUpdateInfo(updateInfo) {
 
   // Setup download button
   if (asset) {
-    downloadBtn.removeAttribute('href');
-    downloadBtn.removeAttribute('target');
-    downloadBtn.onclick = () => downloadUpdate(updateInfo.latestVersion, asset);
+    downloadBtn.href = assetURL;
+    downloadBtn.target = '_blank';
+    downloadBtn.rel = 'noopener noreferrer';
+    downloadBtn.setAttribute('download', assetName || 'installer');
+    downloadBtn.textContent = 'Download Installer';
+    downloadBtn.onclick = null;
     downloadBtn.style.display = 'inline-flex';
   } else {
-    downloadBtn.href = `https://github.com/${updateInfo.repository}/releases/tag/${updateInfo.latestVersion}`;
+    downloadBtn.href = githubReleaseUrl;
     downloadBtn.target = '_blank';
     downloadBtn.textContent = 'View on GitHub';
     downloadBtn.onclick = null;
@@ -304,15 +313,68 @@ function findAssetForPlatform(assets, platform) {
     return null;
   }
 
+  const [os, arch] = platform.split('-');
+
+  const osTokens = {
+    darwin: ['darwin', 'macos', 'osx', 'mac'],
+    linux: ['linux'],
+    windows: ['windows', 'win']
+  };
+
+  const archTokens = {
+    amd64: ['amd64', 'x86_64', 'x64'],
+    arm64: ['arm64', 'aarch64', 'arm64v8']
+  };
+
+  const matchesArch = (name) => archTokens[arch]?.some((token) => name.includes(token)) || false;
+  const matchesOS = (name) => osTokens[os]?.some((token) => name.includes(token)) || false;
+
+  const candidates = assets.map((asset) => ({
+    ...asset,
+    _name: (asset.name || asset.Name || '').toLowerCase()
+  }));
+
   // Try exact match first
-  let asset = assets.find(a => a.name.includes(platform));
+  let asset = candidates.find((a) => a._name.includes(platform));
+
+  // If no exact match, look for explicit OS+arch match
+  if (!asset) {
+    asset = candidates.find((a) => matchesOS(a._name) && matchesArch(a._name));
+  }
+
+  // macOS DMGs often omit the OS token; prefer DMG/ZIP with correct arch
+  if (!asset && os === 'darwin') {
+    asset = candidates.find(
+      (a) =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.dmg') || a._name.endsWith('.zip') || a._name.endsWith('.pkg'))
+    );
+  }
+
+  // Windows installers
+  if (!asset && os === 'windows') {
+    asset = candidates.find(
+      (a) =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.msi') || a._name.endsWith('.exe') || a._name.endsWith('.zip'))
+    );
+  }
+
+  // Linux packages (deb/rpm/tar.gz)
+  if (!asset && os === 'linux') {
+    asset = candidates.find(
+      (a) =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.deb') || a._name.endsWith('.rpm') || a._name.endsWith('.tar.gz'))
+    );
+  }
 
   // If no exact match and platform is darwin-arm64, try darwin-amd64 (Rosetta compatibility)
   if (!asset && platform === 'darwin-arm64') {
-    asset = assets.find(a => a.name.includes('darwin-amd64'));
+    asset = candidates.find((a) => a._name.includes('darwin-amd64') || a._name.includes('macos-amd64'));
   }
 
-  return asset;
+  return asset || null;
 }
 
 // Format file size in human-readable format
@@ -324,6 +386,22 @@ function formatFileSize(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Provide a readable label for the selected asset
+function describeAsset(assetName, platform) {
+  if (!assetName) return '';
+  const lowerName = assetName.toLowerCase();
+  if (lowerName.endsWith('.dmg')) {
+    return platform.includes('arm64') ? 'macOS Apple Silicon installer (.dmg)' : 'macOS Intel installer (.dmg)';
+  }
+  if (lowerName.endsWith('.msi')) return 'Windows installer (.msi)';
+  if (lowerName.endsWith('.exe')) return 'Windows standalone (.exe)';
+  if (lowerName.endsWith('.deb')) return 'Linux Debian/Ubuntu package (.deb)';
+  if (lowerName.endsWith('.rpm')) return 'Linux RPM package (.rpm)';
+  if (lowerName.endsWith('.tar.gz')) return 'Compressed archive (.tar.gz)';
+  if (lowerName.endsWith('.zip')) return 'Compressed archive (.zip)';
+  return 'Download';
 }
 
 // Show toast notification for available update
