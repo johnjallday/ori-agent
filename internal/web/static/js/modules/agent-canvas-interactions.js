@@ -1128,7 +1128,7 @@ export class AgentCanvasInteractionHandler {
         }
 
         // Check if click is on assign button
-        if (task.assignBtnBounds && task.status !== 'completed') {
+        if (task.assignBtnBounds) {
           const btn = task.assignBtnBounds;
           if (x >= btn.x && x <= btn.x + btn.width &&
               y >= btn.y && y <= btn.y + btn.height) {

@@ -369,8 +369,10 @@ export class RendererNodes {
         this.ctx.textAlign = 'left';
       }
 
-      // Assign button (for all tasks except completed)
-      if (task.status !== 'completed') {
+      // Assign button (show for unassigned tasks even if completed)
+      const isUnassignedTask = isUnassigned;
+      const showAssignButton = isUnassignedTask || task.status !== 'completed';
+      if (showAssignButton) {
         const assignBtnWidth = 50;
         const assignBtnHeight = 14;
         const assignBtnX = cardX + 6;
