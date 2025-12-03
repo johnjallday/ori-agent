@@ -557,54 +557,9 @@ async function editCurrentTask() {
     return;
   }
 
-  // Prompt for agent assignment (optional)
-  const agents = window.agentCanvas.state.agents;
-  let assignTo = task.to || '';
-  let assignedNodeId = task.assigned_node_id || '';
-
-  if (agents.length > 0) {
-    const agentList = agents.map((a, i) => {
-      const displayName = a.instanceNumber ? `${a.name} #${a.instanceNumber}` : a.name;
-      return `${i + 1}. ${displayName}`;
-    }).join('\n');
-    const choice = prompt(
-      `Assign to agent (leave empty for unassigned):\n\n${agentList}\n\nEnter agent number or name:`,
-      assignTo
-    );
-
-    if (choice !== null) {
-      // Check if it's a number (agent index)
-      const index = parseInt(choice);
-      if (!isNaN(index) && index > 0 && index <= agents.length) {
-        const selectedAgent = agents[index - 1];
-        assignTo = selectedAgent.name;
-        assignedNodeId = selectedAgent.nodeId || selectedAgent.id || '';
-      } else if (choice.trim() === '') {
-        assignTo = '';
-        assignedNodeId = '';
-      } else {
-        // Parse input like "default #3" to extract agent name and instance number
-        const trimmed = choice.trim();
-        const match = trimmed.match(/^(.+?)\s*#(\d+)$/);
-        if (match) {
-          // User entered "name #number", find the matching agent
-          const agentName = match[1].trim();
-          const instanceNum = parseInt(match[2]);
-          const matchingAgent = agents.find(a => a.name === agentName && a.instanceNumber === instanceNum);
-          if (matchingAgent) {
-            assignTo = matchingAgent.name;
-            assignedNodeId = matchingAgent.nodeId || matchingAgent.id || '';
-          } else {
-            assignTo = agentName;
-            assignedNodeId = '';
-          }
-        } else {
-          assignTo = trimmed;
-          assignedNodeId = '';
-        }
-      }
-    }
-  }
+  // Keep existing assignment; do not prompt for agent
+  const assignTo = task.to || '';
+  const assignedNodeId = task.assigned_node_id || '';
 
   try {
     const response = await fetch(`/api/studios/${currentStudioId}/tasks/${task.id}`, {
