@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+
 	"net"
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/server"
 )
 
@@ -152,7 +154,7 @@ func (c *Controller) StopServer(ctx context.Context) error {
 	// Shutdown the HTTP server gracefully
 	if c.httpServer != nil {
 		if err := c.httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("Error during HTTP server shutdown: %v", err)
+			logger.Error("Error during HTTP server shutdown", logger.Fields{"error": err})
 		}
 	}
 
@@ -227,7 +229,7 @@ func (c *Controller) isPortAvailable() bool {
 
 // runServer runs the HTTP server in a goroutine
 func (c *Controller) runServer(ctx context.Context) {
-	log.Printf("Starting ori-agent server on port %d...", c.port)
+	logger.Debug("Starting ori-agent server on port ...", logger.Fields{"server": c.port})
 
 	// Create server instance
 	srv, err := server.New()
@@ -237,7 +239,7 @@ func (c *Controller) runServer(ctx context.Context) {
 		c.errorMsg = fmt.Sprintf("Failed to create server: %v", err)
 		c.statusMu.Unlock()
 		c.notifyStatusChange(StatusError)
-		log.Printf("Failed to create server: %v", err)
+		logger.Error("Failed to create server", logger.Fields{"server": err})
 		return
 	}
 
@@ -257,7 +259,7 @@ func (c *Controller) runServer(ctx context.Context) {
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusRunning)
 
-	log.Printf("✅ Server running on http://localhost:%d", c.port)
+	logger.Info("Server running on http://localhost", logger.Fields{"server": c.port})
 
 	// Start HTTP server (blocks until shutdown)
 	if err := httpServer.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
@@ -266,7 +268,7 @@ func (c *Controller) runServer(ctx context.Context) {
 		c.errorMsg = fmt.Sprintf("Server error: %v", err)
 		c.statusMu.Unlock()
 		c.notifyStatusChange(StatusError)
-		log.Printf("Server error: %v", err)
+		logger.Error("Server error", logger.Fields{"error": err})
 		return
 	}
 

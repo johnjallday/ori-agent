@@ -3,7 +3,8 @@ package agentstudio
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"strings"
 	"sync"
 	"time"
@@ -52,7 +53,7 @@ func NewStepExecutor(store Store, handler TaskHandler, config StepExecutorConfig
 
 // Start begins the step executor polling loop
 func (se *StepExecutor) Start() {
-	log.Printf("🎬 Step executor started (poll interval: %v)", se.pollInterval)
+	logger.Debug("🎬 Step executor started (poll interval: )", logger.Fields{"pollinterval": se.pollInterval})
 
 	se.wg.Add(1)
 	go se.pollLoop()
@@ -60,7 +61,7 @@ func (se *StepExecutor) Start() {
 
 // Stop gracefully stops the step executor
 func (se *StepExecutor) Stop() {
-	log.Printf("⏹️  Stopping step executor...")
+	logger.Debug("⏹️ Stopping step executor...", logger.Fields{})
 	close(se.stopChan)
 
 	// Cancel all running steps
@@ -71,7 +72,7 @@ func (se *StepExecutor) Stop() {
 	se.mu.Unlock()
 
 	se.wg.Wait()
-	log.Printf("✅ Step executor stopped")
+	logger.Info("Step executor stopped", logger.Fields{})
 }
 
 // pollLoop continuously polls for ready steps
@@ -99,7 +100,7 @@ func (se *StepExecutor) checkAndExecuteSteps() {
 	// Get all workspaces
 	workspaceIDs, err := se.workspaceStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces: %v", err)
+		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
 		return
 	}
 
@@ -190,23 +191,23 @@ func (se *StepExecutor) updateStepStatuses(ws *Workspace, workflow *Workflow) {
 		if shouldSkip {
 			step.Status = StepStatusSkipped
 			changed = true
-			log.Printf("⏭️  Step %s (%s) skipped due to condition", step.ID, step.Name)
+			logger.Debug("⏭️ Step () skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
 		} else if dependenciesMet {
 			// Check condition if present
 			shouldExecute, err := se.evaluateCondition(workflow, step)
 			if err != nil {
-				log.Printf("⚠️  Failed to evaluate condition for step %s: %v", step.ID, err)
+				logger.Error("Failed to evaluate condition for step", logger.Fields{"id": step.ID, "err": err})
 				continue
 			}
 
 			if shouldExecute {
 				step.Status = StepStatusReady
 				changed = true
-				log.Printf("✅ Step %s (%s) is ready to execute", step.ID, step.Name)
+				logger.Info("Step () is ready to execute", logger.Fields{"id": step.ID, "name": step.Name})
 			} else {
 				step.Status = StepStatusSkipped
 				changed = true
-				log.Printf("⏭️  Step %s (%s) skipped due to condition", step.ID, step.Name)
+				logger.Debug("⏭️ Step () skipped due to condition", logger.Fields{"name": step.Name, "id": step.ID})
 			}
 		} else {
 			if step.Status != StepStatusWaiting {
@@ -237,7 +238,7 @@ func (se *StepExecutor) checkDependencies(workflow *Workflow, step *WorkflowStep
 	for _, depID := range step.DependsOn {
 		depStep, exists := stepMap[depID]
 		if !exists {
-			log.Printf("⚠️  Dependency step %s not found", depID)
+			logger.Warn("Dependency step not found", logger.Fields{"depID": depID})
 			return false, false
 		}
 
@@ -349,7 +350,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 	}
 	se.mu.Unlock()
 
-	log.Printf("▶️  Executing step %s (%s) in workflow %s", step.ID, step.Name, workflow.Name)
+	logger.Debug("▶️ Executing step () in workflow", logger.Fields{"id": step.ID, "name": workflow.Name})
 
 	// Update step status to in_progress
 	step.Status = StepStatusInProgress
@@ -394,14 +395,14 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		// Reload workspace (may have changed)
 		ws, wsErr := se.workspaceStore.Get(ws.ID)
 		if wsErr != nil {
-			log.Printf("❌ Failed to reload workspace %s: %v", ws.ID, wsErr)
+			logger.Error("Failed to reload workspace", logger.Fields{"workspace_id": ws.ID, "wsErr": wsErr})
 			return
 		}
 
 		// Reload workflow
 		workflow, wfErr := ws.GetWorkflow(workflow.ID)
 		if wfErr != nil {
-			log.Printf("❌ Failed to reload workflow %s: %v", workflow.ID, wfErr)
+			logger.Error("Failed to reload workflow", logger.Fields{"id": workflow.ID, "wfErr": wfErr})
 			return
 		}
 
@@ -415,7 +416,7 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		}
 
 		if updatedStep == nil {
-			log.Printf("❌ Step %s not found in workflow after execution", step.ID)
+			logger.Error("Step not found in workflow after execution", logger.Fields{"id": step.ID})
 			return
 		}
 
@@ -424,11 +425,11 @@ func (se *StepExecutor) executeStep(ws *Workspace, workflow *Workflow, step *Wor
 		updatedStep.CompletedAt = &completedAt
 
 		if execErr != nil {
-			log.Printf("❌ Step %s (%s) failed: %v", step.ID, step.Name, execErr)
+			logger.Error("Step () failed", logger.Fields{"id": step.ID, "name": step.Name, "execErr": execErr})
 			updatedStep.Status = StepStatusFailed
 			updatedStep.Error = execErr.Error()
 		} else {
-			log.Printf("✅ Step %s (%s) completed successfully", step.ID, step.Name)
+			logger.Info("Step () completed successfully", logger.Fields{"id": step.ID, "name": step.Name})
 			updatedStep.Status = StepStatusCompleted
 			updatedStep.Result = result
 		}
@@ -530,10 +531,10 @@ func (se *StepExecutor) checkWorkflowCompletion(ws *Workspace, workflow *Workflo
 
 		if anyFailed {
 			workflow.Status = WorkflowStatusFailed
-			log.Printf("❌ Workflow %s (%s) completed with failures", workflow.ID, workflow.Name)
+			logger.Error("Workflow () completed with failures", logger.Fields{"id": workflow.ID, "name": workflow.Name})
 		} else {
 			workflow.Status = WorkflowStatusCompleted
-			log.Printf("✅ Workflow %s (%s) completed successfully", workflow.ID, workflow.Name)
+			logger.Info("Workflow () completed successfully", logger.Fields{"id": workflow.ID, "name": workflow.Name})
 		}
 
 		_ = ws.UpdateWorkflow(*workflow) // Best effort update

@@ -2,7 +2,8 @@ package location
 
 import (
 	"context"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
 )
@@ -129,7 +130,7 @@ func (m *Manager) detectAndUpdate() {
 			DetectionMethod:  method,
 		}
 		m.emitLocationChange(event)
-		log.Printf("Location changed: %s -> %s (method: %s)", previousLocation, zoneName, method)
+		logger.Debug("Location changed: -> (method: )", logger.Fields{"previousLocation": previousLocation, "zoneName": zoneName, "method": method})
 	}
 }
 

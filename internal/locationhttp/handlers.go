@@ -2,11 +2,13 @@ package locationhttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/httputil"
 	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Handler handles location-related HTTP requests
@@ -38,7 +40,7 @@ func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -53,7 +55,7 @@ func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(zones); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -66,7 +68,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -83,14 +85,14 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Add zone
 	if err := h.manager.AddZone(zone); err != nil {
-		http.Error(w, "failed to add zone: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, http.StatusInternalServerError, "failed to add zone", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(zone); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -113,7 +115,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -131,14 +133,14 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "zone not found" {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			http.Error(w, "failed to update zone: "+err.Error(), http.StatusInternalServerError)
+			httputil.RespondError(w, http.StatusInternalServerError, "failed to update zone", err)
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(zone); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -163,7 +165,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "zone not found" {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			http.Error(w, "failed to delete zone: "+err.Error(), http.StatusInternalServerError)
+			httputil.RespondError(w, http.StatusInternalServerError, "failed to delete zone", err)
 		}
 		return
 	}
@@ -183,7 +185,7 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -205,6 +207,6 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

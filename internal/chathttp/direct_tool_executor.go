@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -104,7 +105,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 	toolCtx, toolCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer toolCancel()
 
-	log.Printf("🔧 Direct tool execution: %s with args: %s", cmd.ToolName, cmd.Args)
+	logger.Debug("Direct tool execution: with args", logger.Fields{"tool": cmd.ToolName, "args": cmd.Args})
 
 	toolResult, err := tool.Call(toolCtx, cmd.Args)
 	duration := time.Since(startTime)
@@ -124,7 +125,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 		result.Error = err.Error()
 		result.Result = fmt.Sprintf("❌ Error executing %s: %v", cmd.ToolName, err)
 		result.ExecutionTimeMs = duration.Milliseconds()
-		log.Printf("❌ Direct tool execution failed: %v", err)
+		logger.Error("Direct tool execution failed", logger.Fields{"tool": err})
 		return result
 	}
 
@@ -142,7 +143,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 	result.Result = toolResult
 	result.ExecutionTimeMs = duration.Milliseconds()
 
-	log.Printf("✅ Direct tool execution completed in %dms: %s", result.ExecutionTimeMs, cmd.ToolName)
+	logger.Info("Direct tool execution completed in ms", logger.Fields{"tool": result.ExecutionTimeMs, "toolname": cmd.ToolName})
 
 	return result
 }

@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 )
 
@@ -90,7 +91,7 @@ func (e *APIError) WithRequestID(requestID string) *APIError {
 //
 //	err := http.NewAPIError(http.ErrCodeNotFound, "Agent not found")
 //	if encodeErr := http.RespondAPIError(w, http.StatusNotFound, err); encodeErr != nil {
-//	    log.Printf("Failed to encode error response: %v", encodeErr)
+//		log.Printf("Failed to encode error response: %v", encodeErr)
 //	}
 func RespondAPIError(w http.ResponseWriter, statusCode int, err *APIError) error {
 	w.Header().Set("Content-Type", "application/json")

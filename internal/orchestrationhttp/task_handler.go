@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +12,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/httputil"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // TaskHandler manages task and scheduled task operations
@@ -113,7 +115,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -138,8 +140,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	// Get workspace
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
-		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		logger.Error("Error getting workspace", logger.Fields{"err": err, "error": req.WorkspaceID})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -157,15 +159,15 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
-		log.Printf("❌ Failed to add task to workspace: %v", err)
-		http.Error(w, "Failed to add task: "+err.Error(), http.StatusBadRequest)
+		logger.Error("Failed to add task to workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusBadRequest, "Failed to add task", err)
 		return
 	}
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Failed to save workspace: %v", err)
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -180,16 +182,21 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if createdTask == nil {
-		log.Printf("❌ Could not find created task")
+		logger.Error("Could not find created task", logger.Fields{})
 		http.Error(w, "Task created but could not be retrieved", http.StatusInternalServerError)
 		return
 	}
 
 	if len(req.InputTaskIDs) > 0 {
-		log.Printf("✅ Created connected task %s in workspace %s: %s -> %s (receiving input from %d task(s))",
-			createdTask.ID, req.WorkspaceID, req.From, req.To, len(req.InputTaskIDs))
+		logger.Info("Created connected task in workspace (receiving input from task(s))", logger.Fields{
+			"task_id":          createdTask.ID,
+			"workspace_id":     req.WorkspaceID,
+			"from":             req.From,
+			"to":               req.To,
+			"input_task_count": len(req.InputTaskIDs),
+		})
 	} else {
-		log.Printf("✅ Created task %s in workspace %s: %s -> %s", createdTask.ID, req.WorkspaceID, req.From, req.To)
+		logger.Info("Created task in workspace", logger.Fields{"task_id": createdTask.ID, "workspace_id": req.WorkspaceID, "from": req.From, "to": req.To})
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -213,7 +220,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -224,67 +231,66 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.TaskID == "" {
-		http.Error(w, "task_id is required", http.StatusBadRequest)
+		httputil.RespondValidationError(w, "task_id", "is required")
 		return
 	}
 
 	// Handle task updates (input connections, reassignment, or combination mode)
 	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil {
-		log.Printf("🔧 Updating task %s", req.TaskID)
+		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
-		// Get workspace from task
-		task, err := th.communicator.GetTask(req.TaskID)
+		// Get task and workspace using helper
+		task, ws, err := th.getTaskWithWorkspace(req.TaskID)
 		if err != nil {
-			log.Printf("❌ Failed to get task: %v", err)
-			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			logger.Error("", logger.Fields{"err": err})
+			httputil.RespondError(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
 			return
 		}
 
-		ws, err := th.workspaceStore.Get(task.WorkspaceID)
-		if err != nil {
-			log.Printf("❌ Failed to get workspace: %v", err)
-			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
-			return
-		}
-
-		// Update all fields in one pass
-		taskFound := false
+		// Find and update task
+		taskIndex := -1
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == req.TaskID {
+				taskIndex = i
+
+				// Update input connections
 				if req.InputTaskIDs != nil {
 					ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
-					log.Printf("📝 Updated task %s input connections: %v", req.TaskID, req.InputTaskIDs)
+					logger.Debug("📝 Updated task input connections", logger.Fields{"task_id": req.TaskID, "inputtaskids": req.InputTaskIDs})
 				}
+
+				// Update assignment using helper
 				if req.To != nil {
-					ws.Tasks[i].To = *req.To
-					// If a specific agent instance is provided, store it; otherwise clear to avoid stale linkage
 					if req.AssignedNodeID != nil {
-						ws.Tasks[i].AssignedNodeID = *req.AssignedNodeID
-						log.Printf("📝 Reassigned task %s to %s (node: %s)", req.TaskID, *req.To, *req.AssignedNodeID)
+						logger.Debug("📝 Reassigning task to (node: )", logger.Fields{"task_id": req.TaskID, "to": *req.To, "assignednodeid": *req.AssignedNodeID})
 					} else {
-						ws.Tasks[i].AssignedNodeID = ""
-						log.Printf("📝 Reassigned task %s to %s (no node id)", req.TaskID, *req.To)
+						logger.Debug("📝 Reassigning task to (no node id)", logger.Fields{"task_id": req.TaskID, "to": *req.To})
+					}
+					_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
+					if err != nil {
+						logger.Error("", logger.Fields{"err": err})
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
 					}
 				}
-				taskFound = true
 				break
 			}
 		}
 
-		if !taskFound {
-			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+		if taskIndex == -1 {
+			logger.Error("Task not found in workspace", logger.Fields{"task_id": req.TaskID, "workspaceid": task.WorkspaceID})
 			http.Error(w, "Task not found in workspace", http.StatusNotFound)
 			return
 		}
 
 		// Save workspace
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
-			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update task", err)
 			return
 		}
 
-		log.Printf("✅ Updated task %s", req.TaskID)
+		logger.Info("Updated task", logger.Fields{"task_id": req.TaskID})
 
 		// Publish event
 		if th.eventBus != nil {
@@ -318,53 +324,33 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Legacy: Handle task reassignment alone (for backwards compatibility)
 	if req.To != nil {
-		log.Printf("🔄 Reassigning task %s to %s", req.TaskID, *req.To)
+		logger.Debug("🔄 Reassigning task to", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 
-		// Get workspace from task
-		task, err := th.communicator.GetTask(req.TaskID)
+		// Get task and workspace using helper
+		task, ws, err := th.getTaskWithWorkspace(req.TaskID)
 		if err != nil {
-			log.Printf("❌ Failed to get task: %v", err)
-			http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+			logger.Error("", logger.Fields{"err": err})
+			httputil.RespondError(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
 			return
 		}
 
-		ws, err := th.workspaceStore.Get(task.WorkspaceID)
+		// Update task assignment using helper
+		_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 		if err != nil {
-			log.Printf("❌ Failed to get workspace: %v", err)
-			http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
-			return
-		}
-
-		// Update the task assignment
-		taskFound := false
-		for i := range ws.Tasks {
-			if ws.Tasks[i].ID == req.TaskID {
-				ws.Tasks[i].To = *req.To
-				if req.AssignedNodeID != nil {
-					ws.Tasks[i].AssignedNodeID = *req.AssignedNodeID
-				} else {
-					ws.Tasks[i].AssignedNodeID = ""
-				}
-				taskFound = true
-				log.Printf("📝 Updated task in workspace: %s -> %s", req.TaskID, *req.To)
-				break
-			}
-		}
-
-		if !taskFound {
-			log.Printf("❌ Task %s not found in workspace %s", req.TaskID, task.WorkspaceID)
+			logger.Error("", logger.Fields{"err": err})
 			http.Error(w, "Task not found in workspace", http.StatusNotFound)
 			return
 		}
+		logger.Debug("📝 Updated task in workspace: ->", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 
 		// Save workspace
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
-			http.Error(w, "Failed to update task: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update task", err)
 			return
 		}
 
-		log.Printf("✅ Reassigned task %s to %s", req.TaskID, *req.To)
+		logger.Info("Reassigned task to", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 
 		// Publish event
 		th.eventBus.Publish(agentstudio.Event{
@@ -398,7 +384,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	)
 
 	if err != nil {
-		log.Printf("❌ Failed to update task status: %v", err)
+		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -422,12 +408,12 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	// Delete task
 	err := th.communicator.DeleteTask(taskID)
 	if err != nil {
-		log.Printf("❌ Failed to delete task: %v", err)
+		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	log.Printf("✅ Deleted task: %s", taskID)
+	logger.Info("Deleted task", logger.Fields{"task_id": taskID})
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -463,7 +449,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	// For simplicity, we'll search through all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
 		http.Error(w, "Failed to retrieve workspaces", http.StatusInternalServerError)
 		return
 	}
@@ -473,7 +459,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	for _, wsID := range workspaceIDs {
 		ws, err := th.workspaceStore.Get(wsID)
 		if err != nil {
-			log.Printf("⚠️ Error getting workspace %s: %v", wsID, err)
+			logger.Error("Error getting workspace", logger.Fields{"error": wsID, "err": err})
 			continue
 		}
 
@@ -519,7 +505,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -531,8 +517,8 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	// Find the task across all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -561,7 +547,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	// Check if task is in a state that can be executed
 	if foundTask.Status == agentstudio.TaskStatusCompleted {
 		// Allow rerun of completed tasks by resetting status
-		log.Printf("🔄 Rerunning completed task %s", req.TaskID)
+		logger.Info("🔄 Rerunning completed task", logger.Fields{"task_id": req.TaskID})
 		foundTask.Status = agentstudio.TaskStatusPending
 		foundTask.Result = ""
 		foundTask.Error = ""
@@ -570,12 +556,12 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
-			log.Printf("❌ Failed to reset task status: %v", err)
+			logger.Error("Failed to reset task status", logger.Fields{"status": err})
 			http.Error(w, "Failed to reset task for rerun", http.StatusInternalServerError)
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 			http.Error(w, "Failed to save workspace", http.StatusInternalServerError)
 			return
 		}
@@ -588,7 +574,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	// Check if task handler is available
 	if th.taskHandler == nil {
-		log.Printf("❌ Task handler not set")
+		logger.Error("Task handler not set", logger.Fields{})
 		http.Error(w, "Task execution not available", http.StatusInternalServerError)
 		return
 	}
@@ -603,11 +589,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		foundTask.StartedAt = &now
 
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
-			log.Printf("❌ Failed to update task status: %v", err)
+			logger.Error("Failed to update task status", logger.Fields{"task_id": err})
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 			return
 		}
 
@@ -621,12 +607,12 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			th.eventBus.Publish(event)
 		}
 
-		log.Printf("▶️  Manually executing task %s for agent %s: %s", foundTask.ID, foundTask.To, foundTask.Description)
+		logger.Debug("▶️ Manually executing task for agent", logger.Fields{"description": foundTask.Description, "agent": foundTask.ID, "to": foundTask.To})
 
 		// Gather input task results and substitute placeholders in description
 		var inputResults []string
 		if len(foundTask.InputTaskIDs) > 0 {
-			log.Printf("🔗 Task %s has %d input task IDs: %v", foundTask.ID, len(foundTask.InputTaskIDs), foundTask.InputTaskIDs)
+			logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": foundTask.ID, "inputtaskids)": len(foundTask.InputTaskIDs), "inputtaskids": foundTask.InputTaskIDs})
 
 			// Get input context (includes results map)
 			enrichedContext := foundWorkspace.GetInputContext(foundTask)
@@ -635,7 +621,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			// Extract results for placeholder substitution (in order of InputTaskIDs)
 			if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
 				resultsMap := inputResultsMap.(map[string]string)
-				log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), foundTask.ID)
+				logger.Debug("Injected input task results into task context", logger.Fields{"task_id": len(resultsMap), "id": foundTask.ID})
 
 				// Build ordered results array matching InputTaskIDs order
 				for _, inputTaskID := range foundTask.InputTaskIDs {
@@ -645,11 +631,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 						if len(preview) > 100 {
 							preview = preview[:100] + "..."
 						}
-						log.Printf("   - Task %s result: %s", inputTaskID, preview)
+						logger.Debug("- Task result", logger.Fields{"result": inputTaskID, "preview": preview})
 					}
 				}
 			} else {
-				log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", foundTask.ID)
+				logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": foundTask.ID})
 			}
 
 			// Substitute placeholders in task description
@@ -657,13 +643,13 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 				originalDesc := foundTask.Description
 				foundTask.Description = substituteInputPlaceholders(foundTask.Description, inputResults)
 				if originalDesc != foundTask.Description {
-					log.Printf("🔄 Substituted placeholders in description:")
-					log.Printf("   Original: %s", originalDesc)
-					log.Printf("   Processed: %s", foundTask.Description)
+					logger.Debug("🔄 Substituted placeholders in description", logger.Fields{})
+					logger.Debug("Original", logger.Fields{"originalDesc": originalDesc})
+					logger.Debug("Processed", logger.Fields{"description": foundTask.Description})
 				}
 			}
 		} else {
-			log.Printf("ℹ️  Task %s has no input task IDs", foundTask.ID)
+			logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": foundTask.ID})
 		}
 
 		// Execute the task (with processed description if placeholders were substituted)
@@ -672,14 +658,14 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		// Reload workspace (may have changed)
 		ws, err := th.workspaceStore.Get(foundWorkspace.ID)
 		if err != nil {
-			log.Printf("❌ Failed to reload workspace %s: %v", foundWorkspace.ID, err)
+			logger.Error("Failed to reload workspace", logger.Fields{"err": err, "workspace_id": foundWorkspace.ID})
 			return
 		}
 
 		// Find the task in the reloaded workspace
 		task, err := ws.GetTask(foundTask.ID)
 		if err != nil {
-			log.Printf("❌ Task %s not found in workspace after execution", foundTask.ID)
+			logger.Error("Task not found in workspace after execution", logger.Fields{"task_id": foundTask.ID})
 			return
 		}
 
@@ -688,7 +674,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		task.CompletedAt = &completedAt
 
 		if execErr != nil {
-			log.Printf("❌ Task %s failed: %v", task.ID, execErr)
+			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
 			task.Status = agentstudio.TaskStatusFailed
 			task.Error = execErr.Error()
 
@@ -702,7 +688,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 				th.eventBus.Publish(event)
 			}
 		} else {
-			log.Printf("✅ Task %s completed successfully", task.ID)
+			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 			task.Status = agentstudio.TaskStatusCompleted
 			task.Result = result
 
@@ -719,11 +705,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		// Save updated task
 		if err := ws.UpdateTask(*task); err != nil {
-			log.Printf("❌ Failed to update task: %v", err)
+			logger.Error("Failed to update task", logger.Fields{"task_id": err})
 			return
 		}
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 		}
 
 		// Publish workspace updated event
@@ -736,7 +722,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
-	log.Printf("✅ Started manual execution of task %s", req.TaskID)
+	logger.Info("Started manual execution of task", logger.Fields{"task_id": req.TaskID})
 
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -768,8 +754,8 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
-		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		logger.Error("Error getting workspace", logger.Fields{"error": workspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -794,7 +780,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -823,8 +809,8 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	// Get workspace
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
-		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		logger.Error("Error getting workspace", logger.Fields{"err": err, "workspace_id": req.WorkspaceID})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -852,15 +838,15 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 
 	// Add to workspace
 	if err := ws.AddScheduledTask(st); err != nil {
-		log.Printf("❌ Failed to add scheduled task: %v", err)
-		http.Error(w, "Failed to add scheduled task: "+err.Error(), http.StatusBadRequest)
+		logger.Error("Failed to add scheduled task", logger.Fields{"task_id": err})
+		httputil.RespondError(w, http.StatusBadRequest, "Failed to add scheduled task", err)
 		return
 	}
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Failed to save workspace: %v", err)
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -873,7 +859,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 		}
 	}
 
-	log.Printf("✅ Created scheduled task %s in workspace %s: %s", createdTask.ID, req.WorkspaceID, req.Name)
+	logger.Info("Created scheduled task in workspace", logger.Fields{"workspace_id": createdTask.ID, "workspaceid": req.WorkspaceID, "name": req.Name})
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -911,7 +897,7 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 			th.handleTriggerScheduledTask(w, r, id)
 			return
 		default:
-			http.Error(w, "Unknown action: "+action, http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Unknown action: %s", action), http.StatusBadRequest)
 			return
 		}
 	}
@@ -933,8 +919,8 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 	// Find the scheduled task across all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -968,15 +954,15 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
 	// Find the scheduled task
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1030,18 +1016,18 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		st.UpdatedAt = time.Now()
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			log.Printf("❌ Failed to update scheduled task: %v", err)
-			http.Error(w, "Failed to update scheduled task: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
-			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
-		log.Printf("✅ Updated scheduled task %s", id)
+		logger.Info("Updated scheduled task", logger.Fields{"task_id": id})
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":        true,
@@ -1057,8 +1043,8 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1070,12 +1056,12 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 
 		if err := ws.DeleteScheduledTask(id); err == nil {
 			if err := th.workspaceStore.Save(ws); err != nil {
-				log.Printf("❌ Failed to save workspace: %v", err)
-				http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+				logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+				httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 				return
 			}
 
-			log.Printf("✅ Deleted scheduled task %s", id)
+			logger.Info("Deleted scheduled task", logger.Fields{"task_id": id})
 
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
@@ -1096,8 +1082,8 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1125,14 +1111,14 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		}
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			log.Printf("❌ Failed to update scheduled task: %v", err)
-			http.Error(w, "Failed to update scheduled task: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
-			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -1145,7 +1131,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		if len(action) > 0 {
 			capitalizedAction = strings.ToUpper(action[:1]) + action[1:]
 		}
-		log.Printf("✅ %s scheduled task %s", capitalizedAction, id)
+		logger.Info("scheduled task", logger.Fields{"task_id": capitalizedAction, "id": id})
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":        true,
@@ -1167,8 +1153,8 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
-		http.Error(w, "Failed to list workspaces: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1195,14 +1181,14 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		}
 
 		if err := ws.AddTask(task); err != nil {
-			log.Printf("❌ Failed to create task from scheduled task: %v", err)
-			http.Error(w, "Failed to create task: "+err.Error(), http.StatusBadRequest)
+			logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": err})
+			httputil.RespondError(w, http.StatusBadRequest, "Failed to create task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
-			http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -1212,7 +1198,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 			taskID = ws.Tasks[len(ws.Tasks)-1].ID
 		}
 
-		log.Printf("✅ Manually triggered scheduled task %s, created task %s", id, taskID)
+		logger.Info("Manually triggered scheduled task , created task", logger.Fields{"task_id": id, "taskID": taskID})
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -1350,4 +1336,43 @@ func substituteInputPlaceholders(description string, inputs []string) string {
 	result = strings.ReplaceAll(result, "{result}", inputs[0])
 
 	return result
+}
+
+// getTaskWithWorkspace retrieves a task and its associated workspace
+// Returns the task, workspace, and any error encountered
+func (th *TaskHandler) getTaskWithWorkspace(taskID string) (*agentstudio.Task, *agentstudio.Workspace, error) {
+	task, err := th.communicator.GetTask(taskID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("task not found: %w", err)
+	}
+
+	ws, err := th.workspaceStore.Get(task.WorkspaceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("workspace not found: %w", err)
+	}
+
+	return task, ws, nil
+}
+
+// updateTaskAssignment updates the assignment (To and AssignedNodeID) of a task within a workspace
+// Returns the index of the updated task, or -1 if not found
+func (th *TaskHandler) updateTaskAssignment(ws *agentstudio.Workspace, taskID string, newTo *string, assignedNodeID *string) (int, error) {
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			if newTo != nil {
+				ws.Tasks[i].To = *newTo
+			}
+
+			if assignedNodeID != nil {
+				ws.Tasks[i].AssignedNodeID = *assignedNodeID
+			} else if newTo != nil {
+				// If reassigning but no node ID specified, clear it to avoid stale linkage
+				ws.Tasks[i].AssignedNodeID = ""
+			}
+
+			return i, nil
+		}
+	}
+
+	return -1, fmt.Errorf("task not found in workspace")
 }

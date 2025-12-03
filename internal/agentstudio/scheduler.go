@@ -2,7 +2,8 @@ package agentstudio
 
 import (
 	"fmt"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
 )
@@ -42,7 +43,7 @@ func (ts *TaskScheduler) SetEventBus(eventBus *EventBus) {
 
 // Start begins the scheduler polling loop
 func (ts *TaskScheduler) Start() {
-	log.Printf("📅 Task scheduler started (poll interval: %v)", ts.pollInterval)
+	logger.Debug("📅 Task scheduler started (poll interval: )", logger.Fields{"task_id": ts.pollInterval})
 
 	ts.wg.Add(1)
 	go ts.pollLoop()
@@ -50,10 +51,10 @@ func (ts *TaskScheduler) Start() {
 
 // Stop gracefully stops the scheduler
 func (ts *TaskScheduler) Stop() {
-	log.Printf("⏹️  Stopping task scheduler...")
+	logger.Debug("⏹️ Stopping task scheduler...", logger.Fields{})
 	close(ts.stopChan)
 	ts.wg.Wait()
-	log.Printf("✅ Task scheduler stopped")
+	logger.Info("Task scheduler stopped", logger.Fields{})
 }
 
 // pollLoop continuously polls for scheduled tasks
@@ -80,7 +81,7 @@ func (ts *TaskScheduler) pollLoop() {
 func (ts *TaskScheduler) checkScheduledTasks() {
 	workspaceIDs, err := ts.workspaceStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces: %v", err)
+		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
 		return
 	}
 
@@ -113,28 +114,28 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 			// Check if max runs reached
 			if st.Schedule.MaxRuns > 0 && st.ExecutionCount >= st.Schedule.MaxRuns {
-				log.Printf("📅 Scheduled task %s reached max runs (%d), disabling", st.ID, st.Schedule.MaxRuns)
+				logger.Debug("📅 Scheduled task reached max runs (), disabling", logger.Fields{"task_id": st.ID, "maxruns": st.Schedule.MaxRuns})
 				st.Enabled = false
 				st.NextRun = nil
 				if err := ws.UpdateScheduledTask(*st); err != nil {
-					log.Printf("❌ Failed to update scheduled task: %v", err)
+					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
-					log.Printf("❌ Failed to save workspace: %v", err)
+					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 				}
 				continue
 			}
 
 			// Check if end date passed
 			if st.Schedule.EndDate != nil && now.After(*st.Schedule.EndDate) {
-				log.Printf("📅 Scheduled task %s passed end date, disabling", st.ID)
+				logger.Debug("📅 Scheduled task passed end date, disabling", logger.Fields{"task_id": st.ID})
 				st.Enabled = false
 				st.NextRun = nil
 				if err := ws.UpdateScheduledTask(*st); err != nil {
-					log.Printf("❌ Failed to update scheduled task: %v", err)
+					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
-					log.Printf("❌ Failed to save workspace: %v", err)
+					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 				}
 				continue
 			}
@@ -147,7 +148,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 // executeScheduledTask creates a Task from a ScheduledTask and updates the schedule
 func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) {
-	log.Printf("📅 Executing scheduled task %s: %s", st.ID, st.Name)
+	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": st.ID, "name": st.Name})
 
 	// Create a regular Task from the ScheduledTask
 	task := Task{
@@ -162,7 +163,7 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
-		log.Printf("❌ Failed to create task from scheduled task %s: %v", st.ID, err)
+		logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": st.ID, "err": err})
 		st.FailureCount++
 		st.LastError = err.Error()
 
@@ -182,15 +183,15 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 
 		// Optionally disable after consecutive failures
 		if st.FailureCount >= 5 {
-			log.Printf("⚠️  Scheduled task %s disabled after %d consecutive failures", st.ID, st.FailureCount)
+			logger.Warn("Scheduled task disabled after consecutive failures", logger.Fields{"task_id": st.ID, "failurecount": st.FailureCount})
 			st.Enabled = false
 		}
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
-			log.Printf("❌ Failed to update scheduled task: %v", err)
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 		}
 		if err := ts.workspaceStore.Save(ws); err != nil {
-			log.Printf("❌ Failed to save workspace: %v", err)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 		}
 		return
 	}
@@ -227,22 +228,22 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 	// If this was a "once" schedule or no next run, disable the task
 	if nextRun == nil {
 		st.Enabled = false
-		log.Printf("📅 Scheduled task %s completed (one-time execution), disabling", st.ID)
+		logger.Info("📅 Scheduled task completed (one-time execution), disabling", logger.Fields{"duration": st.ID})
 	}
 
 	// Update the scheduled task
 	if err := ws.UpdateScheduledTask(*st); err != nil {
-		log.Printf("❌ Failed to update scheduled task: %v", err)
+		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 		return
 	}
 
 	// Save workspace
 	if err := ts.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Failed to save workspace: %v", err)
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 		return
 	}
 
-	log.Printf("✅ Scheduled task %s executed successfully (next run: %v)", st.ID, nextRun)
+	logger.Info("Scheduled task executed successfully (next run: )", logger.Fields{"task_id": st.ID, "nextRun": nextRun})
 
 	// Publish event
 	if ts.eventBus != nil {
@@ -265,7 +266,7 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 
 	case ScheduleInterval:
 		if config.Interval == 0 {
-			log.Printf("⚠️  Invalid interval schedule: interval is 0")
+			logger.Warn("Invalid interval schedule: interval is 0", logger.Fields{})
 			return nil
 		}
 		next := lastRun.Add(config.Interval)
@@ -279,14 +280,14 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 
 	case ScheduleDaily:
 		if config.TimeOfDay == "" {
-			log.Printf("⚠️  Invalid daily schedule: time_of_day is empty")
+			logger.Warn("Invalid daily schedule: time_of_day is empty", logger.Fields{})
 			return nil
 		}
 
 		// Parse time of day (format: "HH:MM")
 		var hour, minute int
 		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
-			log.Printf("⚠️  Invalid time_of_day format %s: %v", config.TimeOfDay, err)
+			logger.Warn("Invalid time_of_day format", logger.Fields{"err": err, "duration": config.TimeOfDay})
 			return nil
 		}
 
@@ -302,14 +303,14 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 
 	case ScheduleWeekly:
 		if config.TimeOfDay == "" {
-			log.Printf("⚠️  Invalid weekly schedule: time_of_day is empty")
+			logger.Warn("Invalid weekly schedule: time_of_day is empty", logger.Fields{})
 			return nil
 		}
 
 		// Parse time of day
 		var hour, minute int
 		if _, err := fmt.Sscanf(config.TimeOfDay, "%d:%d", &hour, &minute); err != nil {
-			log.Printf("⚠️  Invalid time_of_day format %s: %v", config.TimeOfDay, err)
+			logger.Warn("Invalid time_of_day format", logger.Fields{"duration": config.TimeOfDay, "err": err})
 			return nil
 		}
 
@@ -343,11 +344,11 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 
 	case ScheduleCron:
 		// TODO: Implement cron expression parsing (Phase 4)
-		log.Printf("⚠️  Cron schedules not yet implemented")
+		logger.Warn("Cron schedules not yet implemented", logger.Fields{})
 		return nil
 
 	default:
-		log.Printf("⚠️  Unknown schedule type: %s", config.Type)
+		logger.Warn("Unknown schedule type", logger.Fields{"type": config.Type})
 		return nil
 	}
 }

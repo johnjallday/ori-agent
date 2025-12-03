@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
 )
@@ -141,7 +143,7 @@ func (eb *EventBus) Publish(event Event) {
 		go func(s *subscription) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("❌ Event subscriber panic: %v", r)
+					logger.Error("Event subscriber panic", logger.Fields{"r": r})
 				}
 			}()
 			s.Subscriber(event)

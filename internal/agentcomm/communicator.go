@@ -2,10 +2,11 @@ package agentcomm
 
 import (
 	"fmt"
-	"log"
+
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Communicator handles inter-agent communication and task delegation
@@ -48,7 +49,7 @@ func (c *Communicator) SendMessage(req MessageRequest) error {
 		return fmt.Errorf("failed to save workspace: %w", err)
 	}
 
-	log.Printf("✉️  Message sent from %s to %s in workspace %s", req.From, req.To, req.WorkspaceID)
+	logger.Debug("✉️ Message sent from to in workspace", logger.Fields{"workspaceid": req.WorkspaceID, "workspace_id": req.From, "to": req.To})
 	return nil
 }
 
@@ -152,10 +153,10 @@ func (c *Communicator) DelegateTask(req DelegationRequest) (*agentstudio.Task, e
 			"context":  req.Context,
 		},
 	}); err != nil {
-		log.Printf("⚠️  Failed to send task message: %v", err)
+		logger.Error("Failed to send task message", logger.Fields{"task_id": err})
 	}
 
-	log.Printf("📋 Task %s delegated from %s to %s: %s", addedTask.ID, req.From, req.To, req.Description)
+	logger.Debug("📋 Task delegated from to", logger.Fields{"description": req.Description, "task_id": addedTask.ID, "from": req.From, "to": req.To})
 	return addedTask, nil
 }
 
@@ -235,7 +236,7 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status agentstudio.TaskSt
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
-		log.Printf("📋 Task %s status updated: %s", taskID, status)
+		logger.Debug("📋 Task status updated", logger.Fields{"status": status, "task_id": taskID})
 		return nil
 	}
 
@@ -266,7 +267,7 @@ func (c *Communicator) sendTaskResult(task *agentstudio.Task, result string, err
 			"duration": duration.String(),
 		},
 	}); err != nil {
-		log.Printf("❌ Failed to send task result: %v", err)
+		logger.Error("Failed to send task result", logger.Fields{"task_id": err})
 	}
 }
 
@@ -274,7 +275,7 @@ func (c *Communicator) sendTaskResult(task *agentstudio.Task, result string, err
 func (c *Communicator) ListTasks(workspaceID string) []agentstudio.Task {
 	ws, err := c.studioStore.Get(workspaceID)
 	if err != nil {
-		log.Printf("⚠️  Failed to get workspace %s: %v", workspaceID, err)
+		logger.Error("Failed to get workspace", logger.Fields{"err": err, "workspace_id": workspaceID})
 		return []agentstudio.Task{}
 	}
 
@@ -287,7 +288,7 @@ func (c *Communicator) ListTasksForAgent(agentName string) []agentstudio.Task {
 
 	workspaceIDs, err := c.studioStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces: %v", err)
+		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
 		return allTasks
 	}
 
@@ -314,7 +315,7 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 
 	workspaceIDs, err := c.studioStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces for cleanup: %v", err)
+		logger.Error("Failed to list workspaces for cleanup", logger.Fields{"workspace_id": err})
 		return 0
 	}
 
@@ -344,13 +345,13 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 			ws.Tasks = newTasks
 			ws.UpdatedAt = time.Now()
 			if err := c.studioStore.Save(ws); err != nil {
-				log.Printf("⚠️  Failed to save workspace after cleanup: %v", err)
+				logger.Error("Failed to save workspace after cleanup", logger.Fields{"workspace_id": err})
 			}
 		}
 	}
 
 	if removed > 0 {
-		log.Printf("🧹 Cleaned up %d completed tasks", removed)
+		logger.Info("🧹 Cleaned up completed tasks", logger.Fields{"task_id": removed})
 	}
 
 	return removed
@@ -363,7 +364,7 @@ func (c *Communicator) CheckTimeouts() []agentstudio.Task {
 
 	workspaceIDs, err := c.studioStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces for timeout check: %v", err)
+		logger.Error("Failed to list workspaces for timeout check", logger.Fields{"duration": err})
 		return timedOut
 	}
 
@@ -383,7 +384,7 @@ func (c *Communicator) CheckTimeouts() []agentstudio.Task {
 					task.CompletedAt = &completedAt
 					timedOut = append(timedOut, *task)
 					modified = true
-					log.Printf("⏰ Task %s timed out after %v", task.ID, task.Timeout)
+					logger.Debug("⏰ Task timed out after", logger.Fields{"duration": task.ID, "timeout": task.Timeout})
 				}
 			}
 		}
@@ -392,7 +393,7 @@ func (c *Communicator) CheckTimeouts() []agentstudio.Task {
 		if modified {
 			ws.UpdatedAt = now
 			if err := c.studioStore.Save(ws); err != nil {
-				log.Printf("⚠️  Failed to save workspace after timeout check: %v", err)
+				logger.Error("Failed to save workspace after timeout check", logger.Fields{"workspace_id": err})
 			}
 		}
 	}
@@ -404,7 +405,7 @@ func (c *Communicator) CheckTimeouts() []agentstudio.Task {
 func (c *Communicator) GetTaskStats(workspaceID string) map[string]int {
 	ws, err := c.studioStore.Get(workspaceID)
 	if err != nil {
-		log.Printf("⚠️  Failed to get workspace %s: %v", workspaceID, err)
+		logger.Error("Failed to get workspace", logger.Fields{"err": err, "workspace_id": workspaceID})
 		return map[string]int{
 			"total":       0,
 			"pending":     0,
@@ -457,7 +458,7 @@ func (c *Communicator) DeleteTask(taskID string) error {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
-		log.Printf("🗑️  Task %s deleted from workspace %s", taskID, wsID)
+		logger.Debug("🗑️ Task deleted from workspace", logger.Fields{"workspace_id": taskID, "wsID": wsID})
 		return nil
 	}
 

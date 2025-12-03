@@ -3,10 +3,11 @@ package mcphttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
@@ -45,7 +46,7 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -65,21 +66,21 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add to config manager (persists to disk)
 	if err := h.configManager.AddServer(serverConfig); err != nil {
-		log.Printf("Failed to add MCP server to config: %v", err)
+		logger.Error("Failed to add MCP server to config", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Add to registry (runtime)
 	if err := h.registry.AddServer(serverConfig); err != nil {
-		log.Printf("Failed to add MCP server to registry: %v", err)
+		logger.Error("Failed to add MCP server to registry", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -101,21 +102,21 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Remove from registry (stops if running)
 	if err := h.registry.RemoveServer(serverName); err != nil {
-		log.Printf("Failed to remove MCP server from registry: %v", err)
+		logger.Error("Failed to remove MCP server from registry", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Remove from config (persists)
 	if err := h.configManager.RemoveServer(serverName); err != nil {
-		log.Printf("Failed to remove MCP server from config: %v", err)
+		logger.Error("Failed to remove MCP server from config", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -144,7 +145,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Enable server for agent in config
 	if err := h.configManager.EnableServerForAgent(currentAgentName, serverName); err != nil {
-		log.Printf("Failed to enable MCP server: %v", err)
+		logger.Error("Failed to enable MCP server", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -152,7 +153,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Check current server status
 	status, err := h.registry.GetServerStatus(serverName)
 	if err != nil {
-		log.Printf("Failed to get MCP server status: %v", err)
+		logger.Error("Failed to get MCP server status", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -166,21 +167,21 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Start the server
 		if err := h.registry.StartServer(serverName); err != nil {
-			log.Printf("Failed to start MCP server: %v", err)
+			logger.Error("Failed to start MCP server", logger.Fields{"server": err})
 			http.Error(w, fmt.Sprintf("Failed to start server: %v", err), http.StatusInternalServerError)
 			return
 		}
 	} else if status == mcp.StatusRunning {
 		// Already running, this is fine
-		log.Printf("MCP server %s is already running", serverName)
+		logger.Debug("MCP server is already running", logger.Fields{"server": serverName})
 	} else {
 		// Status is starting or restarting, wait a bit or just continue
-		log.Printf("MCP server %s is in state: %s", serverName, status)
+		logger.Debug("MCP server is in state", logger.Fields{"server": serverName, "status": status})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -209,14 +210,14 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Disable server for agent in config
 	if err := h.configManager.DisableServerForAgent(currentAgentName, serverName); err != nil {
-		log.Printf("Failed to disable MCP server: %v", err)
+		logger.Error("Failed to disable MCP server", logger.Fields{"server": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -249,7 +250,7 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 		"server": serverName,
 		"tools":  tools,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -280,7 +281,7 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 		"server": serverName,
 		"status": status,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -319,7 +320,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 				"success": false,
 				"error":   fmt.Sprintf("Failed to start server: %v", err),
 			}); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -340,7 +341,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 		"tool_count": len(tools),
 		"message":    "Connection successful",
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -369,14 +370,14 @@ func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request)
 
 	// Restart the server (stops if running, then starts)
 	if err := server.Restart(); err != nil {
-		log.Printf("Failed to restart MCP server %s: %v", serverName, err)
+		logger.Error("Failed to restart MCP server", logger.Fields{"server": serverName, "err": err})
 		http.Error(w, fmt.Sprintf("Failed to restart server: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Server restart initiated"}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -442,7 +443,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 		"added":  added,
 		"errors": errors,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -517,6 +518,6 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"servers": marketplaceServers,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

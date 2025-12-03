@@ -2,11 +2,12 @@ package usagehttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Handler handles usage and cost tracking HTTP requests
@@ -28,7 +29,7 @@ func (h *Handler) GetAllTimeStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -39,7 +40,7 @@ func (h *Handler) GetTodayStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -50,7 +51,7 @@ func (h *Handler) GetThisMonthStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -82,7 +83,7 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -95,7 +96,7 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"pricing_models": models,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -120,7 +121,7 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Pricing model updated successfully",
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -154,6 +155,6 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(summary); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

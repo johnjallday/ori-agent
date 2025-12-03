@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // RespondJSON writes a JSON response with the given status code and data.
@@ -16,7 +17,7 @@ import (
 // Usage:
 //
 //	if err := http.RespondJSON(w, http.StatusOK, data); err != nil {
-//	    log.Printf("Failed to encode response: %v", err)
+logger.Error("Failed to encode response", logger.Fields{"response": err})
 //	}
 func RespondJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -32,7 +33,7 @@ func RespondJSON(w http.ResponseWriter, statusCode int, data interface{}) error 
 // Usage:
 //
 //	if err := http.RespondError(w, http.StatusNotFound, "Agent not found"); err != nil {
-//	    log.Printf("Failed to write error response: %v", err)
+logger.Error("Failed to write error response", logger.Fields{"response": err})
 //	}
 func RespondError(w http.ResponseWriter, statusCode int, message string) error {
 	return RespondJSON(w, statusCode, map[string]string{
@@ -45,7 +46,7 @@ func RespondError(w http.ResponseWriter, statusCode int, message string) error {
 // Usage:
 //
 //	if err := http.RespondSuccess(w, data); err != nil {
-//	    log.Printf("Failed to encode success response: %v", err)
+logger.Error("Failed to encode success response", logger.Fields{"response": err})
 //	}
 func RespondSuccess(w http.ResponseWriter, data interface{}) error {
 	return RespondJSON(w, http.StatusOK, data)
@@ -57,7 +58,7 @@ func RespondSuccess(w http.ResponseWriter, data interface{}) error {
 // Usage:
 //
 //	if err := http.RespondCreated(w, newAgent); err != nil {
-//	    log.Printf("Failed to encode created response: %v", err)
+logger.Error("Failed to encode created response", logger.Fields{"response": err})
 //	}
 func RespondCreated(w http.ResponseWriter, data interface{}) error {
 	return RespondJSON(w, http.StatusCreated, data)

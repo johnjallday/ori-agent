@@ -3,12 +3,13 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"log"
+
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -51,7 +52,7 @@ type CollaborativeResult struct {
 func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent string, task CollaborativeTask) (*CollaborativeResult, error) {
 	startTime := time.Now()
 
-	log.Printf("🚀 Starting collaborative task: %s", task.Goal)
+	logger.Debug("🚀 Starting collaborative task", logger.Fields{"task_id": task.Goal})
 
 	// 1. Create workspace
 	workspaceName := fmt.Sprintf("collab-%s-%d", mainAgent, time.Now().Unix())
@@ -65,7 +66,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 		return nil, fmt.Errorf("failed to create workspace: %w", err)
 	}
 
-	log.Printf("📦 Created workspace: %s (ID: %s)", workspaceName, ws.ID)
+	logger.Info("📦 Created workspace: (ID: )", logger.Fields{"workspace_id": workspaceName, "id": ws.ID})
 
 	// 2. Identify required agents based on roles
 	agents, err := o.findAgentsByRoles(task.RequiredRoles)
@@ -76,14 +77,14 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	// Add agents to workspace
 	for _, agentName := range agents {
 		if err := ws.AddAgent(agentName); err != nil {
-			log.Printf("⚠️  Failed to add agent %s: %v", agentName, err)
+			logger.Error("Failed to add agent", logger.Fields{"agent": agentName, "err": err})
 		}
 	}
 	if err := o.workspaceStore.Save(ws); err != nil {
 		return nil, fmt.Errorf("failed to save workspace: %w", err)
 	}
 
-	log.Printf("👥 Selected agents: %v", agents)
+	logger.Debug("👥 Selected agents", logger.Fields{"agent": agents})
 
 	// 3. Execute workflow based on required roles
 	result, err := o.executeWorkflow(ctx, ws, task, agents)
@@ -108,7 +109,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	result.Duration = time.Since(startTime)
 	result.Status = "completed"
 
-	log.Printf("✅ Collaborative task completed in %v", result.Duration)
+	logger.Info("Collaborative task completed in", logger.Fields{"task_id": result.Duration})
 
 	return result, nil
 }
@@ -138,7 +139,7 @@ func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]str
 
 		// If no agent found for role, log warning
 		if _, exists := selectedAgents[role]; !exists {
-			log.Printf("⚠️  No agent found for role: %s, using general agent", role)
+			logger.Warn("No agent found for role: , using general agent", logger.Fields{"agent": role})
 			// Find a general agent as fallback
 			for _, agentName := range allAgents {
 				agent, ok := o.agentStore.GetAgent(agentName)
@@ -194,7 +195,7 @@ func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) 
 
 // executeResearchWorkflow executes a simple research workflow
 func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	log.Printf("📚 Executing research workflow")
+	logger.Debug("📚 Executing research workflow", logger.Fields{})
 
 	subResults := make(map[string]interface{})
 
@@ -230,7 +231,7 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstu
 		return nil, fmt.Errorf("failed to delegate research task: %w", err)
 	}
 
-	log.Printf("📋 Delegated research to %s (task: %s)", researcherAgent, delegateTask.ID)
+	logger.Debug("📋 Delegated research to (task: )", logger.Fields{"task_id": researcherAgent, "id": delegateTask.ID})
 
 	// Wait for completion (simplified - in production, this would be event-driven)
 	// For now, we'll return a status indicating the task is in progress
@@ -245,7 +246,7 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstu
 
 // executeParallelWorkflow executes tasks in parallel across agents
 func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	log.Printf("⚡ Executing parallel workflow with %d agents", len(agents))
+	logger.Debug("⚡ Executing parallel workflow with agents", logger.Fields{"agent": len(agents)})
 
 	subResults := make(map[string]interface{})
 	taskIDs := make([]string, 0)
@@ -268,13 +269,13 @@ func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *agentstu
 		})
 
 		if err != nil {
-			log.Printf("⚠️  Failed to delegate to %s: %v", agentName, err)
+			logger.Error("Failed to delegate to", logger.Fields{"agentName": agentName, "err": err})
 			continue
 		}
 
 		taskIDs = append(taskIDs, delegateTask.ID)
 		subResults[agentName] = delegateTask.ID
-		log.Printf("📋 Delegated to %s (task: %s)", agentName, delegateTask.ID)
+		logger.Debug("📋 Delegated to (task: )", logger.Fields{"task_id": agentName, "id": delegateTask.ID})
 	}
 
 	return &CollaborativeResult{

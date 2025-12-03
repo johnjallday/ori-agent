@@ -3,17 +3,18 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"log"
+
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // executeResearchPipeline executes a full research, analysis, synthesis, validation pipeline
 func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
-	log.Printf("🔬 Executing full research pipeline")
+	logger.Debug("🔬 Executing full research pipeline", logger.Fields{})
 
 	subResults := make(map[string]interface{})
 	var researcherAgent, analyzerAgent, synthesizerAgent, validatorAgent string
@@ -43,7 +44,7 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 	}
 
 	// Phase 1: Research
-	log.Printf("📚 Phase 1: Research")
+	logger.Debug("📚 Phase 1: Research", logger.Fields{})
 
 	// Use first agent in workspace as coordinator
 	coordinatorAgent := ws.Agents[0]
@@ -64,10 +65,10 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 
 	subResults["research_task"] = researchTask.ID
 	subResults["researcher"] = researcherAgent
-	log.Printf("📋 Research delegated to %s (task: %s)", researcherAgent, researchTask.ID)
+	logger.Debug("📋 Research delegated to (task: )", logger.Fields{"task_id": researcherAgent, "id": researchTask.ID})
 
 	// Phase 2: Analysis
-	log.Printf("🔍 Phase 2: Analysis")
+	logger.Debug("🔍 Phase 2: Analysis", logger.Fields{})
 	analysisTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
 		From:        coordinatorAgent,
@@ -82,15 +83,15 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 	})
 
 	if err != nil {
-		log.Printf("⚠️  Failed to delegate analysis: %v", err)
+		logger.Error("Failed to delegate analysis", logger.Fields{"err": err})
 	} else {
 		subResults["analysis_task"] = analysisTask.ID
 		subResults["analyzer"] = analyzerAgent
-		log.Printf("📋 Analysis delegated to %s (task: %s)", analyzerAgent, analysisTask.ID)
+		logger.Debug("📋 Analysis delegated to (task: )", logger.Fields{"task_id": analyzerAgent, "id": analysisTask.ID})
 	}
 
 	// Phase 3: Synthesis
-	log.Printf("✍️  Phase 3: Synthesis")
+	logger.Debug("✍️ Phase 3: Synthesis", logger.Fields{})
 	synthesisTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 		WorkspaceID: ws.ID,
 		From:        coordinatorAgent,
@@ -106,16 +107,16 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 	})
 
 	if err != nil {
-		log.Printf("⚠️  Failed to delegate synthesis: %v", err)
+		logger.Error("Failed to delegate synthesis", logger.Fields{"err": err})
 	} else {
 		subResults["synthesis_task"] = synthesisTask.ID
 		subResults["synthesizer"] = synthesizerAgent
-		log.Printf("📋 Synthesis delegated to %s (task: %s)", synthesizerAgent, synthesisTask.ID)
+		logger.Debug("📋 Synthesis delegated to (task: )", logger.Fields{"task_id": synthesizerAgent, "id": synthesisTask.ID})
 	}
 
 	// Phase 4: Validation (optional)
 	if validatorAgent != "" {
-		log.Printf("✅ Phase 4: Validation")
+		logger.Info("Phase 4: Validation", logger.Fields{})
 		validationTask, err := o.communicator.DelegateTask(agentcomm.DelegationRequest{
 			WorkspaceID: ws.ID,
 			From:        coordinatorAgent,
@@ -130,11 +131,11 @@ func (o *Orchestrator) executeResearchPipeline(ctx context.Context, ws *agentstu
 		})
 
 		if err != nil {
-			log.Printf("⚠️  Failed to delegate validation: %v", err)
+			logger.Error("Failed to delegate validation", logger.Fields{"err": err})
 		} else {
 			subResults["validation_task"] = validationTask.ID
 			subResults["validator"] = validatorAgent
-			log.Printf("📋 Validation delegated to %s (task: %s)", validatorAgent, validationTask.ID)
+			logger.Debug("📋 Validation delegated to (task: )", logger.Fields{"task_id": validatorAgent, "id": validationTask.ID})
 		}
 	}
 
@@ -239,7 +240,7 @@ func (o *Orchestrator) AggregateResults(workspaceID string, taskIDs []string) (s
 	for _, taskID := range taskIDs {
 		task, err := o.communicator.GetTask(taskID)
 		if err != nil {
-			log.Printf("⚠️  Failed to get task %s: %v", taskID, err)
+			logger.Error("Failed to get task", logger.Fields{"task_id": taskID, "err": err})
 			continue
 		}
 

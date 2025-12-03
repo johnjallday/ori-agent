@@ -2,11 +2,12 @@ package orchestrationhttp
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/httputil"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // MessageHandler manages message-related operations for workspaces
@@ -38,7 +39,7 @@ func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request
 	// Get workspace
 	ws, err := mh.workspaceStore.Get(wsID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", wsID, err)
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": wsID, "error": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -87,8 +88,8 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 	var msg agentstudio.AgentMessage
 
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		log.Printf("❌ Error decoding message: %v", err)
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		logger.Error("Error decoding message", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -104,19 +105,19 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 
 	// Add message to workspace
 	if err := ws.AddMessage(msg); err != nil {
-		log.Printf("❌ Error adding message to workspace: %v", err)
+		logger.Error("Error adding message to workspace", logger.Fields{"error": err})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Save updated workspace
 	if err := mh.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Error saving workspace after adding message: %v", err)
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		logger.Error("Error saving workspace after adding message", logger.Fields{"error": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
-	log.Printf("✅ Added message from %s to workspace %s", msg.From, ws.ID)
+	logger.Info("Added message from agent to workspace", logger.Fields{"from": msg.From, "workspace_id": ws.ID})
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{

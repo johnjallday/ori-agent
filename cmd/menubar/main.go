@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/getlantern/systray"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
@@ -28,7 +30,7 @@ func main() {
 	if err := os.Chdir(dataDir); err != nil {
 		log.Fatalf("Failed to change to data directory: %v", err)
 	}
-	log.Printf("Working directory: %s", dataDir)
+	logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -40,14 +42,14 @@ func main() {
 
 	// Get port from settings (defaults to 8765)
 	port := settingsMgr.GetPort()
-	log.Printf("Using port: %d", port)
+	logger.Debug("Using port", logger.Fields{"port": port})
 
 	controller := menubar.NewController(port)
 
 	// Initialize LaunchAgent manager
 	launchAgentMgr, err := menubar.NewLaunchAgentManager()
 	if err != nil {
-		log.Printf("Warning: Failed to create LaunchAgent manager: %v", err)
+		logger.Error("Failed to create LaunchAgent manager", logger.Fields{"agent": err})
 		log.Println("Auto-start feature will be disabled")
 	}
 
@@ -61,7 +63,7 @@ func main() {
 		if controller.GetStatus() == menubar.StatusRunning {
 			log.Println("Stopping server...")
 			if err := controller.StopServer(ctx); err != nil {
-				log.Printf("Error stopping server: %v", err)
+				logger.Error("Error stopping server", logger.Fields{"error": err})
 			}
 		}
 
@@ -147,14 +149,14 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 				log.Println("Start Server clicked")
 				ctx := context.Background()
 				if err := controller.StartServer(ctx); err != nil {
-					log.Printf("Failed to start server: %v", err)
+					logger.Error("Failed to start server", logger.Fields{"server": err})
 				}
 
 			case <-stopItem.ClickedCh:
 				log.Println("Stop Server clicked")
 				ctx := context.Background()
 				if err := controller.StopServer(ctx); err != nil {
-					log.Printf("Failed to stop server: %v", err)
+					logger.Error("Failed to stop server", logger.Fields{"server": err})
 				}
 
 			case <-openBrowserItem.ClickedCh:
@@ -173,10 +175,10 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 					// Currently checked, so uncheck (disable auto-start)
 					log.Println("Disabling auto-start...")
 					if err := launchAgentMgr.Uninstall(); err != nil {
-						log.Printf("Failed to uninstall LaunchAgent: %v", err)
+						logger.Error("Failed to uninstall LaunchAgent", logger.Fields{"agent": err})
 					} else {
 						if err := settingsMgr.SetAutoStartEnabled(false); err != nil {
-							log.Printf("Failed to save auto-start setting: %v", err)
+							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
 						}
 						autoStartItem.Uncheck()
 						log.Println("Auto-start disabled")
@@ -185,10 +187,10 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 					// Currently unchecked, so check (enable auto-start)
 					log.Println("Enabling auto-start...")
 					if err := launchAgentMgr.Install(); err != nil {
-						log.Printf("Failed to install LaunchAgent: %v", err)
+						logger.Error("Failed to install LaunchAgent", logger.Fields{"agent": err})
 					} else {
 						if err := settingsMgr.SetAutoStartEnabled(true); err != nil {
-							log.Printf("Failed to save auto-start setting: %v", err)
+							logger.Error("Failed to save auto-start setting", logger.Fields{"err": err})
 						}
 						autoStartItem.Check()
 						log.Println("Auto-start enabled")
@@ -221,7 +223,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 }
 
 func updateMenuForStatusSystray(status menubar.ServerStatus, controller *menubar.Controller, statusItem, startItem, stopItem, openBrowserItem *systray.MenuItem) {
-	log.Printf("Status changed to: %s", status.String())
+	logger.Debug("Status changed to", logger.Fields{"status": status.String()})
 
 	switch status {
 	case menubar.StatusStopped:
@@ -289,10 +291,10 @@ func openBrowser(port int) {
 		args = []string{url}
 	}
 
-	log.Printf("Opening browser: %s %v", cmd, args)
+	logger.Debug("Opening browser", logger.Fields{"cmd": cmd, "args": args})
 
 	if err := exec.Command(cmd, args...).Start(); err != nil {
-		log.Printf("Failed to open browser: %v", err)
+		logger.Error("Failed to open browser", logger.Fields{"err": err})
 	}
 }
 
@@ -311,7 +313,7 @@ func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr 
 	if runtime.GOOS == "darwin" {
 		newPortStr, err := showInputDialog("Server Port Configuration", fmt.Sprintf("Enter new port number (current: %d):", currentPort), fmt.Sprintf("%d", currentPort))
 		if err != nil {
-			log.Printf("Failed to show port dialog: %v", err)
+			logger.Error("Failed to show port dialog", logger.Fields{"err": err})
 			return
 		}
 
@@ -324,35 +326,35 @@ func handlePortConfigurationSystray(controller *menubar.Controller, settingsMgr 
 		// Parse the new port
 		var newPort int
 		if _, err := fmt.Sscanf(newPortStr, "%d", &newPort); err != nil {
-			log.Printf("Invalid port number: %s", newPortStr)
+			logger.Debug("Invalid port number", logger.Fields{"newPortStr": newPortStr})
 			showNotification("Invalid Port", "Please enter a valid port number")
 			return
 		}
 
 		// Validate port range
 		if newPort < 1024 || newPort > 65535 {
-			log.Printf("Port out of range: %d", newPort)
+			logger.Debug("Port out of range", logger.Fields{"newPort": newPort})
 			showNotification("Invalid Port", "Port must be between 1024 and 65535")
 			return
 		}
 
 		// Update controller
 		if err := controller.SetPort(newPort); err != nil {
-			log.Printf("Failed to set port on controller: %v", err)
+			logger.Error("Failed to set port on controller", logger.Fields{"err": err})
 			showNotification("Error", fmt.Sprintf("Failed to set port: %v", err))
 			return
 		}
 
 		// Save to settings
 		if err := settingsMgr.SetPort(newPort); err != nil {
-			log.Printf("Failed to save port to settings: %v", err)
+			logger.Error("Failed to save port to settings", logger.Fields{"err": err})
 			showNotification("Error", fmt.Sprintf("Failed to save port: %v", err))
 			return
 		}
 
 		// Update menu item
 		portItem.SetTitle(fmt.Sprintf("Port: %d", newPort))
-		log.Printf("Port updated to %d", newPort)
+		logger.Debug("Port updated to", logger.Fields{"newPort": newPort})
 		showNotification("Port Updated", fmt.Sprintf("Server port changed to %d", newPort))
 	} else {
 		log.Println("Port configuration dialog not supported on this platform")
@@ -387,7 +389,7 @@ func showNotification(title, message string) {
 		script := fmt.Sprintf(`display notification "%s" with title "%s"`, message, title)
 		cmd := exec.Command("osascript", "-e", script)
 		if err := cmd.Run(); err != nil {
-			log.Printf("Failed to show notification: %v", err)
+			logger.Error("Failed to show notification", logger.Fields{"err": err})
 		}
 	}
 }

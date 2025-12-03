@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
 )
@@ -177,7 +179,7 @@ func (ns *NotificationService) Subscribe(agentName string) NotificationChannel {
 	ch := make(NotificationChannel, 100)
 	ns.channels[agentName] = ch
 
-	log.Printf("📬 Agent %s subscribed to notifications", agentName)
+	logger.Debug("📬 Agent subscribed to notifications", logger.Fields{"agent": agentName})
 	return ch
 }
 
@@ -189,7 +191,7 @@ func (ns *NotificationService) Unsubscribe(agentName string) {
 	if ch, exists := ns.channels[agentName]; exists {
 		close(ch)
 		delete(ns.channels, agentName)
-		log.Printf("📪 Agent %s unsubscribed from notifications", agentName)
+		logger.Debug("📪 Agent unsubscribed from notifications", logger.Fields{"agent": agentName})
 	}
 }
 
@@ -206,7 +208,7 @@ func (ns *NotificationService) broadcast(notification Notification) {
 				// Successfully sent
 			default:
 				// Channel full, skip
-				log.Printf("⚠️  Notification channel full for agent %s", agentName)
+				logger.Warn("Notification channel full for agent", logger.Fields{"agent": agentName})
 			}
 		}
 	}
@@ -347,7 +349,7 @@ func (ns *NotificationService) Shutdown() {
 
 	for agentName, ch := range ns.channels {
 		close(ch)
-		log.Printf("📪 Closed notification channel for agent %s", agentName)
+		logger.Debug("📪 Closed notification channel for agent", logger.Fields{"agent": agentName})
 	}
 	ns.channels = make(map[string]NotificationChannel)
 

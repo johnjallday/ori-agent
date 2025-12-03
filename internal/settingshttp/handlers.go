@@ -2,13 +2,15 @@ package settingshttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/httputil"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -123,7 +125,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		// Update OpenAI API key if provided
 		if req.OpenAIAPIKey != "" {
 			if err := h.configManager.SetAPIKey(req.OpenAIAPIKey); err != nil {
-				http.Error(w, "Invalid OpenAI API key: "+err.Error(), http.StatusBadRequest)
+				httputil.RespondError(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
 				return
 			}
 			// Update global client with new API key
@@ -140,7 +142,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if req.AnthropicAPIKey != "" {
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
 			if err := h.configManager.Update(cfg); err != nil {
-				http.Error(w, "Invalid Anthropic API key: "+err.Error(), http.StatusBadRequest)
+				httputil.RespondError(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
 				return
 			}
 
@@ -301,7 +303,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"providers": providers,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 

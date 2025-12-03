@@ -3,9 +3,12 @@ package agenthttp
 import (
 	"encoding/json"
 	"log"
+
 	"net/http"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/httputil"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -107,14 +110,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
-			log.Printf("❌ CreateAgent decode error: %s", errMsg)
+			logger.Error("CreateAgent decode error", logger.Fields{"error": errMsg})
 			http.Error(w, errMsg, http.StatusBadRequest)
 			return
 		}
 		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
 			req.Name, req.Type, req.Model, req.Temperature)
 		if req.Name == "" {
-			log.Printf("❌ CreateAgent error: name is empty")
+			logger.Error("CreateAgent error: name is empty", logger.Fields{})
 			http.Error(w, "name required", http.StatusBadRequest)
 			return
 		}
@@ -127,9 +130,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			SystemPrompt: req.SystemPrompt,
 		}
 
-		log.Printf("🔄 Creating agent: %s", req.Name)
+		logger.Debug("🔄 Creating agent", logger.Fields{"agent": req.Name})
 		if err := h.State.CreateAgent(req.Name, config); err != nil {
-			log.Printf("❌ CreateAgent error: %v", err)
+			logger.Error("CreateAgent error", logger.Fields{"error": err})
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -145,12 +148,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				agent.Metadata.Tags = req.Tags
 				agent.Metadata.AvatarColor = req.AvatarColor
 				if err := h.State.SetAgent(req.Name, agent); err != nil {
-					log.Printf("⚠️  Failed to set metadata: %v", err)
+					logger.Error("Failed to set metadata", logger.Fields{"err": err})
 				}
 			}
 		}
 
-		log.Printf("✅ Agent created successfully: %s", req.Name)
+		logger.Info("Agent created successfully", logger.Fields{"agent": req.Name})
 
 		// Log activity
 		if h.ActivityLogger != nil {
@@ -160,7 +163,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"description": req.Description,
 			}
 			if err := h.ActivityLogger.LogActivity(req.Name, types.ActivityEventCreated, details, ""); err != nil {
-				log.Printf("⚠️  Failed to log activity: %v", err)
+				logger.Error("Failed to log activity", logger.Fields{"err": err})
 			}
 		}
 
@@ -170,7 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"success": true,
 			"message": "Agent '" + req.Name + "' created successfully",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 
 	case http.MethodPut:
@@ -223,7 +226,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Favorite    *bool     `json:"favorite,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 			return
 		}
 
@@ -281,12 +284,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if err := h.State.SetAgent(*req.Name, agent); err != nil {
-				log.Printf("❌ Failed to save renamed agent: %v", err)
-				http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
+				logger.Error("Failed to save renamed agent", logger.Fields{"agent": err})
+				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 			if err := h.State.DeleteAgent(agentName); err != nil {
-				log.Printf("⚠️  Failed to delete old agent record %s after rename: %v", agentName, err)
+				logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
 			}
 			newName = *req.Name
 			if wasCurrent {
@@ -294,13 +297,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if err := h.State.SetAgent(agentName, agent); err != nil {
-				log.Printf("❌ Failed to update agent metadata: %v", err)
-				http.Error(w, "Failed to update agent: "+err.Error(), http.StatusInternalServerError)
+				logger.Error("Failed to update agent metadata", logger.Fields{"agent": err})
+				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 		}
 
-		log.Printf("✅ Agent metadata updated: %s", newName)
+		logger.Info("Agent metadata updated", logger.Fields{"agent": newName})
 
 		// Log activity
 		if h.ActivityLogger != nil {
@@ -340,7 +343,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"fields": updatedFields,
 			}
 			if err := h.ActivityLogger.LogActivity(newName, types.ActivityEventUpdated, details, ""); err != nil {
-				log.Printf("⚠️  Failed to log activity: %v", err)
+				logger.Error("Failed to log activity", logger.Fields{"err": err})
 			}
 		}
 
@@ -350,7 +353,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"name":    newName,
 			"message": "Agent updated successfully",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 
 	case http.MethodDelete:
@@ -368,7 +371,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.ActivityLogger != nil {
 			details := map[string]interface{}{}
 			if err := h.ActivityLogger.LogActivity(name, types.ActivityEventDeleted, details, ""); err != nil {
-				log.Printf("⚠️  Failed to log activity: %v", err)
+				logger.Error("Failed to log activity", logger.Fields{"err": err})
 			}
 		}
 

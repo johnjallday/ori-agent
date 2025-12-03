@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"sync"
 	"time"
@@ -81,7 +83,7 @@ func (n *Notifier) AddChannel(channel Channel) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.channels = append(n.channels, channel)
-	log.Printf("Added notification channel: %s", channel.Name())
+	logger.Debug("Added notification channel", logger.Fields{"name()": channel.Name()})
 }
 
 // RemoveChannel removes a notification channel by name
@@ -92,7 +94,7 @@ func (n *Notifier) RemoveChannel(name string) {
 	for i, ch := range n.channels {
 		if ch.Name() == name {
 			n.channels = append(n.channels[:i], n.channels[i+1:]...)
-			log.Printf("Removed notification channel: %s", name)
+			logger.Debug("Removed notification channel", logger.Fields{"name": name})
 			return
 		}
 	}
@@ -117,7 +119,7 @@ func (n *Notifier) Notify(notifType NotificationType, title, message, severity s
 	case n.notificationQueue <- notification:
 		// Queued successfully
 	default:
-		log.Printf("⚠️  Notification queue full, dropping notification: %s", title)
+		logger.Warn("Notification queue full, dropping notification", logger.Fields{"title": title})
 	}
 }
 
@@ -147,7 +149,7 @@ func (n *Notifier) deliverNotification(notification Notification) {
 	for _, channel := range channels {
 		go func(ch Channel) {
 			if err := ch.Send(notification); err != nil {
-				log.Printf("Failed to send notification via %s: %v", ch.Name(), err)
+				logger.Error("Failed to send notification via", logger.Fields{"name()": ch.Name(), "err": err})
 			}
 		}(channel)
 	}
@@ -232,7 +234,7 @@ func (c *LogChannel) Send(notification Notification) error {
 		icon = "ℹ️ "
 	}
 
-	log.Printf("%s %s: %s - %s", icon, notification.Title, notification.Message, notification.Type)
+	logger.Debug(": -", logger.Fields{"type": notification.Type, "icon": icon, "title": notification.Title, "message": notification.Message})
 	return nil
 }
 

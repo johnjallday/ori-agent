@@ -3,11 +3,12 @@ package agentstudio
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // WorkspaceStatus represents the current state of a workspace
@@ -444,7 +445,7 @@ func (w *Workspace) RemoveAgentInstance(instanceID string) error {
 	}
 
 	w.UpdatedAt = time.Now()
-	log.Printf("Removed agent instance %s (%s #%d)", removedInstance.ID, removedInstance.Name, removedInstance.InstanceNumber)
+	logger.Debug("Removed agent instance ( #)", logger.Fields{"instancenumber": removedInstance.InstanceNumber, "agent": removedInstance.ID, "name": removedInstance.Name})
 	return nil
 }
 
@@ -528,7 +529,7 @@ func (w *Workspace) MigrateToAgentInstances() {
 		w.AgentInstances = append(w.AgentInstances, instance)
 	}
 
-	log.Printf("Migrated workspace %s: %d legacy agents -> %d agent instances", w.ID, len(w.Agents), len(w.AgentInstances))
+	logger.Debug("Migrated workspace : legacy agents -> agent instances", logger.Fields{"workspace_id": w.ID, "agents)": len(w.Agents), "agentinstances)": len(w.AgentInstances)})
 }
 
 // GetSummary returns a summary of the workspace
@@ -829,21 +830,21 @@ func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	log.Printf("[DEBUG] AddTask - Workspace: %s, Agents: %v", w.ID, w.Agents)
-	log.Printf("[DEBUG] AddTask - Task: From=%s, To=%s", task.From, task.To)
-	log.Printf("[DEBUG] AddTask - hasAgent(From): %v", w.hasAgent(task.From))
+	logger.Debug("[DEBUG] AddTask - Workspace: , Agents", logger.Fields{"agent": w.ID, "agents": w.Agents})
+	logger.Debug("[DEBUG] AddTask - Task: From=, To=", logger.Fields{"task_id": task.From, "to": task.To})
+	logger.Debug("[DEBUG] AddTask - hasAgent(From)", logger.Fields{"agent": w.hasAgent(task.From)})
 
 	// Validate sender is part of workspace
 	// Allow "user", "system", and empty string as special senders for UI-created tasks
 	if task.From != "" && task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
-		log.Printf("[DEBUG] AddTask - Validation FAILED: From agent not valid")
+		logger.Error("[DEBUG] AddTask - Validation FAILED: From agent not valid", logger.Fields{})
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
 
 	// Validate recipient if specified
 	// Allow "unassigned" as a special value for tasks without a specific recipient
 	if task.To != "" && task.To != "unassigned" && !w.hasAgent(task.To) {
-		log.Printf("[DEBUG] AddTask - Validation FAILED: To agent not valid")
+		logger.Error("[DEBUG] AddTask - Validation FAILED: To agent not valid", logger.Fields{})
 		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
 	}
 

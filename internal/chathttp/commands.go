@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
@@ -100,7 +102,7 @@ func (ch *CommandHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Reque
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 
 	}
 }
@@ -248,7 +250,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 
 	}
 }
@@ -267,7 +269,7 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 			"response": agentList,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -291,7 +293,7 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 			"response": errorMsg,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -302,7 +304,7 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 			"response": fmt.Sprintf("✅ **Already using agent '%s'**", agentName),
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -314,7 +316,7 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 			"response": errorMsg,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -326,7 +328,7 @@ func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, a
 		"response": successMsg,
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -342,7 +344,7 @@ func (ch *CommandHandler) HandleAgentsList(w http.ResponseWriter, r *http.Reques
 			"response": "No agents found.",
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -366,7 +368,7 @@ func (ch *CommandHandler) HandleAgentsList(w http.ResponseWriter, r *http.Reques
 		"response": agentsResponse.String(),
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -421,7 +423,7 @@ Type any command above to get started!`
 		"response": helpResponse,
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -435,7 +437,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": "❌ Workspace functionality is not available.",
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -447,7 +449,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": "❌ No active agent found.",
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -467,7 +469,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": fmt.Sprintf("❌ Failed to get workspace summary: %v", err),
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -476,7 +478,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": summary,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -492,7 +494,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": fmt.Sprintf("❌ Failed to get tasks: %v", err),
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -501,7 +503,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": tasksSummary,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 
 	case "task":
@@ -511,7 +513,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": "❌ Please provide a task ID. Usage: `/workspace task <task-id>`",
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -523,7 +525,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": fmt.Sprintf("❌ Failed to get task details: %v", err),
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -532,7 +534,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": details,
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 
 	case "all":
@@ -543,7 +545,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": fmt.Sprintf("❌ Failed to get tasks: %v", err),
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -553,7 +555,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 				"response": "You have no tasks in any agentstudio.",
 			}
 			if err := json.NewEncoder(w).Encode(response); err != nil {
-				log.Printf("Failed to encode response: %v", err)
+				logger.Error("Failed to encode response", logger.Fields{"response": err})
 			}
 			return
 		}
@@ -601,7 +603,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": sb.String(),
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 
 	default:
@@ -610,7 +612,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 			"response": fmt.Sprintf("❌ Unknown workspace command: `%s`\n\nAvailable commands:\n- `/workspace` - Show active workspaces\n- `/workspace tasks` - List pending tasks\n- `/workspace task <id>` - Show task details\n- `/workspace all` - Show all tasks", subcommand),
 		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 	}
 }
@@ -624,7 +626,7 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 		"response": "👋 **Shutting down ori-agent server...**\n\nGoodbye!",
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 
 	// Flush the response to ensure client receives it

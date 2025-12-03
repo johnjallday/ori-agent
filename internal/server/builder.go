@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -184,7 +186,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 
 	// Log success
 	if !verbose {
-		log.Printf("✅ Server initialized successfully")
+		logger.Info("Server initialized successfully", logger.Fields{})
 	}
 
 	return b.server, nil
@@ -214,12 +216,12 @@ func (b *ServerBuilder) initializeRegistry() error {
 func (b *ServerBuilder) initializeClientFactory() error {
 	apiKey := b.server.configManager.GetAPIKey()
 	if apiKey == "" {
-		log.Printf("⚠️  OPENAI_API_KEY not set - OpenAI provider will be unavailable")
-		log.Printf("   You can configure it later in the Settings page")
+		logger.Warn("OPENAI_API_KEY not set - OpenAI provider will be unavailable", logger.Fields{})
+		logger.Debug("You can configure it later in the Settings page", logger.Fields{})
 	} else {
 		verbose := os.Getenv("ORI_VERBOSE") == "true"
 		if verbose {
-			log.Printf("✅ OpenAI API key configured (length: %d, starts with: %s)", len(apiKey), apiKey[:min(10, len(apiKey))])
+			logger.Info("OpenAI API key configured (length: , starts with: )", logger.Fields{"value1": len(apiKey), "value2": apiKey[:min(10, len(apiKey))]})
 		}
 	}
 	b.server.clientFactory = client.NewFactory(apiKey)
@@ -262,13 +264,13 @@ func (b *ServerBuilder) initializeActivityLogger() error {
 
 	activityLogger, err := agenthttp.NewActivityLogger(activityLogDir)
 	if err != nil {
-		log.Printf("⚠️  Failed to initialize activity logger: %v", err)
+		logger.Error("Failed to initialize activity logger", logger.Fields{"err": err})
 		b.server.activityLogger = nil
 		return nil // Continue without activity logging
 	}
 
 	if verbose {
-		log.Printf("✅ Activity logger initialized: %s", activityLogDir)
+		logger.Info("Activity logger initialized", logger.Fields{"activityLogDir": activityLogDir})
 	}
 	b.server.activityLogger = activityLogger
 	return nil
@@ -341,8 +343,8 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 
 			tool, err := pluginloader.LoadPluginUnified(lp.Path)
 			if err != nil {
-				log.Printf("❌ Failed to load plugin %s for agent %s: %v", lp.Path, agName, err)
-				log.Printf("   Removing failed plugin %s from agent %s config", key, agName)
+				logger.Error("Failed to load plugin for agent", logger.Fields{"err": err, "agent": lp.Path, "agName": agName})
+				logger.Error("Removing failed plugin from agent config", logger.Fields{"plugin": key, "agName": agName})
 				failedPlugins = append(failedPlugins, key)
 				continue
 			}
@@ -352,27 +354,27 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 			if !healthResult.Health.Compatible {
 				if healthResult.Health.Status == "unhealthy" {
 					if verbose {
-						log.Printf("❌ Plugin %s is UNHEALTHY", key)
+						logger.Error("Plugin is UNHEALTHY", logger.Fields{"plugin": key})
 						for _, err := range healthResult.Health.Errors {
-							log.Printf("   Error: %s", err)
+							logger.Error("Error", logger.Fields{"error": err})
 						}
 						if healthResult.Health.Recommendation != "" {
-							log.Printf("   💡 Recommendation: %s", healthResult.Health.Recommendation)
+							logger.Debug("💡 Recommendation", logger.Fields{"recommendation": healthResult.Health.Recommendation})
 						}
 					}
 					unhealthySummary = append(unhealthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 				} else {
 					if verbose {
-						log.Printf("⚠️  Plugin %s is DEGRADED", key)
+						logger.Warn("Plugin is DEGRADED", logger.Fields{"plugin": key})
 						for _, warn := range healthResult.Health.Warnings {
-							log.Printf("   Warning: %s", warn)
+							logger.Warn("Warning", logger.Fields{"warn": warn})
 						}
 					}
 					degradedSummary = append(degradedSummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 				}
 			} else {
 				if verbose {
-					log.Printf("✅ Plugin %s v%s health check passed", key, healthResult.Health.Version)
+					logger.Info("Plugin v health check passed", logger.Fields{"plugin": key, "version": healthResult.Health.Version})
 				}
 				healthySummary = append(healthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
 			}
@@ -390,7 +392,7 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 
 			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
 				if verbose {
-					log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", lp.Path, agName, err)
+					logger.Error("failed to extract settings schema for plugin in agent", logger.Fields{"plugin": lp.Path, "agName": agName, "err": err})
 				}
 			}
 
@@ -404,7 +406,7 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 		}
 
 		if err := b.server.st.SetAgent(agName, ag); err != nil {
-			log.Printf("failed to restore plugins for agent %s: %v", agName, err)
+			logger.Error("failed to restore plugins for agent", logger.Fields{"agent": agName, "err": err})
 		}
 	}
 
@@ -427,7 +429,7 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 			tool, err := pluginloader.LoadPluginRPC(pluginEntry.Path)
 			if err != nil {
 				if verbose {
-					log.Printf("Warning: could not load plugin %s for initial health check: %v", pluginEntry.Name, err)
+					logger.Warn("could not load plugin for initial health check", logger.Fields{"plugin": pluginEntry.Name, "err": err})
 				}
 				continue
 			}
@@ -435,9 +437,9 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 			healthResult := b.server.healthManager.CheckAndCachePlugin(pluginEntry.Name, tool)
 			if verbose {
 				if healthResult.Health.Compatible {
-					log.Printf("✅ Plugin %s v%s health check passed", pluginEntry.Name, healthResult.Health.Version)
+					logger.Info("Plugin v health check passed", logger.Fields{"plugin": pluginEntry.Name, "version": healthResult.Health.Version})
 				} else {
-					log.Printf("⚠️  Plugin %s v%s health check issues: %v", pluginEntry.Name, healthResult.Health.Version, healthResult.Health.Warnings)
+					logger.Warn("Plugin v health check issues", logger.Fields{"plugin": pluginEntry.Name, "version": healthResult.Health.Version, "warnings": healthResult.Health.Warnings})
 				}
 			}
 		}
@@ -454,7 +456,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 	log.Println("╠════════════════════════════════════════════════════════════════════════════════╣")
 
 	if len(healthy) > 0 {
-		log.Printf("║  ✅ %d Healthy: %-66s║", len(healthy), truncateString(strings.Join(healthy, ", "), 66))
+		logger.Info("║ Healthy: 66s║", logger.Fields{"value1": len(healthy), "join(healthy, \", \"), 66)": truncateString(strings.Join(healthy, ", "), 66)})
 		if len(healthy) > 1 {
 			healthyList := strings.Join(healthy, ", ")
 			for i := 66; i < len(healthyList); i += 73 {
@@ -462,7 +464,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 				if end > len(healthyList) {
 					end = len(healthyList)
 				}
-				log.Printf("║     %-74s║", healthyList[i:end])
+				logger.Debug("║ 74s║", logger.Fields{"value1": healthyList[i:end]})
 			}
 		}
 	} else {
@@ -470,7 +472,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 	}
 
 	if len(degraded) > 0 {
-		log.Printf("║  ⚠️  %d Degraded: %-64s║", len(degraded), truncateString(strings.Join(degraded, ", "), 64))
+		logger.Warn("║ Degraded: 64s║", logger.Fields{"join(degraded, \", \"), 64)": truncateString(strings.Join(degraded, ", "), 64), "value1": len(degraded)})
 		if len(degraded) > 1 {
 			degradedList := strings.Join(degraded, ", ")
 			for i := 64; i < len(degradedList); i += 73 {
@@ -478,7 +480,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 				if end > len(degradedList) {
 					end = len(degradedList)
 				}
-				log.Printf("║     %-74s║", degradedList[i:end])
+				logger.Debug("║ 74s║", logger.Fields{"value1": degradedList[i:end]})
 			}
 		}
 	} else {
@@ -486,7 +488,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 	}
 
 	if len(unhealthy) > 0 {
-		log.Printf("║  ❌ %d Unhealthy: %-63s║", len(unhealthy), truncateString(strings.Join(unhealthy, ", "), 63))
+		logger.Error("║ Unhealthy: 63s║", logger.Fields{"value1": len(unhealthy), "join(unhealthy, \", \"), 63)": truncateString(strings.Join(unhealthy, ", "), 63)})
 		if len(unhealthy) > 1 {
 			unhealthyList := strings.Join(unhealthy, ", ")
 			for i := 63; i < len(unhealthyList); i += 73 {
@@ -494,7 +496,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 				if end > len(unhealthyList) {
 					end = len(unhealthyList)
 				}
-				log.Printf("║     %-74s║", unhealthyList[i:end])
+				logger.Debug("║ 74s║", logger.Fields{"value1": unhealthyList[i:end]})
 			}
 		}
 	} else {
@@ -509,7 +511,7 @@ func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string
 func (b *ServerBuilder) loadPluginRegistry() error {
 	reg, _, err := b.server.registryManager.Load()
 	if err != nil {
-		log.Printf("failed to load plugin registry: %v", err)
+		logger.Error("failed to load plugin registry", logger.Fields{"plugin": err})
 		return nil // Non-critical, continue
 	}
 
@@ -553,7 +555,7 @@ func (b *ServerBuilder) initializeCostTracker() error {
 	usageDataDir := resolveCostTrackerDir()
 	b.server.costTracker = llm.NewCostTracker(usageDataDir)
 	if verbose {
-		log.Printf("💰 Cost tracker initialized: %s", usageDataDir)
+		logger.Debug("💰 Cost tracker initialized", logger.Fields{"cost": usageDataDir})
 	}
 	return nil
 }
@@ -567,14 +569,14 @@ func (b *ServerBuilder) initializeMCP() error {
 
 	if err := b.server.mcpConfigManager.InitializeDefaultServers(); err != nil {
 		if verbose {
-			log.Printf("Warning: failed to initialize default MCP servers: %v", err)
+			logger.Error("failed to initialize default MCP servers", logger.Fields{"server": err})
 		}
 	}
 
 	mcpGlobalConfig, err := b.server.mcpConfigManager.LoadGlobalConfig()
 	if err != nil {
 		if verbose {
-			log.Printf("Warning: failed to load MCP global config: %v", err)
+			logger.Error("failed to load MCP global config", logger.Fields{"err": err})
 		}
 		return nil // Non-critical
 	}
@@ -582,13 +584,13 @@ func (b *ServerBuilder) initializeMCP() error {
 	for _, serverConfig := range mcpGlobalConfig.Servers {
 		if err := b.server.mcpRegistry.AddServer(serverConfig); err != nil {
 			if verbose {
-				log.Printf("Warning: failed to add MCP server %s to registry: %v", serverConfig.Name, err)
+				logger.Error("failed to add MCP server to registry", logger.Fields{"server": serverConfig.Name, "err": err})
 			}
 		}
 	}
 
 	if verbose {
-		log.Printf("🔌 MCP system initialized with %d configured servers", len(mcpGlobalConfig.Servers))
+		logger.Debug("🔌 MCP system initialized with configured servers", logger.Fields{"server": len(mcpGlobalConfig.Servers)})
 	}
 
 	return nil
@@ -734,13 +736,13 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 	templateManager := templates.NewTemplateManager(templatesDir)
 	if err := templateManager.LoadTemplates(); err != nil {
 		if verbose {
-			log.Printf("⚠️  Warning: failed to load workflow templates: %v", err)
+			logger.Error("Warning: failed to load workflow templates", logger.Fields{"err": err})
 		}
 		return nil // Non-critical
 	}
 
 	if verbose {
-		log.Printf("✅ Loaded %d workflow templates", len(templateManager.ListTemplates()))
+		logger.Info("Loaded workflow templates", logger.Fields{"listtemplates())": len(templateManager.ListTemplates())})
 	}
 
 	b.server.orchestrationHandler.SetTemplateManager(templateManager)

@@ -3,11 +3,12 @@ package orchestrationhttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // NotificationHandler manages notification and event history operations
@@ -149,7 +150,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 	// Context with cancellation
 	ctx := r.Context()
 
-	log.Printf("🔔 Starting notification stream for agent %s", agentName)
+	logger.Debug("🔔 Starting notification stream for agent", logger.Fields{"agent": agentName})
 
 	// Send initial unread notifications
 	unread := nh.notificationService.GetUnreadForAgent(agentName)
@@ -167,26 +168,26 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 		select {
 		case <-ctx.Done():
 			// Client disconnected
-			log.Printf("🔕 Notification stream closed for agent %s", agentName)
+			logger.Debug("🔕 Notification stream closed for agent", logger.Fields{"agent": agentName})
 			return
 
 		case notification, ok := <-notifChan:
 			if !ok {
 				// Channel closed
-				log.Printf("🔕 Notification channel closed for agent %s", agentName)
+				logger.Debug("🔕 Notification channel closed for agent", logger.Fields{"agent": agentName})
 				return
 			}
 
 			// Send notification to client
 			data, err := json.Marshal(notification)
 			if err != nil {
-				log.Printf("❌ Failed to marshal notification: %v", err)
+				logger.Error("Failed to marshal notification", logger.Fields{"err": err})
 				continue
 			}
 
 			_, err = w.Write([]byte(fmt.Sprintf("event: notification\ndata: %s\n\n", data)))
 			if err != nil {
-				log.Printf("❌ Failed to write notification: %v", err)
+				logger.Error("Failed to write notification", logger.Fields{"err": err})
 				return
 			}
 			flusher.Flush()

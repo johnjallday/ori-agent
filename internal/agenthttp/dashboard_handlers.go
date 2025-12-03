@@ -2,7 +2,7 @@ package agenthttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"sort"
 	"strconv"
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/httputil"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -319,7 +321,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		Status string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -355,7 +357,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Save agent
 	if err := h.State.SetAgent(agentName, agent); err != nil {
-		http.Error(w, "Failed to update agent status: "+err.Error(), http.StatusInternalServerError)
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent status", err)
 		return
 	}
 
@@ -367,7 +369,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		}
 		if err := h.ActivityLogger.LogActivity(agentName, types.ActivityEventStatusChanged, details, ""); err != nil {
 			// Log error but don't fail the request
-			log.Printf("⚠️  Failed to log status change activity: %v", err)
+			logger.Error("Failed to log status change activity", logger.Fields{"status": err})
 		}
 	}
 

@@ -4,7 +4,8 @@ import (
 	"errors"
 	"github.com/johnjallday/ori-agent/internal/version"
 	"html/template"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"path/filepath"
 	"strings"
 )
@@ -60,7 +61,7 @@ func NewTemplateRenderer() *TemplateRenderer {
 
 // LoadTemplates loads all templates from the embedded filesystem
 func (tr *TemplateRenderer) LoadTemplates() error {
-	log.Printf("Loading templates from embedded filesystem")
+	logger.Debug("Loading templates from embedded filesystem", logger.Fields{})
 
 	// Create a new template with custom functions if needed
 	tmpl := template.New("base")
@@ -78,6 +79,8 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/studios/workspace-details-modal.tmpl",
 		"templates/pages/index.tmpl",
 		"templates/pages/agents.tmpl",
+		"templates/pages/agents-detail.tmpl",
+		"templates/pages/agents-edit.tmpl",
 		"templates/pages/settings.tmpl",
 		"templates/pages/marketplace.tmpl",
 		"templates/pages/workflows.tmpl",
@@ -92,7 +95,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	for _, path := range templatePaths {
 		content, err := Templates.ReadFile(path)
 		if err != nil {
-			log.Printf("Warning: Could not read template %s: %v", path, err)
+			logger.Warn("Could not read template", logger.Fields{"path": path, "err": err})
 			continue
 		}
 
@@ -100,10 +103,10 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		name := filepath.Base(path)
 		_, err = tmpl.New(name).Parse(string(content))
 		if err != nil {
-			log.Printf("Error parsing template %s: %v", name, err)
+			logger.Error("Error parsing template", logger.Fields{"error": name, "err": err})
 			return err
 		}
-		log.Printf("Loaded template: %s", name)
+		logger.Debug("Loaded template", logger.Fields{"name": name})
 	}
 
 	tr.templates["index"] = tmpl
@@ -117,7 +120,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["usage"] = tmpl
 	tr.templates["mcp"] = tmpl
 	tr.templates["models"] = tmpl
-	log.Printf("Successfully loaded templates from embedded filesystem")
+	logger.Info("Successfully loaded templates from embedded filesystem", logger.Fields{})
 
 	return nil
 }
@@ -126,7 +129,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (string, error) {
 	tmpl, exists := tr.templates[name]
 	if !exists {
-		log.Printf("Template not found: %s", name)
+		logger.Debug("Template not found", logger.Fields{"name": name})
 		return "", errors.New("template not found: " + name)
 	}
 
@@ -147,7 +150,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 
 	err := tmpl.ExecuteTemplate(&buf, templateName, data)
 	if err != nil {
-		log.Printf("Error executing template %s: %v", name, err)
+		logger.Error("Error executing template", logger.Fields{"error": name, "err": err})
 		return "", err
 	}
 

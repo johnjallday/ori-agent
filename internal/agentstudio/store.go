@@ -3,7 +3,8 @@ package agentstudio
 import (
 	"bytes"
 	"fmt"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"os"
 	"path/filepath"
 	"sync"
@@ -62,7 +63,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 	// DEBUG: Log task assigned_node_id values before serialization
 	for i, task := range ws.Tasks {
 		if task.AssignedNodeID != "" {
-			log.Printf("🔍 [BEFORE SAVE] Task %d (%s): to=%s, assigned_node_id=%s", i, task.ID[:8], task.To, task.AssignedNodeID)
+			logger.Debug("🔍 [BEFORE SAVE] Task (): to=, assigned_node_id=", logger.Fields{"task_id": i, "id[:8]": task.ID[:8], "to": task.To, "assignednodeid": task.AssignedNodeID})
 		}
 	}
 
@@ -74,7 +75,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 
 	// DEBUG: Check if assigned_node_id is in the JSON
 	if len(ws.Tasks) > 0 && ws.Tasks[0].AssignedNodeID != "" {
-		log.Printf("🔍 [JSON DATA] Contains 'assigned_node_id': %t", bytes.Contains(data, []byte("assigned_node_id")))
+		logger.Debug("🔍 [JSON DATA] Contains 'assigned_node_id': t", logger.Fields{"contains(data, []byte(\"assigned_node_id\"))": bytes.Contains(data, []byte("assigned_node_id"))})
 	}
 
 	// Write to file
@@ -92,7 +93,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 	// DEBUG: Log task assigned_node_id values after deserialization
 	for i, task := range freshWS.Tasks {
 		if task.AssignedNodeID != "" {
-			log.Printf("🔍 [AFTER RELOAD] Task %d (%s): to=%s, assigned_node_id=%s", i, task.ID[:8], task.To, task.AssignedNodeID)
+			logger.Debug("🔍 [AFTER RELOAD] Task (): to=, assigned_node_id=", logger.Fields{"task_id": i, "id[:8]": task.ID[:8], "to": task.To, "assignednodeid": task.AssignedNodeID})
 		}
 	}
 
@@ -137,13 +138,13 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 		// We already hold the lock, so inline the save logic without locking again
 		migratedData, err := ws.ToJSON()
 		if err != nil {
-			log.Printf("Warning: failed to serialize migrated workspace %s: %v", id, err)
+			logger.Error("failed to serialize migrated workspace", logger.Fields{"err": err, "workspace_id": id})
 		} else {
 			filePath := s.getFilePath(ws.ID)
 			if err := os.WriteFile(filePath, migratedData, 0644); err != nil {
-				log.Printf("Warning: failed to persist migrated workspace %s: %v", id, err)
+				logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": id, "err": err})
 			} else {
-				log.Printf("Successfully persisted migration for workspace %s", id)
+				logger.Info("Successfully persisted migration for workspace", logger.Fields{"workspace_id": id})
 			}
 		}
 	}
@@ -248,12 +249,12 @@ func (s *FileStore) loadCache() error {
 				// Migration happened - persist it
 				migratedData, err := ws.ToJSON()
 				if err != nil {
-					log.Printf("Warning: failed to serialize migrated workspace %s: %v", ws.ID, err)
+					logger.Error("failed to serialize migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 				} else {
 					if err := os.WriteFile(filePath, migratedData, 0644); err != nil {
-						log.Printf("Warning: failed to persist migrated workspace %s: %v", ws.ID, err)
+						logger.Error("failed to persist migrated workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 					} else {
-						log.Printf("Successfully persisted migration for workspace %s", ws.ID)
+						logger.Info("Successfully persisted migration for workspace", logger.Fields{"workspace_id": ws.ID})
 					}
 				}
 			}

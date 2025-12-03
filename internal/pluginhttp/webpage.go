@@ -2,10 +2,11 @@ package pluginhttp
 
 import (
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -83,7 +84,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Write content
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte(content)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -115,7 +116,7 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 		// Plugin doesn't provide web pages, return empty list
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(`{"pages":[]}`)); err != nil {
-			log.Printf("Failed to write response: %v", err)
+			logger.Error("Failed to write response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -127,7 +128,7 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(quoteStrings(pages), ","))
 	if _, err := w.Write([]byte(response)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 

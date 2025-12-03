@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"strings"
 	"time"
@@ -39,7 +40,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 			Success: false,
 			Error:   fmt.Sprintf("Invalid request: %v", err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -56,7 +57,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 			Success: false,
 			Error:   "Current agent not found",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -72,7 +73,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 			Success: false,
 			Error:   fmt.Sprintf("Plugin %q not found or not loaded", pluginName),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -85,7 +86,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 			Success: false,
 			Error:   fmt.Sprintf("Failed to marshal arguments: %v", err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -113,7 +114,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 			Success: false,
 			Error:   fmt.Sprintf("Tool call failed: %v", err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -123,6 +124,6 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 		Success: true,
 		Result:  result,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

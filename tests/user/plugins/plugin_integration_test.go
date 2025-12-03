@@ -1,34 +1,17 @@
 package plugins
 
 import (
-	"flag"
-	"os"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/tests/user/helpers"
 )
-
-var testModel = flag.String("model", "", "LLM model to use for tests (default: auto-detect)")
-
-func getTestModel() string {
-	// Priority: flag > env var > auto-detect
-	if testModel != nil && *testModel != "" {
-		return *testModel
-	}
-	if model := os.Getenv("OLLAMA_MODEL"); model != "" {
-		return model
-	}
-	// Default to Ollama (free local inference)
-	// Use OpenAI by setting OPENAI_MODEL env var or --model flag
-	return "granite4"
-}
 
 // TestMathPluginIntegration tests the math plugin end-to-end
 func TestMathPluginIntegration(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Testing math plugin integration (model: %s)", model)
 
 	// Create agent
@@ -66,7 +49,7 @@ func TestWeatherPluginIntegration(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Testing weather plugin integration (model: %s)", model)
 
 	// Create agent
@@ -105,7 +88,7 @@ func TestMultiplePluginsOnAgent(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Testing multiple plugins on one agent (model: %s)", model)
 
 	// Create agent
@@ -138,7 +121,7 @@ func TestPluginConfigurationPersistence(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Testing plugin configuration persistence (model: %s)", model)
 
 	// Create agent and enable plugin
@@ -156,7 +139,7 @@ func TestAgentAwarePluginContext(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Testing agent-aware plugin context (model: %s)", model)
 
 	// Create two agents with same plugin

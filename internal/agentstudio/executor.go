@@ -3,7 +3,8 @@ package agentstudio
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
 )
@@ -69,7 +70,7 @@ func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
 
 // Start begins the task executor polling loop
 func (te *TaskExecutor) Start() {
-	log.Printf("🚀 Task executor started (poll interval: %v, max concurrent: %d)", te.pollInterval, te.maxConcurrent)
+	logger.Debug("🚀 Task executor started (poll interval: , max concurrent: )", logger.Fields{"maxconcurrent": te.maxConcurrent, "task_id": te.pollInterval})
 
 	// Clean up orphaned tasks before starting
 	te.cleanupOrphanedTasks()
@@ -82,7 +83,7 @@ func (te *TaskExecutor) Start() {
 func (te *TaskExecutor) cleanupOrphanedTasks() {
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces for orphaned task cleanup: %v", err)
+		logger.Error("Failed to list workspaces for orphaned task cleanup", logger.Fields{"workspace_id": err})
 		return
 	}
 
@@ -105,22 +106,22 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 
 		if resetCount > 0 {
 			if err := te.workspaceStore.Save(ws); err != nil {
-				log.Printf("⚠️  Failed to save workspace %s after orphaned task cleanup: %v", wsID, err)
+				logger.Error("Failed to save workspace after orphaned task cleanup", logger.Fields{"workspace_id": wsID, "err": err})
 			} else {
 				totalReset += resetCount
-				log.Printf("🔄 Reset %d orphaned task(s) in workspace %s", resetCount, wsID)
+				logger.Debug("🔄 Reset orphaned task(s) in workspace", logger.Fields{"task_id": resetCount, "wsID": wsID})
 			}
 		}
 	}
 
 	if totalReset > 0 {
-		log.Printf("✅ Cleaned up %d orphaned task(s) across all workspaces", totalReset)
+		logger.Info("Cleaned up orphaned task(s) across all workspaces", logger.Fields{"task_id": totalReset})
 	}
 }
 
 // Stop gracefully stops the task executor
 func (te *TaskExecutor) Stop() {
-	log.Printf("⏹️  Stopping task executor...")
+	logger.Debug("⏹️ Stopping task executor...", logger.Fields{})
 	close(te.stopChan)
 
 	// Cancel all running tasks
@@ -131,7 +132,7 @@ func (te *TaskExecutor) Stop() {
 	te.mu.Unlock()
 
 	te.wg.Wait()
-	log.Printf("✅ Task executor stopped")
+	logger.Info("Task executor stopped", logger.Fields{})
 }
 
 // pollLoop continuously polls for new tasks
@@ -159,7 +160,7 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 	// Get all workspaces
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
-		log.Printf("⚠️  Failed to list workspaces: %v", err)
+		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
 		return
 	}
 
@@ -198,7 +199,7 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 			te.mu.RUnlock()
 
 			if !canRun {
-				log.Printf("⚠️  Max concurrent tasks reached (%d), deferring task %s", te.maxConcurrent, task.ID)
+				logger.Warn("Max concurrent tasks reached (), deferring task", logger.Fields{"error": te.maxConcurrent, "id": task.ID})
 				continue
 			}
 
@@ -228,30 +229,30 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 	te.mu.Unlock()
 
-	log.Printf("▶️  Executing task %s for agent %s: %s", task.ID, task.To, task.Description)
+	logger.Debug("▶️ Executing task for agent", logger.Fields{"description": task.Description, "agent": task.ID, "to": task.To})
 
 	// Inject input task results into task context if InputTaskIDs are specified
 	if len(task.InputTaskIDs) > 0 {
-		log.Printf("🔗 Task %s has %d input task IDs: %v", task.ID, len(task.InputTaskIDs), task.InputTaskIDs)
+		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
 		enrichedContext := ws.GetInputContext(&task)
 		task.Context = enrichedContext
 
 		// Debug: Check what was added to context
 		if inputResults, ok := enrichedContext["input_task_results"]; ok {
 			resultsMap := inputResults.(map[string]string)
-			log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), task.ID)
+			logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
 			for taskID, result := range resultsMap {
 				preview := result
 				if len(preview) > 100 {
 					preview = preview[:100] + "..."
 				}
-				log.Printf("   - Task %s result: %s", taskID, preview)
+				logger.Debug("- Task result", logger.Fields{"task_id": taskID, "preview": preview})
 			}
 		} else {
-			log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", task.ID)
+			logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": task.ID})
 		}
 	} else {
-		log.Printf("ℹ️  Task %s has no input task IDs", task.ID)
+		logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": task.ID})
 	}
 
 	// Update task status to in_progress
@@ -260,10 +261,10 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	task.StartedAt = &now
 
 	if err := ws.UpdateTask(task); err != nil {
-		log.Printf("⚠️  Failed to update task status: %v", err)
+		logger.Error("Failed to update task status", logger.Fields{"status": err})
 	}
 	if err := te.workspaceStore.Save(ws); err != nil {
-		log.Printf("⚠️  Failed to save workspace: %v", err)
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 	}
 
 	// Publish task started event
@@ -292,7 +293,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		// Reload workspace (may have changed)
 		ws, wsErr := te.workspaceStore.Get(ws.ID)
 		if wsErr != nil {
-			log.Printf("❌ Failed to reload workspace %s: %v", ws.ID, wsErr)
+			logger.Error("Failed to reload workspace", logger.Fields{"workspace_id": ws.ID, "wsErr": wsErr})
 			return
 		}
 
@@ -306,7 +307,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		}
 
 		if updatedTask == nil {
-			log.Printf("❌ Task %s not found in workspace after execution", task.ID)
+			logger.Error("Task not found in workspace after execution", logger.Fields{"task_id": task.ID})
 			return
 		}
 
@@ -315,7 +316,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		updatedTask.CompletedAt = &completedAt
 
 		if err != nil {
-			log.Printf("❌ Task %s failed: %v", task.ID, err)
+			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "err": err})
 			updatedTask.Status = TaskStatusFailed
 			updatedTask.Error = err.Error()
 
@@ -328,7 +329,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 				te.eventBus.Publish(event)
 			}
 		} else {
-			log.Printf("✅ Task %s completed successfully", task.ID)
+			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
 
@@ -344,11 +345,11 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 
 		// Save updated task
 		if err := ws.UpdateTask(*updatedTask); err != nil {
-			log.Printf("⚠️  Failed to update task: %v", err)
+			logger.Error("Failed to update task", logger.Fields{"task_id": err})
 			return
 		}
 		if err := te.workspaceStore.Save(ws); err != nil {
-			log.Printf("⚠️  Failed to save workspace: %v", err)
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 		}
 
 		// Publish workspace updated event
@@ -392,7 +393,7 @@ func (te *TaskExecutor) CancelTask(taskID string) error {
 	}
 
 	exec.Cancel()
-	log.Printf("🚫 Task %s cancelled", taskID)
+	logger.Debug("🚫 Task cancelled", logger.Fields{"task_id": taskID})
 
 	return nil
 }

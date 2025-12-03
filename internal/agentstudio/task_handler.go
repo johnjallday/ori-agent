@@ -3,11 +3,12 @@ package agentstudio
 import (
 	"context"
 	"fmt"
-	"log"
+
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -34,7 +35,7 @@ func (h *LLMTaskHandler) SetEventBus(eventBus *EventBus) {
 
 // ExecuteTask executes a task by sending it to the agent's LLM
 func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task Task) (string, error) {
-	log.Printf("🤖 Executing task %s for agent %s", task.ID, agentName)
+	logger.Debug("🤖 Executing task for agent", logger.Fields{"task_id": task.ID, "agentName": agentName})
 
 	// Publish thinking event
 	if h.eventBus != nil {
@@ -91,7 +92,7 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 	// Handle tool calls if present
 	if len(resp.ToolCalls) > 0 {
-		log.Printf("🔧 Task %s triggered %d tool call(s)", task.ID, len(resp.ToolCalls))
+		logger.Debug("Task triggered tool call(s)", logger.Fields{"task_id": task.ID, "toolcalls)": len(resp.ToolCalls)})
 
 		// Execute tool calls
 		toolResults := h.executeToolCalls(ctx, ag, agentName, task, resp.ToolCalls)
@@ -270,7 +271,7 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
 		if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 			if ollamaProv.HasModel(model) {
-				log.Printf("🎯 Model '%s' found in Ollama, using Ollama provider", model)
+				logger.Info("Model '' found in Ollama, using Ollama provider", logger.Fields{"model": model})
 				return "ollama"
 			}
 		}
@@ -322,7 +323,7 @@ func (h *LLMTaskHandler) executeToolCalls(ctx context.Context, ag *agent.Agent, 
 
 // executeToolCall executes a single tool call
 func (h *LLMTaskHandler) executeToolCall(ctx context.Context, ag *agent.Agent, agentName string, task Task, toolCall llm.ToolCall) toolCallResult {
-	log.Printf("🔧 Executing tool: %s", toolCall.Name)
+	logger.Debug("Executing tool", logger.Fields{"tool": toolCall.Name})
 
 	// Publish tool call event
 	if h.eventBus != nil {

@@ -2,11 +2,12 @@ package updatehttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 )
 
@@ -34,14 +35,14 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 
 	updateInfo, err := h.updateManager.CheckUpdates(includePrerelease)
 	if err != nil {
-		log.Printf("Error checking for updates: %v", err)
+		logger.Error("Error checking for updates", logger.Fields{"error": err})
 		http.Error(w, "Failed to check for updates", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(updateInfo); err != nil {
-		log.Printf("Error encoding update info: %v", err)
+		logger.Error("Error encoding update info", logger.Fields{"error": err})
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -67,7 +68,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 
 	releases, err := h.updateManager.ListReleases(includePrerelease, limit)
 	if err != nil {
-		log.Printf("Error listing releases: %v", err)
+		logger.Error("Error listing releases", logger.Fields{"error": err})
 		http.Error(w, "Failed to list releases", http.StatusInternalServerError)
 		return
 	}
@@ -79,7 +80,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding releases: %v", err)
+		logger.Error("Error encoding releases", logger.Fields{"error": err})
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -109,7 +110,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 
 	filePath, err := h.updateManager.DownloadUpdate(request.Version)
 	if err != nil {
-		log.Printf("Error downloading update: %v", err)
+		logger.Error("Error downloading update", logger.Fields{"error": err})
 		http.Error(w, "Failed to download update", http.StatusInternalServerError)
 		return
 	}
@@ -129,7 +130,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding download response: %v", err)
+		logger.Error("Error encoding download response", logger.Fields{"response": err})
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -155,7 +156,7 @@ func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
-		log.Printf("Error encoding version info: %v", err)
+		logger.Error("Error encoding version info", logger.Fields{"error": err})
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}

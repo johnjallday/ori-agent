@@ -1,7 +1,7 @@
 package web
 
 import (
-	"log"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 )
 
@@ -61,7 +61,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Set content type
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if _, err := w.Write([]byte(content)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -98,7 +98,7 @@ func (ch *ComponentHandler) ListComponents(w http.ResponseWriter, r *http.Reques
 
 	if _, err := w.Write([]byte(response)); err != nil {
 
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 
 	}
 }

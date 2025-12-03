@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"os"
 	"os/exec"
@@ -382,7 +384,7 @@ func (m *Manager) RestartApplication() {
 	// Get the executable path
 	executable, err := os.Executable()
 	if err != nil {
-		log.Printf("Failed to get executable path: %v", err)
+		logger.Error("Failed to get executable path", logger.Fields{"err": err})
 		return
 	}
 
@@ -398,11 +400,11 @@ func (m *Manager) RestartApplication() {
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("Failed to start new process: %v", err)
+		logger.Error("Failed to start new process", logger.Fields{"err": err})
 		return
 	}
 
-	log.Printf("New process started with PID %d, shutting down current process...", cmd.Process.Pid)
+	logger.Debug("New process started with PID , shutting down current process...", logger.Fields{"pid": cmd.Process.Pid})
 
 	// Exit current process
 	os.Exit(0)

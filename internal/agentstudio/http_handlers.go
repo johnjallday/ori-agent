@@ -3,13 +3,14 @@ package agentstudio
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // HTTPHandler handles HTTP requests for Agent Studio
@@ -31,12 +32,6 @@ type CreateStudioRequest struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Agents      []string `json:"agents"`
-	Mission     string   `json:"mission,omitempty"` // Optional: execute mission immediately
-}
-
-// ExecuteMissionRequest represents the request to execute a mission
-type ExecuteMissionRequest struct {
-	Mission string `json:"mission"`
 }
 
 // CreateStudio handles POST /api/studios
@@ -76,30 +71,14 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   time.Now(),
 	}
 
-	// Add mission to shared data if provided
-	if req.Mission != "" {
-		studio.SharedData["mission"] = req.Mission
-	}
-
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		log.Printf("Failed to save studio: %v", err)
+		logger.Error("Failed to save studio", logger.Fields{"workspace_id": err})
 		http.Error(w, "Failed to create studio", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Created studio: %s (ID: %s) with agents: %v", studio.Name, studio.ID, studio.Agents)
-
-	// Execute mission if provided
-	if req.Mission != "" {
-		go func() {
-			ctx := r.Context()
-			if err := h.orchestrator.ExecuteMission(ctx, studio.ID, req.Mission); err != nil {
-				log.Printf("Failed to execute mission for studio %s: %v", studio.ID, err)
-			}
-		}()
-		log.Printf("Started mission execution for studio %s: %s", studio.ID, req.Mission)
-	}
+	logger.Info("Created studio: (ID: ) with agents", logger.Fields{"workspace_id": studio.Name, "id": studio.ID, "agents": studio.Agents})
 
 	// Return created studio
 	w.Header().Set("Content-Type", "application/json")
@@ -111,70 +90,7 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 		"status":  studio.Status,
 		"message": "Studio created successfully",
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
-	}
-}
-
-// ExecuteMission handles POST /api/studios/:id/mission
-func (h *HTTPHandler) ExecuteMission(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Extract studio ID from URL path
-	// URL format: /api/studios/{id}/mission
-	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
-		return
-	}
-	studioID := parts[0]
-
-	// Verify studio exists
-	studio, err := h.store.Get(studioID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
-		return
-	}
-
-	// Parse request
-	var req ExecuteMissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	if req.Mission == "" {
-		http.Error(w, "Mission is required", http.StatusBadRequest)
-		return
-	}
-
-	// Store mission in shared data
-	studio.SetSharedData("mission", req.Mission)
-	if err := h.store.Save(studio); err != nil {
-		log.Printf("Failed to save mission to studio: %v", err)
-	}
-
-	// Execute mission asynchronously
-	go func() {
-		ctx := r.Context()
-		if err := h.orchestrator.ExecuteMission(ctx, studioID, req.Mission); err != nil {
-			log.Printf("Failed to execute mission for studio %s: %v", studioID, err)
-		}
-	}()
-
-	log.Printf("Started mission execution for studio %s: %s", studioID, req.Mission)
-
-	// Return success
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Mission execution started",
-		"mission": req.Mission,
-		"studio":  studioID,
-	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -220,7 +136,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -243,7 +159,7 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 	for _, id := range ids {
 		studio, err := h.store.Get(id)
 		if err != nil {
-			log.Printf("Warning: Failed to get studio %s: %v", id, err)
+			logger.Error("Failed to get studio", logger.Fields{"workspace_id": id, "err": err})
 			continue
 		}
 
@@ -264,7 +180,7 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 		"studios": studios,
 		"count":   len(studios),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -378,7 +294,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Added agent %s to studio %s", req.AgentName, studioID)
+	logger.Debug("Added agent to studio", logger.Fields{"agent": req.AgentName, "studioID": studioID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -387,7 +303,7 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 		"agent":   req.AgentName,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -466,9 +382,9 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if instanceNumber > 0 {
-		log.Printf("Removed agent %s instance #%d from studio %s", agentName, instanceNumber, studioID)
+		logger.Debug("Removed agent instance # from studio", logger.Fields{"instanceNumber": instanceNumber, "studioID": studioID, "workspace_id": agentName})
 	} else {
-		log.Printf("Removed agent %s from studio %s", agentName, studioID)
+		logger.Debug("Removed agent from studio", logger.Fields{"agent": agentName, "studioID": studioID})
 	}
 
 	// Return success
@@ -478,7 +394,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		"agent":   agentName,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -527,8 +443,8 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[DEBUG] CreateTask - Studio: %s, Agents: %v", studioID, studio.Agents)
-	log.Printf("[DEBUG] CreateTask - Request: From=%s, To=%s", req.From, req.To)
+	logger.Debug("[DEBUG] CreateTask - Studio: , Agents", logger.Fields{"agent": studioID, "agents": studio.Agents})
+	logger.Debug("[DEBUG] CreateTask - Request: From=, To=", logger.Fields{"task_id": req.From, "to": req.To})
 
 	// Create task
 	task := Task{
@@ -545,7 +461,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Add task to studio
 	if err := studio.AddTask(task); err != nil {
-		log.Printf("[DEBUG] CreateTask - AddTask failed: %v", err)
+		logger.Error("[DEBUG] CreateTask - AddTask failed", logger.Fields{"task_id": err})
 		http.Error(w, fmt.Sprintf("Failed to add task: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -556,7 +472,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Created task %s in studio %s: %s", task.ID, studioID, req.Description)
+	logger.Info("Created task in studio", logger.Fields{"description": req.Description, "task_id": task.ID, "studioID": studioID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -567,7 +483,7 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		"task":    task,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -641,7 +557,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Updated task %s in studio %s", taskID, studioID)
+	logger.Debug("Updated task in studio", logger.Fields{"task_id": taskID, "studioID": studioID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -650,7 +566,7 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		"task_id": taskID,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -703,7 +619,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Deleted task %s from studio %s", taskID, studioID)
+	logger.Debug("Deleted task from studio", logger.Fields{"workspace_id": taskID, "studioID": studioID})
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
@@ -712,7 +628,7 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		"task_id": taskID,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -755,13 +671,13 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	log.Printf("Manually executing task %s in studio %s", taskID, studioID)
+	logger.Debug("Manually executing task in studio", logger.Fields{"studioID": studioID, "workspace_id": taskID})
 
 	// Execute task asynchronously
 	go func() {
 		ctx := r.Context()
 		if err := h.orchestrator.ExecuteTask(ctx, studioID, *targetTask); err != nil {
-			log.Printf("Failed to execute task %s: %v", taskID, err)
+			logger.Error("Failed to execute task", logger.Fields{"task_id": taskID, "err": err})
 		}
 	}()
 
@@ -772,6 +688,6 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		"task_id": taskID,
 		"studio":  studioID,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

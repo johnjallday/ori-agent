@@ -3,11 +3,11 @@ package orchestrationhttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
 
@@ -56,7 +56,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		// Get specific workspace
 		ws, err := wh.workspaceStore.Get(wsID)
 		if err != nil {
-			log.Printf("❌ Error getting workspace %s: %v", wsID, err)
+			logger.Error("Error getting workspace", logger.Fields{"workspace_id": wsID, "error": err})
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
@@ -70,7 +70,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		// Get only active workspaces
 		workspaces, err := wh.workspaceStore.ListActive()
 		if err != nil {
-			log.Printf("❌ Error listing active workspaces: %v", err)
+			logger.Error("Error listing active workspaces", logger.Fields{"error": err})
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -85,7 +85,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 	// List all workspaces
 	ids, err := wh.workspaceStore.List()
 	if err != nil {
-		log.Printf("❌ Error listing workspaces: %v", err)
+		logger.Error("Error listing workspaces", logger.Fields{"error": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -116,7 +116,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("❌ Error decoding workspace creation request: %v", err)
+		logger.Error("Error decoding workspace creation request", logger.Fields{"error": err})
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -146,12 +146,12 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Error saving workspace: %v", err)
+		logger.Error("Error saving workspace", logger.Fields{"error": err})
 		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Created workspace: %s (ID: %s)", req.Name, ws.ID)
+	logger.Info("Created workspace", logger.Fields{"name": req.Name, "workspace_id": ws.ID})
 
 	// Publish workspace created event
 	if wh.eventBus != nil {
@@ -185,12 +185,12 @@ func (wh *WorkspaceHandler) handleDeleteWorkspace(w http.ResponseWriter, r *http
 	}
 
 	if err := wh.workspaceStore.Delete(wsID); err != nil {
-		log.Printf("❌ Error deleting workspace %s: %v", wsID, err)
+		logger.Error("Error deleting workspace", logger.Fields{"workspace_id": wsID, "error": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	log.Printf("✅ Deleted workspace: %s", wsID)
+	logger.Info("Deleted workspace", logger.Fields{"workspace_id": wsID})
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -245,26 +245,26 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 	// Get workspace
 	ws, err := wh.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", req.WorkspaceID, err)
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
 		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
 
 	// Add agent
 	if err := ws.AddAgent(req.AgentName); err != nil {
-		log.Printf("❌ Error adding agent to workspace: %v", err)
+		logger.Error("Error adding agent to workspace", logger.Fields{"error": err})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Error saving workspace: %v", err)
+		logger.Error("Error saving workspace", logger.Fields{"error": err})
 		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Added agent %s to workspace %s", req.AgentName, req.WorkspaceID)
+	logger.Info("Added agent to workspace", logger.Fields{"agent": req.AgentName, "workspace_id": req.WorkspaceID})
 
 	// Publish event
 	if wh.eventBus != nil {
@@ -306,26 +306,26 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 	// Get workspace
 	ws, err := wh.workspaceStore.Get(workspaceID)
 	if err != nil {
-		log.Printf("❌ Error getting workspace %s: %v", workspaceID, err)
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "error": err})
 		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
 
 	// Remove agent
 	if err := ws.RemoveAgent(agentName); err != nil {
-		log.Printf("❌ Error removing agent from workspace: %v", err)
+		logger.Error("Error removing agent from workspace", logger.Fields{"error": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
-		log.Printf("❌ Error saving workspace: %v", err)
+		logger.Error("Error saving workspace", logger.Fields{"error": err})
 		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Removed agent %s from workspace %s", agentName, workspaceID)
+	logger.Info("Removed agent from workspace", logger.Fields{"agent": agentName, "workspace_id": workspaceID})
 
 	// Publish event
 	if wh.eventBus != nil {
@@ -403,10 +403,6 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Log layout saves only at debug level (commented out to reduce noise)
-	// log.Printf("💾 Saved layout for workspace %s (tasks: %d, agents: %d, combiners: %d, conns: %d, scale: %.2f)",
-	// 	req.WorkspaceID, len(req.TaskPositions), len(req.AgentPositions), len(req.CombinerNodes), len(req.WorkflowConnections), req.Scale)
-
 	// Broadcast workspace update event to notify all connected clients
 	wh.eventBus.Publish(agentstudio.Event{
 		WorkspaceID: req.WorkspaceID,
@@ -419,6 +415,6 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		"success": true,
 		"message": "Layout saved successfully",
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"error": err})
 	}
 }

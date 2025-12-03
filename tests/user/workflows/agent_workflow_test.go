@@ -1,34 +1,17 @@
 package workflows
 
 import (
-	"flag"
-	"os"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/tests/user/helpers"
 )
-
-var testModel = flag.String("model", "", "LLM model to use for tests (default: auto-detect)")
-
-func getTestModel() string {
-	// Priority: flag > env var > auto-detect
-	if testModel != nil && *testModel != "" {
-		return *testModel
-	}
-	if model := os.Getenv("OLLAMA_MODEL"); model != "" {
-		return model
-	}
-	// Default to Ollama (free local inference)
-	// Use OpenAI by setting OPENAI_MODEL env var or --model flag
-	return "granite4"
-}
 
 // TestCompleteAgentWorkflow tests the full user journey of creating and using an agent
 func TestCompleteAgentWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Starting complete agent workflow test (model: %s)", model)
 
 	// Step 1: Create agent
@@ -55,7 +38,7 @@ func TestAgentWithPluginWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Starting agent with plugin workflow test (model: %s)", model)
 
 	// Step 1: Create agent
@@ -85,7 +68,7 @@ func TestMultipleAgentsWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Starting multiple agents workflow test (model: %s)", model)
 
 	// Create two agents with same model
@@ -112,7 +95,7 @@ func TestAgentDeletionWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Starting agent deletion workflow test (model: %s)", model)
 
 	// Create agent
@@ -130,7 +113,7 @@ func TestErrorRecoveryWorkflow(t *testing.T) {
 	ctx := helpers.NewTestContext(t)
 	defer ctx.Cleanup()
 
-	model := getTestModel()
+	model := helpers.GetTestModel()
 	t.Logf("Starting error recovery workflow test (model: %s)", model)
 
 	// Create agent

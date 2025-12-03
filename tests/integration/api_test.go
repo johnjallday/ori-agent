@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/testutil"
+	"github.com/johnjallday/ori-agent/tests/helpers"
 )
 
 // TestHealthEndpoint tests the health check endpoint
@@ -81,10 +82,11 @@ func TestCreateAgentEndpoint(t *testing.T) {
 	defer server.Cleanup()
 
 	// Create agent request
+	model := helpers.GetTestModel()
 	agentData := map[string]interface{}{
 		"name":        "test-agent",
 		"description": "Test agent for integration testing",
-		"model":       "gpt-4o",
+		"model":       model,
 		"provider":    "openai",
 	}
 

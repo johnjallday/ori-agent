@@ -3,11 +3,12 @@ package orchestrationhttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -99,12 +100,12 @@ func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.R
 
 	// Save template
 	if err := th.templateManager.SaveTemplate(&template); err != nil {
-		log.Printf("❌ Failed to save template: %v", err)
+		logger.Error("Failed to save template", logger.Fields{"err": err})
 		http.Error(w, fmt.Sprintf("failed to save template: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Created workflow template: %s", template.ID)
+	logger.Info("Created workflow template", logger.Fields{"id": template.ID})
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(template)
 }
@@ -118,12 +119,12 @@ func (th *TemplateHandler) handleDeleteTemplate(w http.ResponseWriter, r *http.R
 	}
 
 	if err := th.templateManager.DeleteTemplate(templateID); err != nil {
-		log.Printf("❌ Failed to delete template %s: %v", templateID, err)
+		logger.Error("Failed to delete template", logger.Fields{"templateID": templateID, "err": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("🗑️  Deleted workflow template: %s", templateID)
+	logger.Debug("🗑️ Deleted workflow template", logger.Fields{"templateID": templateID})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -156,7 +157,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	// Instantiate template
 	instance, err := th.templateManager.InstantiateTemplate(req.TemplateID, req.Parameters)
 	if err != nil {
-		log.Printf("❌ Failed to instantiate template %s: %v", req.TemplateID, err)
+		logger.Error("Failed to instantiate template", logger.Fields{"templateid": req.TemplateID, "err": err})
 		http.Error(w, fmt.Sprintf("failed to instantiate template: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -172,12 +173,12 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	// Execute collaborative task
 	result, err := th.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
 	if err != nil {
-		log.Printf("❌ Failed to execute collaborative task: %v", err)
+		logger.Error("Failed to execute collaborative task", logger.Fields{"task_id": err})
 		http.Error(w, fmt.Sprintf("failed to execute workflow: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Instantiated and executed workflow from template: %s", req.TemplateID)
+	logger.Info("Instantiated and executed workflow from template", logger.Fields{"templateid": req.TemplateID})
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"instance": instance,
 		"result":   result,

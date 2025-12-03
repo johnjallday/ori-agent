@@ -3,12 +3,13 @@ package pluginupdate
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/health"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -53,7 +54,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 	pluginName := pathParts[2]
 
-	log.Printf("Update request for plugin: %s", pluginName)
+	logger.Debug("Update request for plugin", logger.Fields{"plugin": pluginName})
 
 	// Get current agent (assuming single agent for now, or get from query param)
 	agentNames, _ := h.store.ListAgents()
@@ -117,7 +118,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 			"success": false,
 			"message": fmt.Sprintf("Plugin %s is already at version %s", pluginName, currentVersion),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -132,7 +133,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	if err := json.NewEncoder(w).Encode(result); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -155,7 +156,7 @@ func (h *Handler) HandleListBackups(w http.ResponseWriter, r *http.Request) {
 		"backups": backups,
 		"count":   len(backups),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -193,7 +194,7 @@ func (h *Handler) HandleCleanBackups(w http.ResponseWriter, r *http.Request) {
 		"removed": removed,
 		"message": fmt.Sprintf("Removed %d old backup(s)", removed),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -261,14 +262,14 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("✅ Rolled back %s to backup: %s", pluginName, req.BackupPath)
+	logger.Info("Rolled back to backup", logger.Fields{"pluginName": pluginName, "backuppath": req.BackupPath})
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Successfully rolled back %s", pluginName),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -339,6 +340,6 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 		"updates": updates,
 		"count":   len(updates),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

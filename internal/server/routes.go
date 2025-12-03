@@ -4,12 +4,13 @@ package server
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"strings"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/filehttp"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 )
 
@@ -22,7 +23,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-			log.Printf("Failed to encode health response: %v", err)
+			logger.Error("Failed to encode health response", logger.Fields{"response": err})
 		}
 	})
 
@@ -37,9 +38,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/models", s.serveModels)
 	mux.HandleFunc("/agents", s.serveAgents)      // Clean URL
 	mux.HandleFunc("/agents.html", s.serveAgents) // Legacy support
-	mux.HandleFunc("/agents-detail.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-detail.html", s.serveAgentsDetail)
 	mux.HandleFunc("/agents-create.html", s.serveStaticFile)
-	mux.HandleFunc("/agents-edit.html", s.serveStaticFile)
+	mux.HandleFunc("/agents-edit.html", s.serveAgentsEdit)
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
@@ -335,9 +336,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Handle routes with studio ID
 	mux.HandleFunc("/api/studios/", func(w http.ResponseWriter, r *http.Request) {
 		// Parse the path to determine which handler to use
-		if strings.HasSuffix(r.URL.Path, "/mission") {
-			s.studioHandler.ExecuteMission(w, r)
-		} else if strings.HasSuffix(r.URL.Path, "/events") {
+		if strings.HasSuffix(r.URL.Path, "/events") {
 			s.studioHandler.GetStudioEvents(w, r)
 		} else if strings.Contains(r.URL.Path, "/tasks") {
 			// Handle task operations

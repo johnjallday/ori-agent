@@ -3,13 +3,14 @@ package healthhttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/health"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/notifications"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -151,7 +152,7 @@ func (m *Manager) StartPeriodicChecks(getPlugins func() map[string]pluginapi.Plu
 		for {
 			select {
 			case <-ticker.C:
-				log.Printf("Running periodic plugin health checks...")
+				logger.Debug("Running periodic plugin health checks...", logger.Fields{})
 				plugins := getPlugins()
 
 				for name, tool := range plugins {
@@ -162,14 +163,14 @@ func (m *Manager) StartPeriodicChecks(getPlugins func() map[string]pluginapi.Plu
 					m.mu.Unlock()
 
 					if !result.Health.Compatible {
-						log.Printf("⚠️  Plugin %s health degraded: %v", name, result.Health.Warnings)
+						logger.Warn("Plugin health degraded", logger.Fields{"plugin": name, "warnings": result.Health.Warnings})
 					}
 				}
 
-				log.Printf("Periodic health check complete. Checked %d plugins", len(plugins))
+				logger.Debug("Periodic health check complete. Checked plugins", logger.Fields{"plugin": len(plugins)})
 
 			case <-m.stopChan:
-				log.Printf("Stopping periodic health checks")
+				logger.Debug("Stopping periodic health checks", logger.Fields{})
 				return
 			}
 		}
@@ -481,7 +482,7 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding health response: %v", err)
+		logger.Error("Error encoding health response", logger.Fields{"response": err})
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -513,7 +514,7 @@ func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
-		log.Printf("Error encoding health response: %v", err)
+		logger.Error("Error encoding health response", logger.Fields{"error": err})
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

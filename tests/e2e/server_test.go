@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/johnjallday/ori-agent/tests/helpers"
 )
 
 const (
@@ -110,10 +112,11 @@ func TestAgentLifecycle(t *testing.T) {
 
 	// 1. Create agent
 	t.Log("Creating agent...")
+	model := helpers.GetTestModel()
 	agentData := map[string]interface{}{
 		"name":        "e2e-test-agent",
 		"description": "Agent for E2E testing",
-		"model":       "gpt-4o",
+		"model":       model,
 		"provider":    "openai",
 	}
 

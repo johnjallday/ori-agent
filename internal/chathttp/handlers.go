@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -163,7 +163,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Track usage and cost
 	if h.costTracker != nil {
 		if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp.Usage, ""); err != nil {
-			log.Printf("Warning: failed to track usage: %v", err)
+			logger.Warn("Failed to track usage", logger.Fields{"error": err})
 		}
 
 		// Track statistics in agent
@@ -172,7 +172,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		log.Printf("Claude requested %d tool call(s)", len(resp.ToolCalls))
+		logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
 		// Add the assistant message with tool calls to conversation history
 		assistantMsg := llm.NewAssistantMessage(resp.Content)
@@ -187,7 +187,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 			name := tc.Name
 			args := tc.Arguments
 
-			log.Printf("Executing tool: %s with args: %s", name, args)
+			logger.Debug("Executing tool", logger.Fields{"name": name, "args": args})
 
 			// Find tool by name (searches both plugins and MCP tools)
 			tool, found := h.findTool(ag, name)
@@ -197,7 +197,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 			if !found {
 				result = fmt.Sprintf("❌ Error: Tool %q not found", name)
-				log.Printf("Tool %s not found", name)
+				logger.Warn("Tool not found", logger.Fields{"tool": name})
 			} else {
 				// Execute tool with timeout (30s for operations like API calls)
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
@@ -222,9 +222,9 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				if err != nil {
 					errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
 					result = errorMsg
-					log.Printf("Tool %s failed: %v", name, err)
+					logger.Error("Tool execution failed", logger.Fields{"tool": name, "error": err})
 				} else {
-					log.Printf("Tool %s returned: %s", name, result)
+					logger.Debug("Tool execution completed", logger.Fields{"tool": name, "result": result})
 				}
 			}
 
@@ -277,7 +277,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		// If we have structured or JSON results, return them directly
 		if hasStructuredResult {
 			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
-			log.Printf("Claude chat (with structured tool result) in %s", time.Since(start))
+			logger.Debug("Claude chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
 			_ = h.store.SetAgent(agentName, ag)
 
 			response := map[string]any{
@@ -317,14 +317,14 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		// Track usage and cost for second call
 		if h.costTracker != nil && resp2 != nil {
 			if err := h.costTracker.TrackUsage("claude", ag.Settings.Model, agentName, resp2.Usage, ""); err != nil {
-				log.Printf("Warning: failed to track usage: %v", err)
+				logger.Warn("Failed to track usage", logger.Fields{"error": err})
 			}
 		}
 
 		// Store final response
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(resp2.Content))
 
-		log.Printf("Claude chat (with tool) in %s", time.Since(start))
+		logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(agentName, ag)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response":  resp2.Content,
@@ -342,7 +342,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Store response in OpenAI format for history
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(text))
 
-	log.Printf("Claude chat response in %s", time.Since(start))
+	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
 	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
@@ -393,7 +393,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	}
 
 	// Track usage (Ollama is free/local, so no cost tracking needed)
-	log.Printf("Ollama response received in %v", time.Since(start))
+	logger.Debug("Ollama response received", logger.Fields{"duration": time.Since(start)})
 
 	// Track statistics in agent (with zero cost for Ollama)
 	if resp.Usage.TotalTokens > 0 {
@@ -402,7 +402,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch (similar to Claude handler)
 	if len(resp.ToolCalls) > 0 {
-		log.Printf("Ollama requested %d tool call(s)", len(resp.ToolCalls))
+		logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
 		// Add assistant message to history WITH tool calls (important for Ollama protocol)
 		assistantMsg := llm.NewAssistantMessage(resp.Content)
@@ -413,15 +413,15 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		// Process tool calls
 		var toolResults []map[string]string
 		for _, tc := range resp.ToolCalls {
-			log.Printf("🔧 Looking for tool: %s with args: %s", tc.Name, tc.Arguments)
+			logger.Debug("Looking for tool", logger.Fields{"name": tc.Name, "args": tc.Arguments})
 			tool, found := h.findTool(ag, tc.Name)
 
 			var result string
 			if !found {
-				log.Printf("❌ Tool not found: %s", tc.Name)
+				logger.Warn("Tool not found", logger.Fields{"tool": tc.Name})
 				result = fmt.Sprintf("❌ Error: Tool %q not found", tc.Name)
 			} else {
-				log.Printf("✅ Tool found: %s", tc.Name)
+				logger.Debug("Tool found", logger.Fields{"tool": tc.Name})
 				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
 				defer toolCancel()
 
@@ -438,10 +438,10 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 				}
 
 				if err != nil {
-					log.Printf("❌ Tool execution error for %s: %v", tc.Name, err)
+					logger.Error("Tool execution failed", logger.Fields{"tool": tc.Name, "error": err})
 					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
 				} else {
-					log.Printf("✅ Tool executed successfully: %s -> %s", tc.Name, result)
+					logger.Debug("Tool executed successfully", logger.Fields{"tool": tc.Name, "result": result})
 				}
 			}
 
@@ -455,7 +455,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 			})
 		}
 
-		log.Printf("📤 Sending tool results back to LLM (message count: %d)", len(messages))
+		logger.Debug("Sending tool results back to LLM", logger.Fields{"message_count": len(messages)})
 
 		// Get final response after tool execution
 		// IMPORTANT: Must include Tools array again for Ollama to understand the tool calling context
@@ -467,14 +467,14 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 			MaxTokens:   4000,
 		})
 		if err != nil {
-			log.Printf("❌ Error getting final response from LLM: %v", err)
+			logger.Error("Error getting final response from LLM", logger.Fields{"error": err})
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response": fmt.Sprintf("❌ **Error**: %v", err),
 			})
 			return
 		}
 
-		log.Printf("📥 Final response from LLM: %s", finalResp.Content)
+		logger.Debug("Final response from LLM", logger.Fields{"content": finalResp.Content})
 
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
 		_ = h.store.SetAgent(agentName, ag)
@@ -725,7 +725,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Chat question received: %q", q)
+	logger.Debug("Chat question received", logger.Fields{"question": q})
 	// Context with timeout per request (prevents indefinite hang)
 	base := r.Context()
 	ctx, cancel := context.WithTimeout(base, 45*time.Second)
@@ -750,7 +750,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("DEBUG: Agent '%s' has %d MCP servers: %v", current, len(ag.MCPServers), ag.MCPServers)
+	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
 
 	// Check for uninitialized plugins before proceeding with chat
 	uninitializedPlugins := h.checkUninitializedPlugins(ag)
@@ -766,7 +766,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if orchestration is needed for this message
 	if h.orchestrator != nil && h.orchestrator.DetectOrchestrationNeed(q) {
-		log.Printf("🎯 Orchestration detected for message: %q", q)
+		logger.Info("Orchestration detected for message", logger.Fields{"message": q})
 
 		// Identify required roles
 		roles := h.orchestrator.IdentifyRequiredRoles(q)
@@ -782,11 +782,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Execute collaborative task
 		result, err := h.orchestrator.ExecuteCollaborativeTask(ctx, current, task)
 		if err != nil {
-			log.Printf("❌ Orchestration failed: %v", err)
+			logger.Error("Orchestration failed", logger.Fields{"error": err})
 			// Fall through to normal chat handling
 		} else {
 			// Return orchestration result
-			log.Printf("✅ Orchestration completed successfully")
+			logger.Info("Orchestration completed successfully", logger.Fields{})
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"response":     result.FinalOutput,
 				"orchestrated": true,
@@ -822,14 +822,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add MCP tools for enabled servers
-	log.Printf("DEBUG: Agent '%s' has %d MCP servers: %v", current, len(ag.MCPServers), ag.MCPServers)
+	logger.Debug("Checking MCP servers for agent", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
 	if h.mcpRegistry != nil && len(ag.MCPServers) > 0 {
-		log.Printf("DEBUG: Loading MCP tools for agent '%s'", current)
+		logger.Debug("Loading MCP tools for agent", logger.Fields{"agent": current})
 		for _, serverName := range ag.MCPServers {
-			log.Printf("DEBUG: Attempting to get tools for MCP server '%s'", serverName)
+			logger.Debug("Attempting to get tools for MCP server", logger.Fields{"server": serverName})
 			mcpTools, err := h.mcpRegistry.GetToolsForServer(serverName)
 			if err != nil {
-				log.Printf("Warning: failed to get MCP tools for server %s: %v", serverName, err)
+				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
 				continue
 			}
 			for _, mcpTool := range mcpTools {
@@ -840,7 +840,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 					Parameters:  mcpDef.Parameters,
 				})
 			}
-			log.Printf("Added %d MCP tools from server %s", len(mcpTools), serverName)
+			logger.Debug("Added MCP tools from server", logger.Fields{"count": len(mcpTools), "server": serverName})
 		}
 	}
 
@@ -891,7 +891,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		if ollamaProvider, err := h.llmFactory.GetProvider("ollama"); err == nil {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
-					log.Printf("🎯 Model '%s' found in Ollama, routing to Ollama provider", ag.Settings.Model)
+					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
 					h.handleOllamaChat(w, r, ag, q, tools, current, base)
 					return
 				}
@@ -942,7 +942,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      int(resp.Usage.TotalTokens),
 		}
 		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-			log.Printf("Warning: failed to track usage: %v", err)
+			logger.Warn("Failed to track usage", logger.Fields{"error": err})
 		}
 
 		// Track statistics in agent
@@ -975,7 +975,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 					TotalTokens:      int(respFB.Usage.TotalTokens),
 				}
 				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-					log.Printf("Warning: failed to track fallback usage: %v", err)
+					logger.Warn("Failed to track fallback usage", logger.Fields{"error": err})
 				}
 
 				// Track statistics in agent
@@ -1026,7 +1026,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
 				result = errorMsg
-				log.Printf("Tool %s failed: %v", name, err)
+				logger.Error("Tool failed", logger.Fields{"tool": name, "error": err})
 			}
 
 			// Add tool message response for this specific tool call ID
@@ -1077,7 +1077,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		if hasStructuredResult {
 			// Add assistant message with the raw result for conversation history
 			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
-			log.Printf("Chat (with structured tool result) in %s", time.Since(start))
+			logger.Debug("Chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
 			_ = h.store.SetAgent(current, ag)
 
 			response := map[string]any{
@@ -1122,14 +1122,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				TotalTokens:      int(resp2.Usage.TotalTokens),
 			}
 			if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-				log.Printf("Warning: failed to track usage for tool response: %v", err)
+				logger.Warn("Failed to track usage for tool response", logger.Fields{"error": err})
 			}
 		}
 
 		final := resp2.Choices[0].Message
 		ag.Messages = append(ag.Messages, final.ToParam())
 
-		log.Printf("Chat (with tool) in %s", time.Since(start))
+		logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(current, ag) // persists settings/plugins only
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response":  final.Content,
@@ -1145,7 +1145,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ag.Messages = append(ag.Messages, choice.ToParam())
 
-	log.Printf("Chat response in %s: %q", time.Since(start), text)
+	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
 	_ = h.store.SetAgent(current, ag) // persists settings/plugins only
 	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
 }
@@ -1178,6 +1178,9 @@ func (h *Handler) trackAgentStatistics(ag *agent.Agent, tokenCount int, provider
 	// Record the message with tokens and cost
 	ag.Statistics.RecordMessage(tokenCount, estimatedCost)
 
-	log.Printf("📊 Statistics updated: %d messages, %d tokens, $%.4f total cost",
-		ag.Statistics.MessageCount, ag.Statistics.TokenUsage, ag.Statistics.TotalCost)
+	logger.Debug("Statistics updated", logger.Fields{
+		"messages":   ag.Statistics.MessageCount,
+		"tokens":     ag.Statistics.TokenUsage,
+		"total_cost": ag.Statistics.TotalCost,
+	})
 }

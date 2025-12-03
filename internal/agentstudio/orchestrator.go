@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/openai/openai-go/v3"
 )
 
@@ -39,7 +40,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, studioID string, miss
 		return fmt.Errorf("failed to get studio: %w", err)
 	}
 
-	log.Printf("[Orchestrator] Starting mission for studio %s: %s", studioID, mission)
+	logger.Debug("[Orchestrator] Starting mission for studio", logger.Fields{"workspace_id": studioID, "mission": mission})
 
 	// Step 1: Analyze the mission and break it down into tasks
 	tasks, err := o.analyzeMission(ctx, mission, studio.Agents)
@@ -47,13 +48,13 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, studioID string, miss
 		return fmt.Errorf("failed to analyze mission: %w", err)
 	}
 
-	log.Printf("[Orchestrator] Created %d tasks from mission", len(tasks))
+	logger.Info("[Orchestrator] Created tasks from mission", logger.Fields{"task_id": len(tasks)})
 
 	// Step 2: Add tasks to the studio
 	for _, task := range tasks {
 		task.WorkspaceID = studioID
 		if err := studio.AddTask(task); err != nil {
-			log.Printf("[Orchestrator] Warning: failed to add task %s: %v", task.ID, err)
+			logger.Error("[Orchestrator] Warning: failed to add task", logger.Fields{"task_id": task.ID, "err": err})
 		}
 
 		// Publish task creation event
@@ -67,7 +68,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, studioID string, miss
 
 	// Save updated studio
 	if err := o.studioStore.Save(studio); err != nil {
-		log.Printf("[Orchestrator] Warning: failed to save studio: %v", err)
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
 	}
 
 	// Step 3: Start task execution in background
@@ -128,7 +129,7 @@ Return your response as a JSON array of tasks in this format:
 	}
 
 	if err := json.Unmarshal([]byte(content), &taskSpecs); err != nil {
-		log.Printf("[Orchestrator] Warning: Failed to parse LLM response as JSON: %v. Content: %s", err, content)
+		logger.Error("[Orchestrator] Warning: Failed to parse LLM response as JSON: . Content", logger.Fields{"response": err, "content": content})
 		// Fallback: create a single task
 		return []Task{
 			{
@@ -168,17 +169,17 @@ Return your response as a JSON array of tasks in this format:
 
 // executeTasksSequentially executes tasks in priority order
 func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, studioID string, tasks []Task) {
-	log.Printf("[Orchestrator] Starting sequential task execution for studio %s", studioID)
+	logger.Debug("[Orchestrator] Starting sequential task execution for studio", logger.Fields{"workspace_id": studioID})
 
 	for _, task := range tasks {
 		select {
 		case <-ctx.Done():
-			log.Printf("[Orchestrator] Context cancelled, stopping task execution")
+			logger.Debug("[Orchestrator] Context cancelled, stopping task execution", logger.Fields{})
 			return
 		default:
 			// Execute the task
 			if err := o.ExecuteTask(ctx, studioID, task); err != nil {
-				log.Printf("[Orchestrator] Task %s failed: %v", task.ID, err)
+				logger.Error("[Orchestrator] Task failed", logger.Fields{"task_id": task.ID, "err": err})
 				o.publishEvent("task_failed", studioID, map[string]interface{}{
 					"task_id": task.ID,
 					"error":   err.Error(),
@@ -187,7 +188,7 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, studioID st
 		}
 	}
 
-	log.Printf("[Orchestrator] All tasks completed for studio %s", studioID)
+	logger.Info("[Orchestrator] All tasks completed for studio", logger.Fields{"task_id": studioID})
 	o.publishEvent("mission_completed", studioID, map[string]interface{}{
 		"total_tasks": len(tasks),
 	})
@@ -195,7 +196,7 @@ func (o *Orchestrator) ExecuteTasksSequentially(ctx context.Context, studioID st
 
 // ExecuteTask executes a single task by delegating to an agent
 func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Task) error {
-	log.Printf("[Orchestrator] Executing task %s: %s (assigned to: %s)", task.ID, task.Description, task.To)
+	logger.Debug("[Orchestrator] Executing task : (assigned to: )", logger.Fields{"task_id": task.ID, "description": task.Description, "to": task.To})
 
 	studio, err := o.studioStore.Get(studioID)
 	if err != nil {
@@ -204,26 +205,26 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 
 	// Inject input task results into task context if InputTaskIDs are specified
 	if len(task.InputTaskIDs) > 0 {
-		log.Printf("🔗 Task %s has %d input task IDs: %v", task.ID, len(task.InputTaskIDs), task.InputTaskIDs)
+		logger.Debug("🔗 Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
 		enrichedContext := studio.GetInputContext(&task)
 		task.Context = enrichedContext
 
 		// Debug: Check what was added to context
 		if inputResults, ok := enrichedContext["input_task_results"]; ok {
 			resultsMap := inputResults.(map[string]string)
-			log.Printf("📥 Injected %d input task results into task %s context", len(resultsMap), task.ID)
+			logger.Debug("Injected input task results into task context", logger.Fields{"result": len(resultsMap), "id": task.ID})
 			for taskID, result := range resultsMap {
 				preview := result
 				if len(preview) > 100 {
 					preview = preview[:100] + "..."
 				}
-				log.Printf("   - Task %s result: %s", taskID, preview)
+				logger.Debug("- Task result", logger.Fields{"preview": preview, "task_id": taskID})
 			}
 		} else {
-			log.Printf("⚠️  Warning: No input results found for task %s despite having InputTaskIDs", task.ID)
+			logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": task.ID})
 		}
 	} else {
-		log.Printf("ℹ️  Task %s has no input task IDs", task.ID)
+		logger.Debug("ℹ️ Task has no input task IDs", logger.Fields{"task_id": task.ID})
 	}
 
 	// Update task status to in_progress
@@ -231,7 +232,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 	task.Status = TaskStatusInProgress
 	task.StartedAt = &now
 	if err := studio.UpdateTask(task); err != nil {
-		log.Printf("[Orchestrator] Warning: failed to update task: %v", err)
+		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
 	}
 
 	o.publishEvent("task_started", studioID, map[string]interface{}{
@@ -256,7 +257,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 
 	// Save studio with updated task and message
 	if err := o.studioStore.Save(studio); err != nil {
-		log.Printf("[Orchestrator] Warning: failed to save studio: %v", err)
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
 	}
 
 	o.publishEvent("message_sent", studioID, map[string]interface{}{
@@ -271,17 +272,17 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 	completed := time.Now()
 	if err != nil {
 		// Task failed
-		log.Printf("[Orchestrator] Task %s failed: %v", task.ID, err)
+		logger.Error("[Orchestrator] Task failed", logger.Fields{"task_id": task.ID, "err": err})
 		task.Status = TaskStatusFailed
 		task.CompletedAt = &completed
 		task.Error = err.Error()
 
 		if updateErr := studio.UpdateTask(task); updateErr != nil {
-			log.Printf("[Orchestrator] Warning: failed to update task: %v", updateErr)
+			logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": updateErr})
 		}
 
 		if saveErr := o.studioStore.Save(studio); saveErr != nil {
-			log.Printf("[Orchestrator] Warning: failed to save studio: %v", saveErr)
+			logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": saveErr})
 		}
 
 		o.publishEvent("task_failed", studioID, map[string]interface{}{
@@ -297,12 +298,12 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 	task.CompletedAt = &completed
 	task.Result = result
 	if err := studio.UpdateTask(task); err != nil {
-		log.Printf("[Orchestrator] Warning: failed to update task: %v", err)
+		logger.Error("[Orchestrator] Warning: failed to update task", logger.Fields{"task_id": err})
 	}
 
 	// Save final studio state
 	if err := o.studioStore.Save(studio); err != nil {
-		log.Printf("[Orchestrator] Warning: failed to save studio: %v", err)
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
 	}
 
 	o.publishEvent("task_completed", studioID, map[string]interface{}{
@@ -319,7 +320,7 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 		return "", fmt.Errorf("LLM provider not configured")
 	}
 
-	log.Printf("[Orchestrator] Executing task %s with LLM: %s", task.ID, task.Description)
+	logger.Debug("[Orchestrator] Executing task with LLM", logger.Fields{"task_id": task.ID, "description": task.Description})
 
 	// Create system message with agent role
 	systemMsg := openai.SystemMessage(fmt.Sprintf(
@@ -384,7 +385,7 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 	}
 
 	result := resp.Choices[0].Message.Content
-	log.Printf("[Orchestrator] Task %s completed with result: %s", task.ID, result)
+	logger.Info("[Orchestrator] Task completed with result", logger.Fields{"result": result})
 
 	return result, nil
 }

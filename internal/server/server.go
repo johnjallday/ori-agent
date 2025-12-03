@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+
 	"net/http"
 	"os"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -151,12 +153,12 @@ func (s *Server) cleanupPlugins() {
 			if loadedPlugin.Tool != nil {
 				pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
 				cleanedCount++
-				log.Printf("Closed plugin '%s' for agent '%s'", pluginName, agentName)
+				logger.Debug("Closed plugin '' for agent ''", logger.Fields{"agent": pluginName, "agentName": agentName})
 			}
 		}
 	}
 
-	log.Printf("Plugin cleanup complete: closed %d plugin(s)", cleanedCount)
+	logger.Debug("Plugin cleanup complete: closed plugin(s)", logger.Fields{"plugin": cleanedCount})
 }
 
 // HTTPServer returns a fully configured http.Server
@@ -202,14 +204,14 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("index", data)
 	if err != nil {
-		log.Printf("Failed to render template: %v", err)
+		logger.Error("Failed to render template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -236,14 +238,86 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("agents", data)
 	if err != nil {
-		log.Printf("Failed to render agents template: %v", err)
+		logger.Error("Failed to render agents template", logger.Fields{"agent": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
+	}
+}
+
+func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.Title = "Agent Details - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.CurrentPage = "agents"
+	data.ShowSidebarToggle = true // Enable sidebar toggle
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("agents-detail", data)
+	if err != nil {
+		logger.Error("Failed to render agents-detail template", logger.Fields{"agent": err})
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"response": err})
+	}
+}
+
+func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.Title = "Edit Agent - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.CurrentPage = "agents"
+	data.ShowSidebarToggle = true // Enable sidebar toggle
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("agents-edit", data)
+	if err != nil {
+		logger.Error("Failed to render agents-edit template", logger.Fields{"agent": err})
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -277,14 +351,14 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("settings", data)
 	if err != nil {
-		log.Printf("Failed to render settings template: %v", err)
+		logger.Error("Failed to render settings template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -310,14 +384,14 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("mcp", data)
 	if err != nil {
-		log.Printf("Failed to render mcp template: %v", err)
+		logger.Error("Failed to render mcp template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -347,14 +421,14 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
 	if err != nil {
-		log.Printf("Failed to render marketplace template: %v", err)
+		logger.Error("Failed to render marketplace template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -377,20 +451,21 @@ func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("models", data)
 	if err != nil {
-		log.Printf("Failed to render models template: %v", err)
+		logger.Error("Failed to render models template", logger.Fields{"model": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Workflow Templates - Ori Agent"
+	data.BrandText = "Ori Agent" // Keep navbar brand simple
 	data.CurrentPage = "workflows"
 
 	// Get theme from app state
@@ -411,14 +486,14 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("workflows", data)
 	if err != nil {
-		log.Printf("Failed to render workflows template: %v", err)
+		logger.Error("Failed to render workflows template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -445,14 +520,14 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("studios", data)
 	if err != nil {
-		log.Printf("Failed to render studios template: %v", err)
+		logger.Error("Failed to render studios template", logger.Fields{"workspace_id": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -483,6 +558,7 @@ func (s *Server) handleStudiosRoutes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	data := web.GetDefaultData()
 	data.Title = "Workspace Dashboard - Ori Agent"
+	data.BrandText = "Ori Agent" // Keep navbar brand simple
 	data.CurrentPage = "workspaces"
 	data.ShowSidebarToggle = true // Workspace dashboard has a sidebar
 
@@ -509,20 +585,21 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request,
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
 	if err != nil {
-		log.Printf("Failed to render workspace dashboard template: %v", err)
+		logger.Error("Failed to render workspace dashboard template", logger.Fields{"workspace_id": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	data := web.GetDefaultData()
 	data.Title = "Workspace Canvas - Ori Agent"
+	data.BrandText = "Ori Agent" // Keep navbar brand simple
 	data.CurrentPage = "workspaces"
 	data.ShowSidebarToggle = true
 
@@ -549,20 +626,21 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-canvas", data)
 	if err != nil {
-		log.Printf("Failed to render workspace canvas template: %v", err)
+		logger.Error("Failed to render workspace canvas template", logger.Fields{"workspace_id": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Usage & Cost Tracking - Ori Agent"
+	data.BrandText = "Ori Agent" // Keep navbar brand simple
 	data.CurrentPage = "usage"
 
 	// Get theme from app state
@@ -583,14 +661,14 @@ func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("usage", data)
 	if err != nil {
-		log.Printf("Failed to render usage template: %v", err)
+		logger.Error("Failed to render usage template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write([]byte(html)); err != nil {
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 	}
 }
 
@@ -624,7 +702,7 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := w.Write(content); err != nil {
 
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 
 	}
 }
@@ -633,7 +711,7 @@ func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
 	// Read the favicon SVG from assets
 	content, err := os.ReadFile("assets/favicon.svg")
 	if err != nil {
-		log.Printf("Failed to read favicon: %v", err)
+		logger.Error("Failed to read favicon", logger.Fields{"err": err})
 		http.NotFound(w, r)
 		return
 	}
@@ -642,7 +720,7 @@ func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400") // Cache for 1 day
 
 	if _, err := w.Write(content); err != nil {
-		log.Printf("Failed to write favicon response: %v", err)
+		logger.Error("Failed to write favicon response", logger.Fields{"response": err})
 	}
 }
 
@@ -682,7 +760,7 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := w.Write(content); err != nil {
 
-		log.Printf("Failed to write response: %v", err)
+		logger.Error("Failed to write response", logger.Fields{"response": err})
 
 	}
 }

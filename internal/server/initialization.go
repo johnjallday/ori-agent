@@ -5,7 +5,7 @@ package server
 
 import (
 	"fmt"
-	"log"
+
 	"os"
 	"path/filepath"
 
@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -43,8 +44,8 @@ func createRegistryManager() (*registry.Manager, error) {
 
 	// Refresh plugin registry from GitHub on startup
 	if err := mgr.RefreshFromGitHub(); err != nil {
-		log.Printf("⚠️  Failed to refresh plugin registry from GitHub: %v", err)
-		log.Printf("   Will use cached or local registry")
+		logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
+		logger.Debug("Will use cached or local registry", logger.Fields{})
 	}
 
 	return mgr, nil
@@ -67,11 +68,11 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		})
 		factory.Register("openai", openaiProvider)
 		if verbose {
-			log.Printf("✅ OpenAI provider registered")
+			logger.Info("OpenAI provider registered", logger.Fields{})
 		}
 	} else {
-		log.Printf("⚠️  OPENAI_API_KEY not set - OpenAI provider will be unavailable")
-		log.Printf("   You can configure it later in the Settings page")
+		logger.Warn("OPENAI_API_KEY not set - OpenAI provider will be unavailable", logger.Fields{})
+		logger.Debug("You can configure it later in the Settings page", logger.Fields{})
 	}
 
 	// Register Claude provider if API key is available
@@ -82,7 +83,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 		})
 		factory.Register("claude", claudeProvider)
 		if verbose {
-			log.Printf("Claude provider registered")
+			logger.Debug("Claude provider registered", logger.Fields{})
 		}
 	}
 
@@ -96,7 +97,7 @@ func registerLLMProviders(factory *llm.Factory, configMgr *config.Manager) error
 	})
 	factory.Register("ollama", ollamaProvider)
 	if verbose {
-		log.Printf("Ollama provider registered (base URL: %s)", ollamaBaseURL)
+		logger.Debug("Ollama provider registered (base URL: )", logger.Fields{"ollamaBaseURL": ollamaBaseURL})
 	}
 
 	return nil
@@ -113,7 +114,7 @@ func resolveAgentStorePath() (string, error) {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		log.Printf("Using agent store: %s", agentStorePath)
+		logger.Debug("Using agent store", logger.Fields{"agent": agentStorePath})
 	}
 
 	return agentStorePath, nil
@@ -139,7 +140,7 @@ func resolvePluginCacheDir() string {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		log.Printf("Using plugin cache: %s", pluginCacheDir)
+		logger.Debug("Using plugin cache", logger.Fields{"plugin": pluginCacheDir})
 	}
 
 	return pluginCacheDir
@@ -155,7 +156,7 @@ func refreshLocalPluginRegistry(mgr *registry.Manager) error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if err := mgr.RefreshLocalRegistry(); err != nil {
 		if verbose {
-			log.Printf("Warning: failed to refresh local plugin registry: %v", err)
+			logger.Error("failed to refresh local plugin registry", logger.Fields{"plugin": err})
 		}
 		return err
 	}
@@ -169,13 +170,13 @@ func loadLocationZones(zonesPath string) ([]location.Zone, error) {
 	zones, err := location.LoadZones(zonesPath)
 	if err != nil {
 		if verbose {
-			log.Printf("Warning: failed to load location zones: %v", err)
+			logger.Error("failed to load location zones", logger.Fields{"err": err})
 		}
 		return []location.Zone{}, nil // Return empty zones instead of error
 	}
 
 	if verbose {
-		log.Printf("📍 Loaded %d location zones", len(zones))
+		logger.Debug("📍 Loaded location zones", logger.Fields{"value1": len(zones)})
 	}
 
 	return zones, nil
@@ -197,7 +198,7 @@ func createLocationManager(zones []location.Zone, zonesFilePath string) *locatio
 	mgr.SetZonesFilePath(zonesFilePath)
 
 	if verbose {
-		log.Printf("📍 Location manager initialized and detection started")
+		logger.Debug("📍 Location manager initialized and detection started", logger.Fields{})
 	}
 
 	return mgr
@@ -214,7 +215,7 @@ func resolveWorkspaceDir() string {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		log.Printf("Using workspace directory: %s", workspaceDir)
+		logger.Debug("Using workspace directory", logger.Fields{"workspace_id": workspaceDir})
 	}
 
 	return workspaceDir
@@ -252,7 +253,7 @@ func resolveLocationZonesPath() string {
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	if verbose {
-		log.Printf("Using location zones file: %s", locationZonesPath)
+		logger.Debug("Using location zones file", logger.Fields{"locationZonesPath": locationZonesPath})
 	}
 
 	return locationZonesPath

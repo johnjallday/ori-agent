@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/server"
 )
 
@@ -45,7 +47,7 @@ func main() {
 	// Start HTTP server with configured port
 	addr := fmt.Sprintf(":%d", *port)
 	url := fmt.Sprintf("http://localhost:%d", *port)
-	log.Printf("Listening on %s", url)
+	logger.Debug("Listening on", logger.Fields{"url": url})
 
 	// Launch browser in background after a short delay (unless disabled)
 	// Skip if --no-browser flag is set or NO_BROWSER env var is set
@@ -53,14 +55,14 @@ func main() {
 		go func() {
 			time.Sleep(500 * time.Millisecond) // Wait for server to start
 			if err := openBrowser(url); err != nil {
-				log.Printf("Could not auto-open browser: %v", err)
-				log.Printf("Please open your browser manually and navigate to: %s", url)
+				logger.Debug("Could not auto-open browser", logger.Fields{"err": err})
+				logger.Debug("Please open your browser manually and navigate to", logger.Fields{"url": url})
 			} else {
-				log.Printf("Browser opened at: %s", url)
+				logger.Debug("Browser opened at", logger.Fields{"url": url})
 			}
 		}()
 	} else {
-		log.Printf("Auto-open browser disabled. Navigate to: %s", url)
+		logger.Debug("Auto-open browser disabled. Navigate to", logger.Fields{"url": url})
 	}
 
 	log.Fatal(srv.HTTPServer(addr).ListenAndServe())
@@ -92,14 +94,14 @@ func ensureDataDirectory() error {
 		return err
 	}
 
-	log.Printf("Created data directory: %s", dataDir)
+	logger.Info("Created data directory", logger.Fields{"dataDir": dataDir})
 
 	// Change working directory to the data directory
 	if err := os.Chdir(dataDir); err != nil {
 		return err
 	}
 
-	log.Printf("Working directory: %s", dataDir)
+	logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
 	return nil
 }
 

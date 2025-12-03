@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
+
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/health"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -65,7 +66,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 		return result
 	}
 	result.BackupPath = backupPath
-	log.Printf("✅ Backed up %s v%s to %s", pluginName, currentVersion, backupPath)
+	logger.Info("Backed up v to", logger.Fields{"pluginName": pluginName, "currentVersion": currentVersion, "backupPath": backupPath})
 
 	// Step 2: Download new plugin
 	tempPath := filepath.Join(os.TempDir(), fmt.Sprintf("%s_update_%d", pluginName, time.Now().Unix()))
@@ -74,7 +75,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 		return result
 	}
 	defer os.Remove(tempPath) // Clean up temp file
-	log.Printf("✅ Downloaded %s v%s", pluginName, registryEntry.Version)
+	logger.Info("Downloaded v", logger.Fields{"pluginName": pluginName, "version": registryEntry.Version})
 
 	// Step 3: Verify checksum if available
 	if registryEntry.Checksum != "" {
@@ -82,7 +83,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 			result.Error = fmt.Sprintf("Checksum verification failed: %v", err)
 			return result
 		}
-		log.Printf("✅ Checksum verified for %s", pluginName)
+		logger.Info("Checksum verified for", logger.Fields{"pluginName": pluginName})
 	}
 
 	// Step 4: Make executable
@@ -96,7 +97,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 		result.Error = fmt.Sprintf("Failed to install plugin: %v", err)
 		return result
 	}
-	log.Printf("✅ Installed %s v%s", pluginName, registryEntry.Version)
+	logger.Info("Installed v", logger.Fields{"pluginName": pluginName, "version": registryEntry.Version})
 
 	// Step 6: Verify new plugin loads and is healthy
 	if u.healthChecker != nil {
@@ -104,7 +105,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 		// but we can at least verify the file exists and is executable
 		if info, err := os.Stat(currentPath); err != nil || info.Mode().Perm()&0111 == 0 {
 			// Rollback
-			log.Printf("❌ New plugin failed verification, rolling back...")
+			logger.Error("New plugin failed verification, rolling back...", logger.Fields{})
 			if rollbackErr := u.rollbackPlugin(backupPath, currentPath); rollbackErr != nil {
 				result.Error = fmt.Sprintf("Plugin verification failed and rollback failed: %v (original error: %v)", rollbackErr, err)
 			} else {
@@ -116,7 +117,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 	}
 
 	result.Success = true
-	log.Printf("🎉 Successfully updated %s: v%s → v%s", pluginName, currentVersion, registryEntry.Version)
+	logger.Info("🎉 Successfully updated : v → v", logger.Fields{"pluginName": pluginName, "currentVersion": currentVersion, "version": registryEntry.Version})
 	return result
 }
 
@@ -279,11 +280,11 @@ func (u *Updater) CleanOldBackups(maxAge time.Duration) (int, error) {
 	for _, backup := range backups {
 		if backup.CreatedAt.Before(cutoff) {
 			if err := os.Remove(backup.Path); err != nil {
-				log.Printf("Failed to remove old backup %s: %v", backup.Name, err)
+				logger.Error("Failed to remove old backup", logger.Fields{"err": err, "name": backup.Name})
 				continue
 			}
 			removed++
-			log.Printf("Removed old backup: %s", backup.Name)
+			logger.Debug("Removed old backup", logger.Fields{"name": backup.Name})
 		}
 	}
 
@@ -308,7 +309,7 @@ func (u *Updater) AutoUpdate(pluginName, currentPath, currentVersion string, reg
 		return UpdateResult{}, false // Not older or can't compare
 	}
 
-	log.Printf("🔄 Auto-updating %s: v%s → v%s", pluginName, currentVersion, registryEntry.Version)
+	logger.Debug("🔄 Auto-updating : v → v", logger.Fields{"version": registryEntry.Version, "pluginName": pluginName, "currentVersion": currentVersion})
 	result := u.UpdatePlugin(pluginName, currentPath, registryEntry, currentVersion)
 	return result, true
 }

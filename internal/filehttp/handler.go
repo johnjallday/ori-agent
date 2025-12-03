@@ -3,10 +3,11 @@ package filehttp
 import (
 	"encoding/base64"
 	"encoding/json"
-	"log"
+
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/fileparser"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 type Handler struct{}
@@ -41,7 +42,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to decode file content: " + err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -51,7 +52,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -62,7 +63,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{
 			Error: "Failed to parse file: " + err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -70,6 +71,6 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(ParseFileResponse{
 		Text: text,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

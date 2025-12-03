@@ -2,9 +2,11 @@ package http
 
 import (
 	"log"
+
 	"net/http"
 	"runtime/debug"
 	"time"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ErrorRecovery returns middleware that recovers from panics in HTTP handlers.
@@ -32,7 +34,7 @@ func ErrorRecovery() func(http.Handler) http.Handler {
 					// Attempt to send error response
 					// If headers were already written, this will have no effect
 					if encodeErr := RespondInternalError(w, "Internal server error"); encodeErr != nil {
-						log.Printf("Failed to write panic recovery response: %v", encodeErr)
+						logger.Error("Failed to write panic recovery response", logger.Fields{"response": encodeErr})
 					}
 				}
 			}()
@@ -70,7 +72,7 @@ func RequestLogger() func(http.Handler) http.Handler {
 
 			// Log request with appropriate emoji based on status code
 			emoji := getStatusEmoji(lrw.statusCode)
-			log.Printf("%s %s %s - %d (%v)",
+			logger.Debug("- (", logger.Fields{})
 				emoji, r.Method, r.URL.Path, lrw.statusCode, duration)
 		})
 	}

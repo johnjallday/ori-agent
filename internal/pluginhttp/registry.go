@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
@@ -186,7 +187,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 		// Extract plugin settings schema for this agent if plugin supports get_settings
 		if err := pluginloader.ExtractPluginSettingsSchema(tool, current); err != nil {
-			log.Printf("Warning: failed to extract settings schema for plugin %s in agent %s: %v", def.Name, current, err)
+			logger.Error("failed to extract settings schema for plugin in agent", logger.Fields{"agent": def.Name, "current": current, "err": err})
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
@@ -230,15 +231,15 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 			if settingsErr != nil {
 				// If no settings operation works, just log the basic load message
-				log.Printf("🔌 Plugin '%s' loaded successfully!", def.Name)
+				logger.Info("🔌 Plugin '' loaded successfully!", logger.Fields{"plugin": def.Name})
 				return
 			}
 
 			// Get a suitable emoji based on plugin name
 			emoji := getPluginEmoji(def.Name)
 
-			log.Printf("%s Plugin '%s' loaded successfully!", emoji, def.Name)
-			log.Printf("Current settings/status:\n%s", settingsResult)
+			logger.Info("Plugin '' loaded successfully!", logger.Fields{"plugin": emoji, "name": def.Name})
+			logger.Debug("Current settings/status:\\n", logger.Fields{"status": settingsResult})
 		}()
 
 		w.WriteHeader(http.StatusOK)
@@ -286,7 +287,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		if pluginToDelete.Path != "" && strings.Contains(pluginToDelete.Path, "uploaded_plugins") {
 			if err := os.Remove(pluginToDelete.Path); err != nil {
 				// Log the error but don't fail the request - registry entry is already removed
-				log.Printf("Warning: Failed to remove plugin file %s: %v", pluginToDelete.Path, err)
+				logger.Error("Failed to remove plugin file", logger.Fields{"err": err, "plugin": pluginToDelete.Path})
 			}
 		}
 
@@ -300,7 +301,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			}
 			delete(ag.Plugins, name)
 			if err := h.store.SetAgent(current, ag); err != nil {
-				log.Printf("Warning: Failed to unload plugin %s from agent: %v", name, err)
+				logger.Error("Failed to unload plugin from agent", logger.Fields{"agent": name, "err": err})
 			}
 		}
 
@@ -397,7 +398,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": "method not allowed",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -412,7 +413,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -424,7 +425,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": "name required",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -438,7 +439,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -459,7 +460,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": "plugin not found in registry",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -481,9 +482,9 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"supported_arch":      pluginEntry.SupportedArch,
 		}
 
-		log.Printf("Plugin download blocked: %s not compatible with %s", req.Name, currentPlatform)
+		logger.Debug("Plugin download blocked: not compatible with", logger.Fields{"plugin": req.Name, "currentPlatform": currentPlatform})
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -496,7 +497,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": "plugin does not have a download URL",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -510,7 +511,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": fmt.Sprintf("failed to create upload directory: %v", err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -524,7 +525,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": fmt.Sprintf("failed to get plugin %s: %v", pluginEntry.Name, err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -551,19 +552,19 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 			"success": false,
 			"message": fmt.Sprintf("failed to persist plugin: %v", err),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
 
 	// Make the file executable (for RPC plugins that are binaries)
 	if err := os.Chmod(filePath, 0755); err != nil {
-		log.Printf("Warning: failed to set executable permissions on %s: %v", filePath, err)
+		logger.Error("failed to set executable permissions on", logger.Fields{"filePath": filePath, "err": err})
 	}
 
 	// Scan uploaded plugins to auto-register the newly downloaded plugin
 	if err := h.registryManager.ScanUploadedPlugins(); err != nil {
-		log.Printf("Warning: failed to scan uploaded_plugins after download: %v", err)
+		logger.Error("failed to scan uploaded_plugins after download", logger.Fields{"plugin": err})
 	}
 
 	// Return success response
@@ -574,7 +575,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		"filename": filename,
 		"path":     filePath,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -615,7 +616,7 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 			"success": false,
 			"message": "method not allowed",
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -629,7 +630,7 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			log.Printf("Failed to encode response: %v", err)
+			logger.Error("Failed to encode response", logger.Fields{"response": err})
 		}
 		return
 	}
@@ -670,6 +671,6 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 		"updatesCount": len(updates),
 		"updates":      updates,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }

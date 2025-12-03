@@ -3,10 +3,11 @@ package agenthttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 )
 
@@ -57,7 +58,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	// Get enabled servers for this agent
 	enabledServers, err := h.configManager.GetEnabledServersForAgent(agentName)
 	if err != nil {
-		log.Printf("Failed to get enabled servers for agent %s: %v", agentName, err)
+		logger.Error("Failed to get enabled servers for agent", logger.Fields{"agent": agentName, "err": err})
 		enabledServers = []mcp.ServerConfig{} // Default to empty if error
 	}
 
@@ -101,7 +102,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 		"agent":   agentName,
 		"servers": servers,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -139,7 +140,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 
 	// Enable server for agent
 	if err := h.configManager.EnableServerForAgent(agentName, serverName); err != nil {
-		log.Printf("Failed to enable MCP server %s for agent %s: %v", serverName, agentName, err)
+		logger.Error("Failed to enable MCP server for agent", logger.Fields{"agentName": agentName, "err": err, "agent": serverName})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -148,19 +149,19 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	status, _ := h.registry.GetServerStatus(serverName)
 	if status == mcp.StatusStopped || status == mcp.StatusError {
 		if err := h.registry.StartServer(serverName); err != nil {
-			log.Printf("Warning: Failed to start MCP server %s: %v (will remain enabled for agent)", serverName, err)
+			logger.Error("Failed to start MCP server : (will remain enabled for agent)", logger.Fields{"server": serverName, "err": err})
 			// Don't return error - server is enabled for agent even if not currently running
 		}
 	}
 
-	log.Printf("✅ Enabled MCP server '%s' for agent '%s'", serverName, agentName)
+	logger.Info("Enabled MCP server '' for agent ''", logger.Fields{"agentName": agentName, "server": serverName})
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("MCP server '%s' enabled for agent '%s'", serverName, agentName),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 
@@ -191,19 +192,19 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 
 	// Disable server for agent
 	if err := h.configManager.DisableServerForAgent(agentName, serverName); err != nil {
-		log.Printf("Failed to disable MCP server %s for agent %s: %v", serverName, agentName, err)
+		logger.Error("Failed to disable MCP server for agent", logger.Fields{"server": serverName, "agentName": agentName, "err": err})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("✅ Disabled MCP server '%s' for agent '%s'", serverName, agentName)
+	logger.Info("Disabled MCP server '' for agent ''", logger.Fields{"agent": serverName, "agentName": agentName})
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("MCP server '%s' disabled for agent '%s'", serverName, agentName),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}
 }
 

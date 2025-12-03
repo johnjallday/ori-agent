@@ -2,12 +2,13 @@ package orchestrationhttp
 
 import (
 	"encoding/json"
-	"log"
+
 	"net/http"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -77,12 +78,12 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 		}
 
 		if err := ch.agentStore.SetAgent(agentName, agent); err != nil {
-			log.Printf("❌ Error updating agent capabilities: %v", err)
+			logger.Error("Error updating agent capabilities", logger.Fields{"error": err})
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("✅ Updated agent %s capabilities and role", agentName)
+		logger.Info("Updated agent capabilities and role", logger.Fields{"agent": agentName})
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -161,7 +162,7 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	})
 
 	if err != nil {
-		log.Printf("❌ Failed to delegate task: %v", err)
+		logger.Error("Failed to delegate task", logger.Fields{"task_id": err})
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

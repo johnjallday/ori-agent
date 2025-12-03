@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 )
 
@@ -55,7 +56,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	// Get workflow status from orchestrator
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err != nil {
-		log.Printf("❌ Failed to get workflow status: %v", err)
+		logger.Error("Failed to get workflow status", logger.Fields{"status": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -93,7 +94,7 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 	// Context with cancellation
 	ctx := r.Context()
 
-	log.Printf("🔄 Starting SSE stream for workspace %s", workspaceID)
+	logger.Debug("🔄 Starting SSE stream for workspace", logger.Fields{"workspace_id": workspaceID})
 
 	// Use event bus if available for real-time updates
 	if sh.eventBus != nil {
@@ -114,7 +115,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 		select {
 		case eventChan <- event:
 		default:
-			log.Printf("⚠️  Event channel full for workspace %s", workspaceID)
+			logger.Warn("Event channel full for workspace", logger.Fields{"workspace_id": workspaceID})
 		}
 	})
 	defer sh.eventBus.Unsubscribe(subID)
@@ -131,7 +132,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 		select {
 		case <-ctx.Done():
 			// Client disconnected
-			log.Printf("⏹  SSE stream closed for workspace %s", workspaceID)
+			logger.Debug("⏹ SSE stream closed for workspace", logger.Fields{"workspace_id": workspaceID})
 			return
 
 		case event := <-eventChan:
@@ -146,21 +147,21 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 
 			data, err := json.Marshal(eventData)
 			if err != nil {
-				log.Printf("❌ Failed to marshal event: %v", err)
+				logger.Error("Failed to marshal event", logger.Fields{"err": err})
 				continue
 			}
 
 			// Send with event type prefix
 			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
 			if err != nil {
-				log.Printf("❌ Failed to write SSE event: %v", err)
+				logger.Error("Failed to write SSE event", logger.Fields{"err": err})
 				return
 			}
 			flusher.Flush()
 
 			// Check for completion events
 			if event.Type == agentstudio.EventWorkspaceCompleted || event.Type == agentstudio.EventWorkflowCompleted {
-				log.Printf("✅ Workspace %s completed, closing SSE stream", workspaceID)
+				logger.Info("Workspace completed, closing SSE stream", logger.Fields{"workspace_id": workspaceID})
 				return
 			}
 
@@ -195,7 +196,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 		select {
 		case <-ctx.Done():
 			// Client disconnected
-			log.Printf("⏹  SSE stream closed for workspace %s", workspaceID)
+			logger.Debug("⏹ SSE stream closed for workspace", logger.Fields{"workspace_id": workspaceID})
 			return
 
 		case <-ticker.C:
@@ -203,7 +204,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 			status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 			if err != nil {
 				// Workspace might have been deleted or completed
-				log.Printf("❌ Failed to get status for workspace %s: %v", workspaceID, err)
+				logger.Error("Failed to get status for workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
 				_, _ = w.Write([]byte("event: error\ndata: workspace not found\n\n"))
 				flusher.Flush()
 				return
@@ -212,13 +213,13 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 			// Send status as JSON
 			data, err := json.Marshal(status)
 			if err != nil {
-				log.Printf("❌ Failed to marshal status: %v", err)
+				logger.Error("Failed to marshal status", logger.Fields{"status": err})
 				continue
 			}
 
 			_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
 			if err != nil {
-				log.Printf("❌ Failed to write SSE data: %v", err)
+				logger.Error("Failed to write SSE data", logger.Fields{"err": err})
 				return
 			}
 			flusher.Flush()
@@ -227,7 +228,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 			if status.Phase == "completed" {
 				_, _ = w.Write([]byte("event: complete\ndata: workflow completed\n\n"))
 				flusher.Flush()
-				log.Printf("✅ Workflow %s completed, closing SSE stream", workspaceID)
+				logger.Info("Workflow completed, closing SSE stream", logger.Fields{"workspaceID": workspaceID})
 				return
 			}
 		}
@@ -310,7 +311,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 		select {
 		case eventChan <- event:
 		default:
-			log.Printf("⚠️  Progress event channel full for workspace %s", workspaceID)
+			logger.Warn("Progress event channel full for workspace", logger.Fields{"workspace_id": workspaceID})
 		}
 	})
 	defer sh.eventBus.Unsubscribe(subID)
@@ -340,14 +341,14 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 
 			data, err := json.Marshal(eventData)
 			if err != nil {
-				log.Printf("❌ Failed to marshal progress event: %v", err)
+				logger.Error("Failed to marshal progress event", logger.Fields{"err": err})
 				continue
 			}
 
 			// Send with event type prefix
 			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
 			if err != nil {
-				log.Printf("❌ Failed to write progress SSE event: %v", err)
+				logger.Error("Failed to write progress SSE event", logger.Fields{"err": err})
 				return
 			}
 			flusher.Flush()
@@ -368,7 +369,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	ws, err := sh.workspaceStore.Get(workspaceID)
 	if err != nil {
-		log.Printf("❌ Failed to get workspace for initial progress: %v", err)
+		logger.Error("Failed to get workspace for initial progress", logger.Fields{"workspace_id": err})
 		return
 	}
 
@@ -384,7 +385,7 @@ func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher h
 
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		log.Printf("❌ Failed to marshal initial progress: %v", err)
+		logger.Error("Failed to marshal initial progress", logger.Fields{"err": err})
 		return
 	}
 
@@ -412,7 +413,7 @@ func (sh *StreamingHandler) sendWorkspaceProgressUpdate(w http.ResponseWriter, f
 
 	data, err := json.Marshal(eventData)
 	if err != nil {
-		log.Printf("❌ Failed to marshal workspace progress: %v", err)
+		logger.Error("Failed to marshal workspace progress", logger.Fields{"workspace_id": err})
 		return
 	}
 
