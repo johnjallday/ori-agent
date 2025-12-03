@@ -148,33 +148,17 @@ export class RendererConnections {
       this.ctx.lineWidth = width;
       this.ctx.lineCap = 'round';
 
-      // Draw curved line
-      const midX = (fromX + toX) / 2;
-      const midY = (fromY + toY) / 2;
-      const dx = toX - fromX;
-      const dy = toY - fromY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const controlOffset = dist * 0.2;
-
-      // Perpendicular offset for curve
-      const perpX = -dy / dist * controlOffset;
-      const perpY = dx / dist * controlOffset;
-
+      // Draw straight line
       this.ctx.beginPath();
       this.ctx.moveTo(fromX, fromY);
-      this.ctx.quadraticCurveTo(
-        midX + perpX,
-        midY + perpY,
-        toX,
-        toY
-      );
+      this.ctx.lineTo(toX, toY);
       this.ctx.stroke();
 
       this.ctx.shadowColor = 'transparent';
       this.ctx.shadowBlur = 0;
 
       // Draw arrow head at destination
-      const angle = Math.atan2(toY - (midY + perpY), toX - (midX + perpX));
+      const angle = Math.atan2(toY - fromY, toX - fromX);
       const arrowSize = 10;
 
       this.ctx.fillStyle = color;
