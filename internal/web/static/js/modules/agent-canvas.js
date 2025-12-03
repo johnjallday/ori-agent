@@ -754,7 +754,17 @@ class AgentCanvas {
           const targetMatches = t.assigned_node_id === nodeId || t.to === agentName;
           if (targetMatches) {
             affectedTasks.push(t.id);
-            return { ...t, to: 'unassigned', assigned_node_id: '' };
+            return {
+              ...t,
+              to: 'unassigned',
+              assigned_node_id: '',
+              status: 'pending',
+              progress: 0,
+              result: null,
+              error: null,
+              started_at: null,
+              completed_at: null
+            };
           }
           return t;
         });
@@ -769,7 +779,10 @@ class AgentCanvas {
               body: JSON.stringify({
                 task_id: taskId,
                 to: 'unassigned',
-                assigned_node_id: ''
+                assigned_node_id: '',
+                status: 'pending',
+                result: null,
+                error: null
               })
             }).catch(err => console.error('Failed to unassign task after agent removal:', err));
           });

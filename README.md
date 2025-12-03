@@ -254,6 +254,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/johnjallday/ori-agent/discussions)
 
 While this app is very functional, there will be a lot of breaking changes. Feel free to give feedbacks.
+MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99 
 
 ## 🛣️Roadmap
 - blockchain integration
