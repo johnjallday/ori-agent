@@ -1583,9 +1583,10 @@ function loadCanvasBackground() {
     const savedColor = localStorage.getItem('canvas-bg-color');
     if (!savedColor) return;
 
-    // Newer AgentCanvas may not expose setBackgroundColor; guard it
-    if (window.agentCanvas && typeof window.agentCanvas.setBackgroundColor === 'function') {
-        window.agentCanvas.setBackgroundColor(savedColor);
+    // Use backgroundColor property directly
+    if (window.agentCanvas) {
+        window.agentCanvas.backgroundColor = savedColor;
+        window.agentCanvas.draw();
     }
 
     const colorPicker = document.getElementById('canvas-bg-color');
@@ -1599,7 +1600,8 @@ function loadCanvasBackground() {
  */
 function changeCanvasBackground(color) {
     if (window.agentCanvas) {
-        window.agentCanvas.setBackgroundColor(color);
+        window.agentCanvas.backgroundColor = color;
+        window.agentCanvas.draw();
         localStorage.setItem('canvas-bg-color', color);
     }
 }
