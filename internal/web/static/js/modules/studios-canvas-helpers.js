@@ -1532,6 +1532,86 @@ function changeCanvasBackground(color) {
 }
 
 /**
+ * Return tasks that are ready to run: assigned, pending, and dependencies completed
+ */
+function getExecutableTasks() {
+  if (!window.agentCanvas || !window.agentCanvas.state || !Array.isArray(window.agentCanvas.state.tasks)) {
+    return [];
+  }
+
+  const tasks = window.agentCanvas.state.tasks;
+  const tasksById = tasks.reduce((acc, task) => {
+    if (task && task.id) acc[task.id] = task;
+    return acc;
+  }, {});
+
+  return tasks.filter(task => {
+    if (!task || !task.id) return false;
+    const status = (task.status || '').toLowerCase();
+    if (status !== 'pending') return false;
+    if (!task.to || task.to === 'unassigned') return false;
+
+    const deps = Array.isArray(task.input_task_ids) ? task.input_task_ids : [];
+    return deps.every(depId => {
+      const dep = tasksById[depId];
+      return !dep || (dep.status && dep.status.toLowerCase() === 'completed');
+    });
+  });
+}
+
+/**
+ * Execute all runnable tasks on the canvas (assigned + dependencies done)
+ */
+async function executeExecutableNodes() {
+  const executable = getExecutableTasks();
+  if (executable.length === 0) {
+    window.agentCanvas?.showNotification?.('No executable nodes found', 'info');
+    console.log('[CANVAS] No executable nodes to run');
+    return;
+  }
+
+  console.log(`[CANVAS] Executing ${executable.length} runnable node(s)`);
+  for (const task of executable) {
+    try {
+      await window.agentCanvas.executeTask(task);
+    } catch (error) {
+      console.error('Failed to execute task', task?.id, error);
+      window.agentCanvas?.showNotification?.(
+        `Failed to execute "${task?.description || task?.id || 'task'}": ${error.message}`,
+        'error'
+      );
+    }
+  }
+}
+
+/**
+ * Pause/resume canvas animation loop and update the toggle button icon/title
+ */
+async function toggleCanvasAnimation() {
+  if (!window.agentCanvas) {
+    console.error('Canvas not initialized');
+    return;
+  }
+
+  window.agentCanvas.animationPaused = !window.agentCanvas.animationPaused;
+  const isPaused = window.agentCanvas.animationPaused;
+
+  const btn = document.getElementById('animation-toggle');
+  if (btn) {
+    if (isPaused) {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
+      btn.title = 'Resume Animation';
+    } else {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,19H18V5H14M6,19H10V5H6V19Z"/></svg>';
+      btn.title = 'Pause Animation';
+    }
+  }
+
+  // Always try to run runnable tasks when the control is used
+  await executeExecutableNodes();
+}
+
+/**
  * Utility function to escape HTML (uses global from studios-workspace.js)
  */
 function escapeHtml(text) {
@@ -1833,6 +1913,8 @@ window.connectToMerge = connectToMerge;
 window.createMergeWorkflowTasks = createMergeWorkflowTasks;
 window.addCombinerNode = addCombinerNode;
 window.toggleCanvasSidebar = toggleCanvasSidebar;
+window.toggleCanvasAnimation = toggleCanvasAnimation;
+window.executeExecutableNodes = executeExecutableNodes;
 window.zoomToFitCanvas = zoomToFitCanvas;
 window.resetCanvasView = resetCanvasView;
 window.editAgentSettings = editAgentSettings;
