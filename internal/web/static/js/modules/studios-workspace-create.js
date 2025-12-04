@@ -67,10 +67,7 @@ async function createWorkspace() {
         return;
     }
 
-    if (selectedAgents.size === 0) {
-        showError('Please select at least one agent');
-        return;
-    }
+    // Allow creating workspace without agents - they can be added later
 
     try {
         const response = await fetch('/api/orchestration/workspace', {
