@@ -168,16 +168,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.rollbackHandler.HandleRollbackPlugin(w, r)
 			return
 		}
-		// Check if this is an enable endpoint
-		if strings.HasSuffix(r.URL.Path, "/enable") {
-			s.pluginsPageHandler.HandleEnablePlugin(w, r)
-			return
-		}
-		// Check if this is a disable endpoint
-		if strings.HasSuffix(r.URL.Path, "/disable") {
-			s.pluginsPageHandler.HandleDisablePlugin(w, r)
-			return
-		}
 		// Check if this is a config update endpoint
 		if strings.HasSuffix(r.URL.Path, "/config") {
 			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)

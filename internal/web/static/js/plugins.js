@@ -69,44 +69,6 @@ async function loadNotifications() {
     }
 }
 
-async function enablePlugin(pluginName) {
-    try {
-        const response = await fetch(`/api/plugins/${pluginName}/enable`, {
-            method: 'POST'
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            showToast(`Plugin ${pluginName} enabled`, 'success');
-            await loadPlugins();
-        } else {
-            showToast(data.message || 'Failed to enable plugin', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to enable plugin:', error);
-        showToast('Failed to enable plugin', 'error');
-    }
-}
-
-async function disablePlugin(pluginName) {
-    try {
-        const response = await fetch(`/api/plugins/${pluginName}/disable`, {
-            method: 'POST'
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            showToast(`Plugin ${pluginName} disabled`, 'success');
-            await loadPlugins();
-        } else {
-            showToast(data.message || 'Failed to disable plugin', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to disable plugin:', error);
-        showToast('Failed to disable plugin', 'error');
-    }
-}
-
 async function deletePlugin(pluginName) {
     if (!confirm(`Are you sure you want to delete ${pluginName}? This action cannot be undone.`)) {
         return;
@@ -238,10 +200,6 @@ function renderPluginsTable() {
             <td>${renderAgentList(plugin.agents || [])}</td>
             <td>
                 <div class="action-buttons">
-                    ${plugin.enabled
-                        ? `<button class="btn-action" onclick="disablePlugin('${plugin.name}')">Disable</button>`
-                        : `<button class="btn-action" onclick="enablePlugin('${plugin.name}')">Enable</button>`
-                    }
                     <button class="btn-action" onclick="showPluginDetails('${plugin.name}')">Details</button>
                     <button class="btn-action" onclick="testPlugin('${plugin.name}')">Test</button>
                     <button class="btn-action" onclick="rollbackPlugin('${plugin.name}')">Rollback</button>
@@ -259,15 +217,12 @@ function renderPluginsTable() {
 }
 
 function renderStatusBadge(plugin) {
-    let statusClass = 'status-inactive';
-    let statusText = 'Inactive';
+    let statusClass = 'status-active';
+    let statusText = 'Active';
 
     if (plugin.health_status === 'error') {
         statusClass = 'status-error';
         statusText = 'Error';
-    } else if (plugin.enabled) {
-        statusClass = 'status-active';
-        statusText = 'Active';
     } else if (plugin.needs_update) {
         statusClass = 'status-update';
         statusText = 'Needs Update';
@@ -696,10 +651,9 @@ function applyFilters() {
 
 function getPluginStatus(plugin) {
     if (plugin.health_status === 'error') return 'error';
-    if (plugin.enabled) return 'active';
     if (plugin.needs_update) return 'update';
     if (!plugin.permissions_approved) return 'not-configured';
-    return 'inactive';
+    return 'active';
 }
 
 function loadAgentFilter() {
