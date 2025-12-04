@@ -117,9 +117,12 @@ async function createWorkspace() {
  * @param {string} message - Error message to display
  */
 function showError(message) {
-    if (typeof window.showError === 'function') {
-        window.showError(message);
+    // Check if there's a global toast/notification system
+    if (typeof window.showToast === 'function') {
+        window.showToast(message, 'error');
     } else {
+        // Fallback to alert
+        console.error('Workspace Creation Error:', message);
         alert(message);
     }
 }
