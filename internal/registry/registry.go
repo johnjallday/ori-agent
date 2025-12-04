@@ -634,3 +634,218 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 	// Otherwise return current directory as base
 	return merged, ".", nil
 }
+
+// GetPluginByName retrieves a plugin entry by name from the local registry
+func (m *Manager) GetPluginByName(pluginName string) (*types.PluginRegistryEntry, error) {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			return &localReg.Plugins[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("plugin not found: %s", pluginName)
+}
+
+// UpdatePluginCategory updates the category for a plugin in the local registry
+func (m *Manager) UpdatePluginCategory(pluginName, category string) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	found := false
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			localReg.Plugins[i].Category = category
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	return m.SaveLocal(localReg)
+}
+
+// UpdatePluginPermissions updates the permissions for a plugin in the local registry
+func (m *Manager) UpdatePluginPermissions(pluginName string, perms map[string]interface{}, approved bool) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	found := false
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			localReg.Plugins[i].Permissions = perms
+			localReg.Plugins[i].PermissionsApproved = approved
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	return m.SaveLocal(localReg)
+}
+
+// UpdatePluginStatus updates the enabled status and health for a plugin
+func (m *Manager) UpdatePluginStatus(pluginName string, enabled bool, healthStatus string) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	found := false
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			localReg.Plugins[i].Enabled = enabled
+			localReg.Plugins[i].HealthStatus = healthStatus
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	return m.SaveLocal(localReg)
+}
+
+// UpdatePluginLastUsed updates the last used timestamp for a plugin
+func (m *Manager) UpdatePluginLastUsed(pluginName string, lastUsed time.Time) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	found := false
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			localReg.Plugins[i].LastUsed = &lastUsed
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	return m.SaveLocal(localReg)
+}
+
+// AddVersionToHistory adds a version entry to a plugin's version history
+func (m *Manager) AddVersionToHistory(pluginName string, versionEntry types.VersionHistoryEntry) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	found := false
+	for i := range localReg.Plugins {
+		if localReg.Plugins[i].Name == pluginName {
+			localReg.Plugins[i].VersionHistory = append(localReg.Plugins[i].VersionHistory, versionEntry)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	return m.SaveLocal(localReg)
+}
+
+// RemovePlugin removes a plugin from the local registry
+func (m *Manager) RemovePlugin(pluginName string) error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	var updatedPlugins []types.PluginRegistryEntry
+	found := false
+	for _, plugin := range localReg.Plugins {
+		if plugin.Name != pluginName {
+			updatedPlugins = append(updatedPlugins, plugin)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	localReg.Plugins = updatedPlugins
+	return m.SaveLocal(localReg)
+}
+
+// MigrateExistingPlugins adds default values for new metadata fields to existing plugins
+func (m *Manager) MigrateExistingPlugins() error {
+	localReg, err := m.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("failed to load local registry: %w", err)
+	}
+
+	if len(localReg.Plugins) == 0 {
+		return nil // Nothing to migrate
+	}
+
+	updated := false
+	for i := range localReg.Plugins {
+		plugin := &localReg.Plugins[i]
+
+		// Set default category if empty
+		if plugin.Category == "" {
+			plugin.Category = "Custom" // Default category
+			updated = true
+		}
+
+		// Initialize permissions if nil with default values (all false)
+		// Note: We set actual values instead of empty map to avoid omitempty removing it
+		if plugin.Permissions == nil {
+			plugin.Permissions = map[string]interface{}{
+				"file_access":     false,
+				"network_access":  false,
+				"system_commands": false,
+			}
+			updated = true
+		}
+
+		// Version history can remain nil/empty as it will be populated over time
+		// Initialize only if nil to ensure it's not nil
+		if plugin.VersionHistory == nil {
+			plugin.VersionHistory = make([]types.VersionHistoryEntry, 0)
+			updated = true
+		}
+
+		// Set default enabled status if not set
+		if !plugin.Enabled && plugin.HealthStatus == "" {
+			plugin.Enabled = true // Enable by default
+			plugin.HealthStatus = "healthy"
+			updated = true
+		}
+	}
+
+	if updated {
+		if err := m.SaveLocal(localReg); err != nil {
+			return fmt.Errorf("failed to save migrated registry: %w", err)
+		}
+		fmt.Println("✅ Migrated local plugin registry with new metadata fields")
+	}
+
+	return nil
+}

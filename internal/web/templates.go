@@ -83,6 +83,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/agents-edit.tmpl",
 		"templates/pages/settings.tmpl",
 		"templates/pages/marketplace.tmpl",
+		"templates/pages/plugins.tmpl",
 		"templates/pages/workflows.tmpl",
 		"templates/pages/studios.tmpl",
 		"templates/pages/workspace-dashboard.tmpl",
@@ -113,6 +114,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["agents"] = tmpl
 	tr.templates["settings"] = tmpl
 	tr.templates["marketplace"] = tmpl
+	tr.templates["plugins"] = tmpl
 	tr.templates["workflows"] = tmpl
 	tr.templates["studios"] = tmpl
 	tr.templates["workspace-dashboard"] = tmpl
@@ -140,7 +142,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	templateName := name + ".tmpl"
 	if name == "index" {
 		templateName = "base.tmpl"
-	} else if name == "marketplace" || name == "settings" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "workspace-canvas" || name == "usage" || name == "mcp" || name == "models" {
+	} else if name == "marketplace" || name == "settings" || name == "plugins" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "workspace-canvas" || name == "usage" || name == "mcp" || name == "models" {
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	} else if name == "agents" {

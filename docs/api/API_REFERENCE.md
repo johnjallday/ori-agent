@@ -319,6 +319,370 @@ Check which plugins need initialization.
 }
 ```
 
+### Plugin Management API (Dedicated Plugins Page)
+
+The following endpoints provide comprehensive plugin management capabilities for the dedicated plugins page at `/plugins`.
+
+#### List All Plugins with Management Metadata
+
+Get all plugins with complete management information including status, categories, permissions, and version history.
+
+**Endpoint:** `GET /api/plugins?management=true`
+
+**Response:**
+```json
+{
+  "plugins": [
+    {
+      "name": "math",
+      "description": "Perform basic math operations",
+      "version": "1.0.0",
+      "path": "/path/to/plugin",
+      "category": "System Tools",
+      "permissions": {
+        "file_access": false,
+        "network_access": false,
+        "system_commands": false
+      },
+      "permissions_approved": true,
+      "enabled": true,
+      "health_status": "healthy",
+      "last_used": "2025-12-03T10:30:00Z",
+      "version_history": [
+        {
+          "version": "1.0.0",
+          "timestamp": "2025-12-01T09:00:00Z"
+        }
+      ],
+      "agents": ["default", "test-agent"]
+    }
+  ]
+}
+```
+
+#### Get Plugin Details
+
+Get detailed information about a specific plugin.
+
+**Endpoint:** `GET /api/plugins/:name`
+
+**Response:**
+```json
+{
+  "name": "math",
+  "description": "Perform basic math operations",
+  "version": "1.0.0",
+  "path": "/path/to/plugin",
+  "category": "System Tools",
+  "permissions": {
+    "file_access": false,
+    "network_access": true,
+    "system_commands": false
+  },
+  "permissions_approved": true,
+  "enabled": true,
+  "health_status": "healthy",
+  "last_used": "2025-12-03T10:30:00Z",
+  "version_history": [
+    {
+      "version": "1.0.0",
+      "timestamp": "2025-12-01T09:00:00Z"
+    },
+    {
+      "version": "0.9.0",
+      "timestamp": "2025-11-15T14:20:00Z"
+    }
+  ],
+  "agents": ["default", "test-agent"]
+}
+```
+
+#### Enable Plugin
+
+Enable a plugin for use.
+
+**Endpoint:** `POST /api/plugins/:name/enable`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Plugin math enabled"
+}
+```
+
+#### Disable Plugin
+
+Disable a plugin.
+
+**Endpoint:** `POST /api/plugins/:name/disable`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Plugin math disabled"
+}
+```
+
+#### Update Plugin Configuration
+
+Update plugin configuration settings.
+
+**Endpoint:** `PUT /api/plugins/:name/config`
+
+**Request Body:**
+```json
+{
+  "config": {
+    "api_key": "your-api-key",
+    "timeout": 30
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Configuration updated for plugin math"
+}
+```
+
+#### Test Plugin
+
+Execute a test call to the plugin with custom arguments.
+
+**Endpoint:** `POST /api/plugins/:name/test`
+
+**Request Body:**
+```json
+{
+  "args": "{\"operation\": \"add\", \"a\": 5, \"b\": 3}"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "result": "8",
+  "execution_time_ms": 15
+}
+```
+
+#### Get Plugin Logs
+
+Retrieve recent logs for a plugin.
+
+**Endpoint:** `GET /api/plugins/:name/logs`
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "timestamp": "2025-12-03T10:30:00Z",
+      "level": "info",
+      "message": "Plugin executed successfully"
+    },
+    {
+      "timestamp": "2025-12-03T10:29:00Z",
+      "level": "error",
+      "message": "Connection timeout"
+    }
+  ]
+}
+```
+
+#### Delete Plugin
+
+Remove a plugin from the system.
+
+**Endpoint:** `DELETE /api/plugins/:name`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Plugin math deleted"
+}
+```
+
+#### Reload Plugin
+
+Reload a plugin (restart the plugin process).
+
+**Endpoint:** `POST /api/plugins/:name/reload`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Plugin math reloaded"
+}
+```
+
+#### Get Plugin Agents
+
+Get list of agents using a plugin.
+
+**Endpoint:** `GET /api/plugins/:name/agents`
+
+**Response:**
+```json
+{
+  "agents": ["default", "test-agent", "research-agent"]
+}
+```
+
+#### Rollback Plugin Version
+
+Rollback a plugin to a previous version.
+
+**Endpoint:** `POST /api/plugins/:name/rollback`
+
+**Request Body:**
+```json
+{
+  "version": "0.9.0"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Plugin math rolled back to version 0.9.0",
+  "version": "0.9.0"
+}
+```
+
+#### Get Plugin Permissions
+
+Get permission information for a plugin.
+
+**Endpoint:** `GET /api/plugins/:name/permissions`
+
+**Response:**
+```json
+{
+  "plugin_name": "math",
+  "permissions": {
+    "file_access": false,
+    "network_access": true,
+    "system_commands": false
+  },
+  "approved": false,
+  "requested_at": "2025-12-03T09:00:00Z"
+}
+```
+
+#### Approve Plugin Permissions
+
+Approve requested permissions for a plugin.
+
+**Endpoint:** `POST /api/plugins/:name/permissions/approve`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Permissions approved for plugin math"
+}
+```
+
+#### Export Plugin Configuration
+
+Export configuration for one or all plugins.
+
+**Endpoint:** `GET /api/plugins/export?plugin=<name>`
+
+Query Parameters:
+- `plugin` (optional): Plugin name to export. If omitted, exports all plugins.
+
+**Response:** JSON file download
+
+**Example:**
+```bash
+curl -O http://localhost:8765/api/plugins/export?plugin=math
+# Downloads: math-config.json
+
+curl -O http://localhost:8765/api/plugins/export
+# Downloads: all-plugins-config.json
+```
+
+#### Import Plugin Configuration
+
+Import plugin configuration from a JSON file.
+
+**Endpoint:** `POST /api/plugins/import`
+
+**Request:** `multipart/form-data`
+- `config` (file): JSON configuration file
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Configuration imported successfully",
+  "imported_plugins": ["math", "weather"]
+}
+```
+
+#### Get Notifications
+
+Get all plugin-related notifications.
+
+**Endpoint:** `GET /api/plugins/notifications`
+
+**Response:**
+```json
+{
+  "notifications": [
+    {
+      "id": "notif-123",
+      "type": "PluginError",
+      "plugin_name": "weather",
+      "message": "Failed to connect to weather API",
+      "timestamp": "2025-12-03T10:00:00Z",
+      "read": false,
+      "dismissed": false
+    },
+    {
+      "id": "notif-124",
+      "type": "UpdateAvailable",
+      "plugin_name": "math",
+      "message": "Version 1.1.0 is available",
+      "timestamp": "2025-12-03T09:30:00Z",
+      "read": true,
+      "dismissed": false
+    }
+  ],
+  "unread_count": 1
+}
+```
+
+**Notification Types:**
+- `PluginError` - Plugin execution or health check failures
+- `UpdateAvailable` - New version available in registry
+- `HealthCheckFailed` - Plugin health check failed
+- `PermissionRequired` - Plugin requires permission approval
+
+#### Dismiss Notification
+
+Mark a notification as dismissed.
+
+**Endpoint:** `POST /api/plugins/notifications/:id/dismiss`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Notification dismissed"
+}
+```
+
 ## Plugin Registry API
 
 ### List Available Plugins

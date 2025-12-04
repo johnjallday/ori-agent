@@ -155,3 +155,39 @@ type WebPageProvider interface {
 	// Each entry should be a path like "marketplace", "settings", etc.
 	GetWebPages() []string
 }
+
+// CategoryProvider allows plugins to declare their category/tags for organization.
+// Plugins can optionally implement this interface to specify which category they belong to.
+type CategoryProvider interface {
+	// GetCategory returns the plugin's category (e.g., "System Tools", "AI/ML", "Data Processing")
+	// Can return a single category string or comma-separated categories for multiple tags
+	GetCategory() string
+}
+
+// PermissionType represents the type of system permission a plugin requires.
+type PermissionType string
+
+const (
+	PermissionFileAccess     PermissionType = "file_access"
+	PermissionNetworkAccess  PermissionType = "network_access"
+	PermissionSystemCommands PermissionType = "system_commands"
+)
+
+// PluginPermissions describes what system permissions a plugin requires.
+type PluginPermissions struct {
+	// FileAccess indicates if the plugin needs to read/write files
+	FileAccess bool `json:"file_access"`
+	// NetworkAccess indicates if the plugin needs to make network requests
+	NetworkAccess bool `json:"network_access"`
+	// SystemCommands indicates if the plugin needs to execute system commands
+	SystemCommands bool `json:"system_commands"`
+	// Description provides context about why these permissions are needed
+	Description string `json:"description,omitempty"`
+}
+
+// PermissionProvider allows plugins to declare required system permissions.
+// Plugins can optionally implement this interface to specify what permissions they need.
+type PermissionProvider interface {
+	// GetRequiredPermissions returns the permissions this plugin requires
+	GetRequiredPermissions() PluginPermissions
+}

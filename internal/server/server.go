@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
@@ -81,6 +82,16 @@ type Server struct {
 	agentMCPHandler       *agenthttp.MCPHandler
 	locationManager       *location.Manager
 	locationHandler       *locationhttp.Handler
+	categoryManager       *pluginmanager.CategoryManager
+	permissionManager     *pluginmanager.PermissionManager
+	versionManager        *pluginmanager.VersionManager
+	notificationManager   *pluginmanager.NotificationManager
+	backupManager         *pluginmanager.BackupManager
+	pluginsPageHandler    *pluginhttp.PluginsPageHandler
+	rollbackHandler       *pluginhttp.RollbackHandler
+	permissionsHandler    *pluginhttp.PermissionsHandler
+	backupHandler         *pluginhttp.BackupHandler
+	notificationsHandler  *pluginhttp.NotificationsHandler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -422,6 +433,35 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
 	if err != nil {
 		logger.Error("Failed to render marketplace template", logger.Fields{"err": err})
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"response": err})
+	}
+}
+
+func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.CurrentPage = "plugins"
+	data.ShowSidebarToggle = true // Enable sidebar toggle
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("plugins", data)
+	if err != nil {
+		logger.Error("Failed to render plugins template", logger.Fields{"err": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
