@@ -27,7 +27,6 @@ function initializeEventListeners() {
     document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
     document.getElementById('statusFilter').addEventListener('change', applyFilters);
     document.getElementById('categoryFilter').addEventListener('change', applyFilters);
-    document.getElementById('agentFilter').addEventListener('change', applyFilters);
 
     // Select all checkbox
     document.getElementById('selectAll').addEventListener('change', handleSelectAll);
@@ -44,7 +43,6 @@ async function loadPlugins() {
             allPlugins = data.plugins;
             filteredPlugins = [...allPlugins];
             renderPluginsTable();
-            loadAgentFilter();
         }
     } catch (error) {
         console.error('Failed to load plugins:', error);
@@ -197,7 +195,6 @@ function renderPluginsTable() {
             <td>${plugin.version || 'N/A'}</td>
             <td>${renderStatusBadge(plugin)}</td>
             <td><span class="category-badge">${plugin.category || 'Uncategorized'}</span></td>
-            <td>${renderAgentList(plugin.agents || [])}</td>
             <td>
                 <div class="action-buttons">
                     <button class="btn-action" onclick="showPluginDetails('${plugin.name}')">Details</button>
@@ -240,18 +237,6 @@ function renderStatusBadge(plugin) {
             <span class="status-dot"></span>
             Healthy
         </span>
-    `;
-}
-
-function renderAgentList(agents) {
-    if (!agents || agents.length === 0) {
-        return '<span style="color: var(--text-muted); font-size: 0.85rem;">None</span>';
-    }
-
-    return `
-        <div class="agent-list">
-            ${agents.map(agent => `<span class="agent-tag">${agent}</span>`).join('')}
-        </div>
     `;
 }
 
@@ -628,7 +613,6 @@ function applyFilters() {
     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
     const statusFilter = document.getElementById('statusFilter').value;
     const categoryFilter = document.getElementById('categoryFilter').value;
-    const agentFilter = document.getElementById('agentFilter').value;
 
     filteredPlugins = allPlugins.filter(plugin => {
         // Search filter
@@ -643,11 +627,7 @@ function applyFilters() {
         // Category filter
         const matchesCategory = !categoryFilter || plugin.category === categoryFilter;
 
-        // Agent filter
-        const matchesAgent = !agentFilter ||
-            (plugin.agents && plugin.agents.includes(agentFilter));
-
-        return matchesSearch && matchesStatus && matchesCategory && matchesAgent;
+        return matchesSearch && matchesStatus && matchesCategory;
     });
 
     renderPluginsTable();
@@ -657,23 +637,6 @@ function getPluginStatus(plugin) {
     if (plugin.health_status === 'error') return 'error';
     if (plugin.needs_update) return 'update';
     return ''; // No status for healthy plugins
-}
-
-function loadAgentFilter() {
-    const agentFilter = document.getElementById('agentFilter');
-    const agents = new Set();
-
-    allPlugins.forEach(plugin => {
-        if (plugin.agents) {
-            plugin.agents.forEach(agent => agents.add(agent));
-        }
-    });
-
-    const options = Array.from(agents).map(agent =>
-        `<option value="${agent}">${agent}</option>`
-    ).join('');
-
-    agentFilter.innerHTML = '<option value="">All Agents</option>' + options;
 }
 
 function handleSelectAll(e) {
