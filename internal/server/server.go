@@ -443,6 +443,35 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
+	data := web.GetDefaultData()
+	data.CurrentPage = "plugins"
+	data.ShowSidebarToggle = true // Enable sidebar toggle
+
+	// Get theme from app state
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		data.CurrentAgent = currentAgentName
+	}
+
+	html, err := s.templateRenderer.RenderTemplate("plugins", data)
+	if err != nil {
+		logger.Error("Failed to render plugins template", logger.Fields{"err": err})
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"response": err})
+	}
+}
+
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	data := web.GetDefaultData()
 	data.Title = "Ori Agent"
