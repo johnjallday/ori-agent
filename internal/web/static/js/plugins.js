@@ -18,8 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
 function initializeEventListeners() {
     // Header actions
     document.getElementById('uploadBtn').addEventListener('click', showUploadModal);
-    document.getElementById('exportBtn').addEventListener('click', showExportModal);
-    document.getElementById('importBtn').addEventListener('click', showImportModal);
     document.getElementById('notificationBadge').addEventListener('click', toggleNotificationDrawer);
     document.getElementById('closeDrawer').addEventListener('click', toggleNotificationDrawer);
 
@@ -129,27 +127,6 @@ async function rollbackPlugin(pluginName) {
     }
 }
 
-async function exportPlugin(pluginName) {
-    try {
-        const response = await fetch(`/api/plugins/export?plugin=${pluginName}`);
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${pluginName}-config.json`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-
-        showToast(`Plugin ${pluginName} exported`, 'success');
-    } catch (error) {
-        console.error('Failed to export plugin:', error);
-        showToast('Failed to export plugin', 'error');
-    }
-}
-
 async function dismissNotification(notificationId) {
     try {
         await fetch(`/api/plugins/notifications/${notificationId}/dismiss`, {
@@ -200,7 +177,6 @@ function renderPluginsTable() {
                     <button class="btn-action" onclick="showPluginDetails('${plugin.name}')">Details</button>
                     <button class="btn-action" onclick="testPlugin('${plugin.name}')">Test</button>
                     <button class="btn-action" onclick="rollbackPlugin('${plugin.name}')">Rollback</button>
-                    <button class="btn-action" onclick="exportPlugin('${plugin.name}')">Export</button>
                     <button class="btn-action btn-danger" onclick="deletePlugin('${plugin.name}')">Remove</button>
                 </div>
             </td>
@@ -388,64 +364,6 @@ function showUploadModal() {
     showModal(modal);
 }
 
-function showExportModal() {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Export Configuration</h2>
-                <button class="modal-close" onclick="closeModal(this)">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Export plugin configurations:</p>
-                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                    <button class="btn-modern btn-secondary" onclick="exportAllConfigs()" style="justify-content: center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M12,19L8,15H10.5V12H13.5V15H16L12,19M13,9V3.5L18.5,9H13Z"/>
-                        </svg>
-                        Export All Plugins
-                    </button>
-                    <button class="btn-modern btn-secondary" onclick="exportBackupArchive()" style="justify-content: center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M12,19L8,15H10.5V12H13.5V15H16L12,19M13,9V3.5L18.5,9H13Z"/>
-                        </svg>
-                        Create Backup Archive (ZIP)
-                    </button>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Close</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    showModal(modal);
-}
-
-function showImportModal() {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Import Configuration</h2>
-                <button class="modal-close" onclick="closeModal(this)">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select a configuration file to import:</p>
-                <input type="file" id="importFile" accept=".json" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary);">
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Cancel</button>
-                <button class="btn-modern btn-primary" onclick="executeImport()">Import</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    showModal(modal);
-}
-
 // Modal actions
 async function executeTest(pluginName) {
     const argsInput = document.getElementById('testArgs');
@@ -531,80 +449,6 @@ async function executeUpload() {
     } catch (error) {
         console.error('Upload failed:', error);
         showToast('Upload failed', 'error');
-    }
-}
-
-async function exportAllConfigs() {
-    try {
-        const response = await fetch('/api/plugins/export');
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'all-plugins-config.json';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-
-        showToast('All configurations exported', 'success');
-        closeModal(document.querySelector('.modal-overlay.active .modal-close'));
-    } catch (error) {
-        console.error('Export failed:', error);
-        showToast('Export failed', 'error');
-    }
-}
-
-async function exportBackupArchive() {
-    try {
-        const response = await fetch('/api/plugins/backup');
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `plugins-backup-${Date.now()}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-
-        showToast('Backup archive created', 'success');
-        closeModal(document.querySelector('.modal-overlay.active .modal-close'));
-    } catch (error) {
-        console.error('Backup failed:', error);
-        showToast('Backup failed', 'error');
-    }
-}
-
-async function executeImport() {
-    const fileInput = document.getElementById('importFile');
-    if (!fileInput.files.length) {
-        showToast('Please select a file', 'warning');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('config', fileInput.files[0]);
-
-    try {
-        const response = await fetch('/api/plugins/import', {
-            method: 'POST',
-            body: formData
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            showToast('Configuration imported successfully', 'success');
-            closeModal(document.querySelector('.modal-overlay.active .modal-close'));
-            await loadPlugins();
-        } else {
-            showToast(data.message || 'Import failed', 'error');
-        }
-    } catch (error) {
-        console.error('Import failed:', error);
-        showToast('Import failed', 'error');
     }
 }
 

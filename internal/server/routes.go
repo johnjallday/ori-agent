@@ -132,8 +132,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/plugins/upload", s.pluginHandler.ServeHTTP)
 
 	// Dedicated plugins page endpoints (must be before catch-all /api/plugins/ pattern)
-	mux.HandleFunc("/api/plugins/export", s.backupHandler.HandleExportPluginConfig)
-	mux.HandleFunc("/api/plugins/import", s.backupHandler.HandleImportPluginConfig)
 	mux.HandleFunc("/api/plugins/notifications", s.notificationsHandler.HandleGetNotifications)
 
 	// Plugin-specific routes with pattern matching
