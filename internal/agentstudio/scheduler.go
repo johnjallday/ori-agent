@@ -194,6 +194,18 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 		if err := ts.workspaceStore.Save(ws); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
 		}
+
+		// Publish failure event
+		if ts.eventBus != nil {
+			event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, st.ID, st.Name, map[string]interface{}{
+				"error":         st.LastError,
+				"failure_count": st.FailureCount,
+				"timestamp":     time.Now(),
+				"disabled":      !st.Enabled, // true if disabled after 5 failures
+			})
+			ts.eventBus.Publish(event)
+		}
+
 		return
 	}
 
@@ -246,15 +258,25 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 
 	logger.Info("Scheduled task executed successfully (next run: )", logger.Fields{"task_id": st.ID, "nextRun": nextRun})
 
-	// Publish event
+	// Publish triggered event
 	if ts.eventBus != nil {
-		event := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, st.ID, st.Name, map[string]interface{}{
+			"task_id":         createdTaskID,
+			"task_created":    true,
+			"execution_count": st.ExecutionCount,
+			"next_run":        nextRun,
+			"timestamp":       now,
+		})
+		ts.eventBus.Publish(event)
+
+		// Also publish workspace updated event for backward compatibility
+		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
 			"scheduled_task_id": st.ID,
 			"task_created":      true,
 			"execution_count":   st.ExecutionCount,
 			"next_run":          nextRun,
 		})
-		ts.eventBus.Publish(event)
+		ts.eventBus.Publish(workspaceEvent)
 	}
 }
 

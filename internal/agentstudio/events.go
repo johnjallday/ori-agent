@@ -33,6 +33,10 @@ const (
 	EventTaskToolCall   EventType = "task.tool_call"   // Agent is calling a tool
 	EventTaskToolResult EventType = "task.tool_result" // Tool call completed
 
+	// Scheduled task events
+	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully
+	EventScheduledTaskFailed    EventType = "scheduled_task.failed"    // Scheduled task execution failed
+
 	// Attachment events
 	EventAttachmentCreated EventType = "attachment.created"
 	EventAttachmentUpdated EventType = "attachment.updated"
@@ -346,6 +350,23 @@ func NewWorkflowEvent(eventType EventType, workspaceID, workflowID string, data 
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		Source:      "workflow-executor",
+		Data:        data,
+		Metadata:    make(map[string]string),
+	}
+}
+
+// NewScheduledTaskEvent creates a scheduled task-related event
+func NewScheduledTaskEvent(eventType EventType, workspaceID, scheduledTaskID, scheduledTaskName string, data map[string]interface{}) Event {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	data["scheduled_task_id"] = scheduledTaskID
+	data["scheduled_task_name"] = scheduledTaskName
+
+	return Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		Source:      "scheduler",
 		Data:        data,
 		Metadata:    make(map[string]string),
 	}
