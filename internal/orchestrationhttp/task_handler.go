@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/httputil"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/robfig/cron/v3"
 )
 
 // TaskHandler manages task and scheduled task operations
@@ -1424,6 +1425,36 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 			now.Location(),
 		)
 
+		return &next
+
+	case agentstudio.ScheduleCron:
+		if config.CronExpr == "" {
+			return nil
+		}
+
+		// Validate and parse cron expression using agentstudio's validator
+		if err := agentstudio.ValidateCronExpression(config.CronExpr); err != nil {
+			return nil
+		}
+
+		// Parse cron expression
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		schedule, err := parser.Parse(config.CronExpr)
+		if err != nil {
+			return nil
+		}
+
+		// Calculate next execution time from now
+		next := schedule.Next(now)
+		return &next
+
+	case agentstudio.ScheduleRelativeDelay:
+		if config.DelayDuration == 0 {
+			return nil
+		}
+
+		// Calculate initial next run as now + DelayDuration
+		next := now.Add(config.DelayDuration)
 		return &next
 
 	default:

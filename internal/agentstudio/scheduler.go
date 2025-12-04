@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/robfig/cron/v3"
 	"sync"
 	"time"
 )
@@ -343,12 +344,68 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 		return &next
 
 	case ScheduleCron:
-		// TODO: Implement cron expression parsing (Phase 4)
-		logger.Warn("Cron schedules not yet implemented", logger.Fields{})
-		return nil
+		if config.CronExpr == "" {
+			logger.Warn("Invalid cron schedule: cron_expr is empty", logger.Fields{})
+			return nil
+		}
+
+		// Parse cron expression
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		schedule, err := parser.Parse(config.CronExpr)
+		if err != nil {
+			logger.Warn("Invalid cron expression", logger.Fields{"cron_expr": config.CronExpr, "err": err})
+			return nil
+		}
+
+		// Calculate next execution time from lastRun
+		next := schedule.Next(lastRun)
+
+		// Check if next run exceeds end date
+		if config.EndDate != nil && next.After(*config.EndDate) {
+			return nil
+		}
+
+		return &next
+
+	case ScheduleRelativeDelay:
+		if config.DelayDuration == 0 {
+			logger.Warn("Invalid relative delay schedule: delay_duration is 0", logger.Fields{})
+			return nil
+		}
+
+		// If TriggerOnce is true, don't schedule again after first execution
+		if config.TriggerOnce {
+			return nil
+		}
+
+		// Calculate next run as lastRun + DelayDuration
+		next := lastRun.Add(config.DelayDuration)
+
+		// Check if next run exceeds end date
+		if config.EndDate != nil && next.After(*config.EndDate) {
+			return nil
+		}
+
+		return &next
 
 	default:
 		logger.Warn("Unknown schedule type", logger.Fields{"type": config.Type})
 		return nil
 	}
+}
+
+// ValidateCronExpression validates a cron expression
+func ValidateCronExpression(expr string) error {
+	if expr == "" {
+		return fmt.Errorf("cron expression is empty")
+	}
+
+	// Parse using standard cron format (minute, hour, day, month, weekday)
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	_, err := parser.Parse(expr)
+	if err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+
+	return nil
 }
