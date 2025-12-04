@@ -870,6 +870,43 @@ class AgentCanvas {
   }
 
   /**
+   * Delete a scheduler node
+   */
+  async deleteSchedulerNode(schedulerNode) {
+    if (!schedulerNode || !schedulerNode.id || !this.studioId) {
+      alert('Cannot delete scheduler node: missing ID or workspace');
+      return;
+    }
+    try {
+      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}`);
+      this.state.removeSchedulerNode(schedulerNode.id);
+      this.saveLayout();
+      this.draw();
+      this.notifications?.showNotification?.('Scheduler node deleted', 'success');
+    } catch (err) {
+      console.error('Failed to delete scheduler node', err);
+      alert('Failed to delete scheduler node: ' + (err?.message || err));
+    }
+  }
+
+  /**
+   * Manually trigger a scheduler node
+   */
+  async triggerSchedulerNode(schedulerNode) {
+    if (!schedulerNode || !schedulerNode.id || !this.studioId) {
+      alert('Cannot trigger scheduler node: missing ID or workspace');
+      return;
+    }
+    try {
+      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}/trigger`, {});
+      this.notifications?.showNotification?.('Scheduler node triggered', 'success');
+    } catch (err) {
+      console.error('Failed to trigger scheduler node', err);
+      alert('Failed to trigger scheduler node: ' + (err?.message || err));
+    }
+  }
+
+  /**
    * Find the most recent task associated with an agent so combiners can treat
    * direct agent connections as inputs.
    */
