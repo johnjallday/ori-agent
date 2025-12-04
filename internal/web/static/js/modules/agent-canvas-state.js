@@ -86,6 +86,12 @@ export const EVENT_TYPES = {
   TASK_STATUS_CHANGED: 'task.status.changed',
   TASK_SELECTED: 'task.selected',
 
+  // Attachment events
+  ATTACHMENT_CREATED: 'attachment.created',
+  ATTACHMENT_UPDATED: 'attachment.updated',
+  ATTACHMENT_MOVED: 'attachment.moved',
+  ATTACHMENT_DELETED: 'attachment.deleted',
+
   // Canvas events
   CANVAS_PANNED: 'canvas.panned',
   CANVAS_ZOOMED: 'canvas.zoomed',
@@ -133,6 +139,7 @@ export class AgentCanvasState {
     this.studio = null;
     this.agents = [];
     this.tasks = [];
+    this.attachments = [];
 
     // Data & Communication
     this.messages = [];
@@ -157,6 +164,10 @@ export class AgentCanvasState {
     // Drag State - Task
     this.isDraggingTask = false;
     this.draggedTask = null;
+
+    // Drag State - Attachment
+    this.isDraggingAttachment = false;
+    this.draggedAttachment = null;
 
     // Drag State - Connection
     this.isDraggingConnection = false;
@@ -240,6 +251,9 @@ export class AgentCanvasState {
     this.timelineEvents = [];
     this.timelineScrollOffset = 0;
     this.timelineMaxEvents = 50;
+
+    // Attachment connect mode
+    this.pendingAttachmentSource = null;
 
     // Chain Visualization State
     this.activeChains = [];
@@ -377,6 +391,50 @@ export class AgentCanvasState {
     if (task) {
       task.status = status;
       this.eventBus.emit(EVENT_TYPES.TASK_STATUS_CHANGED, { task, status });
+    }
+  }
+
+  // ==================== ATTACHMENTS ====================
+
+  /**
+   * Set attachments array
+   */
+  setAttachments(attachments) {
+    this.attachments = attachments || [];
+  }
+
+  /**
+   * Add attachment
+   */
+  addAttachment(attachment) {
+    this.attachments.push(attachment);
+    this.eventBus.emit(EVENT_TYPES.ATTACHMENT_CREATED, { attachment });
+  }
+
+  /**
+   * Get attachment by ID
+   */
+  getAttachment(attachmentId) {
+    return this.attachments.find(a => a.id === attachmentId);
+  }
+
+  /**
+   * Update attachment position
+   */
+  updateAttachmentPosition(attachment, x, y) {
+    attachment.x = x;
+    attachment.y = y;
+    this.eventBus.emit(EVENT_TYPES.ATTACHMENT_MOVED, { attachment, x, y });
+  }
+
+  /**
+   * Remove attachment by ID
+   */
+  removeAttachment(attachmentId) {
+    const idx = this.attachments.findIndex(a => a.id === attachmentId);
+    if (idx !== -1) {
+      this.attachments.splice(idx, 1);
+      this.eventBus.emit(EVENT_TYPES.ATTACHMENT_DELETED, { attachmentId });
     }
   }
 

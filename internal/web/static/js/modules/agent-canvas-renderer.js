@@ -95,6 +95,10 @@ export class AgentCanvasRenderer {
     return this.nodes.drawAgents();
   }
 
+  drawAttachments() {
+    return this.nodes.drawAttachments();
+  }
+
   drawCombinerNodes() {
     return this.nodes.drawCombinerNodes();
   }

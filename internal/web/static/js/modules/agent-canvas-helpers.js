@@ -116,6 +116,9 @@ export class AgentCanvasHelpers {
     const task = this.state.tasks.find(t => t.id === nodeId);
     if (task) return { type: 'task', node: task };
 
+    const attachment = this.state.attachments.find(a => a.id === nodeId);
+    if (attachment) return { type: 'attachment', node: attachment };
+
     return null;
   }
 
@@ -160,6 +163,14 @@ export class AgentCanvasHelpers {
         };
       }
       return null;
+    } else if (type === 'attachment') {
+      // Attachments expose only an output port at the bottom
+      const cardHeight = node.cardBounds ? node.cardBounds.height : 70;
+      const cardY = node.cardBounds ? node.cardBounds.y : node.y;
+      return {
+        x: node.x * this.parent.scale + this.parent.offsetX,
+        y: (cardY + cardHeight + 5) * this.parent.scale + this.parent.offsetY
+      };
     }
 
     return null;
@@ -197,6 +208,33 @@ export class AgentCanvasHelpers {
           nodeType: 'task',
           portId: 'input-0',
           type: 'input'
+        };
+      }
+
+      // If inside task card bounds, treat as an input port (for forgiving drops)
+      if (x >= task.cardBounds.x && x <= task.cardBounds.x + task.cardBounds.width &&
+          y >= task.cardBounds.y && y <= task.cardBounds.y + task.cardBounds.height) {
+        return {
+          nodeId: task.id,
+          nodeType: 'task',
+          portId: 'input-0',
+          type: 'input'
+        };
+      }
+    }
+
+    // Check attachment output ports (bottom center)
+    for (const att of this.parent.attachments) {
+      if (att.x == null || att.y == null) continue;
+      const portX = att.x;
+      const portY = (att.cardBounds ? att.cardBounds.y + att.cardBounds.height : att.y + 35);
+      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
+      if (dist <= portRadius) {
+        return {
+          nodeId: att.id,
+          nodeType: 'attachment',
+          portId: 'output',
+          type: 'output'
         };
       }
     }

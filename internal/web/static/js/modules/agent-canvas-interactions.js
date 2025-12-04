@@ -194,27 +194,31 @@ export class AgentCanvasInteractionHandler {
     }
 
     // If in assignment mode, prioritize assignment clicks over manual port wiring
-    // Check ports if not in assignment mode, or treat combiner ports as clicks during assignment
-    const clickedPort = this.parent.getPortAtPosition(x, y);
-    if (clickedPort) {
-      if (this.state.assignmentMode && this.state.assignmentSourceTask) {
-        const target = this.parent.getNodeById(clickedPort.nodeId);
-        if (target && target.type === 'combiner') {
+    // Only honor port clicks when explicitly in connection modes to avoid blocking drag
+    const allowPortClick = this.state.ctrlPressed || this.state.isDraggingConnection ||
+      this.state.connectionDragStart || this.state.pendingAttachmentSource;
+    if (allowPortClick) {
+      const clickedPort = this.parent.getPortAtPosition(x, y);
+      if (clickedPort) {
+        if (this.state.assignmentMode && this.state.assignmentSourceTask) {
+          const target = this.parent.getNodeById(clickedPort.nodeId);
+          if (target && target.type === 'combiner') {
+            e.stopPropagation();
+            e.preventDefault();
+            console.log('Assigning task to combiner via port click:', target.node.id);
+            this.parent.assignTaskToCombiner(target.node);
+            return;
+          }
+          // Otherwise ignore port clicks while assigning
+        } else {
           e.stopPropagation();
           e.preventDefault();
-          console.log('Assigning task to combiner via port click:', target.node.id);
-          this.parent.assignTaskToCombiner(target.node);
+          this.state.isDraggingConnection = true;
+          this.state.connectionDragStart = clickedPort;
+          this.canvas.style.cursor = 'crosshair';
+          console.log(`🔗 Started dragging connection from ${clickedPort.nodeId}.${clickedPort.portId}`);
           return;
         }
-        // Otherwise ignore port clicks while assigning
-      } else {
-        e.stopPropagation();
-        e.preventDefault();
-        this.state.isDraggingConnection = true;
-        this.state.connectionDragStart = clickedPort;
-        this.canvas.style.cursor = 'crosshair';
-        console.log(`🔗 Started dragging connection from ${clickedPort.nodeId}.${clickedPort.portId}`);
-        return;
       }
     }
 
@@ -342,6 +346,65 @@ export class AgentCanvasInteractionHandler {
             e.preventDefault();
             this.state.isDraggingTask = true;
             this.state.draggedTask = task;
+            this.state.dragStartX = x;
+            this.state.dragStartY = y;
+            this.canvas.style.cursor = 'move';
+            return;
+          }
+        }
+      }
+    }
+
+    // Check if clicking on an attachment card
+    if (this.state.attachments && this.state.attachments.length > 0) {
+      for (let i = this.state.attachments.length - 1; i >= 0; i--) {
+        const attachment = this.state.attachments[i];
+        if (attachment && attachment.x != null && attachment.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 70;
+          const cardX = attachment.x - cardWidth / 2;
+          const cardY = attachment.y - cardHeight / 2;
+
+          // Delete button first
+          if (attachment.deleteButton) {
+            const btn = attachment.deleteButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              if (confirm('Delete this attachment?')) {
+                this.parent.deleteAttachment(attachment);
+              }
+              return;
+            }
+          }
+
+          // Attach button
+          if (attachment.attachButton) {
+            const btn = attachment.attachButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.state.isDraggingConnection = true;
+              this.state.connectionDragStart = {
+                nodeId: attachment.id,
+                nodeType: 'attachment',
+                portId: 'output',
+                type: 'output'
+              };
+              this.state.pendingAttachmentSource = attachment;
+              this.canvas.style.cursor = 'crosshair';
+              return;
+            }
+          }
+
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            e.stopPropagation();
+            e.preventDefault();
+            this.state.isDraggingAttachment = true;
+            this.state.draggedAttachment = attachment;
             this.state.dragStartX = x;
             this.state.dragStartY = y;
             this.canvas.style.cursor = 'move';
@@ -481,6 +544,15 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
+    if (this.state.isDraggingAttachment && this.state.draggedAttachment) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.draggedAttachment.x = x;
+      this.state.draggedAttachment.y = y;
+      this.parent.draw();
+      return;
+    }
+
     if (this.state.isDraggingAgent && this.state.draggedAgent) {
       // Drag the agent
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
@@ -531,6 +603,7 @@ export class AgentCanvasInteractionHandler {
   onMouseUp(e) {
     const wasDraggingAgent = this.state.isDraggingAgent;
     const wasDraggingTask = this.state.isDraggingTask;
+    const wasDraggingAttachment = this.state.isDraggingAttachment;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
     const wasAssigning = this.state.assignmentMode && this.state.assignmentSourceTask;
@@ -610,6 +683,27 @@ export class AgentCanvasInteractionHandler {
             resolvedPort = {
               nodeId: agent.nodeId || agent.name,
               nodeType: 'agent',
+              portId: 'input',
+              type: 'input'
+            };
+            break;
+          }
+        }
+      }
+
+      // Fallback: if no port but dropped on a task body, treat as input port
+      if (!resolvedPort && this.state.tasks.length > 0) {
+        for (const task of this.state.tasks) {
+          const cardWidth = task.cardBounds ? task.cardBounds.width : 160;
+          const cardHeight = task.cardBounds ? task.cardBounds.height : 60;
+          const cardX = task.cardBounds ? task.cardBounds.x : task.x - cardWidth / 2;
+          const cardY = task.cardBounds ? task.cardBounds.y : task.y - cardHeight / 2;
+
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            resolvedPort = {
+              nodeId: task.id,
+              nodeType: 'task',
               portId: 'input',
               type: 'input'
             };
@@ -709,12 +803,14 @@ export class AgentCanvasInteractionHandler {
     this.state.isDraggingAgent = false;
     this.state.draggedAgent = null;
     this.state.isDraggingTask = false;
+    this.state.isDraggingAttachment = false;
+    this.state.draggedAttachment = null;
     this.state.isDraggingCombiner = false;
     this.state.draggedCombiner = null;
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingCombiner) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingAttachment || wasDraggingCombiner) {
       this.parent.saveLayout();
     }
 
@@ -799,7 +895,7 @@ export class AgentCanvasInteractionHandler {
    */
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask) {
+    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingAttachment) {
       return;
     }
 
@@ -1072,6 +1168,57 @@ export class AgentCanvasInteractionHandler {
     const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
     const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
 
+    // If we have a pending attachment source (click-to-connect), attach on task/agent click
+    if (this.state.pendingAttachmentSource) {
+      // Check tasks first
+      for (let i = this.state.tasks.length - 1; i >= 0; i--) {
+        const task = this.state.tasks[i];
+        if (!task || task.x == null || task.y == null) continue;
+        const cardWidth = task.cardBounds ? task.cardBounds.width : 160;
+        const cardHeight = task.cardBounds ? task.cardBounds.height : 60;
+        const cardX = task.cardBounds ? task.cardBounds.x : task.x - cardWidth / 2;
+        const cardY = task.cardBounds ? task.cardBounds.y : task.y - cardHeight / 2;
+
+        if (x >= cardX && x <= cardX + cardWidth &&
+            y >= cardY && y <= cardY + cardHeight) {
+          this.parent.createConnection(this.state.pendingAttachmentSource.id, 'output', task.id, 'input');
+          this.state.pendingAttachmentSource = null;
+          this.state.isDraggingConnection = false;
+          this.state.connectionDragStart = null;
+          this.canvas.style.cursor = 'grab';
+          this.parent.draw();
+          return;
+        }
+      }
+
+      // Then agents
+      for (const agent of this.state.agents) {
+        const halfWidth = (agent.width || 120) / 2;
+        const halfHeight = (agent.height || 70) / 2;
+        const bounds = {
+          left: agent.x - halfWidth,
+          right: agent.x + halfWidth,
+          top: agent.y - halfHeight,
+          bottom: agent.y + halfHeight
+        };
+        if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
+          this.parent.createConnection(this.state.pendingAttachmentSource.id, 'output', agent.nodeId || agent.name, 'input');
+          this.state.pendingAttachmentSource = null;
+          this.state.isDraggingConnection = false;
+          this.state.connectionDragStart = null;
+          this.canvas.style.cursor = 'grab';
+          this.parent.draw();
+          return;
+        }
+      }
+
+      // If click did not attach, clear pending state to restore normal interactions
+      this.state.pendingAttachmentSource = null;
+      this.state.isDraggingConnection = false;
+      this.state.connectionDragStart = null;
+      this.canvas.style.cursor = 'grab';
+    }
+
     // Check if click is on any task first (tasks are on top)
     for (let i = this.state.tasks.length - 1; i >= 0; i--) {
       const task = this.state.tasks[i];
@@ -1189,6 +1336,26 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
+    // Check if click is on any attachment
+    if (this.state.attachments && this.state.attachments.length > 0) {
+      for (let i = this.state.attachments.length - 1; i >= 0; i--) {
+        const att = this.state.attachments[i];
+        if (!att || att.x == null || att.y == null) continue;
+        const cardWidth = att.cardBounds ? att.cardBounds.width : 160;
+        const cardHeight = att.cardBounds ? att.cardBounds.height : 70;
+        const cardX = att.cardBounds ? att.cardBounds.x : att.x - cardWidth / 2;
+        const cardY = att.cardBounds ? att.cardBounds.y : att.y - cardHeight / 2;
+
+        if (x >= cardX && x <= cardX + cardWidth &&
+            y >= cardY && y <= cardY + cardHeight) {
+          if (window.showAttachmentDetails) {
+            window.showAttachmentDetails(att);
+          }
+          return;
+        }
+      }
+    }
+
     // Check if click is on any agent
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
@@ -1263,6 +1430,9 @@ export class AgentCanvasInteractionHandler {
     }
     if (this.state.expandedCombiner) {
       this.parent.closeCombinerPanel();
+    }
+    if (window.hideAttachmentDetails) {
+      window.hideAttachmentDetails();
     }
   }
 

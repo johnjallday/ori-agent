@@ -678,4 +678,116 @@ export class RendererNodes {
       };
     });
   }
+
+  /**
+   * Draw attachment nodes (notes/files/links)
+   */
+  drawAttachments() {
+    if (!this.state.attachments || this.state.attachments.length === 0) return;
+
+    this.state.attachments.forEach((attachment) => {
+      if (attachment.x == null || attachment.y == null) return;
+
+      const cardWidth = 160;
+      const cardHeight = 70;
+      const cardX = attachment.x - cardWidth / 2;
+      const cardY = attachment.y - cardHeight / 2;
+
+      // Store bounds for hit testing/ports
+      attachment.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      const baseColor = attachment.color || '#e2e8f0';
+      const icon = attachment.type === 'image' ? '🖼️' : attachment.type === 'doc' ? '📄' : '📎';
+
+      // Background
+      this.ctx.save();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.1)';
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowOffsetY = 2;
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Border
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.stroke();
+
+      // Title
+      this.ctx.fillStyle = '#0f172a';
+      this.ctx.font = 'bold 12px system-ui';
+      this.ctx.fillText(`${icon} ${attachment.title || 'Attachment'}`, cardX + 10, cardY + 20);
+
+      // Badge
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = '10px system-ui';
+      const fileMeta = attachment.file || attachment.file_meta;
+      const badge = attachment.link_url ? 'Link' : (fileMeta?.name ? fileMeta.name : attachment.type || 'note');
+      this.ctx.fillText(badge, cardX + 10, cardY + 38);
+
+      // Body preview
+      if (attachment.body) {
+        const preview = attachment.body.length > 50 ? `${attachment.body.slice(0, 47)}...` : attachment.body;
+        this.ctx.fillStyle = '#475569';
+        this.ctx.font = '10px system-ui';
+        this.ctx.fillText(preview, cardX + 10, cardY + 55);
+      }
+
+      // Attach button (bottom right)
+      const attachWidth = 58;
+      const attachHeight = 20;
+      const attachX = cardX + cardWidth - attachWidth - 10;
+      const attachY = cardY + cardHeight - attachHeight - 10;
+      this.ctx.fillStyle = '#2563eb';
+      this.primitives.roundRect(attachX, attachY, attachWidth, attachHeight, 6);
+      this.ctx.fill();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText('Attach', attachX + 10, attachY + 14);
+
+      attachment.attachButton = {
+        x: attachX,
+        y: attachY,
+        width: attachWidth,
+        height: attachHeight
+      };
+
+      // Delete button (top-right)
+      const deleteSize = 18;
+      const deleteX = cardX + cardWidth - deleteSize - 6;
+      const deleteY = cardY + 6;
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteX + 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
+      this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
+      this.ctx.stroke();
+
+      attachment.deleteButton = {
+        x: deleteX,
+        y: deleteY,
+        width: deleteSize,
+        height: deleteSize
+      };
+
+      // Output port indicator
+      this.ctx.fillStyle = baseColor;
+      this.ctx.beginPath();
+      this.ctx.arc(attachment.x, cardY + cardHeight + 5, 6, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
+    });
+  }
 }

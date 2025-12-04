@@ -69,7 +69,9 @@ export class AgentCanvasLayoutManager {
    * Zoom and pan to fit all tasks and agents in view
    */
   zoomToFitContent() {
-    if ((!this.state.tasks || this.state.tasks.length === 0) && (!this.state.agents || this.state.agents.length === 0)) {
+    if ((!this.state.tasks || this.state.tasks.length === 0) &&
+        (!this.state.agents || this.state.agents.length === 0) &&
+        (!this.state.attachments || this.state.attachments.length === 0)) {
       return;
     }
 
@@ -95,6 +97,17 @@ export class AgentCanvasLayoutManager {
       maxX = Math.max(maxX, agent.x + halfW);
       minY = Math.min(minY, agent.y - halfH);
       maxY = Math.max(maxY, agent.y + halfH);
+    });
+
+    // Include attachments
+    this.state.attachments.forEach(att => {
+      if (att.x == null || att.y == null) return;
+      const cardWidth = 160;
+      const cardHeight = 70;
+      minX = Math.min(minX, att.x - cardWidth / 2);
+      maxX = Math.max(maxX, att.x + cardWidth / 2);
+      minY = Math.min(minY, att.y - cardHeight / 2);
+      maxY = Math.max(maxY, att.y + cardHeight / 2);
     });
 
     // Calculate content dimensions
@@ -189,6 +202,13 @@ export class AgentCanvasLayoutManager {
         agentPositions[key] = { x: agent.x, y: agent.y };
       });
 
+      // Collect attachment positions
+      const attachmentPositions = {};
+      this.state.attachments.forEach(att => {
+        if (att.x == null || att.y == null) return;
+        attachmentPositions[att.id] = { x: att.x, y: att.y };
+      });
+
       // Collect combiner nodes
       const combinerNodes = this.state.combinerNodes.map(node => ({
         id: node.id,
@@ -222,7 +242,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Combiners: ${combinerNodes.length}, Connections: ${workflowConnections.length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
@@ -231,6 +251,7 @@ export class AgentCanvasLayoutManager {
         workspace_id: this.state.studioId,
         task_positions: taskPositions,
         agent_positions: agentPositions,
+        attachment_positions: attachmentPositions,
         combiner_nodes: combinerNodes,
         workflow_connections: workflowConnections,
         scale: this.state.scale,
@@ -289,6 +310,17 @@ export class AgentCanvasLayoutManager {
           agent.x = savedPos.x;
           agent.y = savedPos.y;
           agentsRestored++;
+        }
+      });
+    }
+
+    // Restore attachment positions
+    if (layout.attachment_positions) {
+      this.state.attachments.forEach(att => {
+        const savedPos = layout.attachment_positions[att.id];
+        if (savedPos) {
+          att.x = savedPos.x;
+          att.y = savedPos.y;
         }
       });
     }

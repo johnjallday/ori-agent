@@ -50,6 +50,7 @@ type Workspace struct {
 	SharedData     map[string]interface{} `json:"shared_data"`
 	Messages       []AgentMessage         `json:"messages"`
 	Tasks          []Task                 `json:"tasks"`
+	Attachments    []Attachment           `json:"attachments,omitempty"`
 	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
 	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
 	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
@@ -63,6 +64,7 @@ type Workspace struct {
 type CanvasLayout struct {
 	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
 	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
+	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -84,6 +86,39 @@ type WorkflowConnectionLayout struct {
 	ToPort   string `json:"toPort"`
 	Color    string `json:"color,omitempty"`
 	Animated bool   `json:"animated,omitempty"`
+}
+
+// AttachmentType represents the attachment content type
+type AttachmentType string
+
+const (
+	AttachmentTypeDoc   AttachmentType = "doc"
+	AttachmentTypeImage AttachmentType = "image"
+	AttachmentTypeOther AttachmentType = "other"
+)
+
+// AttachmentFileMeta captures optional file information
+type AttachmentFileMeta struct {
+	Name string `json:"name,omitempty"`
+	Size int64  `json:"size,omitempty"`
+	Mime string `json:"mime,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
+// Attachment represents a note/file/link pinned to the workspace canvas
+type Attachment struct {
+	ID          string              `json:"id"`
+	WorkspaceID string              `json:"workspace_id"`
+	Title       string              `json:"title"`
+	Body        string              `json:"body,omitempty"`
+	Type        AttachmentType      `json:"type"`
+	Color       string              `json:"color,omitempty"`
+	LinkURL     string              `json:"link_url,omitempty"`
+	File        *AttachmentFileMeta `json:"file_meta,omitempty"`
+	X           float64             `json:"x"`
+	Y           float64             `json:"y"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
 
 // AgentMessage represents a message passed between agents
@@ -863,6 +898,82 @@ func (w *Workspace) AddTask(task Task) error {
 	w.UpdatedAt = time.Now()
 
 	return nil
+}
+
+// AddAttachment adds an attachment node to the workspace
+func (w *Workspace) AddAttachment(att Attachment) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if att.Title == "" {
+		return fmt.Errorf("attachment title is required")
+	}
+	if att.Type != AttachmentTypeDoc && att.Type != AttachmentTypeImage && att.Type != AttachmentTypeOther {
+		return fmt.Errorf("invalid attachment type %s", att.Type)
+	}
+
+	if att.ID == "" {
+		att.ID = uuid.New().String()
+	}
+	now := time.Now()
+	if att.CreatedAt.IsZero() {
+		att.CreatedAt = now
+	}
+	att.UpdatedAt = now
+	att.WorkspaceID = w.ID
+
+	w.Attachments = append(w.Attachments, att)
+	w.UpdatedAt = now
+	return nil
+}
+
+// UpdateAttachment updates an existing attachment in the workspace
+func (w *Workspace) UpdateAttachment(att Attachment) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.Attachments {
+		if w.Attachments[i].ID == att.ID {
+			att.UpdatedAt = time.Now()
+			att.WorkspaceID = w.ID
+			w.Attachments[i] = att
+			w.UpdatedAt = att.UpdatedAt
+			return nil
+		}
+	}
+
+	return fmt.Errorf("attachment %s not found in workspace", att.ID)
+}
+
+// DeleteAttachment removes an attachment from the workspace
+func (w *Workspace) DeleteAttachment(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.Attachments {
+		if w.Attachments[i].ID == id {
+			w.Attachments = append(w.Attachments[:i], w.Attachments[i+1:]...)
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("attachment %s not found in workspace", id)
+}
+
+// GetAttachment retrieves an attachment by ID
+func (w *Workspace) GetAttachment(id string) (*Attachment, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	for i := range w.Attachments {
+		if w.Attachments[i].ID == id {
+			attCopy := w.Attachments[i]
+			return &attCopy, nil
+		}
+	}
+
+	return nil, fmt.Errorf("attachment %s not found in workspace", id)
 }
 
 // GetTask retrieves a task by ID

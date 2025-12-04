@@ -749,7 +749,7 @@ func (b *ServerBuilder) initializeStudioOrchestrator() error {
 		log.Println("✅ Agent Studio orchestrator initialized")
 	}
 
-	b.server.studioHandler = agentstudio.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator)
+	b.server.studioHandler = agentstudio.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
 	if verbose {
 		log.Println("✅ Agent Studio HTTP handler initialized")
 	}

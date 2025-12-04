@@ -66,6 +66,10 @@ export class AgentCanvasEventHandler {
         this.parent.notifications.addExecutionLog(data.data.task_id, 'progress', data.data.message || 'Task progress update');
         this.parent.timeline.addTimelineEvent({ type: 'task.progress', data });
       },
+      onAttachmentEvent: (type, data) => {
+        const evt = { type, data };
+        this.handleAttachmentEvent(evt);
+      },
       onError: (error) => {
         console.error('EventSource error:', error);
         setTimeout(() => {
@@ -110,6 +114,11 @@ export class AgentCanvasEventHandler {
         this.state.setTasks(tasks);
       }
       this.updateAgentResultsFromTasks(tasks);
+    }
+
+    if (data.attachments && Array.isArray(data.attachments)) {
+      const attachments = this.normalizeAttachmentsForState(data.attachments);
+      this.state.setAttachments(attachments);
     }
 
     this.parent.draw();
@@ -163,6 +172,38 @@ export class AgentCanvasEventHandler {
   }
 
   /**
+   * Normalize attachments while preserving known positions from state.
+   */
+  normalizeAttachmentsForState(attachments) {
+    const existingPositions = {};
+    this.state.attachments.forEach(a => {
+      if (a.x !== null && a.y !== null) {
+        existingPositions[a.id] = { x: a.x, y: a.y };
+      }
+    });
+
+    return attachments.map(att => {
+      const existing = existingPositions[att.id];
+      const mapped = {
+        ...att,
+        file: att.file || att.file_meta,
+        x: existing ? existing.x : (att.x ?? null),
+        y: existing ? existing.y : (att.y ?? null)
+      };
+      return this.normalizeAttachmentWithPosition(mapped);
+    });
+  }
+
+  /**
+   * Normalize a single attachment and ensure position.
+   */
+  normalizeAttachmentWithPosition(att) {
+    if (!att) return att;
+    this.ensureAttachmentPosition(att);
+    return att;
+  }
+
+  /**
    * Immediately feed the current state back through the workspace processor so
    * the canvas updates without waiting for the first SSE tick.
    */
@@ -172,7 +213,8 @@ export class AgentCanvasEventHandler {
       workspace_id: this.parent.studioId,
       workspace_progress: this.parent.workspaceProgress || null,
       agent_stats: (this.parent.studio && this.parent.studio.agent_stats) || null,
-      tasks: this.state.tasks
+      tasks: this.state.tasks,
+      attachments: this.state.attachments
     };
     this.processWorkspacePayload(snapshot, { setTasks: false, source: 'client.snapshot' });
   }
@@ -209,6 +251,33 @@ export class AgentCanvasEventHandler {
       this.parent.animation.updateChains();
       this.parent.draw();
     }
+  }
+
+  /**
+   * Handle attachment events from SSE.
+   */
+  handleAttachmentEvent(eventData) {
+    const payload = eventData.data?.attachment;
+    const id = eventData.data?.attachment_id || payload?.id;
+
+    if (eventData.type === 'attachment.deleted') {
+      this.state.removeAttachment(id);
+      this.parent.draw();
+      return;
+    }
+
+    if (!payload) {
+      return;
+    }
+
+    const normalized = this.normalizeAttachmentWithPosition({ ...payload, file: payload.file || payload.file_meta });
+    const idx = this.state.attachments.findIndex(a => a.id === normalized.id);
+    if (idx === -1) {
+      this.state.attachments.push(normalized);
+    } else {
+      this.state.attachments[idx] = normalized;
+    }
+    this.parent.draw();
   }
 
   /**
@@ -371,6 +440,34 @@ export class AgentCanvasEventHandler {
 
     task.x = centerX + jitterX;
     task.y = centerY + jitterY;
+  }
+
+  /**
+   * Ensure an attachment has a sensible on-screen position near the viewport.
+   */
+  ensureAttachmentPosition(att) {
+    if (!att) return;
+
+    const centerX = (this.parent.width / 2 - this.parent.offsetX) / this.parent.scale;
+    const centerY = (this.parent.height / 2 - this.parent.offsetY) / this.parent.scale;
+
+    const halfW = (this.parent.width / this.parent.scale) / 2;
+    const halfH = (this.parent.height / this.parent.scale) / 2;
+    const left = centerX - halfW * 1.5;
+    const right = centerX + halfW * 1.5;
+    const top = centerY - halfH * 1.5;
+    const bottom = centerY + halfH * 1.5;
+
+    const needsPlacement =
+      att.x == null || att.y == null || att.x < left || att.x > right || att.y < top || att.y > bottom;
+
+    if (!needsPlacement) return;
+
+    const jitterX = (Math.random() - 0.5) * 100;
+    const jitterY = (Math.random() - 0.5) * 100;
+
+    att.x = centerX + jitterX;
+    att.y = centerY + jitterY;
   }
 
   /**

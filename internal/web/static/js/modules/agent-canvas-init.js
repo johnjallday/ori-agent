@@ -100,6 +100,23 @@ export class AgentCanvasInitialization {
         }
       }
 
+      // Load attachments from studio
+      if (this.parent.studio.attachments) {
+        const attachments = this.parent.studio.attachments.map(att => ({
+          ...att,
+          file: att.file || att.file_meta,
+          x: att.x ?? null,
+          y: att.y ?? null
+        }));
+
+        // Ensure positions exist
+        if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureAttachmentPosition === 'function') {
+          attachments.forEach(a => this.parent.eventHandler.ensureAttachmentPosition(a));
+        }
+
+        this.state.setAttachments(attachments);
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 
@@ -126,7 +143,7 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}`;
+        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length}`;
 
 
     } catch (error) {

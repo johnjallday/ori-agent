@@ -13,25 +13,30 @@
 function openCreateWorkspaceModal() {
     // Populate agent selection
     const container = document.getElementById('agents-selection');
+    if (!container) {
+        console.warn('[workspace-create] agents-selection container not found; continuing without agent list');
+    }
 
     // Ensure availableAgents is initialized
     if (!window.availableAgents) {
         window.availableAgents = [];
     }
 
-    container.innerHTML = window.availableAgents.map(agent => `
-        <div class="col-md-6">
-            <div class="modern-card p-3">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="agent-${escapeHtml(agent.name)}"
-                           value="${escapeHtml(agent.name)}" onchange="toggleAgent('${escapeHtml(agent.name)}')">
-                    <label class="form-check-label" for="agent-${escapeHtml(agent.name)}" style="color: var(--text-primary);">
-                        ${escapeHtml(agent.name)}
-                    </label>
+    if (container) {
+        container.innerHTML = window.availableAgents.map(agent => `
+            <div class="col-md-6">
+                <div class="modern-card p-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="agent-${escapeHtml(agent.name)}"
+                               value="${escapeHtml(agent.name)}" onchange="toggleAgent('${escapeHtml(agent.name)}')">
+                        <label class="form-check-label" for="agent-${escapeHtml(agent.name)}" style="color: var(--text-primary);">
+                            ${escapeHtml(agent.name)}
+                        </label>
+                    </div>
                 </div>
             </div>
-        </div>
-    `).join('');
+        `).join('');
+    }
 
     // Reset selected agents
     selectedAgents = new Set();

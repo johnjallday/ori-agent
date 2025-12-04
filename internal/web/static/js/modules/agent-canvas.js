@@ -91,6 +91,7 @@ class AgentCanvas {
     // Subscribe to state changes that require redraw
     this.state.on(EVENT_TYPES.AGENT_MOVED, () => this.draw());
     this.state.on(EVENT_TYPES.TASK_MOVED, () => this.draw());
+    this.state.on(EVENT_TYPES.ATTACHMENT_MOVED, () => this.draw());
     this.state.on(EVENT_TYPES.CANVAS_PANNED, () => this.draw());
     this.state.on(EVENT_TYPES.CANVAS_ZOOMED, () => this.draw());
   }
@@ -107,6 +108,9 @@ class AgentCanvas {
 
   get tasks() { return this.state.tasks; }
   set tasks(value) { this.state.setTasks(value); }
+
+  get attachments() { return this.state.attachments; }
+  set attachments(value) { this.state.setAttachments(value); }
 
   get messages() { return this.state.messages; }
   set messages(value) { this.state.messages = value; }
@@ -140,8 +144,14 @@ class AgentCanvas {
   get isDraggingTask() { return this.state.isDraggingTask; }
   set isDraggingTask(value) { this.state.isDraggingTask = value; }
 
+  get isDraggingAttachment() { return this.state.isDraggingAttachment; }
+  set isDraggingAttachment(value) { this.state.isDraggingAttachment = value; }
+
   get draggedTask() { return this.state.draggedTask; }
   set draggedTask(value) { this.state.draggedTask = value; }
+
+  get draggedAttachment() { return this.state.draggedAttachment; }
+  set draggedAttachment(value) { this.state.draggedAttachment = value; }
 
   get isDraggingConnection() { return this.state.isDraggingConnection; }
   set isDraggingConnection(value) { this.state.isDraggingConnection = value; }
@@ -373,6 +383,9 @@ class AgentCanvas {
 
     // Draw task flows
     this.renderer.drawTaskFlows();
+
+    // Draw attachments
+    this.renderer.drawAttachments();
 
     // Draw task input connections (task-to-task and task-to-merge)
     this.renderer.drawResultConnections();
@@ -821,6 +834,39 @@ class AgentCanvas {
   }
 
   /**
+   * Delete a connection by id (utility for context menu)
+   */
+  deleteConnection(connectionId) {
+    if (!connectionId) return;
+    const idx = this.state.connections.findIndex(c => c.id === connectionId);
+    if (idx !== -1) {
+      this.state.connections.splice(idx, 1);
+      this.saveLayout();
+      this.draw();
+    }
+  }
+
+  /**
+   * Delete an attachment node
+   */
+  async deleteAttachment(attachment) {
+    if (!attachment || !attachment.id || !this.studioId) {
+      alert('Cannot delete attachment: missing ID or workspace');
+      return;
+    }
+    try {
+      await apiDelete(`/api/studios/${this.studioId}/attachments/${attachment.id}`);
+      this.state.removeAttachment(attachment.id);
+      this.saveLayout();
+      this.draw();
+      this.notifications?.showNotification?.('Attachment deleted', 'success');
+    } catch (err) {
+      console.error('Failed to delete attachment', err);
+      alert('Failed to delete attachment: ' + (err?.message || err));
+    }
+  }
+
+  /**
    * Find the most recent task associated with an agent so combiners can treat
    * direct agent connections as inputs.
    */
@@ -972,6 +1018,51 @@ class AgentCanvas {
   /**
    * Create a connection between two nodes (agent/combiner to agent/combiner)
    */
+  createConnection(fromNodeId, fromPort, toNodeId, toPort) {
+    const fromNode = this.helpers.getNodeById(fromNodeId);
+    const toNode = this.helpers.getNodeById(toNodeId);
+
+    if (!fromNode || !toNode) {
+      console.warn('Cannot create connection: missing node', { fromNodeId, toNodeId });
+      return null;
+    }
+
+    // Enforce attachment direction: attachments can only connect outward to tasks/agents
+    if (fromNode.type === 'attachment' && !(toNode.type === 'task' || toNode.type === 'agent')) {
+      this.notifications?.showNotification?.('Attachments can only connect to tasks or agents', 'warning');
+      return null;
+    }
+    if (toNode.type === 'attachment') {
+      this.notifications?.showNotification?.('Attachments cannot receive connections', 'warning');
+      return null;
+    }
+
+    // Avoid duplicate connections
+    const existing = this.state.connections.find(conn =>
+      conn.from === fromNodeId &&
+      conn.to === toNodeId &&
+      conn.fromPort === fromPort &&
+      conn.toPort === toPort
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const conn = {
+      id: `conn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      from: fromNodeId,
+      fromPort,
+      to: toNodeId,
+      toPort,
+      color: '#cbd5e1',
+      animated: false
+    };
+
+    this.state.connections.push(conn);
+    this.saveLayout();
+    this.draw();
+    return conn;
+  }
 
   /**
    * Get node by ID (searches both agents and combiners)

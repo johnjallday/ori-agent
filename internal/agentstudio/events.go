@@ -33,6 +33,11 @@ const (
 	EventTaskToolCall   EventType = "task.tool_call"   // Agent is calling a tool
 	EventTaskToolResult EventType = "task.tool_result" // Tool call completed
 
+	// Attachment events
+	EventAttachmentCreated EventType = "attachment.created"
+	EventAttachmentUpdated EventType = "attachment.updated"
+	EventAttachmentDeleted EventType = "attachment.deleted"
+
 	// Workflow events
 	EventWorkflowStarted   EventType = "workflow.started"
 	EventWorkflowCompleted EventType = "workflow.completed"

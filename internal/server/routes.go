@@ -416,6 +416,17 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
+		} else if strings.Contains(r.URL.Path, "/attachments") {
+			// Handle attachment operations
+			if r.Method == http.MethodPost {
+				s.studioHandler.CreateAttachment(w, r)
+			} else if r.Method == http.MethodPatch {
+				s.studioHandler.UpdateAttachment(w, r)
+			} else if r.Method == http.MethodDelete {
+				s.studioHandler.DeleteAttachment(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		} else if strings.Contains(r.URL.Path, "/agents") {
 			// Handle agent add/remove operations
 			if r.Method == http.MethodPost {

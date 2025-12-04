@@ -22,6 +22,16 @@ function hideAgentDetails() {
 }
 
 /**
+ * Hide attachment details panel
+ */
+function hideAttachmentDetails() {
+  const panel = document.getElementById('attachment-details-panel');
+  if (panel) {
+    panel.style.display = 'none';
+  }
+}
+
+/**
  * Show task details in the sidebar
  */
 function showTaskDetails(task) {
@@ -29,17 +39,18 @@ function showTaskDetails(task) {
 
   // Hide agent details if showing
   hideAgentDetails();
+  hideAttachmentDetails();
 
   // Force close all canvas panels
   if (window.agentCanvas && window.agentCanvas.state) {
     console.log('[SIDEBAR] Closing canvas panels');
     window.agentCanvas.state.expandedPanelWidth = 0;
     window.agentCanvas.state.expandedTask = null;
-    window.agentCanvas.state.expandedAgentPanelWidth = 0;
-    window.agentCanvas.state.expandedAgent = null;
-    window.agentCanvas.state.expandedCombinerPanelWidth = 0;
-    window.agentCanvas.state.expandedCombiner = null;
-    if (window.agentCanvas.draw) window.agentCanvas.draw();
+  window.agentCanvas.state.expandedAgentPanelWidth = 0;
+  window.agentCanvas.state.expandedAgent = null;
+  window.agentCanvas.state.expandedCombinerPanelWidth = 0;
+  window.agentCanvas.state.expandedCombiner = null;
+  if (window.agentCanvas.draw) window.agentCanvas.draw();
   }
 
   const panel = document.getElementById('task-details-panel');
@@ -335,6 +346,94 @@ function showTaskDetails(task) {
   console.log('[SIDEBAR] Task details populated');
 }
 
+function escapeHTML(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Show attachment details in the sidebar
+ */
+function showAttachmentDetails(att) {
+  // Hide other panels
+  hideAgentDetails();
+  const taskPanel = document.getElementById('task-details-panel');
+  if (taskPanel) taskPanel.style.display = 'none';
+
+  // Close canvas panels
+  if (window.agentCanvas && window.agentCanvas.state) {
+    window.agentCanvas.state.expandedPanelWidth = 0;
+    window.agentCanvas.state.expandedTask = null;
+    window.agentCanvas.state.expandedAgentPanelWidth = 0;
+    window.agentCanvas.state.expandedAgent = null;
+    window.agentCanvas.state.expandedCombinerPanelWidth = 0;
+    window.agentCanvas.state.expandedCombiner = null;
+    if (window.agentCanvas.draw) window.agentCanvas.draw();
+  }
+
+  const panel = document.getElementById('attachment-details-panel');
+  const content = document.getElementById('attachment-details-content');
+  if (!panel || !content) return;
+
+  panel.style.display = 'block';
+
+  const badgeColor = att.color || '#3b82f6';
+  const typeLabel = (att.type || 'other').toUpperCase();
+  const fileMeta = att.file || att.file_meta;
+  const bodyHtml = att.body
+    ? (window.marked ? window.marked.parse(att.body) : `<pre style="white-space: pre-wrap; margin:0;">${escapeHTML(att.body)}</pre>`)
+    : '<div class="text-muted" style="font-size: 0.85rem;">No body</div>';
+
+  const linkHtml = att.link_url
+    ? `<a href="${att.link_url}" target="_blank" rel="noopener" style="font-size: 0.85rem;">${att.link_url}</a>`
+    : '<span class="text-muted" style="font-size: 0.85rem;">No link</span>';
+
+  const fileHtml = fileMeta && (fileMeta.name || fileMeta.url)
+    ? `<div style="font-size: 0.85rem;">${fileMeta.name || 'File'}${fileMeta.size ? ` • ${(fileMeta.size/1024).toFixed(1)} KB` : ''}${fileMeta.url ? ` • <a href="${fileMeta.url}" target="_blank" rel="noopener">open</a>` : ''}</div>`
+    : '<span class="text-muted" style="font-size: 0.85rem;">No file</span>';
+
+  const created = att.created_at ? new Date(att.created_at).toLocaleString() : '—';
+  const updated = att.updated_at ? new Date(att.updated_at).toLocaleString() : '—';
+
+  content.innerHTML = `
+    <div class="mb-2 d-flex align-items-center gap-2">
+      <div style="width: 12px; height: 12px; border-radius: 50%; background: ${badgeColor};"></div>
+      <strong style="color: var(--text-primary);">${escapeHTML(att.title || 'Attachment')}</strong>
+    </div>
+    <div class="mb-3">
+      <span class="badge" style="background:${badgeColor}; color: #fff; font-size: 0.7rem;">${typeLabel}</span>
+    </div>
+    <div class="mb-3 d-flex gap-2">
+      <button class="btn btn-sm btn-outline-primary flex-fill" onclick="editAttachment('${att.id || ''}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom;">
+          <path d="M12 20h9"></path>
+          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
+        </svg>
+        Edit
+      </button>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Link:</strong><br>${linkHtml}
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">File:</strong><br>${fileHtml}
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Body:</strong>
+      <div class="mt-2" style="max-height: 240px; overflow-y: auto;">${bodyHtml}</div>
+    </div>
+    <div class="mb-2 text-muted" style="font-size: 0.8rem;">
+      Created: ${created}<br>
+      Updated: ${updated}
+    </div>
+  `;
+}
+
 /**
  * Hide task details panel
  */
@@ -505,6 +604,134 @@ async function showAddTaskModal() {
   } catch (error) {
     console.error('Error creating task:', error);
     alert(`Error creating task: ${error.message}`);
+  }
+}
+
+/**
+ * Show add attachment prompt (quick create)
+ */
+async function showAddAttachmentModal() {
+  const title = prompt('Enter attachment title:');
+  if (!title || !title.trim()) {
+    return;
+  }
+
+  const body = prompt('Add a note/body (optional):', '') || '';
+  const link = prompt('Link URL (optional):', '') || '';
+  const filePath = prompt('File path to reference (optional):', '') || '';
+
+  const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+  if (!studioId) {
+    alert('No studio loaded');
+    return;
+  }
+
+  const fileMeta = filePath
+    ? {
+        name: getFileNameFromPath(filePath),
+        url: filePath
+      }
+    : null;
+
+  const attachment = {
+    title: title.trim(),
+    body: body,
+    type: guessAttachmentType(body, link, fileMeta),
+    color: '',
+    link_url: link || '',
+    file_meta: fileMeta,
+    x: 140,
+    y: 140
+  };
+
+  try {
+    const response = await fetch(`/api/studios/${studioId}/attachments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(attachment)
+    });
+
+    if (response.ok) {
+      console.log('Attachment created successfully');
+      window.location.reload();
+    } else {
+      const error = await response.text();
+      alert(`Failed to create attachment: ${error}`);
+    }
+  } catch (error) {
+    console.error('Error creating attachment:', error);
+    alert(`Error creating attachment: ${error.message}`);
+  }
+}
+
+function guessAttachmentType(body, link, fileMeta) {
+  const lowerLink = (link || '').toLowerCase();
+  const lowerName = (fileMeta?.name || '').toLowerCase();
+  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.svg'];
+
+  const isImage = (src) => imageExts.some(ext => src.endsWith(ext));
+
+  if (fileMeta && isImage(lowerName)) return 'image';
+  if (lowerLink && isImage(lowerLink)) return 'image';
+  if (fileMeta && (fileMeta.mime || '').toLowerCase().startsWith('image/')) return 'image';
+
+  // Fallback: doc for text-ish, other otherwise
+  if (body && body.length > 0) return 'doc';
+  return 'other';
+}
+
+function getFileNameFromPath(path) {
+  if (!path) return '';
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
+/**
+ * Basic prompt-based editor for an attachment
+ */
+async function editAttachment(attachmentId) {
+  if (!attachmentId || !window.agentCanvas) return;
+  const existing = window.agentCanvas.state.attachments.find(a => a.id === attachmentId);
+  if (!existing) {
+    alert('Attachment not found');
+    return;
+  }
+
+  const title = prompt('Title', existing.title || '') ?? existing.title;
+  const body = prompt('Body (markdown ok)', existing.body || '') ?? existing.body;
+  const link = prompt('Link URL', existing.link_url || '') ?? existing.link_url;
+  const color = prompt('Color hex', existing.color || '') ?? existing.color;
+  const filePath = prompt('File path/URL', (existing.file || existing.file_meta || {}).url || '') || '';
+  const fileMeta = filePath ? { name: getFileNameFromPath(filePath), url: filePath } : (existing.file || existing.file_meta || null);
+
+  try {
+    const resp = await fetch(`/api/studios/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        body,
+        link_url: link,
+        color,
+        file_meta: fileMeta,
+        type: guessAttachmentType(body, link, fileMeta)
+      })
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to update attachment');
+    }
+    // Refresh
+    if (window.agentCanvas && window.agentCanvas.init) {
+      await window.agentCanvas.init();
+    }
+    if (window.showAttachmentDetails) {
+      const updated = window.agentCanvas.state.attachments.find(a => a.id === attachmentId);
+      if (updated) window.showAttachmentDetails(updated);
+    }
+  } catch (err) {
+    console.error('Failed to update attachment', err);
+    alert('Failed to update attachment: ' + err.message);
   }
 }
 
@@ -694,10 +921,14 @@ async function unassignCurrentTask() {
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
+window.hideAttachmentDetails = hideAttachmentDetails;
+window.showAttachmentDetails = showAttachmentDetails;
+window.editAttachment = editAttachment;
 window.hideTaskDetails = hideTaskDetails;
 window.showCombinerDetails = showCombinerDetails;
 window.hideCombinerDetails = hideCombinerDetails;
-window.showAddTaskModal = showAddTaskModal;
+  window.showAddTaskModal = showAddTaskModal;
+  window.showAddAttachmentModal = showAddAttachmentModal;
 window.editCurrentTask = editCurrentTask;
 window.deleteCurrentTask = deleteCurrentTask;
 window.unassignCurrentTask = unassignCurrentTask;
@@ -1435,6 +1666,7 @@ async function showAgentDetails(agent) {
 
     // Hide task details if showing
     hideTaskDetails();
+    hideAttachmentDetails();
 
     // Hide combiner details if showing
     if (typeof hideCombinerDetails === 'function') {
@@ -1468,6 +1700,7 @@ async function showAgentDetails(agent) {
   let model = 'N/A';
   let temperature = 1.0;
   const lastResult = agent.lastResult || '';
+  let systemPrompt = '';
 
   try {
     // Fetch full agent details from settings file
@@ -1484,6 +1717,7 @@ async function showAgentDetails(agent) {
     agentType = agentSettings?.type || 'tool-calling';
     model = agentSettings?.Settings?.model || 'N/A';
     temperature = agentSettings?.Settings?.temperature || 1.0;
+    systemPrompt = agentSettings?.Settings?.system || '';
   } catch (error) {
     console.error('Failed to load agent details:', error);
   }
@@ -1548,6 +1782,15 @@ async function showAgentDetails(agent) {
         <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Last Result</h6>
         <div class="p-2" style="background: #0b1525; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto;">
           ${escapeHtml(lastResult.toString())}
+        </div>
+      </div>
+    ` : ''}
+
+    ${systemPrompt ? `
+      <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">System Prompt</h6>
+        <div class="p-2" style="background: #0b1525; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 0.85rem; max-height: 240px; overflow-y: auto; white-space: pre-wrap;">
+          ${escapeHtml(systemPrompt)}
         </div>
       </div>
     ` : ''}

@@ -22,6 +22,9 @@ export function createEventStream(studioId, handlers) {
   source.addEventListener('task.tool_success', (event) => safe(handlers.onTaskToolSuccess)(event));
   source.addEventListener('task.tool_error', (event) => safe(handlers.onTaskToolError)(event));
   source.addEventListener('task.progress', (event) => safe(handlers.onTaskProgress)(event));
+  source.addEventListener('attachment.created', (event) => safe(handlers.onAttachmentEvent)(event));
+  source.addEventListener('attachment.updated', (event) => safe(handlers.onAttachmentEvent)(event));
+  source.addEventListener('attachment.deleted', (event) => safe(handlers.onAttachmentEvent)(event));
 
   source.onerror = (error) => safe(handlers.onError)(error);
 
@@ -74,6 +77,10 @@ export function connectProgressStream(studioId, handlers) {
     onTaskProgress: (event) => {
       const data = parseJSON(event);
       if (data && handlers.onTaskProgress) handlers.onTaskProgress(data);
+    },
+    onAttachmentEvent: (event) => {
+      const data = parseJSON(event);
+      if (data && handlers.onAttachmentEvent) handlers.onAttachmentEvent(event.type, data);
     },
     onError: (error) => {
       if (handlers.onError) handlers.onError(error);

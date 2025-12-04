@@ -356,7 +356,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 			flusher.Flush()
 
 			// After any task event, send updated workspace progress
-			if strings.HasPrefix(string(event.Type), "task.") {
+			if strings.HasPrefix(string(event.Type), "task.") || strings.HasPrefix(string(event.Type), "attachment.") {
 				sh.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
 			}
 
@@ -383,6 +383,7 @@ func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher h
 		"workspace_progress": progress,
 		"agent_stats":        agentStats,
 		"tasks":              ws.Tasks,
+		"attachments":        ws.Attachments,
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -411,6 +412,7 @@ func (sh *StreamingHandler) sendWorkspaceProgressUpdate(w http.ResponseWriter, f
 		"timestamp":          time.Now(),
 		"workspace_progress": progress,
 		"agent_stats":        agentStats,
+		"attachments":        ws.Attachments,
 	}
 
 	data, err := json.Marshal(eventData)
