@@ -217,7 +217,7 @@ function renderPluginsTable() {
 }
 
 function renderStatusBadge(plugin) {
-    // Only show status badge if there's an issue
+    // Show status badge based on plugin health
     if (plugin.health_status === 'error') {
         return `
             <span class="status-badge status-error">
@@ -234,8 +234,13 @@ function renderStatusBadge(plugin) {
         `;
     }
 
-    // No badge for healthy plugins
-    return '<span style="color: var(--text-muted); font-size: 0.85rem;">—</span>';
+    // Show "Healthy" for plugins with no issues
+    return `
+        <span class="status-badge status-active">
+            <span class="status-dot"></span>
+            Healthy
+        </span>
+    `;
 }
 
 function renderAgentList(agents) {
