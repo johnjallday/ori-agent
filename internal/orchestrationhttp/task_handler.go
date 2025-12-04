@@ -1555,3 +1555,615 @@ func (th *TaskHandler) updateTaskAssignment(ws *agentstudio.Workspace, taskID st
 
 	return -1, fmt.Errorf("task not found in workspace")
 }
+
+// SchedulerNodesHandler handles CRUD operations for scheduler nodes (canvas-based scheduled tasks)
+// GET: List all scheduler nodes in a workspace
+// POST: Create a new scheduler node
+func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		th.handleListSchedulerNodes(w, r)
+	case http.MethodPost:
+		th.handleCreateSchedulerNode(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleListSchedulerNodes lists all scheduler nodes (scheduled tasks with CanvasNodeID) for a workspace
+func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.URL.Query().Get("studio_id")
+	if workspaceID == "" {
+		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Filter scheduled tasks that have CanvasNodeID (scheduler nodes)
+	schedulerNodes := make([]map[string]interface{}, 0)
+	for _, st := range ws.ScheduledTasks {
+		if st.CanvasNodeID != "" {
+			// Get position from layout if available
+			var position *agentstudio.Position
+			if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
+				if pos, exists := ws.Layout.SchedulerPositions[st.CanvasNodeID]; exists {
+					position = &pos
+				}
+			}
+
+			node := map[string]interface{}{
+				"node_id":           st.CanvasNodeID,
+				"scheduled_task":    st,
+				"scheduled_task_id": st.ID,
+				"position":          position,
+			}
+			schedulerNodes = append(schedulerNodes, node)
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"scheduler_nodes": schedulerNodes,
+		"count":           len(schedulerNodes),
+	})
+}
+
+// handleCreateSchedulerNode creates a new scheduler node (scheduled task with canvas position)
+func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkspaceID string                     `json:"studio_id"`
+		Name        string                     `json:"name"`
+		Description string                     `json:"description"`
+		From        string                     `json:"from"`
+		To          string                     `json:"to"`
+		Prompt      string                     `json:"prompt"`
+		Priority    int                        `json:"priority"`
+		Schedule    agentstudio.ScheduleConfig `json:"schedule"`
+		Enabled     bool                       `json:"enabled"`
+		X           float64                    `json:"x"`
+		Y           float64                    `json:"y"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	// Validate required fields
+	if req.WorkspaceID == "" {
+		http.Error(w, "studio_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" {
+		http.Error(w, "from is required", http.StatusBadRequest)
+		return
+	}
+	if req.To == "" {
+		http.Error(w, "to is required", http.StatusBadRequest)
+		return
+	}
+	if req.Prompt == "" {
+		http.Error(w, "prompt is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate schedule configuration
+	if err := validateScheduleConfig(req.Schedule); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid schedule configuration", err)
+		return
+	}
+
+	// Get workspace
+	ws, err := th.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Check scheduler node limit (max 50 per workspace)
+	schedulerNodeCount := 0
+	for _, st := range ws.ScheduledTasks {
+		if st.CanvasNodeID != "" {
+			schedulerNodeCount++
+		}
+	}
+	if schedulerNodeCount >= 50 {
+		http.Error(w, "Maximum of 50 scheduler nodes per workspace reached", http.StatusBadRequest)
+		return
+	}
+
+	// Generate unique CanvasNodeID
+	nodeID := "scheduler-" + generateNodeID()
+
+	// Create scheduled task
+	now := time.Now()
+	st := agentstudio.ScheduledTask{
+		WorkspaceID:  req.WorkspaceID,
+		CanvasNodeID: nodeID,
+		Name:         req.Name,
+		Description:  req.Description,
+		From:         req.From,
+		To:           req.To,
+		Prompt:       req.Prompt,
+		Priority:     req.Priority,
+		Schedule:     req.Schedule,
+		Enabled:      req.Enabled,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	// Calculate initial NextRun if enabled
+	if st.Enabled {
+		nextRun := calculateInitialNextRun(st.Schedule, now)
+		st.NextRun = nextRun
+	}
+
+	// Add to workspace
+	if err := ws.AddScheduledTask(st); err != nil {
+		logger.Error("Failed to add scheduled task", logger.Fields{"err": err})
+		httputil.RespondError(w, http.StatusBadRequest, "Failed to add scheduler node", err)
+		return
+	}
+
+	// Initialize layout if needed
+	if ws.Layout == nil {
+		ws.Layout = &agentstudio.CanvasLayout{}
+	}
+	if ws.Layout.SchedulerPositions == nil {
+		ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
+	}
+
+	// Add position to layout
+	ws.Layout.SchedulerPositions[nodeID] = agentstudio.Position{
+		X: req.X,
+		Y: req.Y,
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		return
+	}
+
+	// Get the created scheduled task (now has ID)
+	var createdTask *agentstudio.ScheduledTask
+	for i := len(ws.ScheduledTasks) - 1; i >= 0; i-- {
+		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
+			createdTask = &ws.ScheduledTasks[i]
+			break
+		}
+	}
+
+	logger.Info("Created scheduler node in workspace", logger.Fields{
+		"node_id":           nodeID,
+		"scheduled_task_id": createdTask.ID,
+		"workspace_id":      req.WorkspaceID,
+		"name":              req.Name,
+	})
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":           true,
+		"node_id":           nodeID,
+		"scheduled_task_id": createdTask.ID,
+		"scheduled_task":    createdTask,
+	})
+}
+
+// SchedulerNodeHandler handles operations for a specific scheduler node
+// GET: Get scheduler node details
+// PUT: Update scheduler node
+// DELETE: Delete scheduler node
+func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract node ID from URL path
+	// Path format: /api/orchestration/workspaces/{workspace_id}/scheduler-nodes/{node_id}
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+
+	// Find node_id in path (should be last part)
+	if len(parts) < 2 {
+		http.Error(w, "Invalid URL: missing node ID", http.StatusBadRequest)
+		return
+	}
+	nodeID := parts[len(parts)-1]
+
+	// Handle special actions (e.g., /trigger)
+	if len(parts) >= 2 && parts[len(parts)-2] == "scheduler-nodes" {
+		// Check if there's an action after the node ID
+		// This would be like: /scheduler-nodes/{node_id}/trigger
+		// But our path only has node_id as last part, so no action here
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		th.handleGetSchedulerNode(w, r, nodeID)
+	case http.MethodPut:
+		th.handleUpdateSchedulerNode(w, r, nodeID)
+	case http.MethodDelete:
+		th.handleDeleteSchedulerNode(w, r, nodeID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetSchedulerNode retrieves a specific scheduler node
+func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
+	workspaceID := r.URL.Query().Get("studio_id")
+	if workspaceID == "" {
+		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Find scheduled task by CanvasNodeID
+	var foundTask *agentstudio.ScheduledTask
+	for i := range ws.ScheduledTasks {
+		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
+			foundTask = &ws.ScheduledTasks[i]
+			break
+		}
+	}
+
+	if foundTask == nil {
+		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		return
+	}
+
+	// Get position from layout
+	var position *agentstudio.Position
+	if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
+		if pos, exists := ws.Layout.SchedulerPositions[nodeID]; exists {
+			position = &pos
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":        nodeID,
+		"scheduled_task": foundTask,
+		"position":       position,
+	})
+}
+
+// handleUpdateSchedulerNode updates a scheduler node
+func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
+	var req struct {
+		WorkspaceID string                      `json:"studio_id"`
+		Name        *string                     `json:"name,omitempty"`
+		Description *string                     `json:"description,omitempty"`
+		Prompt      *string                     `json:"prompt,omitempty"`
+		Priority    *int                        `json:"priority,omitempty"`
+		Schedule    *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
+		Enabled     *bool                       `json:"enabled,omitempty"`
+		X           *float64                    `json:"x,omitempty"`
+		Y           *float64                    `json:"y,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		http.Error(w, "studio_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate schedule configuration if provided
+	if req.Schedule != nil {
+		if err := validateScheduleConfig(*req.Schedule); err != nil {
+			httputil.RespondError(w, http.StatusBadRequest, "Invalid schedule configuration", err)
+			return
+		}
+	}
+
+	ws, err := th.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Find scheduled task by CanvasNodeID
+	var taskIndex int = -1
+	var st *agentstudio.ScheduledTask
+	for i := range ws.ScheduledTasks {
+		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
+			taskIndex = i
+			st = &ws.ScheduledTasks[i]
+			break
+		}
+	}
+
+	if st == nil {
+		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		return
+	}
+
+	// Update fields if provided
+	if req.Name != nil {
+		st.Name = *req.Name
+	}
+	if req.Description != nil {
+		st.Description = *req.Description
+	}
+	if req.Prompt != nil {
+		st.Prompt = *req.Prompt
+	}
+	if req.Priority != nil {
+		st.Priority = *req.Priority
+	}
+	if req.Schedule != nil {
+		st.Schedule = *req.Schedule
+		// Recalculate NextRun if schedule changed
+		if st.Enabled {
+			now := time.Now()
+			nextRun := calculateInitialNextRun(st.Schedule, now)
+			st.NextRun = nextRun
+		}
+	}
+	if req.Enabled != nil {
+		wasEnabled := st.Enabled
+		st.Enabled = *req.Enabled
+
+		// Calculate NextRun when enabling
+		if st.Enabled && !wasEnabled {
+			now := time.Now()
+			nextRun := calculateInitialNextRun(st.Schedule, now)
+			st.NextRun = nextRun
+		} else if !st.Enabled && wasEnabled {
+			st.NextRun = nil
+		}
+	}
+
+	st.UpdatedAt = time.Now()
+
+	// Update in workspace
+	ws.ScheduledTasks[taskIndex] = *st
+
+	// Update position if provided
+	if req.X != nil || req.Y != nil {
+		if ws.Layout == nil {
+			ws.Layout = &agentstudio.CanvasLayout{}
+		}
+		if ws.Layout.SchedulerPositions == nil {
+			ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
+		}
+
+		pos := ws.Layout.SchedulerPositions[nodeID]
+		if req.X != nil {
+			pos.X = *req.X
+		}
+		if req.Y != nil {
+			pos.Y = *req.Y
+		}
+		ws.Layout.SchedulerPositions[nodeID] = pos
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		return
+	}
+
+	logger.Info("Updated scheduler node", logger.Fields{"node_id": nodeID})
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":        true,
+		"node_id":        nodeID,
+		"scheduled_task": st,
+	})
+}
+
+// handleDeleteSchedulerNode deletes a scheduler node
+func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
+	workspaceID := r.URL.Query().Get("studio_id")
+	if workspaceID == "" {
+		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Find and delete scheduled task by CanvasNodeID
+	found := false
+	for i := range ws.ScheduledTasks {
+		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
+			scheduledTaskID := ws.ScheduledTasks[i].ID
+			if err := ws.DeleteScheduledTask(scheduledTaskID); err != nil {
+				logger.Error("Failed to delete scheduled task", logger.Fields{"scheduled_task_id": scheduledTaskID, "err": err})
+				httputil.RespondError(w, http.StatusInternalServerError, "Failed to delete scheduler node", err)
+				return
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		return
+	}
+
+	// Remove position from layout
+	if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
+		delete(ws.Layout.SchedulerPositions, nodeID)
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		return
+	}
+
+	logger.Info("Deleted scheduler node", logger.Fields{"node_id": nodeID})
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Scheduler node deleted successfully",
+		"node_id": nodeID,
+	})
+}
+
+// SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
+func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract node ID from URL path
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+	if len(parts) < 2 {
+		http.Error(w, "Invalid URL: missing node ID", http.StatusBadRequest)
+		return
+	}
+	nodeID := parts[len(parts)-2] // node ID is before "trigger"
+
+	workspaceID := r.URL.Query().Get("studio_id")
+	if workspaceID == "" {
+		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
+		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		return
+	}
+
+	// Find scheduled task by CanvasNodeID
+	var foundTask *agentstudio.ScheduledTask
+	for i := range ws.ScheduledTasks {
+		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
+			foundTask = &ws.ScheduledTasks[i]
+			break
+		}
+	}
+
+	if foundTask == nil {
+		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		return
+	}
+
+	// Use existing trigger endpoint logic by calling handleTriggerScheduledTask
+	// Create a task from the scheduled task
+	task := agentstudio.Task{
+		WorkspaceID: ws.ID,
+		From:        foundTask.From,
+		To:          foundTask.To,
+		Description: foundTask.Prompt,
+		Priority:    foundTask.Priority,
+		Context:     foundTask.Context,
+		Status:      agentstudio.TaskStatusPending,
+	}
+
+	if err := ws.AddTask(task); err != nil {
+		logger.Error("Failed to create task from scheduler node", logger.Fields{"node_id": nodeID, "err": err})
+		httputil.RespondError(w, http.StatusBadRequest, "Failed to trigger scheduler node", err)
+		return
+	}
+
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		return
+	}
+
+	// Get the created task ID
+	var taskID string
+	if len(ws.Tasks) > 0 {
+		taskID = ws.Tasks[len(ws.Tasks)-1].ID
+	}
+
+	logger.Info("Manually triggered scheduler node, created task", logger.Fields{"node_id": nodeID, "task_id": taskID})
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"task_id": taskID,
+		"message": "Scheduler node triggered successfully",
+	})
+}
+
+// validateScheduleConfig validates a schedule configuration
+func validateScheduleConfig(config agentstudio.ScheduleConfig) error {
+	switch config.Type {
+	case agentstudio.ScheduleOnce:
+		if config.ExecuteAt == nil {
+			return fmt.Errorf("execute_at is required for 'once' schedule type")
+		}
+		if config.ExecuteAt.Before(time.Now()) {
+			return fmt.Errorf("execute_at must be in the future")
+		}
+
+	case agentstudio.ScheduleInterval:
+		if config.Interval <= 0 {
+			return fmt.Errorf("interval must be positive for 'interval' schedule type")
+		}
+
+	case agentstudio.ScheduleDaily:
+		if config.TimeOfDay == "" {
+			return fmt.Errorf("time_of_day is required for 'daily' schedule type")
+		}
+		if _, _, err := parseScheduleTime(config.TimeOfDay); err != nil {
+			return fmt.Errorf("invalid time_of_day format: %w", err)
+		}
+
+	case agentstudio.ScheduleWeekly:
+		if config.TimeOfDay == "" {
+			return fmt.Errorf("time_of_day is required for 'weekly' schedule type")
+		}
+		if _, _, err := parseScheduleTime(config.TimeOfDay); err != nil {
+			return fmt.Errorf("invalid time_of_day format: %w", err)
+		}
+		if config.DayOfWeek < 0 || config.DayOfWeek > 6 {
+			return fmt.Errorf("day_of_week must be between 0 (Sunday) and 6 (Saturday)")
+		}
+
+	case agentstudio.ScheduleCron:
+		if config.CronExpr == "" {
+			return fmt.Errorf("cron_expr is required for 'cron' schedule type")
+		}
+		if err := agentstudio.ValidateCronExpression(config.CronExpr); err != nil {
+			return fmt.Errorf("invalid cron expression: %w", err)
+		}
+
+	case agentstudio.ScheduleRelativeDelay:
+		if config.DelayDuration <= 0 {
+			return fmt.Errorf("delay_duration must be positive for 'relative_delay' schedule type")
+		}
+
+	default:
+		return fmt.Errorf("unknown schedule type: %s", config.Type)
+	}
+
+	return nil
+}
+
+// generateNodeID generates a unique node ID
+func generateNodeID() string {
+	return time.Now().Format("20060102150405") + "-" + fmt.Sprintf("%d", time.Now().UnixNano()%10000)
+}

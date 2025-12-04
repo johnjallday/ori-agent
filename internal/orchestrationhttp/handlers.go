@@ -221,3 +221,21 @@ func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	h.workspaceHandler.SaveLayoutHandler(w, r)
 }
+
+// SchedulerNodesHandler handles listing and creating scheduler nodes (canvas-based scheduled tasks)
+// Delegates to TaskHandler for modular organization
+func (h *Handler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.SchedulerNodesHandler(w, r)
+}
+
+// SchedulerNodeHandler handles get/update/delete for a specific scheduler node
+// Delegates to TaskHandler for modular organization
+func (h *Handler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.SchedulerNodeHandler(w, r)
+}
+
+// SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
+// Delegates to TaskHandler for modular organization
+func (h *Handler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.SchedulerNodeTriggerHandler(w, r)
+}
