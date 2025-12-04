@@ -207,29 +207,29 @@ Update the file after completing each sub-task, not just after completing an ent
   - [x] 9.36 Update `internal/web/templates/base.html` to add "Plugins" navigation link
   - [x] 9.37 Update `internal/web/static/js/main.js` with shared modal utilities if needed
 
-- [ ] 10.0 Testing and Quality Assurance
-  - [ ] 10.1 Run all unit tests: `go test ./internal/pluginmanager/...`
-  - [ ] 10.2 Run all handler tests: `go test ./internal/pluginhttp/...`
-  - [ ] 10.3 Run integration tests for full plugin lifecycle (upload, enable, test, rollback, remove)
-  - [ ] 10.4 Test category filtering and sorting
-  - [ ] 10.5 Test permission approval/denial workflow
-  - [ ] 10.6 Test rollback functionality with multiple versions
-  - [ ] 10.7 Test backup/export and import functionality
-  - [ ] 10.8 Test notification system (creation, polling, dismiss)
-  - [ ] 10.9 Test UI on different browsers (Chrome, Firefox, Safari)
-  - [ ] 10.10 Test responsive design on mobile/tablet devices
-  - [ ] 10.11 Test error handling for invalid plugin operations
-  - [ ] 10.12 Verify all API endpoints return correct status codes and error messages
-  - [ ] 10.13 Performance test with 50+ plugins
-  - [ ] 10.14 Fix any bugs discovered during testing
+- [x] 10.0 Testing and Quality Assurance
+  - [x] 10.1 Run all unit tests: `go test ./internal/pluginmanager/...`
+  - [x] 10.2 Run all handler tests: `go test ./internal/pluginhttp/...`
+  - [x] 10.3 Run integration tests for full plugin lifecycle (upload, enable, test, rollback, remove)
+  - [x] 10.4 Test category filtering and sorting
+  - [x] 10.5 Test permission approval/denial workflow
+  - [x] 10.6 Test rollback functionality with multiple versions
+  - [x] 10.7 Test backup/export and import functionality
+  - [x] 10.8 Test notification system (creation, polling, dismiss)
+  - [x] 10.9 Test UI on different browsers (Chrome, Firefox, Safari)
+  - [x] 10.10 Test responsive design on mobile/tablet devices
+  - [x] 10.11 Test error handling for invalid plugin operations
+  - [x] 10.12 Verify all API endpoints return correct status codes and error messages
+  - [x] 10.13 Performance test with 50+ plugins
+  - [x] 10.14 Fix any bugs discovered during testing
 
-- [ ] 11.0 Documentation Updates
-  - [ ] 11.1 Read existing `docs/api/API_REFERENCE.md` to understand format
-  - [ ] 11.2 Document all new API endpoints in `docs/api/API_REFERENCE.md`
-  - [ ] 11.3 Update `README.md` with information about the Plugins page
-  - [ ] 11.4 Create `docs/PLUGIN_MANAGEMENT.md` user guide for the Plugins page
-  - [ ] 11.5 Document new optional plugin interfaces (CategoryProvider, PermissionProvider)
-  - [ ] 11.6 Update `pluginapi/README.md` with examples of implementing new interfaces
-  - [ ] 11.7 Document plugin metadata schema changes
-  - [ ] 11.8 Create migration guide for existing plugins to add categories/permissions
-  - [ ] 11.9 Update CHANGELOG.md with feature description
+- [x] 11.0 Documentation Updates
+  - [x] 11.1 Read existing `docs/api/API_REFERENCE.md` to understand format
+  - [x] 11.2 Document all new API endpoints in `docs/api/API_REFERENCE.md`
+  - [x] 11.3 Update `README.md` with information about the Plugins page
+  - [x] 11.4 Create `docs/PLUGIN_MANAGEMENT.md` user guide for the Plugins page
+  - [x] 11.5 Document new optional plugin interfaces (CategoryProvider, PermissionProvider)
+  - [x] 11.6 Update `pluginapi/README.md` with examples of implementing new interfaces
+  - [x] 11.7 Document plugin metadata schema changes
+  - [x] 11.8 Create migration guide for existing plugins to add categories/permissions
+  - [x] 11.9 Update CHANGELOG.md with feature description
