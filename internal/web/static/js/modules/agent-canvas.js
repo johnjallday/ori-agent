@@ -387,6 +387,9 @@ class AgentCanvas {
     // Draw attachments
     this.renderer.drawAttachments();
 
+    // Draw scheduler nodes
+    this.renderer.drawSchedulerNodes();
+
     // Draw task input connections (task-to-task and task-to-merge)
     this.renderer.drawResultConnections();
 

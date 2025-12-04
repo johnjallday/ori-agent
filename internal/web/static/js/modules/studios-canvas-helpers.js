@@ -2378,3 +2378,172 @@ window.resetCanvasView = resetCanvasView;
 window.editAgentSettings = editAgentSettings;
 window.cancelEditAgentSettings = cancelEditAgentSettings;
 window.saveAgentSettings = saveAgentSettings;
+
+// ============================================================================
+// Scheduler Node Functions
+// ============================================================================
+
+/**
+ * Show add scheduler node modal
+ */
+async function showAddSchedulerNodeModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addSchedulerNodeModal'));
+  modal.show();
+}
+
+/**
+ * Update schedule input fields based on selected schedule type
+ */
+function updateScheduleInputs() {
+  const scheduleType = document.getElementById('scheduler-type').value;
+
+  // Hide all config sections
+  document.querySelectorAll('.schedule-type-config').forEach(el => {
+    el.style.display = 'none';
+  });
+
+  // Show relevant config section
+  const configMap = {
+    'interval': 'interval-config',
+    'daily': 'daily-config',
+    'weekly': 'weekly-config',
+    'cron': 'cron-config',
+    'relative_delay': 'relative-delay-config'
+  };
+
+  const configId = configMap[scheduleType];
+  if (configId) {
+    document.getElementById(configId).style.display = 'block';
+  }
+}
+
+/**
+ * Toggle end date input visibility
+ */
+function toggleEndDate() {
+  const checkbox = document.getElementById('has-end-date');
+  const input = document.getElementById('end-date');
+  input.style.display = checkbox.checked ? 'block' : 'none';
+}
+
+/**
+ * Build schedule config object from form inputs
+ */
+function buildScheduleConfig() {
+  const scheduleType = document.getElementById('scheduler-type').value;
+  const config = {
+    schedule_type: scheduleType
+  };
+
+  switch (scheduleType) {
+    case 'interval':
+      config.interval_minutes = parseInt(document.getElementById('interval-minutes').value);
+      break;
+
+    case 'daily':
+      const dailyTime = document.getElementById('daily-time').value;
+      const [dailyHour, dailyMinute] = dailyTime.split(':').map(v => parseInt(v));
+      config.hour = dailyHour;
+      config.minute = dailyMinute;
+      break;
+
+    case 'weekly':
+      const weeklyTime = document.getElementById('weekly-time').value;
+      const [weeklyHour, weeklyMinute] = weeklyTime.split(':').map(v => parseInt(v));
+      const dayOfWeek = parseInt(document.getElementById('weekly-day').value);
+      config.day_of_week = dayOfWeek;
+      config.hour = weeklyHour;
+      config.minute = weeklyMinute;
+      break;
+
+    case 'cron':
+      config.cron_expr = document.getElementById('cron-expr').value.trim();
+      if (!config.cron_expr) {
+        throw new Error('Cron expression is required');
+      }
+      break;
+
+    case 'relative_delay':
+      config.delay_duration = parseInt(document.getElementById('delay-minutes').value);
+      config.trigger_once = document.getElementById('delay-trigger-once').checked;
+      break;
+  }
+
+  // Add end date if specified
+  if (document.getElementById('has-end-date').checked) {
+    const endDateStr = document.getElementById('end-date').value;
+    if (endDateStr) {
+      config.end_date = new Date(endDateStr).toISOString();
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Submit scheduler node creation
+ */
+async function submitSchedulerNode() {
+  try {
+    const name = document.getElementById('scheduler-name').value.trim();
+    if (!name) {
+      alert('Please enter a name for the scheduler');
+      return;
+    }
+
+    const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+    if (!studioId) {
+      alert('No workspace loaded');
+      return;
+    }
+
+    // Build schedule config
+    const scheduleConfig = buildScheduleConfig();
+
+    // Get enabled state
+    const enabled = document.getElementById('scheduler-enabled').checked;
+
+    // Create scheduler node
+    const schedulerNode = {
+      name: name,
+      schedule_config: scheduleConfig,
+      enabled: enabled,
+      x: 300,  // Default position
+      y: 300
+    };
+
+    console.log('Creating scheduler node:', schedulerNode);
+
+    const response = await fetch(`/api/orchestration/workspaces/${studioId}/scheduler-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedulerNode)
+    });
+
+    if (response.ok) {
+      console.log('Scheduler node created successfully');
+
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addSchedulerNodeModal'));
+      modal.hide();
+
+      // Reset form
+      document.getElementById('schedulerNodeForm').reset();
+
+      // Reload page to show new scheduler node
+      window.location.reload();
+    } else {
+      const error = await response.text();
+      alert(`Failed to create scheduler node: ${error}`);
+    }
+  } catch (error) {
+    console.error('Error creating scheduler node:', error);
+    alert(`Error creating scheduler node: ${error.message}`);
+  }
+}
+
+// Export functions to window
+window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
+window.updateScheduleInputs = updateScheduleInputs;
+window.toggleEndDate = toggleEndDate;
+window.submitSchedulerNode = submitSchedulerNode;
