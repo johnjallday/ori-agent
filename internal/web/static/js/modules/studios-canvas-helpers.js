@@ -2542,8 +2542,160 @@ async function submitSchedulerNode() {
   }
 }
 
+/**
+ * Set a cron preset value
+ */
+function setCronPreset(cronExpr) {
+  document.getElementById('cron-expr').value = cronExpr;
+  updateCronDescription();
+}
+
+/**
+ * Toggle the cron builder panel
+ */
+function toggleCronBuilder() {
+  const builder = document.getElementById('cron-builder');
+  const icon = document.getElementById('cron-builder-icon');
+
+  if (builder.style.display === 'none') {
+    builder.style.display = 'block';
+    // Change icon to collapse (up arrow)
+    icon.innerHTML = '<path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>';
+
+    // Populate fields from current expression
+    const cronExpr = document.getElementById('cron-expr').value.trim();
+    if (cronExpr) {
+      const parts = cronExpr.split(/\s+/);
+      if (parts.length === 5) {
+        document.getElementById('cron-minute').value = parts[0];
+        document.getElementById('cron-hour').value = parts[1];
+        document.getElementById('cron-day').value = parts[2];
+        document.getElementById('cron-month').value = parts[3];
+        document.getElementById('cron-weekday').value = parts[4];
+      }
+    }
+  } else {
+    builder.style.display = 'none';
+    // Change icon to expand (down arrow)
+    icon.innerHTML = '<path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>';
+  }
+}
+
+/**
+ * Build cron expression from individual fields
+ */
+function buildCronFromFields() {
+  const minute = document.getElementById('cron-minute').value.trim() || '*';
+  const hour = document.getElementById('cron-hour').value.trim() || '*';
+  const day = document.getElementById('cron-day').value.trim() || '*';
+  const month = document.getElementById('cron-month').value.trim() || '*';
+  const weekday = document.getElementById('cron-weekday').value.trim() || '*';
+
+  const cronExpr = `${minute} ${hour} ${day} ${month} ${weekday}`;
+  document.getElementById('cron-expr').value = cronExpr;
+  updateCronDescription();
+}
+
+/**
+ * Update the human-readable cron description
+ */
+function updateCronDescription() {
+  const cronExpr = document.getElementById('cron-expr').value.trim();
+  const descriptionDiv = document.getElementById('cron-description');
+  const descriptionText = document.getElementById('cron-description-text');
+
+  if (!cronExpr) {
+    descriptionDiv.style.display = 'none';
+    return;
+  }
+
+  const description = parseCronExpression(cronExpr);
+  if (description) {
+    descriptionText.textContent = description;
+    descriptionDiv.style.display = 'block';
+  } else {
+    descriptionDiv.style.display = 'none';
+  }
+}
+
+/**
+ * Parse a cron expression and return a human-readable description
+ */
+function parseCronExpression(cronExpr) {
+  const parts = cronExpr.split(/\s+/);
+  if (parts.length !== 5) {
+    return 'Invalid cron expression (must have 5 fields)';
+  }
+
+  const [minute, hour, day, month, weekday] = parts;
+
+  // Build description
+  let desc = 'Runs ';
+
+  // Check for every minute
+  if (minute === '*' && hour === '*' && day === '*' && month === '*' && weekday === '*') {
+    return 'Runs every minute';
+  }
+
+  // Check for specific intervals
+  if (minute.startsWith('*/')) {
+    const interval = minute.substring(2);
+    desc += `every ${interval} minutes`;
+  } else if (minute === '0' && hour.startsWith('*/')) {
+    const interval = hour.substring(2);
+    desc += `every ${interval} hours`;
+  } else if (minute === '0' && hour === '0' && day.startsWith('*/')) {
+    const interval = day.substring(2);
+    desc += `every ${interval} days`;
+  } else if (minute !== '*' && hour !== '*') {
+    // Specific time
+    const h = hour === '*' ? 'every hour' : `at ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    desc += h;
+  } else if (minute !== '*') {
+    desc += `at minute ${minute}`;
+  } else if (hour !== '*') {
+    desc += `at hour ${hour}`;
+  } else {
+    desc += 'at a specific time';
+  }
+
+  // Add day/month/weekday constraints
+  const constraints = [];
+
+  if (weekday !== '*') {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayNames = weekday.split(',').map(d => days[parseInt(d)] || `day ${d}`);
+    constraints.push(`on ${dayNames.join(', ')}`);
+  }
+
+  if (day !== '*' && weekday === '*') {
+    if (day.includes(',')) {
+      constraints.push(`on days ${day}`);
+    } else {
+      constraints.push(`on day ${day} of the month`);
+    }
+  }
+
+  if (month !== '*') {
+    const months = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthNames = month.split(',').map(m => months[parseInt(m)] || `month ${m}`);
+    constraints.push(`in ${monthNames.join(', ')}`);
+  }
+
+  if (constraints.length > 0) {
+    desc += ' ' + constraints.join(' ');
+  }
+
+  return desc;
+}
+
 // Export functions to window
 window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
 window.updateScheduleInputs = updateScheduleInputs;
 window.toggleEndDate = toggleEndDate;
 window.submitSchedulerNode = submitSchedulerNode;
+window.setCronPreset = setCronPreset;
+window.toggleCronBuilder = toggleCronBuilder;
+window.buildCronFromFields = buildCronFromFields;
+window.updateCronDescription = updateCronDescription;

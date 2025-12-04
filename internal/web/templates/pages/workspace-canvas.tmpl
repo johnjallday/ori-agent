@@ -344,8 +344,78 @@
               <div id="cron-config" class="schedule-type-config" style="display: none;">
                 <div class="mb-3">
                   <label class="form-label" style="color: var(--text-primary);">Cron Expression</label>
-                  <input type="text" class="form-control" id="cron-expr" placeholder="0 9 * * *">
+                  <input type="text" class="form-control" id="cron-expr" placeholder="0 9 * * *" oninput="updateCronDescription()">
                   <small class="text-muted">Format: minute hour day-of-month month day-of-week</small>
+                </div>
+
+                <!-- Cron Description -->
+                <div id="cron-description" class="alert alert-info py-2 px-3" style="font-size: 0.875rem; display: none;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                  </svg>
+                  <span id="cron-description-text">Enter a cron expression above</span>
+                </div>
+
+                <!-- Common Presets -->
+                <div class="mb-3">
+                  <label class="form-label" style="color: var(--text-primary); font-size: 0.875rem;">Quick Presets:</label>
+                  <div class="d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCronPreset('0 * * * *')">
+                      Every Hour
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCronPreset('0 9 * * *')">
+                      Daily at 9 AM
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCronPreset('0 0 * * 1')">
+                      Weekly (Mon)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCronPreset('0 0 1 * *')">
+                      Monthly (1st)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCronPreset('*/15 * * * *')">
+                      Every 15 min
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Cron Builder (collapsed by default) -->
+                <div class="mb-3">
+                  <button type="button" class="btn btn-sm btn-link p-0" onclick="toggleCronBuilder()" style="text-decoration: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" id="cron-builder-icon">
+                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                    </svg>
+                    <span style="color: var(--text-primary); font-size: 0.875rem;">Advanced Cron Builder</span>
+                  </button>
+
+                  <div id="cron-builder" style="display: none; margin-top: 0.75rem; padding: 1rem; background: #f8f9fa; border-radius: 6px;">
+                    <div class="row g-2">
+                      <div class="col-md-6">
+                        <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">Minute (0-59)</label>
+                        <input type="text" class="form-control form-control-sm" id="cron-minute" placeholder="*" oninput="buildCronFromFields()">
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">Hour (0-23)</label>
+                        <input type="text" class="form-control form-control-sm" id="cron-hour" placeholder="*" oninput="buildCronFromFields()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">Day of Month (1-31)</label>
+                        <input type="text" class="form-control form-control-sm" id="cron-day" placeholder="*" oninput="buildCronFromFields()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">Month (1-12)</label>
+                        <input type="text" class="form-control form-control-sm" id="cron-month" placeholder="*" oninput="buildCronFromFields()">
+                      </div>
+                      <div class="col-md-4">
+                        <label class="form-label" style="font-size: 0.75rem; color: var(--text-secondary);">Day of Week (0-6)</label>
+                        <input type="text" class="form-control form-control-sm" id="cron-weekday" placeholder="*" oninput="buildCronFromFields()">
+                      </div>
+                    </div>
+                    <div class="mt-2">
+                      <small class="text-muted" style="font-size: 0.7rem;">
+                        Use * for any, specific numbers (e.g., 5), ranges (e.g., 1-5), or steps (e.g., */15)
+                      </small>
+                    </div>
+                  </div>
                 </div>
               </div>
 
