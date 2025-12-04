@@ -80,14 +80,13 @@ async function updateStatistics() {
         if (!response.ok) {
             // Fallback to client-side calculation
             const stats = calculateStatistics(allAgents);
-            displayStatistics(stats.total, stats.active, stats.messages, stats.cost);
+            displayStatistics(stats.total, stats.messages, stats.cost);
             return;
         }
 
         const stats = await response.json();
         displayStatistics(
             stats.total_agents,
-            stats.active_agents,
             stats.total_messages,
             stats.total_cost
         );
@@ -95,14 +94,13 @@ async function updateStatistics() {
         console.error('Error loading statistics:', error);
         // Fallback to client-side calculation
         const stats = calculateStatistics(allAgents);
-        displayStatistics(stats.total, stats.active, stats.messages, stats.cost);
+        displayStatistics(stats.total, stats.messages, stats.cost);
     }
 }
 
 // Display statistics in the UI
-function displayStatistics(total, active, messages, cost) {
+function displayStatistics(total, messages, cost) {
     document.getElementById('totalAgents').textContent = total;
-    document.getElementById('activeAgents').textContent = active;
     document.getElementById('totalMessages').textContent = formatNumber(messages);
     document.getElementById('totalCost').textContent = '$' + cost.toFixed(2);
 }
@@ -110,19 +108,17 @@ function displayStatistics(total, active, messages, cost) {
 // Calculate statistics from agents (fallback)
 function calculateStatistics(agents) {
     let total = agents.length;
-    let active = 0;
     let messages = 0;
     let cost = 0;
 
     agents.forEach(agent => {
-        if (agent.status === 'active') active++;
         if (agent.statistics) {
             messages += agent.statistics.message_count || 0;
             cost += agent.statistics.total_cost || 0;
         }
     });
 
-    return { total, active, messages, cost };
+    return { total, messages, cost };
 }
 
 // Render agents in current view
@@ -163,25 +159,12 @@ function renderTableView() {
                     </div>
                 </div>
             </td>
-            <td>
-                <span class="status-badge status-${agent.status || 'idle'}">
-                    ${capitalize(agent.status || 'idle')}
-                </span>
-            </td>
             <td>${capitalize(agent.type || 'tool-calling')}</td>
             <td>${formatNumber(agent.statistics?.message_count || 0)}</td>
             <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
-            <td>${formatDate(agent.statistics?.last_active)}</td>
             <td>
                 <div class="actions-cell" onclick="event.stopPropagation()">
                     <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
-                    <button class="action-btn" onclick="editAgent('${escapeHtml(agent.name)}')">Edit</button>
-                    <select class="action-btn status-select" onchange="changeAgentStatus('${escapeHtml(agent.name)}', this.value, this)" onclick="event.stopPropagation()">
-                        <option value="">Change Status...</option>
-                        <option value="active" ${agent.status === 'active' ? 'disabled' : ''}>Active</option>
-                        <option value="idle" ${agent.status === 'idle' ? 'disabled' : ''}>Idle</option>
-                        <option value="disabled" ${agent.status === 'disabled' ? 'disabled' : ''}>Disabled</option>
-                    </select>
                     <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
                 </div>
             </td>
@@ -208,9 +191,6 @@ function renderCardView() {
                 </div>
                 <div class="agent-card-info">
                     <div class="agent-card-name">${escapeHtml(agent.name)}</div>
-                    <span class="status-badge status-${agent.status || 'idle'}">
-                        ${capitalize(agent.status || 'idle')}
-                    </span>
                 </div>
             </div>
             ${agent.metadata?.description ?
@@ -235,12 +215,8 @@ function renderCardView() {
                 </div>
             </div>
             <div class="agent-card-actions" onclick="event.stopPropagation()">
-                <select class="action-btn status-select" onchange="changeAgentStatus('${escapeHtml(agent.name)}', this.value, this)">
-                    <option value="">Change Status...</option>
-                    <option value="active" ${agent.status === 'active' ? 'disabled' : ''}>Active</option>
-                    <option value="idle" ${agent.status === 'idle' ? 'disabled' : ''}>Idle</option>
-                    <option value="disabled" ${agent.status === 'disabled' ? 'disabled' : ''}>Disabled</option>
-                </select>
+                <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
+                <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
             </div>
         `;
 
@@ -251,18 +227,13 @@ function renderCardView() {
 // Filter agents based on search and filters
 function filterAgents() {
     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
 
     filteredAgents = allAgents.filter(agent => {
         // Search filter
         const matchesSearch = !searchTerm ||
             agent.name.toLowerCase().includes(searchTerm) ||
             (agent.metadata?.description || '').toLowerCase().includes(searchTerm);
-
-        // Status filter
-        const matchesStatus = !statusFilter || agent.status === statusFilter;
-
-        return matchesSearch && matchesStatus;
+        return matchesSearch;
     });
 
     sortAgents();
@@ -286,11 +257,6 @@ function sortAgents() {
                 aVal = new Date(a.statistics?.created_at || 0);
                 bVal = new Date(b.statistics?.created_at || 0);
                 return bVal - aVal; // Newest first
-
-            case 'last_active':
-                aVal = new Date(a.statistics?.last_active || 0);
-                bVal = new Date(b.statistics?.last_active || 0);
-                return bVal - aVal; // Most recent first
 
             case 'cost':
                 aVal = a.statistics?.total_cost || 0;
@@ -337,75 +303,6 @@ function createAgent() {
 // View agent details
 function viewAgent(name) {
     window.location.href = `/agents-detail.html?name=${encodeURIComponent(name)}`;
-}
-
-// Edit agent
-function editAgent(name) {
-    window.location.href = `/agents-edit.html?name=${encodeURIComponent(name)}`;
-}
-
-// Change agent status
-async function changeAgentStatus(name, newStatus, selectElement) {
-    if (!newStatus) return; // User selected "Change Status..." placeholder
-
-    const originalStatus = allAgents.find(a => a.name === name)?.status;
-
-    // Disable the select dropdown during update
-    selectElement.disabled = true;
-
-    // Show loading state on status badge
-    const statusBadges = document.querySelectorAll('.status-badge');
-    statusBadges.forEach(badge => {
-        if (badge.closest('tr')?.onclick?.toString().includes(name) ||
-            badge.closest('.agent-card')?.onclick?.toString().includes(name)) {
-            badge.innerHTML = '⏳ Updating...';
-            badge.className = 'status-badge status-updating';
-        }
-    });
-
-    try {
-        const response = await fetch(`/api/agents/${encodeURIComponent(name)}/status`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ status: newStatus })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || 'Failed to update agent status');
-        }
-
-        // Update local agent data (optimistic update)
-        const agent = allAgents.find(a => a.name === name);
-        if (agent) {
-            agent.status = newStatus;
-        }
-
-        // Refresh the view
-        filterAgents();
-        updateStatistics();
-
-        // Show success message
-        showSuccess(`Agent "${name}" status changed to ${capitalize(newStatus)}`);
-
-    } catch (error) {
-        console.error('Error changing agent status:', error);
-        showError('Failed to change agent status: ' + error.message);
-
-        // Revert status on error
-        const agent = allAgents.find(a => a.name === name);
-        if (agent) {
-            agent.status = originalStatus;
-        }
-        filterAgents();
-
-    } finally {
-        // Re-enable the select dropdown
-        selectElement.disabled = false;
-        selectElement.value = ''; // Reset to placeholder
-    }
 }
 
 // Delete agent with confirmation

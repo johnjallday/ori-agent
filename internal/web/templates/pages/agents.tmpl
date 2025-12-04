@@ -286,53 +286,6 @@
         color: var(--text-muted);
     }
 
-    .status-badge {
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 12px;
-        font-weight: 500;
-    }
-
-    .status-active {
-        background: #d4edda;
-        color: #155724;
-    }
-
-    .dark-mode .status-active {
-        background: #1e4620;
-        color: #a8e6a3;
-    }
-
-    .status-idle {
-        background: #fff3cd;
-        color: #856404;
-    }
-
-    .dark-mode .status-idle {
-        background: #4d4020;
-        color: #f5d791;
-    }
-
-    .status-error {
-        background: #f8d7da;
-        color: #721c24;
-    }
-
-    .dark-mode .status-error {
-        background: #4a1f23;
-        color: #f5a8ad;
-    }
-
-    .status-disabled {
-        background: #e2e3e5;
-        color: #383d41;
-    }
-
-    .dark-mode .status-disabled {
-        background: #2d3035;
-        color: #9ca3af;
-    }
-
     .actions-cell {
         display: flex;
         gap: 8px;
@@ -356,23 +309,6 @@
     .action-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-    }
-
-    .status-select {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        min-width: 120px;
-        border: 1px solid var(--border-color);
-    }
-
-    .status-select:disabled {
-        opacity: 0.5;
-        cursor: wait;
-    }
-
-    .status-updating {
-        background: #d1ecf1 !important;
-        color: #0c5460 !important;
     }
 
     /* Card View */
@@ -526,10 +462,6 @@
                 <div class="stat-value" id="totalAgents">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Active</div>
-                <div class="stat-value" id="activeAgents">-</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-label">Total Messages</div>
                 <div class="stat-value" id="totalMessages">-</div>
             </div>
@@ -546,17 +478,9 @@
                 <span class="search-icon">🔍</span>
             </div>
             <div class="filters">
-                <select class="filter-select" id="statusFilter" onchange="filterAgents()">
-                    <option value="">All Status</option>
-                    <option value="active">Active</option>
-                    <option value="idle">Idle</option>
-                    <option value="disabled">Disabled</option>
-                    <option value="error">Error</option>
-                </select>
                 <select class="filter-select" id="sortSelect" onchange="sortAgents()">
                     <option value="name">Sort by Name</option>
                     <option value="created_at">Sort by Created</option>
-                    <option value="last_active">Sort by Last Active</option>
                     <option value="cost">Sort by Cost</option>
                 </select>
             </div>
@@ -577,11 +501,9 @@
                 <thead>
                     <tr>
                         <th onclick="sortTable('name')">Agent <span class="sort-icon">▼</span></th>
-                        <th onclick="sortTable('status')">Status</th>
                         <th onclick="sortTable('type')">Type</th>
                         <th onclick="sortTable('messages')">Messages</th>
                         <th onclick="sortTable('cost')">Cost</th>
-                        <th onclick="sortTable('last_active')">Last Active</th>
                         <th>Actions</th>
                     </tr>
                 </thead>

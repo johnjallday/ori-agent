@@ -26,16 +26,17 @@
         <!-- Content (hidden until loaded) -->
         <div id="content" style="display: none;">
           <!-- Agent Header -->
-          <div class="agent-header modern-card p-4 mb-4">
+          <div id="agentHeader" class="agent-header modern-card p-4 mb-4" style="display: none;">
             <div class="d-flex align-items-center gap-3">
-              <div class="agent-avatar-large" style="width: 80px; height: 80px; border-radius: 16px; background: linear-gradient(135deg, var(--primary-color), var(--primary-light)); display: flex; align-items: center; justify-content: center;">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="white">
-                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                </svg>
+              <div id="agentAvatar" class="agent-avatar-large" style="width: 80px; height: 80px; border-radius: 16px; background: linear-gradient(135deg, var(--primary-color), var(--primary-light)); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: white;">
+                --
               </div>
               <div class="flex-grow-1">
                 <h1 id="agentName" style="font-size: 28px; margin: 0 0 8px 0; color: var(--text-primary);">Loading...</h1>
                 <p id="agentDescription" class="agent-description-large" style="color: var(--text-secondary); margin: 0;">Loading description...</p>
+                <div class="d-flex align-items-center gap-2 mt-2">
+                  <span id="agentType" class="badge bg-secondary" style="font-size: 12px;">Type</span>
+                </div>
               </div>
               <div class="d-flex gap-2">
                 <a id="editButton" href="#" class="modern-btn modern-btn-primary">
@@ -54,8 +55,36 @@
             </div>
           </div>
 
+          <!-- Quick Stats -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-3">
+              <div class="section-card modern-card p-3">
+                <div style="color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Messages</div>
+                <div id="statMessages" style="font-size: 22px; font-weight: 700; color: var(--text-primary);">0</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="section-card modern-card p-3">
+                <div style="color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Tokens</div>
+                <div id="statTokens" style="font-size: 22px; font-weight: 700; color: var(--text-primary);">0</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="section-card modern-card p-3">
+                <div style="color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Cost</div>
+                <div id="statCost" style="font-size: 22px; font-weight: 700; color: var(--text-primary);">$0.0000</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="section-card modern-card p-3">
+                <div style="color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Avg Tokens</div>
+                <div id="statAvgTokens" style="font-size: 22px; font-weight: 700; color: var(--text-primary);">0</div>
+              </div>
+            </div>
+          </div>
+
           <!-- Details Grid -->
-          <div class="row g-4">
+          <div id="contentGrid" class="row g-4" style="display: none;">
             <!-- Configuration Section -->
             <div class="col-lg-6">
               <div class="section-card modern-card p-4">
@@ -69,6 +98,7 @@
                   <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Model</div>
                     <div id="agentModel" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
+                    <div id="configModel" style="display: none;"></div>
                   </div>
                   <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Provider</div>
@@ -77,10 +107,19 @@
                   <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Temperature</div>
                     <div id="agentTemperature" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
+                    <div id="configTemp" style="display: none;"></div>
+                  </div>
+                  <div class="info-item" style="padding: 12px 0; border-bottom: 1px solid var(--border-color);">
+                    <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Type</div>
+                    <div id="configType" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
                   </div>
                   <div class="info-item" style="padding: 12px 0;">
                     <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Max Tokens</div>
                     <div id="agentMaxTokens" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
+                  </div>
+                  <div class="info-item" style="padding: 12px 0;">
+                    <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Role</div>
+                    <div id="configRole" class="info-item-value" style="color: var(--text-primary);">Loading...</div>
                   </div>
                 </div>
               </div>
@@ -95,7 +134,7 @@
                   </svg>
                   System Prompt
                 </h3>
-                <div id="agentSystemPrompt" style="padding: 16px; background: var(--bg-secondary); border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">Loading...</div>
+                <div id="configPrompt" style="padding: 16px; background: var(--bg-secondary); border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">Loading...</div>
               </div>
             </div>
 
@@ -111,6 +150,62 @@
                 </h3>
                 <div id="pluginsList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
                   <div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tags Section -->
+            <div class="col-12" id="tagsSection">
+              <div class="section-card modern-card p-4">
+                <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                    <path d="M3,15V17H5L14.06,7.94L12.06,5.94L3,15M17.66,3C17.41,3 17.16,3.1 16.97,3.29L15.13,5.13L18.88,8.88L20.72,7.04C21.11,6.65 21.11,6 20.72,5.63L18.37,3.28C18.18,3.1 17.93,3 17.66,3Z" />
+                  </svg>
+                  Tags
+                </h3>
+                <div id="tagsList" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <span style="color: var(--text-secondary);">Loading tags...</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- MCP Servers Section -->
+            <div class="col-12">
+              <div class="section-card modern-card p-4" id="mcpSection" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                      <path d="M12 2C6.48 2 2 6.48 2 12H0l3 3 3-3H4C4 7.59 7.59 4 12 4s8 3.59 8 8c0 4.41-3.59 8-8 8-2.21 0-4.21-.9-5.65-2.35l-1.42 1.42C6.73 21.19 9.23 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z"/>
+                    </svg>
+                    MCP Servers
+                  </h3>
+                  <button class="modern-btn modern-btn-secondary" onclick="toggleMCPConfig()">Configure</button>
+                </div>
+                <div id="mcpList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+                  <div class="text-center py-3" style="color: var(--text-secondary);">Loading MCP servers...</div>
+                </div>
+                <div id="mcpConfigPanel" style="display: none; margin-top: 16px;"></div>
+              </div>
+            </div>
+
+            <!-- Metadata Section -->
+            <div class="col-12">
+              <div class="section-card modern-card p-4">
+                <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                    <path d="M12,6A6,6 0 1,0 18,12A6,6 0 0,0 12,6M4,20A8,8 0 0,1 12,4A8,8 0 0,1 20,12C20,17.25 16.42,20 12,20C10.29,20 8.7,19.5 7.37,18.65L4,20L4.93,16.05C4.34,14.92 4,13.71 4,12" />
+                  </svg>
+                  Activity
+                </h3>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Created</div>
+                    <div id="createdAt" style="color: var(--text-primary);">--</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="info-item-label" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;">Updated</div>
+                    <div id="updatedAt" style="color: var(--text-primary);">--</div>
+                  </div>
                 </div>
               </div>
             </div>

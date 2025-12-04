@@ -54,48 +54,73 @@ function renderAgentDetails() {
 
     // Header
     const avatar = document.getElementById('agentAvatar');
-    avatar.style.background = getAgentColor(currentAgent);
-    avatar.textContent = getAgentInitials(currentAgent.name);
+    if (avatar) {
+        avatar.style.background = getAgentColor(currentAgent);
+        avatar.textContent = getAgentInitials(currentAgent.name);
+    }
 
-    document.getElementById('agentName').textContent = currentAgent.name;
+    const nameEl = document.getElementById('agentName');
+    if (nameEl) nameEl.textContent = currentAgent.name;
 
     const description = currentAgent.metadata?.description || 'No description provided';
-    document.getElementById('agentDescription').textContent = description;
+    const descEl = document.getElementById('agentDescription');
+    if (descEl) descEl.textContent = description;
 
-    const statusBadge = document.getElementById('statusBadge');
-    const status = currentAgent.status || 'idle';
-    statusBadge.className = `status-badge status-${status}`;
-    statusBadge.textContent = capitalize(status);
+    const typeEl = document.getElementById('agentType');
+    if (typeEl) typeEl.textContent = capitalize(currentAgent.type || 'tool-calling');
 
-    document.getElementById('agentType').textContent = capitalize(currentAgent.type || 'tool-calling');
-    document.getElementById('agentModel').textContent = currentAgent.model || 'Not set';
-    document.getElementById('pluginCount').textContent = currentAgent.enabled_plugins?.length || 0;
+    const modelEl = document.getElementById('agentModel');
+    if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
+
+    const providerEl = document.getElementById('agentProvider');
+    if (providerEl) providerEl.textContent = currentAgent.provider || 'Not set';
+
+    const tempEl = document.getElementById('agentTemperature');
+    if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
+
+    const maxTokensEl = document.getElementById('agentMaxTokens');
+    if (maxTokensEl) maxTokensEl.textContent = currentAgent.max_output_tokens ?? 'Not set';
+
+    const pluginCountEl = document.getElementById('pluginCount');
+    if (pluginCountEl) pluginCountEl.textContent = currentAgent.enabled_plugins?.length || 0;
 
     // Statistics
     const stats = currentAgent.statistics || {};
-    document.getElementById('statMessages').textContent = formatNumber(stats.message_count || 0);
-    document.getElementById('statTokens').textContent = formatNumber(stats.token_usage || 0);
-    document.getElementById('statCost').textContent = '$' + (stats.total_cost || 0).toFixed(4);
+    const statMessages = document.getElementById('statMessages');
+    if (statMessages) statMessages.textContent = formatNumber(stats.message_count || 0);
+    const statTokens = document.getElementById('statTokens');
+    if (statTokens) statTokens.textContent = formatNumber(stats.token_usage || 0);
+    const statCost = document.getElementById('statCost');
+    if (statCost) statCost.textContent = '$' + (stats.total_cost || 0).toFixed(4);
 
     const avgTokens = stats.message_count > 0
         ? Math.round(stats.token_usage / stats.message_count)
         : 0;
-    document.getElementById('statAvgTokens').textContent = formatNumber(avgTokens);
+    const statAvgTokens = document.getElementById('statAvgTokens');
+    if (statAvgTokens) statAvgTokens.textContent = formatNumber(avgTokens);
 
-    document.getElementById('createdAt').textContent = formatFullDate(stats.created_at);
-    document.getElementById('lastActive').textContent = formatFullDate(stats.last_active);
-    document.getElementById('updatedAt').textContent = formatFullDate(stats.updated_at);
+    const createdAt = document.getElementById('createdAt');
+    if (createdAt) createdAt.textContent = formatFullDate(stats.created_at);
+    const updatedAt = document.getElementById('updatedAt');
+    if (updatedAt) updatedAt.textContent = formatFullDate(stats.updated_at);
 
     // Configuration
-    document.getElementById('configModel').textContent = currentAgent.model || 'Not set';
-    document.getElementById('configTemp').textContent = currentAgent.temperature || 1.0;
-    document.getElementById('configType').textContent = capitalize(currentAgent.type || 'tool-calling');
-    document.getElementById('configRole').textContent = capitalize(currentAgent.role || 'general');
+    const configModel = document.getElementById('configModel');
+    if (configModel) configModel.textContent = currentAgent.model || 'Not set';
+    const configTemp = document.getElementById('configTemp');
+    if (configTemp) configTemp.textContent = currentAgent.temperature || 1.0;
+    const configType = document.getElementById('configType');
+    if (configType) configType.textContent = capitalize(currentAgent.type || 'tool-calling');
+    const configRole = document.getElementById('configRole');
+    if (configRole) configRole.textContent = capitalize(currentAgent.role || 'general');
 
     const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
-    document.getElementById('configPrompt').textContent = systemPrompt.length > 100
-        ? systemPrompt.substring(0, 100) + '...'
-        : systemPrompt;
+    const promptEl = document.getElementById('configPrompt');
+    if (promptEl) {
+        promptEl.textContent = systemPrompt.length > 100
+            ? systemPrompt.substring(0, 100) + '...'
+            : systemPrompt;
+    }
 
     // Plugins
     renderPlugins();
@@ -107,8 +132,10 @@ function renderAgentDetails() {
     renderMCPServers();
 
     // Show content
-    document.getElementById('agentHeader').style.display = 'flex';
-    document.getElementById('contentGrid').style.display = 'grid';
+    const header = document.getElementById('agentHeader');
+    if (header) header.style.display = 'flex';
+    const grid = document.getElementById('contentGrid');
+    if (grid) grid.style.display = 'grid';
 }
 
 // Render plugins list
@@ -411,7 +438,10 @@ function escapeHtml(text) {
 }
 
 function showLoading(show) {
-    document.getElementById('loadingState').style.display = show ? 'block' : 'none';
+    const loading = document.getElementById('loadingState');
+    const content = document.getElementById('content');
+    if (loading) loading.style.display = show ? 'flex' : 'none';
+    if (content) content.style.display = show ? 'none' : 'block';
 }
 
 function showError(message) {
