@@ -217,26 +217,25 @@ function renderPluginsTable() {
 }
 
 function renderStatusBadge(plugin) {
-    let statusClass = 'status-active';
-    let statusText = 'Active';
-
+    // Only show status badge if there's an issue
     if (plugin.health_status === 'error') {
-        statusClass = 'status-error';
-        statusText = 'Error';
+        return `
+            <span class="status-badge status-error">
+                <span class="status-dot"></span>
+                Error
+            </span>
+        `;
     } else if (plugin.needs_update) {
-        statusClass = 'status-update';
-        statusText = 'Needs Update';
-    } else if (!plugin.permissions_approved) {
-        statusClass = 'status-not-configured';
-        statusText = 'Not Configured';
+        return `
+            <span class="status-badge status-update">
+                <span class="status-dot"></span>
+                Needs Update
+            </span>
+        `;
     }
 
-    return `
-        <span class="status-badge ${statusClass}">
-            <span class="status-dot"></span>
-            ${statusText}
-        </span>
-    `;
+    // No badge for healthy plugins
+    return '<span style="color: var(--text-muted); font-size: 0.85rem;">—</span>';
 }
 
 function renderAgentList(agents) {
@@ -652,8 +651,7 @@ function applyFilters() {
 function getPluginStatus(plugin) {
     if (plugin.health_status === 'error') return 'error';
     if (plugin.needs_update) return 'update';
-    if (!plugin.permissions_approved) return 'not-configured';
-    return 'active';
+    return ''; // No status for healthy plugins
 }
 
 function loadAgentFilter() {
