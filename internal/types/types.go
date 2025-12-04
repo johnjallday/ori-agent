@@ -105,6 +105,23 @@ type PluginRegistryEntry struct {
 	SupportedArch []string        `json:"supported_arch,omitempty"` // Supported architectures (amd64, arm64, all)
 	Platforms     []string        `json:"platforms,omitempty"`      // Supported platform strings (e.g., "darwin-arm64", "linux-amd64")
 	Metadata      *PluginMetadata `json:"metadata,omitempty"`       // Plugin metadata (maintainers, license, repository)
+
+	// Plugin Management Fields (added for dedicated plugins page)
+	Category            string                 `json:"category,omitempty"`             // Plugin category (e.g., "System Tools", "AI/ML")
+	Permissions         map[string]interface{} `json:"permissions,omitempty"`          // Required permissions (file_access, network_access, system_commands)
+	PermissionsApproved bool                   `json:"permissions_approved,omitempty"` // Whether permissions have been approved
+	Enabled             bool                   `json:"enabled,omitempty"`              // Whether plugin is enabled
+	HealthStatus        string                 `json:"health_status,omitempty"`        // Health status (healthy, degraded, failed)
+	LastUsed            *time.Time             `json:"last_used,omitempty"`            // When plugin was last used
+	VersionHistory      []VersionHistoryEntry  `json:"version_history,omitempty"`      // Previous versions for rollback
+}
+
+// VersionHistoryEntry tracks information about a specific plugin version for rollback
+type VersionHistoryEntry struct {
+	Version     string    `json:"version"`
+	Path        string    `json:"path"`
+	InstalledAt time.Time `json:"installed_at"`
+	Changelog   string    `json:"changelog,omitempty"`
 }
 
 // PluginRegistry contains all available plugins

@@ -33,6 +33,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
@@ -628,6 +629,34 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
+
+	// Initialize plugin management components
+	s.categoryManager = pluginmanager.NewCategoryManager()
+	s.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")
+	s.versionManager = pluginmanager.NewVersionManager("plugin_versions")
+	s.notificationManager = pluginmanager.NewNotificationManager("plugin_notifications.json")
+	s.backupManager = pluginmanager.NewBackupManager("plugin_backups")
+
+	// Initialize plugin management handlers
+	s.pluginsPageHandler = pluginhttp.NewPluginsPageHandler(
+		s.st,
+		s.registryManager,
+		s.categoryManager,
+		s.permissionManager,
+		pluginhttp.NativeLoader{},
+	)
+	s.rollbackHandler = pluginhttp.NewRollbackHandler(
+		s.st,
+		s.versionManager,
+		s.registryManager,
+		pluginhttp.NativeLoader{},
+	)
+	s.permissionsHandler = pluginhttp.NewPermissionsHandler(
+		s.permissionManager,
+		s.registryManager,
+	)
+	s.backupHandler = pluginhttp.NewBackupHandler(s.backupManager)
+	s.notificationsHandler = pluginhttp.NewNotificationsHandler(s.notificationManager)
 
 	return nil
 }

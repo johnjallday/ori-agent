@@ -129,7 +129,19 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Plugin upload endpoint (must be before catch-all /api/plugins/ pattern)
 	mux.HandleFunc("/api/plugins/upload", s.pluginHandler.ServeHTTP)
+
+	// Dedicated plugins page endpoints (must be before catch-all /api/plugins/ pattern)
+	mux.HandleFunc("/api/plugins/export", s.backupHandler.HandleExportPluginConfig)
+	mux.HandleFunc("/api/plugins/import", s.backupHandler.HandleImportPluginConfig)
+	mux.HandleFunc("/api/plugins/notifications", s.notificationsHandler.HandleGetNotifications)
+
+	// Plugin-specific routes with pattern matching
 	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is a notification dismiss request
+		if strings.Contains(r.URL.Path, "/notifications/") && strings.HasSuffix(r.URL.Path, "/dismiss") {
+			s.notificationsHandler.HandleDismissNotification(w, r)
+			return
+		}
 		// Check if this is a web page request
 		if strings.Contains(r.URL.Path, "/pages/") {
 			s.webPageHandler.ServeHTTP(w, r)
@@ -150,9 +162,63 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)
 			return
 		}
-		// Check if this is a rollback endpoint
+		// Check if this is a rollback endpoint (new dedicated handler)
 		if strings.HasSuffix(r.URL.Path, "/rollback") {
-			s.pluginUpdateHandler.HandleRollbackPlugin(w, r)
+			s.rollbackHandler.HandleRollbackPlugin(w, r)
+			return
+		}
+		// Check if this is an enable endpoint
+		if strings.HasSuffix(r.URL.Path, "/enable") {
+			s.pluginsPageHandler.HandleEnablePlugin(w, r)
+			return
+		}
+		// Check if this is a disable endpoint
+		if strings.HasSuffix(r.URL.Path, "/disable") {
+			s.pluginsPageHandler.HandleDisablePlugin(w, r)
+			return
+		}
+		// Check if this is a config update endpoint
+		if strings.HasSuffix(r.URL.Path, "/config") {
+			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			return
+		}
+		// Check if this is a test endpoint
+		if strings.HasSuffix(r.URL.Path, "/test") {
+			s.pluginsPageHandler.HandleTestPlugin(w, r)
+			return
+		}
+		// Check if this is a logs endpoint
+		if strings.HasSuffix(r.URL.Path, "/logs") {
+			s.pluginsPageHandler.HandleGetPluginLogs(w, r)
+			return
+		}
+		// Check if this is a reload endpoint
+		if strings.HasSuffix(r.URL.Path, "/reload") {
+			s.pluginsPageHandler.HandleReloadPlugin(w, r)
+			return
+		}
+		// Check if this is an agents endpoint
+		if strings.HasSuffix(r.URL.Path, "/agents") {
+			s.pluginsPageHandler.HandleGetPluginAgents(w, r)
+			return
+		}
+		// Check if this is a permissions request
+		if strings.Contains(r.URL.Path, "/permissions") {
+			if strings.HasSuffix(r.URL.Path, "/approve") {
+				s.permissionsHandler.HandleApprovePermissions(w, r)
+			} else {
+				s.permissionsHandler.HandleGetPermissions(w, r)
+			}
+			return
+		}
+		// Check if this is a delete request
+		if r.Method == http.MethodDelete {
+			s.pluginsPageHandler.HandleDeletePlugin(w, r)
+			return
+		}
+		// Check if this is a plugin details request (GET with plugin name)
+		if r.Method == http.MethodGet && !strings.HasSuffix(r.URL.Path, "/plugins/") {
+			s.pluginsPageHandler.HandleGetPluginDetails(w, r)
 			return
 		}
 		// Otherwise, delegate to init handler
@@ -162,7 +228,17 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Reuse the plugin handler instance
 	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
 	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
-	mux.Handle("/api/plugins", s.pluginHandler)
+
+	// Main plugins list endpoint - route based on query parameters
+	mux.HandleFunc("/api/plugins", func(w http.ResponseWriter, r *http.Request) {
+		// If there's a 'management' query parameter, use the new handler
+		if r.URL.Query().Get("management") == "true" {
+			s.pluginsPageHandler.HandleListPlugins(w, r)
+			return
+		}
+		// Otherwise use the original handler for backward compatibility
+		s.pluginHandler.ServeHTTP(w, r)
+	})
 
 	// =============================================================================
 	// Settings and Configuration Endpoints

@@ -29,6 +29,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
@@ -81,6 +82,16 @@ type Server struct {
 	agentMCPHandler       *agenthttp.MCPHandler
 	locationManager       *location.Manager
 	locationHandler       *locationhttp.Handler
+	categoryManager       *pluginmanager.CategoryManager
+	permissionManager     *pluginmanager.PermissionManager
+	versionManager        *pluginmanager.VersionManager
+	notificationManager   *pluginmanager.NotificationManager
+	backupManager         *pluginmanager.BackupManager
+	pluginsPageHandler    *pluginhttp.PluginsPageHandler
+	rollbackHandler       *pluginhttp.RollbackHandler
+	permissionsHandler    *pluginhttp.PermissionsHandler
+	backupHandler         *pluginhttp.BackupHandler
+	notificationsHandler  *pluginhttp.NotificationsHandler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
