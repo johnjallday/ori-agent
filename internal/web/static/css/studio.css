@@ -330,3 +330,51 @@
         box-shadow: 0 0 0 4px rgba(52, 211, 153, 0);
     }
 }
+
+/* Color Picker Modal Styles */
+.color-palette-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    gap: 12px;
+    padding: 10px;
+}
+
+.color-palette-item {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.color-palette-item:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.color-palette-item.selected {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px #000, 0 4px 8px rgba(0, 0, 0, 0.3);
+    transform: scale(1.05);
+}
+
+.color-palette-item::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.color-palette-item.selected::after {
+    opacity: 1;
+}

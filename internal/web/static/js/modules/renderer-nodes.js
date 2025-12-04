@@ -398,30 +398,7 @@ export class RendererNodes {
         this.ctx.textAlign = 'left';
       }
 
-      // View Log button (show if task has execution logs)
-      const hasLogs = this.state.executionLogs[task.id] && this.state.executionLogs[task.id].length > 0;
-      if (showActions && (hasLogs || task.status === 'in_progress' || task.status === 'completed' || task.status === 'failed')) {
-        const logBtnWidth = 50;
-        const logBtnHeight = 14;
-        const logBtnX = cardX + 60; // After ASSIGN button
-        const logBtnY = cardY + 40;
-
-        // Store button bounds for click detection
-        task.viewLogBtnBounds = { x: logBtnX, y: logBtnY, width: logBtnWidth, height: logBtnHeight };
-
-        // Button background
-        const logColor = hasLogs ? '#17a2b8' : '#adb5bd'; // Teal if logs exist, gray otherwise
-        this.ctx.fillStyle = logColor;
-        this.primitives.roundRect(logBtnX, logBtnY, logBtnWidth, logBtnHeight, 3);
-        this.ctx.fill();
-
-        // Button text
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = 'bold 8px system-ui';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('📋 LOG', logBtnX + logBtnWidth / 2, logBtnY + 10);
-        this.ctx.textAlign = 'left';
-      }
+      // Log button removed - was non-functional and confusing for users
 
       // Progress bar for in_progress tasks
       if (task.status === 'in_progress') {

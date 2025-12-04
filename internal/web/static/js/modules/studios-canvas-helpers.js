@@ -393,8 +393,11 @@ function showAttachmentDetails(att) {
     ? `<a href="${att.link_url}" target="_blank" rel="noopener" style="font-size: 0.85rem;">${att.link_url}</a>`
     : '<span class="text-muted" style="font-size: 0.85rem;">No link</span>';
 
+  // Helper function to check if URL is a web URL (http/https)
+  const isWebUrl = (url) => url && (url.startsWith('http://') || url.startsWith('https://'));
+
   const fileHtml = fileMeta && (fileMeta.name || fileMeta.url)
-    ? `<div style="font-size: 0.85rem;">${fileMeta.name || 'File'}${fileMeta.size ? ` • ${(fileMeta.size/1024).toFixed(1)} KB` : ''}${fileMeta.url ? ` • <a href="${fileMeta.url}" target="_blank" rel="noopener">open</a>` : ''}</div>`
+    ? `<div style="font-size: 0.85rem;">${fileMeta.name || 'File'}${fileMeta.size ? ` • ${(fileMeta.size/1024).toFixed(1)} KB` : ''}${fileMeta.url ? (isWebUrl(fileMeta.url) ? ` • <a href="${fileMeta.url}" target="_blank" rel="noopener">open</a>` : ` • <span style="color: var(--text-secondary); font-family: monospace;">${fileMeta.url}</span>`) : ''}</div>`
     : '<span class="text-muted" style="font-size: 0.85rem;">No file</span>';
 
   const created = att.created_at ? new Date(att.created_at).toLocaleString() : '—';
@@ -415,6 +418,14 @@ function showAttachmentDetails(att) {
           <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
         </svg>
         Edit
+      </button>
+      <button class="btn btn-sm btn-outline-secondary flex-fill" onclick="editAttachmentColor('${att.id || ''}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom;">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 2v20"></path>
+          <path d="M2 12h20"></path>
+        </svg>
+        Color
       </button>
     </div>
     <div class="mb-3">
@@ -687,7 +698,7 @@ function getFileNameFromPath(path) {
 }
 
 /**
- * Basic prompt-based editor for an attachment
+ * Basic prompt-based editor for an attachment (excludes color)
  */
 async function editAttachment(attachmentId) {
   if (!attachmentId || !window.agentCanvas) return;
@@ -700,7 +711,6 @@ async function editAttachment(attachmentId) {
   const title = prompt('Title', existing.title || '') ?? existing.title;
   const body = prompt('Body (markdown ok)', existing.body || '') ?? existing.body;
   const link = prompt('Link URL', existing.link_url || '') ?? existing.link_url;
-  const color = prompt('Color hex', existing.color || '') ?? existing.color;
   const filePath = prompt('File path/URL', (existing.file || existing.file_meta || {}).url || '') || '';
   const fileMeta = filePath ? { name: getFileNameFromPath(filePath), url: filePath } : (existing.file || existing.file_meta || null);
 
@@ -712,7 +722,6 @@ async function editAttachment(attachmentId) {
         title,
         body,
         link_url: link,
-        color,
         file_meta: fileMeta,
         type: guessAttachmentType(body, link, fileMeta)
       })
@@ -732,6 +741,134 @@ async function editAttachment(attachmentId) {
   } catch (err) {
     console.error('Failed to update attachment', err);
     alert('Failed to update attachment: ' + err.message);
+  }
+}
+
+/**
+ * Edit attachment node color only
+ */
+async function editAttachmentColor(attachmentId) {
+  if (!attachmentId || !window.agentCanvas) return;
+  const existing = window.agentCanvas.state.attachments.find(a => a.id === attachmentId);
+  if (!existing) {
+    alert('Attachment not found');
+    return;
+  }
+
+  // Show color picker modal
+  showColorPickerModal(attachmentId, existing.color || '#e2e8f0');
+}
+
+/**
+ * Show color picker modal with color palette
+ */
+function showColorPickerModal(attachmentId, currentColor) {
+  // Define color palette (nice selection of colors)
+  const colors = [
+    '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
+    '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
+    '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#be123c',
+    '#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', '#16a34a',
+    '#059669', '#0d9488', '#0891b2', '#0284c7', '#2563eb', '#4f46e5',
+    '#7c3aed', '#9333ea', '#c026d3', '#db2777', '#e11d48', '#9f1239',
+    '#991b1b', '#c2410c', '#b45309', '#a16207', '#4d7c0f', '#15803d',
+    '#047857', '#115e59', '#155e75', '#075985', '#1e40af', '#3730a3',
+    '#6d28d9', '#7e22ce', '#a21caf', '#be185d', '#be123c', '#7f1d1d',
+    '#78350f', '#92400e', '#713f12', '#365314', '#14532d', '#064e3b',
+    '#134e4a', '#164e63', '#1e3a8a', '#312e81', '#4c1d95', '#581c87',
+    '#701a75', '#831843', '#881337', '#e2e8f0', '#cbd5e1', '#94a3b8',
+    '#64748b', '#475569', '#334155', '#1e293b', '#0f172a', '#020617'
+  ];
+
+  // Populate color palette grid
+  const grid = document.getElementById('color-palette-grid');
+  grid.innerHTML = colors.map(color => `
+    <div class="color-palette-item ${color === currentColor ? 'selected' : ''}"
+         style="background-color: ${color};"
+         data-color="${color}"
+         onclick="selectColor('${color}', '${attachmentId}')">
+    </div>
+  `).join('');
+
+  // Set current color in custom input
+  document.getElementById('custom-color-input').value = currentColor;
+
+  // Store attachment ID for later use
+  window.currentColorPickerAttachmentId = attachmentId;
+
+  // Show modal
+  const modal = new bootstrap.Modal(document.getElementById('colorPickerModal'));
+  modal.show();
+}
+
+/**
+ * Select a color from the palette
+ */
+async function selectColor(color, attachmentId) {
+  // Update selected state in UI
+  document.querySelectorAll('.color-palette-item').forEach(item => {
+    item.classList.remove('selected');
+  });
+  document.querySelector(`[data-color="${color}"]`)?.classList.add('selected');
+
+  // Update the color
+  await updateAttachmentColor(attachmentId, color);
+
+  // Close modal
+  const modal = bootstrap.Modal.getInstance(document.getElementById('colorPickerModal'));
+  if (modal) modal.hide();
+}
+
+/**
+ * Apply custom color from input field
+ */
+async function applyCustomColor() {
+  const input = document.getElementById('custom-color-input');
+  const color = input.value.trim();
+  const attachmentId = window.currentColorPickerAttachmentId;
+
+  // Validate hex color
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    alert('Please enter a valid hex color (e.g., #3b82f6)');
+    return;
+  }
+
+  await updateAttachmentColor(attachmentId, color);
+
+  // Close modal
+  const modal = bootstrap.Modal.getInstance(document.getElementById('colorPickerModal'));
+  if (modal) modal.hide();
+}
+
+/**
+ * Update attachment color via API
+ */
+async function updateAttachmentColor(attachmentId, color) {
+  if (!attachmentId || !window.agentCanvas) return;
+
+  try {
+    const resp = await fetch(`/api/studios/${window.agentCanvas.studioId}/attachments/${attachmentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        color: color
+      })
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text || 'Failed to update attachment color');
+    }
+    // Refresh
+    if (window.agentCanvas && window.agentCanvas.init) {
+      await window.agentCanvas.init();
+    }
+    if (window.showAttachmentDetails) {
+      const updated = window.agentCanvas.state.attachments.find(a => a.id === attachmentId);
+      if (updated) window.showAttachmentDetails(updated);
+    }
+  } catch (err) {
+    console.error('Failed to update attachment color', err);
+    alert('Failed to update attachment color: ' + err.message);
   }
 }
 
@@ -924,6 +1061,9 @@ window.showTaskDetails = showTaskDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
 window.editAttachment = editAttachment;
+window.editAttachmentColor = editAttachmentColor;
+window.selectColor = selectColor;
+window.applyCustomColor = applyCustomColor;
 window.hideTaskDetails = hideTaskDetails;
 window.showCombinerDetails = showCombinerDetails;
 window.hideCombinerDetails = hideCombinerDetails;

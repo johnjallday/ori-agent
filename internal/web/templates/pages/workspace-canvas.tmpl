@@ -228,6 +228,41 @@
     </div>
   </div>
 
+  <!-- Color Picker Modal -->
+  <div class="modal fade" id="colorPickerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 2v20"></path>
+              <path d="M2 12h20"></path>
+            </svg>
+            Choose Attachment Color
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select a color for your attachment node:</p>
+          <div id="color-palette-grid" class="color-palette-grid">
+            <!-- Colors will be dynamically populated -->
+          </div>
+          <div class="mt-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Or enter custom color:</label>
+            <div class="d-flex gap-2">
+              <input type="text" id="custom-color-input" class="form-control" placeholder="#3b82f6" pattern="^#[0-9A-Fa-f]{6}$">
+              <button class="modern-btn modern-btn-secondary" onclick="applyCustomColor()">Apply</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

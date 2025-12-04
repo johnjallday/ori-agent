@@ -3,6 +3,7 @@ package agentstudio
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"strings"
 
@@ -15,16 +16,18 @@ import (
 
 // LLMTaskHandler executes tasks using the LLM system
 type LLMTaskHandler struct {
-	agentStore store.Store
-	llmFactory *llm.Factory
-	eventBus   *EventBus // Optional event bus for publishing execution events
+	agentStore     store.Store
+	llmFactory     *llm.Factory
+	workspaceStore Store     // Added to access workspace attachments
+	eventBus       *EventBus // Optional event bus for publishing execution events
 }
 
 // NewLLMTaskHandler creates a new LLM-based task handler
-func NewLLMTaskHandler(agentStore store.Store, llmFactory *llm.Factory) *LLMTaskHandler {
+func NewLLMTaskHandler(agentStore store.Store, llmFactory *llm.Factory, workspaceStore Store) *LLMTaskHandler {
 	return &LLMTaskHandler{
-		agentStore: agentStore,
-		llmFactory: llmFactory,
+		agentStore:     agentStore,
+		llmFactory:     llmFactory,
+		workspaceStore: workspaceStore,
 	}
 }
 
@@ -206,6 +209,27 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	processedDescription := h.substitutePlaceholders(task)
 	prompt.WriteString(fmt.Sprintf("## Task Description\n\n%s\n\n", processedDescription))
 
+	// Include attachments if any are connected to this task
+	attachmentContents := h.getAttachedFileContents(task)
+	if len(attachmentContents) > 0 {
+		prompt.WriteString("## Attached Files\n\n")
+		prompt.WriteString("The following files are attached to this task:\n\n")
+		for _, att := range attachmentContents {
+			prompt.WriteString(fmt.Sprintf("### %s\n\n", att.Title))
+			if att.FilePath != "" {
+				prompt.WriteString(fmt.Sprintf("**File**: `%s`\n\n", att.FilePath))
+			}
+			if att.Body != "" {
+				prompt.WriteString(fmt.Sprintf("**Note**: %s\n\n", att.Body))
+			}
+			if att.Content != "" {
+				prompt.WriteString("**Content**:\n```\n")
+				prompt.WriteString(att.Content)
+				prompt.WriteString("\n```\n\n")
+			}
+		}
+	}
+
 	// Handle input task results specially for better formatting
 	inputTaskResults, hasInputResults := task.Context["input_task_results"]
 	if hasInputResults {
@@ -244,6 +268,63 @@ func (h *LLMTaskHandler) buildTaskPrompt(task Task, ag *agent.Agent) string {
 	prompt.WriteString("Provide a clear, concise response with your findings or results.")
 
 	return prompt.String()
+}
+
+// AttachmentContent holds attachment info and file contents
+type AttachmentContent struct {
+	Title    string
+	Body     string
+	FilePath string
+	Content  string
+}
+
+// getAttachedFileContents finds attachments connected to this task and reads their file contents
+func (h *LLMTaskHandler) getAttachedFileContents(task Task) []AttachmentContent {
+	// Get the workspace to access attachments and connections
+	workspace, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil {
+		logger.Error("Failed to get workspace for attachment reading", logger.Fields{"workspace_id": task.WorkspaceID, "error": err})
+		return nil
+	}
+
+	var attachmentContents []AttachmentContent
+
+	// Find connections from attachments to this task
+	if workspace.Layout != nil && workspace.Layout.WorkflowConnections != nil {
+		for _, conn := range workspace.Layout.WorkflowConnections {
+			// Check if connection points to this task
+			if conn.To == task.ID {
+				// Check if source is an attachment
+				for _, att := range workspace.Attachments {
+					if att.ID == conn.From {
+						attContent := AttachmentContent{
+							Title: att.Title,
+							Body:  att.Body,
+						}
+
+						// Read file contents if a file path is provided
+						if att.File != nil && att.File.URL != "" {
+							filePath := att.File.URL
+							attContent.FilePath = filePath
+
+							// Try to read the file
+							content, err := os.ReadFile(filePath)
+							if err != nil {
+								logger.Warn("Failed to read attachment file", logger.Fields{"file": filePath, "error": err})
+								attContent.Content = fmt.Sprintf("[Failed to read file: %v]", err)
+							} else {
+								attContent.Content = string(content)
+							}
+						}
+
+						attachmentContents = append(attachmentContents, attContent)
+					}
+				}
+			}
+		}
+	}
+
+	return attachmentContents
 }
 
 // formatInputResults formats input task results based on the combination mode

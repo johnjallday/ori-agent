@@ -697,7 +697,7 @@ func (b *ServerBuilder) initializeEventSystem() error {
 func (b *ServerBuilder) initializeTaskExecution() error {
 	s := b.server
 
-	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory)
+	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 	taskHandler.SetEventBus(s.eventBus)
 
 	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
@@ -728,7 +728,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	s.orchestrationHandler = orchestrationhttp.NewHandler(s.st, s.workspaceStore)
 	s.orchestrationHandler.SetOrchestrator(orch)
 
-	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory)
+	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 	s.orchestrationHandler.SetTaskHandler(taskHandler)
 	s.orchestrationHandler.SetEventBus(s.eventBus)
 	s.orchestrationHandler.SetNotificationService(s.notificationService)

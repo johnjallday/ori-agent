@@ -325,10 +325,18 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
+	// Create keepalive ticker to prevent connection timeout (every 15 seconds)
+	keepaliveTicker := time.NewTicker(15 * time.Second)
+	defer keepaliveTicker.Stop()
+
 	// Stream events
 	for {
 		select {
 		case <-ctx.Done():
+			// Client disconnected - send close message and return
+			logger.Debug("Progress stream closed by client", logger.Fields{"workspace_id": workspaceID})
+			_, _ = w.Write([]byte("event: close\ndata: stream closed\n\n"))
+			flusher.Flush()
 			return
 
 		case event := <-eventChan:
@@ -350,9 +358,11 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 			// Send with event type prefix
 			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
 			if err != nil {
-				logger.Error("Failed to write progress SSE event", logger.Fields{"err": err})
+				logger.Debug("Failed to write progress SSE event (client likely disconnected)", logger.Fields{"err": err})
 				return
 			}
+
+			// Check if flush works (connection still alive)
 			flusher.Flush()
 
 			// After any task event, send updated workspace progress
@@ -363,6 +373,15 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 		case <-ticker.C:
 			// Send periodic workspace progress update
 			sh.sendWorkspaceProgressUpdate(w, flusher, workspaceID)
+
+		case <-keepaliveTicker.C:
+			// Send keepalive comment to prevent timeout
+			_, err := w.Write([]byte(": keepalive\n\n"))
+			if err != nil {
+				logger.Debug("Failed to send keepalive (client disconnected)", logger.Fields{"workspace_id": workspaceID})
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

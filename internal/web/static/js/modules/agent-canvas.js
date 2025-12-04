@@ -1037,14 +1037,15 @@ class AgentCanvas {
       return null;
     }
 
-    // Avoid duplicate connections
+    // Avoid duplicate connections - check for any connection between same nodes
+    // This prevents creating multiple connections from same source to same destination
     const existing = this.state.connections.find(conn =>
       conn.from === fromNodeId &&
-      conn.to === toNodeId &&
-      conn.fromPort === fromPort &&
-      conn.toPort === toPort
+      conn.to === toNodeId
     );
     if (existing) {
+      console.log('Connection already exists between these nodes', { fromNodeId, toNodeId });
+      this.notifications?.showNotification?.('A connection already exists between these nodes', 'info');
       return existing;
     }
 

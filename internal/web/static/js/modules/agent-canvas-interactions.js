@@ -1297,16 +1297,7 @@ export class AgentCanvasInteractionHandler {
           }
         }
 
-        // Check if click is on view log button
-        if (task.viewLogBtnBounds) {
-          const btn = task.viewLogBtnBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
-            // View log button clicked - show execution log modal
-            this.parent.showExecutionLog(task);
-            return;
-          }
-        }
+        // Log button click handler removed - button no longer rendered
 
         if (x >= cardX && x <= cardX + cardWidth &&
             y >= cardY && y <= cardY + cardHeight) {
