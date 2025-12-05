@@ -877,8 +877,14 @@ func (w *Workspace) AddTask(task Task) error {
 	logger.Debug("[DEBUG] AddTask - hasAgent(From)", logger.Fields{"agent": w.hasAgent(task.From)})
 
 	// Validate sender is part of workspace
-	// Allow "user", "system", and empty string as special senders for UI-created tasks
-	if task.From != "" && task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
+	// Allow "user", "system", "scheduler", and empty string as special senders for UI-created tasks
+	systemSources := map[string]bool{
+		"user":      true,
+		"system":    true,
+		"scheduler": true,
+		"":          true, // empty string allowed
+	}
+	if !systemSources[task.From] && !w.hasAgent(task.From) {
 		logger.Error("[DEBUG] AddTask - Validation FAILED: From agent not valid", logger.Fields{})
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
@@ -1085,8 +1091,12 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Validate sender is part of workspace
-	if !w.hasAgent(st.From) {
+	// Validate sender is part of workspace (allow system sources like "scheduler", "system")
+	systemSources := map[string]bool{
+		"scheduler": true,
+		"system":    true,
+	}
+	if !systemSources[st.From] && !w.hasAgent(st.From) {
 		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
 	}
 
