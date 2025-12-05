@@ -129,6 +129,14 @@ export class AgentCanvasInteractionHandler {
         this.canvas.style.cursor = 'grab';
         this.parent.draw();
         console.log('Result connection mode cancelled');
+      } else if (this.state.schedulerAssignmentMode) {
+        this.state.schedulerAssignmentMode = false;
+        this.state.schedulerAssignmentSource = null;
+        this.state.schedulerAssignmentMouseX = 0;
+        this.state.schedulerAssignmentMouseY = 0;
+        this.canvas.style.cursor = 'grab';
+        this.parent.draw();
+        console.log('Scheduler assignment mode cancelled');
       } else if (this.state.assignmentMode) {
         this.state.assignmentMode = false;
         this.state.assignmentSourceTask = null;
@@ -390,6 +398,18 @@ export class AgentCanvasInteractionHandler {
             }
           }
 
+          // Assign button
+          if (schedulerNode.assignBtnBounds) {
+            const btn = schedulerNode.assignBtnBounds;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.toggleSchedulerAssignmentMode(schedulerNode);
+              return;
+            }
+          }
+
           // Trigger button
           if (schedulerNode.triggerButton) {
             const btn = schedulerNode.triggerButton;
@@ -497,6 +517,20 @@ export class AgentCanvasInteractionHandler {
 
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+        // If we're assigning a scheduler node, clicking an agent should assign immediately
+        if (this.state.schedulerAssignmentMode && this.state.schedulerAssignmentSource) {
+          e.stopPropagation();
+          e.preventDefault();
+          this.parent.assignSchedulerToAgent(agent);
+          this.state.schedulerAssignmentMode = false;
+          this.state.schedulerAssignmentSource = null;
+          this.state.schedulerAssignmentMouseX = 0;
+          this.state.schedulerAssignmentMouseY = 0;
+          this.canvas.style.cursor = 'grab';
+          this.parent.draw();
+          return;
+        }
+
         // If we're assigning a task, clicking an agent should assign immediately
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();

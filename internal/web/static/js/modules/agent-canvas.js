@@ -925,6 +925,57 @@ class AgentCanvas {
   }
 
   /**
+   * Toggle scheduler assignment mode
+   */
+  toggleSchedulerAssignmentMode(schedulerNode) {
+    if (this.state.schedulerAssignmentMode &&
+        this.state.schedulerAssignmentSource?.canvas_node_id === schedulerNode.canvas_node_id) {
+      // Cancel if clicking same scheduler
+      this.state.schedulerAssignmentMode = false;
+      this.state.schedulerAssignmentSource = null;
+      this.state.schedulerAssignmentMouseX = 0;
+      this.state.schedulerAssignmentMouseY = 0;
+      this.canvas.style.cursor = 'grab';
+      console.log('Scheduler assignment mode cancelled');
+    } else {
+      // Enter assignment mode
+      this.state.schedulerAssignmentMode = true;
+      this.state.schedulerAssignmentSource = schedulerNode;
+      this.canvas.style.cursor = 'crosshair';
+      console.log('Scheduler assignment mode activated for:', schedulerNode.name);
+    }
+    this.draw();
+  }
+
+  /**
+   * Assign scheduler node to an agent
+   */
+  async assignSchedulerToAgent(agent) {
+    const schedulerNode = this.state.schedulerAssignmentSource;
+    if (!schedulerNode || !agent) return;
+
+    try {
+      // Update the scheduler node's target agent
+      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.canvas_node_id}?studio_id=${this.studioId}`, {
+        to: agent.name
+      });
+
+      // Update local state
+      const localScheduler = this.state.schedulerNodes.find(s => s.canvas_node_id === schedulerNode.canvas_node_id);
+      if (localScheduler) {
+        localScheduler.to = agent.name;
+      }
+
+      this.notifications?.showNotification?.(`Scheduler assigned to ${agent.name}`, 'success');
+      console.log('✅ Scheduler assigned to agent:', agent.name);
+      this.draw();
+    } catch (err) {
+      console.error('Failed to assign scheduler to agent', err);
+      alert('Failed to assign scheduler: ' + (err?.message || err));
+    }
+  }
+
+  /**
    * Update scheduler node's target task ID
    */
   async updateSchedulerTargetTask(schedulerNodeId, targetTaskId) {

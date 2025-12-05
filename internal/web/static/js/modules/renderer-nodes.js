@@ -907,6 +907,34 @@ export class RendererNodes {
         this.ctx.fillText(`Next: ${timeText}`, cardX + 10, cardY + 62);
       }
 
+      // Assign button (left side, below schedule text)
+      const assignBtnWidth = 50;
+      const assignBtnHeight = 14;
+      const assignBtnX = cardX + 10;
+      const assignBtnY = cardY + cardHeight - 28;
+
+      // Check if in assignment mode for this scheduler
+      const isActiveAssignment = this.state.schedulerAssignmentMode &&
+                                  this.state.schedulerAssignmentSource &&
+                                  this.state.schedulerAssignmentSource.canvas_node_id === schedulerNode.canvas_node_id;
+
+      this.ctx.fillStyle = isActiveAssignment ? '#fd7e14' : '#6c757d';
+      this.primitives.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 8px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('➜ ASSIGN', assignBtnX + assignBtnWidth / 2, assignBtnY + 10);
+      this.ctx.textAlign = 'left';
+
+      schedulerNode.assignBtnBounds = {
+        x: assignBtnX,
+        y: assignBtnY,
+        width: assignBtnWidth,
+        height: assignBtnHeight
+      };
+
       // Trigger button (bottom right)
       const triggerWidth = 60;
       const triggerHeight = 20;
