@@ -2432,28 +2432,25 @@ function toggleEndDate() {
 function buildScheduleConfig() {
   const scheduleType = document.getElementById('scheduler-type').value;
   const config = {
-    schedule_type: scheduleType
+    type: scheduleType  // Backend expects 'type', not 'schedule_type'
   };
 
   switch (scheduleType) {
     case 'interval':
-      config.interval_minutes = parseInt(document.getElementById('interval-minutes').value);
+      // Convert minutes to duration string (e.g., "60m", "2h")
+      const intervalMinutes = parseInt(document.getElementById('interval-minutes').value);
+      config.interval = `${intervalMinutes}m`;  // Backend expects duration string
       break;
 
     case 'daily':
-      const dailyTime = document.getElementById('daily-time').value;
-      const [dailyHour, dailyMinute] = dailyTime.split(':').map(v => parseInt(v));
-      config.hour = dailyHour;
-      config.minute = dailyMinute;
+      // Backend expects time_of_day as "HH:MM" string
+      config.time_of_day = document.getElementById('daily-time').value;
       break;
 
     case 'weekly':
-      const weeklyTime = document.getElementById('weekly-time').value;
-      const [weeklyHour, weeklyMinute] = weeklyTime.split(':').map(v => parseInt(v));
-      const dayOfWeek = parseInt(document.getElementById('weekly-day').value);
-      config.day_of_week = dayOfWeek;
-      config.hour = weeklyHour;
-      config.minute = weeklyMinute;
+      // Backend expects time_of_day as "HH:MM" string
+      config.time_of_day = document.getElementById('weekly-time').value;
+      config.day_of_week = parseInt(document.getElementById('weekly-day').value);
       break;
 
     case 'cron':
@@ -2464,7 +2461,9 @@ function buildScheduleConfig() {
       break;
 
     case 'relative_delay':
-      config.delay_duration = parseInt(document.getElementById('delay-minutes').value);
+      // Convert minutes to duration string (e.g., "5m", "1h")
+      const delayMinutes = parseInt(document.getElementById('delay-minutes').value);
+      config.delay_duration = `${delayMinutes}m`;  // Backend expects duration string
       config.trigger_once = document.getElementById('delay-trigger-once').checked;
       break;
   }
