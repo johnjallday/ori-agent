@@ -2501,7 +2501,6 @@ async function submitSchedulerNode() {
 
     // Get required fields
     const prompt = document.getElementById('scheduler-prompt').value.trim();
-    const to = document.getElementById('scheduler-to').value.trim();
     const enabled = document.getElementById('scheduler-enabled').checked;
 
     // Validate required fields
@@ -2509,16 +2508,12 @@ async function submitSchedulerNode() {
       alert('Please enter a task prompt');
       return;
     }
-    if (!to) {
-      alert('Please specify a target agent');
-      return;
-    }
 
-    // Create scheduler node
+    // Create scheduler node (without 'to' - assign agent later using ASSIGN button)
     const schedulerNode = {
       name: name,
       prompt: prompt,
-      to: to,
+      to: '',  // Empty - use ASSIGN button to set target agent
       from: 'scheduler',  // Scheduler nodes always use 'scheduler' as the source
       schedule: scheduleConfig,
       enabled: enabled,
