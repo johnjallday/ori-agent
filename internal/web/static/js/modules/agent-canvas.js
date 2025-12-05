@@ -843,6 +843,16 @@ class AgentCanvas {
     if (!connectionId) return;
     const idx = this.state.connections.findIndex(c => c.id === connectionId);
     if (idx !== -1) {
+      const conn = this.state.connections[idx];
+
+      // If this is a scheduler→task connection, clear the scheduler's target_task_id
+      const fromNode = this.helpers.getNodeById(conn.from);
+      if (fromNode?.type === 'scheduler') {
+        this.updateSchedulerTargetTask(fromNode.node.id, null).catch(err => {
+          console.error('Failed to clear scheduler target task', err);
+        });
+      }
+
       this.state.connections.splice(idx, 1);
       this.saveLayout();
       this.draw();
@@ -903,6 +913,28 @@ class AgentCanvas {
     } catch (err) {
       console.error('Failed to trigger scheduler node', err);
       alert('Failed to trigger scheduler node: ' + (err?.message || err));
+    }
+  }
+
+  /**
+   * Update scheduler node's target task ID
+   */
+  async updateSchedulerTargetTask(schedulerNodeId, targetTaskId) {
+    if (!schedulerNodeId || !this.studioId) {
+      throw new Error('Cannot update scheduler: missing ID or workspace');
+    }
+    try {
+      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNodeId}`, {
+        target_task_id: targetTaskId
+      });
+      // Update local state
+      const scheduler = this.state.schedulerNodes.find(s => s.id === schedulerNodeId);
+      if (scheduler) {
+        scheduler.target_task_id = targetTaskId;
+      }
+    } catch (err) {
+      console.error('Failed to update scheduler target task', err);
+      throw err;
     }
   }
 
@@ -1077,6 +1109,16 @@ class AgentCanvas {
       return null;
     }
 
+    // Enforce scheduler direction: schedulers can only connect to tasks
+    if (fromNode.type === 'scheduler' && toNode.type !== 'task') {
+      this.notifications?.showNotification?.('Scheduler nodes can only connect to tasks', 'warning');
+      return null;
+    }
+    if (toNode.type === 'scheduler') {
+      this.notifications?.showNotification?.('Scheduler nodes cannot receive connections', 'warning');
+      return null;
+    }
+
     // Avoid duplicate connections - check for any connection between same nodes
     // This prevents creating multiple connections from same source to same destination
     const existing = this.state.connections.find(conn =>
@@ -1101,6 +1143,15 @@ class AgentCanvas {
 
     this.state.connections.push(conn);
     this.saveLayout();
+
+    // If this is a scheduler→task connection, update the scheduler's target_task_id
+    if (fromNode.type === 'scheduler' && toNode.type === 'task') {
+      this.updateSchedulerTargetTask(fromNode.node.id, toNode.node.id).catch(err => {
+        console.error('Failed to update scheduler target task', err);
+        this.notifications?.showNotification?.('Failed to link scheduler to task', 'error');
+      });
+    }
+
     this.draw();
     return conn;
   }

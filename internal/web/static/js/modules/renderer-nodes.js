@@ -789,6 +789,10 @@ export class RendererNodes {
       const enabled = schedulerNode.enabled !== false;
       const baseColor = enabled ? '#8b5cf6' : '#94a3b8'; // Purple when enabled, gray when paused
 
+      // Check if scheduler is connected to a task
+      const isConnected = schedulerNode.target_task_id ||
+        this.state.connections.some(conn => conn.from === schedulerNode.id);
+
       // Background
       this.ctx.save();
       this.ctx.fillStyle = '#ffffff';
@@ -799,12 +803,19 @@ export class RendererNodes {
       this.ctx.fill();
       this.ctx.restore();
 
-      // Border (thicker when enabled)
+      // Border (thicker when enabled, dashed when not connected)
       this.ctx.strokeStyle = baseColor;
       this.ctx.lineWidth = enabled ? 3 : 2;
+
+      // Use dashed border if not connected to indicate it needs configuration
+      if (!isConnected) {
+        this.ctx.setLineDash([5, 3]);
+      }
+
       this.ctx.beginPath();
       this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
       this.ctx.stroke();
+      this.ctx.setLineDash([]); // Reset dash pattern
 
       // Clock icon (SVG-style drawing)
       const iconSize = 20;
@@ -845,6 +856,26 @@ export class RendererNodes {
       this.ctx.fillStyle = statusColor;
       this.ctx.font = '10px system-ui';
       this.ctx.fillText(statusText, badgeX + 8, badgeY + 12);
+
+      // Connection indicator (small link icon if connected)
+      if (isConnected) {
+        const linkIconX = cardX + 10;
+        const linkIconY = cardY + cardHeight - 28;
+        this.ctx.strokeStyle = '#10b981';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        // Draw link icon (two circles connected)
+        this.ctx.arc(linkIconX + 3, linkIconY + 3, 2, 0, Math.PI * 2);
+        this.ctx.arc(linkIconX + 9, linkIconY + 3, 2, 0, Math.PI * 2);
+        this.ctx.moveTo(linkIconX + 5, linkIconY + 2);
+        this.ctx.lineTo(linkIconX + 7, linkIconY + 4);
+        this.ctx.stroke();
+
+        // "Connected" text
+        this.ctx.fillStyle = '#10b981';
+        this.ctx.font = '9px system-ui';
+        this.ctx.fillText('Connected', linkIconX + 14, linkIconY + 7);
+      }
 
       // Schedule pattern summary
       this.ctx.fillStyle = '#475569';

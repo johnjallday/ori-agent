@@ -119,6 +119,10 @@ export class AgentCanvasHelpers {
     const attachment = this.state.attachments.find(a => a.id === nodeId);
     if (attachment) return { type: 'attachment', node: attachment };
 
+    // Check if it's a scheduler node
+    const schedulerNode = this.state.schedulerNodes.find(s => s.id === nodeId);
+    if (schedulerNode) return { type: 'scheduler', node: schedulerNode };
+
     return null;
   }
 
@@ -167,6 +171,14 @@ export class AgentCanvasHelpers {
       // Attachments expose only an output port at the bottom
       const cardHeight = node.cardBounds ? node.cardBounds.height : 70;
       const cardY = node.cardBounds ? node.cardBounds.y : node.y;
+      return {
+        x: node.x * this.parent.scale + this.parent.offsetX,
+        y: (cardY + cardHeight + 5) * this.parent.scale + this.parent.offsetY
+      };
+    } else if (type === 'scheduler') {
+      // Scheduler nodes expose only an output port at the bottom
+      const cardHeight = node.cardBounds ? node.cardBounds.height : 90;
+      const cardY = node.cardBounds ? node.cardBounds.y : node.y - cardHeight / 2;
       return {
         x: node.x * this.parent.scale + this.parent.offsetX,
         y: (cardY + cardHeight + 5) * this.parent.scale + this.parent.offsetY
@@ -233,6 +245,22 @@ export class AgentCanvasHelpers {
         return {
           nodeId: att.id,
           nodeType: 'attachment',
+          portId: 'output',
+          type: 'output'
+        };
+      }
+    }
+
+    // Check scheduler node output ports (bottom center)
+    for (const scheduler of this.parent.schedulerNodes) {
+      if (scheduler.x == null || scheduler.y == null) continue;
+      const portX = scheduler.x;
+      const portY = (scheduler.cardBounds ? scheduler.cardBounds.y + scheduler.cardBounds.height : scheduler.y + 45);
+      const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
+      if (dist <= portRadius) {
+        return {
+          nodeId: scheduler.id,
+          nodeType: 'scheduler',
           portId: 'output',
           type: 'output'
         };
