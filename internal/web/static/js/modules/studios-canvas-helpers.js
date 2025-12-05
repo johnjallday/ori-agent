@@ -1054,10 +1054,134 @@ async function unassignCurrentTask() {
   }
 }
 
+function showSchedulerDetails(schedulerNode) {
+  console.log('[SIDEBAR] showSchedulerDetails called for:', schedulerNode.name);
+
+  // Hide other details
+  hideAgentDetails();
+  hideAttachmentDetails();
+  const taskPanel = document.getElementById('task-details-panel');
+  if (taskPanel) taskPanel.style.display = 'none';
+
+  // Use the same task details panel but rename title
+  const panel = document.getElementById('task-details-panel');
+  const content = document.getElementById('task-details-content');
+
+  if (!panel || !content) {
+    console.error('[SIDEBAR] Panel or content not found!');
+    return;
+  }
+
+  // Show panel
+  panel.style.display = 'block';
+
+  // Change title
+  const titleElement = panel.querySelector('h6');
+  if (titleElement) {
+    titleElement.textContent = 'Scheduler Details';
+  }
+
+  // Format schedule details
+  const scheduleTypes = {
+    'interval': 'Interval',
+    'daily': 'Daily',
+    'weekly': 'Weekly',
+    'cron': 'Cron Expression',
+    'relative_delay': 'Relative Delay'
+  };
+
+  const scheduleType = scheduleTypes[schedulerNode.schedule?.type] || 'Unknown';
+  let scheduleDetails = '';
+
+  if (schedulerNode.schedule) {
+    const sched = schedulerNode.schedule;
+    switch (sched.type) {
+      case 'interval':
+        const intervalMins = Math.floor(sched.interval / (60 * 1e9));
+        scheduleDetails = `Every ${intervalMins} minutes`;
+        break;
+      case 'daily':
+        scheduleDetails = `Every day at ${sched.time_of_day || '09:00'}`;
+        break;
+      case 'weekly':
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        scheduleDetails = `Every ${days[sched.day_of_week || 0]} at ${sched.time_of_day || '09:00'}`;
+        break;
+      case 'cron':
+        scheduleDetails = `Cron: ${sched.cron_expr}`;
+        break;
+      case 'relative_delay':
+        const delayMins = Math.floor(sched.delay_duration / (60 * 1e9));
+        scheduleDetails = `${delayMins} minutes after trigger`;
+        if (sched.trigger_once) scheduleDetails += ' (once)';
+        break;
+    }
+  }
+
+  const statusBadge = schedulerNode.enabled !== false
+    ? '<span class="badge bg-success">Enabled</span>'
+    : '<span class="badge bg-secondary">Paused</span>';
+
+  const html = `
+    <div class="mb-3">
+      <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">⏰</div>
+      <strong style="color: var(--text-primary); font-size: 1.1rem;">${schedulerNode.name || 'Scheduler'}</strong>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Status:</strong>
+      <div>${statusBadge}</div>
+    </div>
+    ${schedulerNode.to ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Assigned To:</strong>
+        <div style="color: var(--text-secondary);">${schedulerNode.to}</div>
+      </div>
+    ` : `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Assigned To:</strong>
+        <div style="color: #94a3b8; font-style: italic;">(unassigned)</div>
+      </div>
+    `}
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Schedule Type:</strong>
+      <div style="color: var(--text-secondary);">${scheduleType}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Schedule:</strong>
+      <div style="color: var(--text-secondary);">${scheduleDetails}</div>
+    </div>
+    ${schedulerNode.prompt ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Task Prompt:</strong>
+        <div style="color: var(--text-secondary); white-space: pre-wrap; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 4px;">${schedulerNode.prompt}</div>
+      </div>
+    ` : ''}
+    ${schedulerNode.next_run ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Next Run:</strong>
+        <div style="color: var(--text-secondary);">${new Date(schedulerNode.next_run).toLocaleString()}</div>
+      </div>
+    ` : ''}
+    ${schedulerNode.last_run ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Last Run:</strong>
+        <div style="color: var(--text-secondary);">${new Date(schedulerNode.last_run).toLocaleString()}</div>
+      </div>
+    ` : ''}
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Execution Count:</strong>
+      <div style="color: var(--text-secondary);">${schedulerNode.execution_count || 0}</div>
+    </div>
+  `;
+
+  content.innerHTML = html;
+}
+
 // Make functions globally available
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
+window.showSchedulerDetails = showSchedulerDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
 window.editAttachment = editAttachment;

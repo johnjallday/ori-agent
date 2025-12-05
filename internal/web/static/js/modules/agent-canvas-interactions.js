@@ -422,7 +422,7 @@ export class AgentCanvasInteractionHandler {
             }
           }
 
-          // Check if clicking inside the card (for dragging)
+          // Check if clicking inside the card (for dragging or selecting)
           if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
               y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
             e.stopPropagation();
@@ -431,6 +431,7 @@ export class AgentCanvasInteractionHandler {
             this.state.draggedSchedulerNode = schedulerNode;
             this.state.dragStartX = x;
             this.state.dragStartY = y;
+            this.state.schedulerNodeClickTarget = schedulerNode; // Track for click detection
             this.canvas.style.cursor = 'move';
             return;
           }
@@ -904,6 +905,25 @@ export class AgentCanvasInteractionHandler {
         this.state.assignmentMouseX = 0;
         this.state.assignmentMouseY = 0;
       }
+    }
+
+    // Detect scheduler node click (vs drag)
+    if (wasDraggingSchedulerNode && this.state.schedulerNodeClickTarget) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      const dragDistance = Math.sqrt(
+        Math.pow(x - this.state.dragStartX, 2) +
+        Math.pow(y - this.state.dragStartY, 2)
+      );
+
+      // If drag distance is small (< 5 pixels), treat as a click
+      if (dragDistance < 5) {
+        if (window.showSchedulerDetails) {
+          window.showSchedulerDetails(this.state.schedulerNodeClickTarget);
+        }
+      }
+      this.state.schedulerNodeClickTarget = null;
     }
 
     this.state.isDragging = false;
