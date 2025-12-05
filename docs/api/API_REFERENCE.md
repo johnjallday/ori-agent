@@ -20,6 +20,7 @@ http://localhost:8765/api
 - [Settings API](#settings-api)
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
+- [Scheduler Nodes API](#scheduler-nodes-api)
 - [Examples](#examples)
 
 ## Authentication
@@ -1168,6 +1169,197 @@ async function safeApiCall(apiFunction) {
 const result = await safeApiCall(() => client.chat('Hello'));
 if (result) {
   console.log(result.response);
+}
+```
+
+## Scheduler Nodes API
+
+Scheduler nodes enable automatic execution of tasks at scheduled times on the workspace canvas. They support various schedule types including cron expressions, intervals, daily/weekly schedules, and relative delays.
+
+### Create Scheduler Node
+
+Create a new scheduler node on the workspace canvas.
+
+**Endpoint:** `POST /api/orchestration/workspaces/:workspace_id/scheduler-nodes`
+
+**Request Body:**
+```json
+{
+  "name": "Daily Data Sync",
+  "prompt": "Sync data from external API",
+  "to": "data-agent",
+  "schedule_type": "cron",
+  "cron_expression": "0 9 * * *",
+  "enabled": true,
+  "x": 400,
+  "y": 300
+}
+```
+
+**Parameters:**
+- `name` (required): Display name for the scheduler node
+- `prompt` (required): Task description/prompt to execute
+- `to` (required): Target agent name to execute the task
+- `schedule_type` (required): One of: `"interval"`, `"daily"`, `"weekly"`, `"cron"`, `"relative_delay"`
+- `enabled` (optional): Whether scheduler is enabled (default: `true`)
+- `x`, `y` (optional): Canvas position coordinates
+
+**Schedule Type Parameters:**
+- For `interval`: `interval_minutes` (integer)
+- For `daily`: `time_of_day` (string, format: "HH:MM")
+- For `weekly`: `day_of_week` (integer, 0-6), `time_of_day` (string)
+- For `cron`: `cron_expression` (string, 5-field cron format)
+- For `relative_delay`: `delay_duration` (duration string, e.g., "5m", "1h")
+
+**Optional Parameters:**
+- `max_runs` (integer): Maximum number of executions (0 = unlimited)
+- `end_date` (string, ISO 8601): Stop executing after this date
+- `priority` (string): Task priority (`"low"`, `"medium"`, `"high"`)
+
+**Response:**
+```json
+{
+  "id": "sched-abc123",
+  "name": "Daily Data Sync",
+  "enabled": true,
+  "next_run": "2025-12-05T09:00:00Z",
+  "execution_count": 0,
+  "created_at": "2025-12-04T22:00:00Z"
+}
+```
+
+### Update Scheduler Node
+
+Update an existing scheduler node configuration.
+
+**Endpoint:** `PUT /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id`
+
+**Request Body:**
+```json
+{
+  "name": "Updated Name",
+  "enabled": false,
+  "cron_expression": "0 10 * * *"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "sched-abc123",
+  "name": "Updated Name",
+  "enabled": false,
+  "next_run": null,
+  "execution_count": 5
+}
+```
+
+### Delete Scheduler Node
+
+Remove a scheduler node from the workspace.
+
+**Endpoint:** `DELETE /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Scheduler node deleted"
+}
+```
+
+### Trigger Scheduler Node Manually
+
+Execute a scheduler node immediately, regardless of its schedule.
+
+**Endpoint:** `POST /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id/trigger`
+
+**Response:**
+```json
+{
+  "task_id": "task-xyz789",
+  "message": "Scheduler triggered successfully"
+}
+```
+
+### List Scheduler Nodes
+
+Get all scheduler nodes for a workspace.
+
+**Endpoint:** `GET /api/orchestration/workspaces/:workspace_id/scheduler-nodes`
+
+**Response:**
+```json
+{
+  "scheduler_nodes": [
+    {
+      "id": "sched-abc123",
+      "name": "Daily Data Sync",
+      "enabled": true,
+      "schedule_type": "cron",
+      "cron_expression": "0 9 * * *",
+      "next_run": "2025-12-05T09:00:00Z",
+      "last_run": "2025-12-04T09:00:00Z",
+      "execution_count": 5,
+      "x": 400,
+      "y": 300
+    }
+  ]
+}
+```
+
+### Cron Expression Format
+
+Scheduler nodes support standard 5-field cron expressions:
+
+```
+* * * * *
+│ │ │ │ │
+│ │ │ │ └─ Day of week (0-6, 0=Sunday)
+│ │ │ └─── Month (1-12)
+│ │ └───── Day of month (1-31)
+│ └─────── Hour (0-23)
+└───────── Minute (0-59)
+```
+
+**Examples:**
+- `0 9 * * *` - Daily at 9:00 AM
+- `*/15 * * * *` - Every 15 minutes
+- `0 0 * * 0` - Every Sunday at midnight
+- `0 14 * * 1-5` - Weekdays at 2:00 PM
+- `30 6 1 * *` - First day of month at 6:30 AM
+
+**Special Characters:**
+- `*` - Any value
+- `*/n` - Every n units (e.g., `*/5` = every 5 minutes)
+- `n-m` - Range (e.g., `1-5` = Monday through Friday)
+- `n,m` - List (e.g., `1,3,5` = Monday, Wednesday, Friday)
+
+### Real-Time Events
+
+Scheduler nodes emit Server-Sent Events (SSE) for real-time updates:
+
+**Event Types:**
+- `scheduled_task.triggered` - Scheduler executed and created a task
+- `scheduled_task.completed` - Scheduler execution completed successfully
+- `scheduled_task.failed` - Scheduler execution failed
+
+**Event Data:**
+```json
+{
+  "type": "scheduled_task.triggered",
+  "data": {
+    "scheduled_task_id": "sched-abc123",
+    "scheduled_task": {
+      "id": "sched-abc123",
+      "name": "Daily Data Sync",
+      "execution_count": 6,
+      "next_run": "2025-12-05T09:00:00Z",
+      "last_execution": "2025-12-04T09:00:00Z"
+    },
+    "task_id": "task-xyz789",
+    "timestamp": "2025-12-04T09:00:00Z"
+  }
 }
 ```
 
