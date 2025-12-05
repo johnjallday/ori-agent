@@ -168,12 +168,25 @@ if goreleaser release --clean; then
   print_success "All platform installers built successfully"
   print_success "GitHub release created and installers uploaded"
 
+  # Create macOS DMGs (GoReleaser publishers don't work since we exclude darwin archives)
+  print_status "Creating macOS DMG installers..."
+  SHORT_VERSION="${VERSION#v}"
+  if ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin amd64 dist; then
+    print_success "Created DMG for amd64"
+  else
+    print_warning "Failed to create DMG for amd64"
+  fi
+  if ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist; then
+    print_success "Created DMG for arm64"
+  else
+    print_warning "Failed to create DMG for arm64"
+  fi
+
   # Show what was built
   print_status "Built installers:"
   ls -lh dist/*.dmg dist/*.deb dist/*.rpm 2>/dev/null || echo "  (See dist/ directory for all artifacts)"
 
-  # Ensure DMGs are uploaded (GoReleaser sometimes skips when publishers are custom)
-  SHORT_VERSION="${VERSION#v}"
+  # Upload DMGs to GitHub release
   DMG_AMD64="dist/OriAgent-${SHORT_VERSION}-amd64.dmg"
   DMG_ARM64="dist/OriAgent-${SHORT_VERSION}-arm64.dmg"
   if command -v gh >/dev/null 2>&1; then

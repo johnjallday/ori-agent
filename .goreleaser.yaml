@@ -95,29 +95,8 @@ archives:
       - LICENSE
       - README.md
 
-# macOS DMG installers - created via custom publisher
-publishers:
-  - name: macos-dmg-amd64
-    ids:
-      - default
-    cmd: ./build/macos/create-dmg.sh {{ .Version }} {{ .Os }} {{ .Arch }} dist
-    env:
-      - PATH={{ .Env.PATH }}
-      - TARGET_ARCH=amd64
-    extra_files:
-      - glob: ./dist/ori-menubar_darwin_amd64/*
-      - glob: ./dist/ori-agent_darwin_amd64/*
-
-  - name: macos-dmg-arm64
-    ids:
-      - default
-    cmd: ./build/macos/create-dmg.sh {{ .Version }} {{ .Os }} {{ .Arch }} dist
-    env:
-      - PATH={{ .Env.PATH }}
-      - TARGET_ARCH=arm64
-    extra_files:
-      - glob: ./dist/ori-menubar_darwin_arm64/*
-      - glob: ./dist/ori-agent_darwin_arm64/*
+# macOS DMG installers - created via hooks (publishers don't work since we don't create darwin archives)
+# DMGs are created in after hooks and uploaded via extra_files in release section
 
 # Windows MSI installers - created via custom script on Windows runner
 # Note: MSI creation is handled in GitHub Actions on windows-latest runner
