@@ -140,8 +140,8 @@ else
     exit 1
 fi
 
-# Find the server binary
-SERVER_PATH=$(find "${DIST_DIR}" -path "*/server_darwin_${ARCH}*/ori-agent" -type f | head -1)
+# Find the server binary (goreleaser creates server-macos_darwin_* directories)
+SERVER_PATH=$(find "${DIST_DIR}" -path "*/server-macos_darwin_${ARCH}*/ori-agent" -type f | head -1)
 if [ -f "$SERVER_PATH" ]; then
     if cp "$SERVER_PATH" "${APP_PATH}/Contents/Resources/"; then
         echo "  ✓ Copied server from: $SERVER_PATH"
@@ -152,7 +152,7 @@ if [ -f "$SERVER_PATH" ]; then
     fi
 else
     echo "❌ Error: ori-agent binary not found for architecture ${ARCH}"
-    echo "  Searched in: ${DIST_DIR}/server_darwin_${ARCH}*/"
+    echo "  Searched in: ${DIST_DIR}/server-macos_darwin_${ARCH}*/"
     exit 1
 fi
 

@@ -3,6 +3,7 @@ package pluginhttp
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -103,7 +104,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // HandleGetPluginDetails returns detailed information about a specific plugin
@@ -170,7 +171,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(details)
+	_ = json.NewEncoder(w).Encode(details)
 }
 
 // HandleEnablePlugin enables a plugin for the current agent
@@ -239,10 +240,12 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s enabled successfully", pluginName),
-	})
+	}); err != nil {
+		fmt.Printf("Warning: Failed to encode response: %v\n", err)
+	}
 }
 
 // HandleDisablePlugin disables a plugin for the current agent
@@ -282,10 +285,12 @@ func (h *PluginsPageHandler) HandleDisablePlugin(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s disabled successfully", pluginName),
-	})
+	}); err != nil {
+		fmt.Printf("Warning: Failed to encode response: %v\n", err)
+	}
 }
 
 // HandleUpdatePluginConfig updates configuration for a specific plugin
@@ -338,11 +343,13 @@ func (h *PluginsPageHandler) HandleUpdatePluginConfig(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Configuration updated for plugin %s", pluginName),
 		"path":    settingsPath,
-	})
+	}); err != nil {
+		fmt.Printf("Warning: Failed to encode response: %v\n", err)
+	}
 }
 
 // HandleTestPlugin executes a test call to the plugin
@@ -396,7 +403,9 @@ func (h *PluginsPageHandler) HandleTestPlugin(w http.ResponseWriter, r *http.Req
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		fmt.Printf("Error encoding response: %v\n", err)
+	}
 }
 
 // HandleGetPluginLogs returns recent logs for a specific plugin
@@ -429,9 +438,11 @@ func (h *PluginsPageHandler) HandleGetPluginLogs(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"logs": logs,
-	})
+	}); err != nil {
+		fmt.Printf("Error encoding logs response: %v\n", err)
+	}
 }
 
 // HandleDeletePlugin removes a plugin from the system
@@ -461,7 +472,7 @@ func (h *PluginsPageHandler) HandleDeletePlugin(w http.ResponseWriter, r *http.R
 		agent, ok := h.Store.GetAgent(agentName)
 		if ok {
 			delete(agent.Plugins, pluginName)
-			h.Store.SetAgent(agentName, agent)
+			_ = h.Store.SetAgent(agentName, agent)
 		}
 	}
 
@@ -482,10 +493,12 @@ func (h *PluginsPageHandler) HandleDeletePlugin(w http.ResponseWriter, r *http.R
 	h.CategoryManager.RemovePlugin(pluginName)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s deleted successfully", pluginName),
-	})
+	}); err != nil {
+		fmt.Printf("Error encoding delete response: %v\n", err)
+	}
 }
 
 // HandleReloadPlugin reloads a plugin (useful after updates)
@@ -540,10 +553,12 @@ func (h *PluginsPageHandler) HandleReloadPlugin(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s reloaded successfully", pluginName),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // HandleGetPluginAgents returns list of agents provided by a plugin
@@ -581,9 +596,11 @@ func (h *PluginsPageHandler) HandleGetPluginAgents(w http.ResponseWriter, r *htt
 	agents := h.getPluginAgents(plugin, loadedPlugin)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"agents": agents,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 // Helper methods

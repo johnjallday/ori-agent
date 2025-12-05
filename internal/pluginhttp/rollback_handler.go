@@ -3,6 +3,7 @@ package pluginhttp
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -105,17 +106,19 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 				agent.Plugins[pluginName] = loadedPlugin
 
 				// Save agent
-				h.Store.SetAgent(currentAgent, agent)
+				_ = h.Store.SetAgent(currentAgent, agent)
 			}
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s rolled back to version %s", pluginName, rollbackReq.Version),
 		"version": rollbackReq.Version,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+	}
 }
 
 func (h *RollbackHandler) extractPluginName(path string) string {

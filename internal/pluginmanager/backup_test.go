@@ -458,9 +458,9 @@ func TestBackupManager_ListBackups(t *testing.T) {
 	bm := NewBackupManager(tmpDir)
 
 	// Create some backup files
-	os.WriteFile(filepath.Join(tmpDir, "backup1.json"), []byte("{}"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "backup2.zip"), []byte("test"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("text"), 0644) // Should be ignored
+	_ = os.WriteFile(filepath.Join(tmpDir, "backup1.json"), []byte("{}"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "backup2.zip"), []byte("test"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("text"), 0644) // Should be ignored
 
 	// List backups
 	backups, err := bm.ListBackups()

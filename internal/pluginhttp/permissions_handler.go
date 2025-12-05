@@ -49,7 +49,7 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(permissionEntry)
+	_ = json.NewEncoder(w).Encode(permissionEntry)
 }
 
 // HandleApprovePermissions approves requested permissions for a plugin
@@ -80,11 +80,11 @@ func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *
 			"network_access":  permissionEntry.Permissions.NetworkAccess,
 			"system_commands": permissionEntry.Permissions.SystemCommands,
 		}
-		h.RegistryManager.UpdatePluginPermissions(pluginName, permMap, true)
+		_ = h.RegistryManager.UpdatePluginPermissions(pluginName, permMap, true)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Permissions approved for plugin %s", pluginName),
 	})

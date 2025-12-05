@@ -71,7 +71,7 @@ func TestPermissionManager_ApprovePermissions(t *testing.T) {
 
 	// Request permissions first
 	perms := pluginapi.PluginPermissions{FileAccess: true}
-	pm.RequestPermissions("plugin1", perms)
+	_ = pm.RequestPermissions("plugin1", perms)
 
 	// Test approve
 	err := pm.ApprovePermissions("plugin1")
@@ -100,7 +100,7 @@ func TestPermissionManager_DenyPermissions(t *testing.T) {
 
 	// Request permissions first
 	perms := pluginapi.PluginPermissions{NetworkAccess: true}
-	pm.RequestPermissions("plugin1", perms)
+	_ = pm.RequestPermissions("plugin1", perms)
 
 	// Test deny
 	err := pm.DenyPermissions("plugin1", "Security concern")
@@ -135,8 +135,8 @@ func TestPermissionManager_RevokePermissions(t *testing.T) {
 
 	// Request and approve permissions first
 	perms := pluginapi.PluginPermissions{SystemCommands: true}
-	pm.RequestPermissions("plugin1", perms)
-	pm.ApprovePermissions("plugin1")
+	_ = pm.RequestPermissions("plugin1", perms)
+	_ = pm.ApprovePermissions("plugin1")
 
 	// Test revoke
 	err := pm.RevokePermissions("plugin1", "Policy change")
@@ -154,7 +154,7 @@ func TestPermissionManager_RevokePermissions(t *testing.T) {
 	}
 
 	// Test revoke non-approved plugin
-	pm.RequestPermissions("plugin2", perms)
+	_ = pm.RequestPermissions("plugin2", perms)
 	err = pm.RevokePermissions("plugin2", "Test")
 	if err == nil {
 		t.Error("Expected error when revoking non-approved permissions")
@@ -169,8 +169,8 @@ func TestPermissionManager_CheckPermission(t *testing.T) {
 		FileAccess:    true,
 		NetworkAccess: false,
 	}
-	pm.RequestPermissions("plugin1", perms)
-	pm.ApprovePermissions("plugin1")
+	_ = pm.RequestPermissions("plugin1", perms)
+	_ = pm.ApprovePermissions("plugin1")
 
 	tests := []struct {
 		name       string
@@ -214,13 +214,13 @@ func TestPermissionManager_IsApproved(t *testing.T) {
 	perms := pluginapi.PluginPermissions{FileAccess: true}
 
 	// Request but don't approve
-	pm.RequestPermissions("plugin1", perms)
+	_ = pm.RequestPermissions("plugin1", perms)
 	if pm.IsApproved("plugin1") {
 		t.Error("Plugin1 should not be approved yet")
 	}
 
 	// Approve
-	pm.ApprovePermissions("plugin1")
+	_ = pm.ApprovePermissions("plugin1")
 	if !pm.IsApproved("plugin1") {
 		t.Error("Plugin1 should be approved")
 	}
@@ -235,10 +235,10 @@ func TestPermissionManager_GetPendingApprovals(t *testing.T) {
 	pm := NewPermissionManager("")
 
 	// Add some plugins with different statuses
-	pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
-	pm.RequestPermissions("plugin2", pluginapi.PluginPermissions{NetworkAccess: true})
-	pm.RequestPermissions("plugin3", pluginapi.PluginPermissions{SystemCommands: true})
-	pm.ApprovePermissions("plugin2")
+	_ = pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
+	_ = pm.RequestPermissions("plugin2", pluginapi.PluginPermissions{NetworkAccess: true})
+	_ = pm.RequestPermissions("plugin3", pluginapi.PluginPermissions{SystemCommands: true})
+	_ = pm.ApprovePermissions("plugin2")
 
 	pending := pm.GetPendingApprovals()
 
@@ -262,8 +262,8 @@ func TestPermissionManager_GetPendingApprovals(t *testing.T) {
 func TestPermissionManager_RemovePermissionEntry(t *testing.T) {
 	pm := NewPermissionManager("")
 
-	pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
-	pm.RequestPermissions("plugin2", pluginapi.PluginPermissions{NetworkAccess: true})
+	_ = pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
+	_ = pm.RequestPermissions("plugin2", pluginapi.PluginPermissions{NetworkAccess: true})
 
 	// Remove plugin1
 	pm.RemovePermissionEntry("plugin1")
@@ -285,7 +285,9 @@ func TestPermissionManager_LoadPermissions(t *testing.T) {
 	pm := NewPermissionManager("")
 
 	// Pre-load some data
-	pm.RequestPermissions("old-plugin", pluginapi.PluginPermissions{FileAccess: true})
+	if err := pm.RequestPermissions("old-plugin", pluginapi.PluginPermissions{FileAccess: true}); err != nil {
+		t.Fatalf("Failed to request permissions: %v", err)
+	}
 
 	// Create new entries to load
 	now := time.Now()
@@ -328,7 +330,7 @@ func TestPermissionManager_AuditLog(t *testing.T) {
 	pm := NewPermissionManager("")
 
 	perms := pluginapi.PluginPermissions{FileAccess: true}
-	pm.RequestPermissions("plugin1", perms)
+	_ = pm.RequestPermissions("plugin1", perms)
 
 	entry, _ := pm.GetPermissionEntry("plugin1")
 
@@ -341,7 +343,7 @@ func TestPermissionManager_AuditLog(t *testing.T) {
 	}
 
 	// Approve and check audit log
-	pm.ApprovePermissions("plugin1")
+	_ = pm.ApprovePermissions("plugin1")
 	entry, _ = pm.GetPermissionEntry("plugin1")
 
 	if len(entry.AuditLog) < 2 {
@@ -365,12 +367,12 @@ func TestPermissionManager_UpdatePermissions(t *testing.T) {
 
 	// Request initial permissions
 	perms1 := pluginapi.PluginPermissions{FileAccess: true}
-	pm.RequestPermissions("plugin1", perms1)
-	pm.ApprovePermissions("plugin1")
+	_ = pm.RequestPermissions("plugin1", perms1)
+	_ = pm.ApprovePermissions("plugin1")
 
 	// Request updated permissions (different)
 	perms2 := pluginapi.PluginPermissions{FileAccess: true, NetworkAccess: true}
-	pm.RequestPermissions("plugin1", perms2)
+	_ = pm.RequestPermissions("plugin1", perms2)
 
 	entry, _ := pm.GetPermissionEntry("plugin1")
 
@@ -409,8 +411,8 @@ func TestPermissionManager_FileIO(t *testing.T) {
 	pm := NewPermissionManager(auditPath)
 
 	// Request and approve some permissions
-	pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
-	pm.ApprovePermissions("plugin1")
+	_ = pm.RequestPermissions("plugin1", pluginapi.PluginPermissions{FileAccess: true})
+	_ = pm.ApprovePermissions("plugin1")
 
 	// Create new manager and load from file
 	pm2 := NewPermissionManager(auditPath)

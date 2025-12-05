@@ -105,12 +105,12 @@ func setupTestHandler(t *testing.T) (*PluginsPageHandler, string, func()) {
 	testAgent := &agent.Agent{
 		Plugins: make(map[string]types.LoadedPlugin),
 	}
-	st.SetAgent("test-agent", testAgent)
-	st.SwitchAgent("test-agent")
+	_ = st.SetAgent("test-agent", testAgent)
+	_ = st.SwitchAgent("test-agent")
 
 	// Initialize registry manager
 	regMgr := registry.NewManager()
-	regMgr.SaveLocal(types.PluginRegistry{
+	_ = regMgr.SaveLocal(types.PluginRegistry{
 		Plugins: []types.PluginRegistryEntry{
 			{
 				Name:         "test-plugin",

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
@@ -42,7 +41,7 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-config.json", pluginName))
-		w.Write(data)
+		_, _ = w.Write(data)
 	} else {
 		// Export all plugins
 		data, err := h.BackupManager.ExportAllPluginConfigs()
@@ -53,7 +52,7 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=all-plugins-config.json")
-		w.Write(data)
+		_, _ = w.Write(data)
 	}
 }
 
@@ -95,21 +94,9 @@ func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":        true,
 		"message":        fmt.Sprintf("Successfully imported %d plugin configuration(s)", importedCount),
 		"imported_count": importedCount,
 	})
-}
-
-func (h *BackupHandler) extractPluginName(path string) string {
-	// Remove /api/plugins/ prefix
-	pluginPath := strings.TrimPrefix(path, "/api/plugins/")
-
-	// Split by / and take first component (plugin name)
-	parts := strings.Split(pluginPath, "/")
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return ""
 }

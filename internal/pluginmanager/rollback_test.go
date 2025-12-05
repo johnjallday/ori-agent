@@ -119,13 +119,13 @@ func TestVersionManager_GetVersionHistory(t *testing.T) {
 	// Create dummy binaries
 	plugin1 := filepath.Join(tmpDir, "plugin1-v1")
 	plugin2 := filepath.Join(tmpDir, "plugin1-v2")
-	os.WriteFile(plugin1, []byte("v1"), 0755)
-	os.WriteFile(plugin2, []byte("v2"), 0755)
+	_ = os.WriteFile(plugin1, []byte("v1"), 0755)
+	_ = os.WriteFile(plugin2, []byte("v2"), 0755)
 
 	// Store multiple versions
-	vm.StoreVersion("plugin1", "1.0.0", plugin1)
+	_ = vm.StoreVersion("plugin1", "1.0.0", plugin1)
 	time.Sleep(10 * time.Millisecond) // Small delay to ensure different timestamps
-	vm.StoreVersion("plugin1", "1.1.0", plugin2)
+	_ = vm.StoreVersion("plugin1", "1.1.0", plugin2)
 
 	history := vm.GetVersionHistory("plugin1")
 
@@ -164,7 +164,7 @@ func TestVersionManager_RollbackToVersion(t *testing.T) {
 	}
 
 	// Store v1.0
-	vm.StoreVersion("test-plugin", "1.0.0", v1Path)
+	_ = vm.StoreVersion("test-plugin", "1.0.0", v1Path)
 
 	// Update to v2.0
 	currentPath := filepath.Join(tmpDir, "plugin-current")
@@ -250,9 +250,9 @@ func TestVersionManager_GetAvailableVersions(t *testing.T) {
 	// Create dummy binaries and store versions
 	for i, version := range []string{"1.0.0", "1.1.0", "1.2.0"} {
 		pluginPath := filepath.Join(tmpDir, "plugin", version)
-		os.MkdirAll(filepath.Dir(pluginPath), 0755)
-		os.WriteFile(pluginPath, []byte("v"+version), 0755)
-		vm.StoreVersion("plugin1", version, pluginPath)
+		_ = os.MkdirAll(filepath.Dir(pluginPath), 0755)
+		_ = os.WriteFile(pluginPath, []byte("v"+version), 0755)
+		_ = vm.StoreVersion("plugin1", version, pluginPath)
 		time.Sleep(time.Duration(i+1) * 10 * time.Millisecond) // Ensure different timestamps
 	}
 
@@ -288,8 +288,8 @@ func TestVersionManager_HasVersionHistory(t *testing.T) {
 
 	// Store a version
 	pluginPath := filepath.Join(tmpDir, "plugin1")
-	os.WriteFile(pluginPath, []byte("v1"), 0755)
-	vm.StoreVersion("plugin1", "1.0.0", pluginPath)
+	_ = os.WriteFile(pluginPath, []byte("v1"), 0755)
+	_ = vm.StoreVersion("plugin1", "1.0.0", pluginPath)
 
 	// Should have history now
 	if !vm.HasVersionHistory("plugin1") {
@@ -313,8 +313,8 @@ func TestVersionManager_RemoveVersionHistory(t *testing.T) {
 
 	// Store a version
 	pluginPath := filepath.Join(tmpDir, "plugin1")
-	os.WriteFile(pluginPath, []byte("v1"), 0755)
-	vm.StoreVersion("plugin1", "1.0.0", pluginPath)
+	_ = os.WriteFile(pluginPath, []byte("v1"), 0755)
+	_ = vm.StoreVersion("plugin1", "1.0.0", pluginPath)
 
 	// Verify history exists
 	if !vm.HasVersionHistory("plugin1") {
@@ -351,9 +351,9 @@ func TestVersionManager_CleanupOldVersions(t *testing.T) {
 	// Store more than MaxVersionHistory versions
 	for i := 1; i <= 5; i++ {
 		pluginPath := filepath.Join(tmpDir, "plugin", "v", string(rune(i)))
-		os.MkdirAll(filepath.Dir(pluginPath), 0755)
-		os.WriteFile(pluginPath, []byte("version"), 0755)
-		vm.StoreVersion("plugin1", "1."+string(rune('0'+i))+".0", pluginPath)
+		_ = os.MkdirAll(filepath.Dir(pluginPath), 0755)
+		_ = os.WriteFile(pluginPath, []byte("version"), 0755)
+		_ = vm.StoreVersion("plugin1", "1."+string(rune('0'+i))+".0", pluginPath)
 		time.Sleep(10 * time.Millisecond) // Ensure different timestamps
 	}
 
@@ -393,8 +393,8 @@ func TestVersionManager_LoadVersionHistory(t *testing.T) {
 
 	// Store some versions with first manager
 	pluginPath := filepath.Join(tmpDir, "plugin1")
-	os.WriteFile(pluginPath, []byte("v1"), 0755)
-	vm1.StoreVersion("plugin1", "1.0.0", pluginPath)
+	_ = os.WriteFile(pluginPath, []byte("v1"), 0755)
+	_ = vm1.StoreVersion("plugin1", "1.0.0", pluginPath)
 
 	// Create new manager and load from disk
 	vm2 := NewVersionManager(versionsDir)

@@ -124,32 +124,18 @@ run_check "Go Vet" "make vet" || {
 
 # Check if golangci-lint is installed (check PATH and ~/go/bin)
 if command -v golangci-lint &> /dev/null; then
-  run_check "Lint Check" "make lint" || {
-    # Lint check failed - offer to auto-fix
-    echo -e "${YELLOW}💡 Tip: Automated lint fixing is available${NC}"
-    echo ""
-    read -p "Run automated lint fixer? [y/N]: " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-      echo ""
-      if [ -f "./scripts/fix-all-lint.sh" ]; then
-        ./scripts/fix-all-lint.sh
-        echo ""
-        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
-        echo ""
-        # Re-run lint check after fixes
-        if run_check "Lint Check (after fixes)" "make lint"; then
-          # Remove the original failure from FAILED_CHECKS
-          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
-        fi
-      else
-        echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
-      fi
-    fi
-  }
+  LINT_CMD="make lint"
+  LINT_AVAILABLE=true
 elif [ -x "$HOME/go/bin/golangci-lint" ]; then
-  run_check "Lint Check" "$HOME/go/bin/golangci-lint run ./..." || {
-    # Lint check failed - offer to auto-fix
+  LINT_CMD="$HOME/go/bin/golangci-lint run ./..."
+  LINT_AVAILABLE=true
+else
+  LINT_AVAILABLE=false
+fi
+
+if [ "$LINT_AVAILABLE" = true ]; then
+  run_check "Lint Check" "$LINT_CMD" || {
+    # Lint check failed - offer to auto-fix with feedback loop
     echo -e "${YELLOW}💡 Tip: Automated lint fixing is available${NC}"
     echo ""
     read -p "Run automated lint fixer? [y/N]: " -n 1 -r
@@ -157,14 +143,66 @@ elif [ -x "$HOME/go/bin/golangci-lint" ]; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       echo ""
       if [ -f "./scripts/fix-all-lint.sh" ]; then
-        ./scripts/fix-all-lint.sh
-        echo ""
-        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
-        echo ""
-        # Re-run lint check after fixes
-        if run_check "Lint Check (after fixes)" "$HOME/go/bin/golangci-lint run ./..."; then
-          # Remove the original failure from FAILED_CHECKS
-          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
+        # Feedback loop: keep fixing until no errors or max iterations
+        MAX_ITERATIONS=5
+        ITERATION=1
+        LINT_PASSED=false
+
+        while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$LINT_PASSED" = false ]; do
+          echo ""
+          echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+          echo -e "${BLUE}║         FIX ITERATION $ITERATION/$MAX_ITERATIONS                ║${NC}"
+          echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+          echo ""
+
+          ./scripts/fix-all-lint.sh
+
+          echo ""
+          echo -e "${BLUE}Re-running lint check after fixes...${NC}"
+          echo ""
+          echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+          echo -e "${BLUE}Running: Lint Check (iteration $ITERATION)${NC}"
+          echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+          if eval "$LINT_CMD"; then
+            echo -e "${GREEN}✅ Lint Check (iteration $ITERATION): PASSED${NC}"
+            echo ""
+            LINT_PASSED=true
+            # Remove the original failure from FAILED_CHECKS
+            FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
+          else
+            echo -e "${RED}❌ Lint Check (iteration $ITERATION): FAILED${NC}"
+            echo ""
+
+            if [ $ITERATION -lt $MAX_ITERATIONS ]; then
+              echo -e "${YELLOW}⚠️  Still have lint errors. Attempting fix again...${NC}"
+              echo ""
+            else
+              echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
+              echo ""
+            fi
+          fi
+
+          ITERATION=$((ITERATION + 1))
+        done
+
+        if [ "$LINT_PASSED" = true ]; then
+          echo ""
+          echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
+          echo -e "${GREEN}║              COMPLETE                      ║${NC}"
+          echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+          echo ""
+          echo -e "${GREEN}✅ All lint errors fixed successfully!${NC}"
+          echo ""
+        else
+          echo ""
+          echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
+          echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
+          echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
+          echo ""
+          echo -e "${RED}❌ Automated fixes could not resolve all errors.${NC}"
+          echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
+          echo ""
         fi
       else
         echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"

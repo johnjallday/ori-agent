@@ -38,7 +38,7 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // HandleDismissNotification dismisses a specific notification
@@ -61,7 +61,7 @@ func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Notification dismissed successfully",
 	})

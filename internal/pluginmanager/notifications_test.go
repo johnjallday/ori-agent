@@ -71,9 +71,9 @@ func TestNotificationManager_GetNotifications(t *testing.T) {
 		Timestamp:  time.Now(),
 	}
 
-	nm.CreateNotification(notif1)
-	nm.CreateNotification(notif2)
-	nm.CreateNotification(notif3)
+	_ = nm.CreateNotification(notif1)
+	_ = nm.CreateNotification(notif2)
+	_ = nm.CreateNotification(notif3)
 
 	notifications := nm.GetNotifications()
 
@@ -114,9 +114,9 @@ func TestNotificationManager_GetUnreadNotifications(t *testing.T) {
 		Dismissed:  true,
 	}
 
-	nm.CreateNotification(notif1)
-	nm.CreateNotification(notif2)
-	nm.CreateNotification(notif3)
+	_ = nm.CreateNotification(notif1)
+	_ = nm.CreateNotification(notif2)
+	_ = nm.CreateNotification(notif3)
 
 	unread := nm.GetUnreadNotifications()
 
@@ -138,37 +138,43 @@ func TestNotificationManager_GetUnreadCount(t *testing.T) {
 	}
 
 	// Add unread notification
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin1",
 		Message:    "Error",
 		Read:       false,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	if count := nm.GetUnreadCount(); count != 1 {
 		t.Errorf("Expected 1 unread, got %d", count)
 	}
 
 	// Add read notification
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeUpdateAvailable,
 		PluginName: "plugin2",
 		Message:    "Update",
 		Read:       true,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	if count := nm.GetUnreadCount(); count != 1 {
 		t.Errorf("Expected 1 unread (read notification should not count), got %d", count)
 	}
 
 	// Add dismissed notification
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeHealthCheckFailed,
 		PluginName: "plugin3",
 		Message:    "Health",
 		Read:       false,
 		Dismissed:  true,
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	if count := nm.GetUnreadCount(); count != 1 {
 		t.Errorf("Expected 1 unread (dismissed notification should not count), got %d", count)
@@ -185,7 +191,9 @@ func TestNotificationManager_MarkAsRead(t *testing.T) {
 		Message:    "Error",
 		Read:       false,
 	}
-	nm.CreateNotification(notif)
+	if err := nm.CreateNotification(notif); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	// Get the actual ID that was generated
 	notifications := nm.GetNotifications()
@@ -215,12 +223,14 @@ func TestNotificationManager_MarkAllAsRead(t *testing.T) {
 
 	// Create multiple unread notifications
 	for i := 0; i < 3; i++ {
-		nm.CreateNotification(Notification{
+		if err := nm.CreateNotification(Notification{
 			Type:       NotificationTypePluginError,
 			PluginName: "plugin",
 			Message:    "Error",
 			Read:       false,
-		})
+		}); err != nil {
+			t.Fatalf("Failed to create notification %d: %v", i, err)
+		}
 	}
 
 	// Mark all as read
@@ -251,7 +261,9 @@ func TestNotificationManager_DismissNotification(t *testing.T) {
 		Message:    "Error",
 		Dismissed:  false,
 	}
-	nm.CreateNotification(notif)
+	if err := nm.CreateNotification(notif); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	// Get the actual ID
 	notifications := nm.GetNotifications()
@@ -279,19 +291,19 @@ func TestNotificationManager_ClearDismissed(t *testing.T) {
 	nm := NewNotificationManager("")
 
 	// Create mix of dismissed and non-dismissed notifications
-	nm.CreateNotification(Notification{
+	_ = nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin1",
 		Message:    "Error 1",
 		Dismissed:  true,
 	})
-	nm.CreateNotification(Notification{
+	_ = nm.CreateNotification(Notification{
 		Type:       NotificationTypeUpdateAvailable,
 		PluginName: "plugin2",
 		Message:    "Update",
 		Dismissed:  false,
 	})
-	nm.CreateNotification(Notification{
+	_ = nm.CreateNotification(Notification{
 		Type:       NotificationTypeHealthCheckFailed,
 		PluginName: "plugin3",
 		Message:    "Health",
@@ -319,11 +331,13 @@ func TestNotificationManager_ClearAll(t *testing.T) {
 
 	// Create some notifications
 	for i := 0; i < 5; i++ {
-		nm.CreateNotification(Notification{
+		if err := nm.CreateNotification(Notification{
 			Type:       NotificationTypePluginError,
 			PluginName: "plugin",
 			Message:    "Error",
-		})
+		}); err != nil {
+			t.Fatalf("Failed to create notification %d: %v", i, err)
+		}
 	}
 
 	// Clear all
@@ -343,21 +357,27 @@ func TestNotificationManager_GetNotificationsByPlugin(t *testing.T) {
 	nm := NewNotificationManager("")
 
 	// Create notifications for different plugins
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin1",
 		Message:    "Error 1",
-	})
-	nm.CreateNotification(Notification{
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeUpdateAvailable,
 		PluginName: "plugin2",
 		Message:    "Update",
-	})
-	nm.CreateNotification(Notification{
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeHealthCheckFailed,
 		PluginName: "plugin1",
 		Message:    "Health",
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	// Get notifications for plugin1
 	plugin1Notifs := nm.GetNotificationsByPlugin("plugin1")
@@ -382,21 +402,27 @@ func TestNotificationManager_GetNotificationsByType(t *testing.T) {
 	nm := NewNotificationManager("")
 
 	// Create notifications of different types
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin1",
 		Message:    "Error",
-	})
-	nm.CreateNotification(Notification{
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin2",
 		Message:    "Another error",
-	})
-	nm.CreateNotification(Notification{
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeUpdateAvailable,
 		PluginName: "plugin3",
 		Message:    "Update",
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	// Get error notifications
 	errors := nm.GetNotificationsByType(NotificationTypePluginError)
@@ -416,11 +442,13 @@ func TestNotificationManager_MaxHistory(t *testing.T) {
 
 	// Create more than MaxNotificationHistory notifications
 	for i := 0; i < MaxNotificationHistory+10; i++ {
-		nm.CreateNotification(Notification{
+		if err := nm.CreateNotification(Notification{
 			Type:       NotificationTypePluginError,
 			PluginName: "plugin",
 			Message:    "Error",
-		})
+		}); err != nil {
+			t.Fatalf("Failed to create notification %d: %v", i, err)
+		}
 		time.Sleep(time.Millisecond) // Ensure different timestamps
 	}
 
@@ -442,16 +470,20 @@ func TestNotificationManager_FileIO(t *testing.T) {
 	nm := NewNotificationManager(storagePath)
 
 	// Create some notifications
-	nm.CreateNotification(Notification{
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypePluginError,
 		PluginName: "plugin1",
 		Message:    "Error",
-	})
-	nm.CreateNotification(Notification{
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if err := nm.CreateNotification(Notification{
 		Type:       NotificationTypeUpdateAvailable,
 		PluginName: "plugin2",
 		Message:    "Update",
-	})
+	}); err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 
 	// Create new manager and load from file
 	nm2 := NewNotificationManager(storagePath)

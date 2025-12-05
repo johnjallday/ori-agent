@@ -261,7 +261,7 @@ func (pm *PermissionManager) RemovePermissionEntry(pluginName string) {
 	defer pm.mu.Unlock()
 
 	delete(pm.permissions, pluginName)
-	pm.saveAuditLog() // Ignore error on cleanup
+	_ = pm.saveAuditLog() // Ignore error on cleanup
 }
 
 // LoadPermissions loads permission entries from a map (used when restoring from storage).

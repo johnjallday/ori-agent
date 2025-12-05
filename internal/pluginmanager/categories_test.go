@@ -66,8 +66,8 @@ func TestCategoryManager_AssignCategory(t *testing.T) {
 
 func TestCategoryManager_GetCategory(t *testing.T) {
 	cm := NewCategoryManager()
-	cm.AssignCategory("plugin1", CategorySystemTools)
-	cm.AssignCategory("plugin2", "AI/ML, Data Processing")
+	_ = cm.AssignCategory("plugin1", CategorySystemTools)
+	_ = cm.AssignCategory("plugin2", "AI/ML, Data Processing")
 
 	tests := []struct {
 		name       string
@@ -103,9 +103,9 @@ func TestCategoryManager_GetCategory(t *testing.T) {
 
 func TestCategoryManager_GetPluginsByCategory(t *testing.T) {
 	cm := NewCategoryManager()
-	cm.AssignCategory("plugin1", CategorySystemTools)
-	cm.AssignCategory("plugin2", CategorySystemTools)
-	cm.AssignCategory("plugin3", CategoryAIML)
+	_ = cm.AssignCategory("plugin1", CategorySystemTools)
+	_ = cm.AssignCategory("plugin2", CategorySystemTools)
+	_ = cm.AssignCategory("plugin3", CategoryAIML)
 
 	tests := []struct {
 		name     string
@@ -143,9 +143,9 @@ func TestCategoryManager_GetPluginsByCategory(t *testing.T) {
 
 func TestCategoryManager_GetAllCategories(t *testing.T) {
 	cm := NewCategoryManager()
-	cm.AssignCategory("plugin1", CategorySystemTools)
-	cm.AssignCategory("plugin2", CategoryAIML)
-	cm.AssignCategory("plugin3", CategoryDataProcessing)
+	_ = cm.AssignCategory("plugin1", CategorySystemTools)
+	_ = cm.AssignCategory("plugin2", CategoryAIML)
+	_ = cm.AssignCategory("plugin3", CategoryDataProcessing)
 
 	got := cm.GetAllCategories()
 	want := []string{CategorySystemTools, CategoryAIML, CategoryDataProcessing}
@@ -160,8 +160,12 @@ func TestCategoryManager_GetAllCategories(t *testing.T) {
 
 func TestCategoryManager_RemovePlugin(t *testing.T) {
 	cm := NewCategoryManager()
-	cm.AssignCategory("plugin1", CategorySystemTools)
-	cm.AssignCategory("plugin2", CategorySystemTools)
+	if err := cm.AssignCategory("plugin1", CategorySystemTools); err != nil {
+		t.Fatalf("Failed to assign category: %v", err)
+	}
+	if err := cm.AssignCategory("plugin2", CategorySystemTools); err != nil {
+		t.Fatalf("Failed to assign category: %v", err)
+	}
 
 	// Remove plugin1
 	cm.RemovePlugin("plugin1")
@@ -187,7 +191,9 @@ func TestCategoryManager_LoadCategories(t *testing.T) {
 	cm := NewCategoryManager()
 
 	// Pre-load some data
-	cm.AssignCategory("old-plugin", CategoryCustom)
+	if err := cm.AssignCategory("old-plugin", CategoryCustom); err != nil {
+		t.Fatalf("Failed to assign category: %v", err)
+	}
 
 	// Load new categories
 	newCategories := map[string]string{
@@ -299,7 +305,9 @@ func TestCategoryManager_ReassignCategory(t *testing.T) {
 	cm := NewCategoryManager()
 
 	// Assign initial category
-	cm.AssignCategory("plugin1", CategorySystemTools)
+	if err := cm.AssignCategory("plugin1", CategorySystemTools); err != nil {
+		t.Fatalf("Failed to assign initial category: %v", err)
+	}
 
 	// Verify initial assignment
 	if cat := cm.GetCategory("plugin1"); cat != CategorySystemTools {
@@ -311,7 +319,9 @@ func TestCategoryManager_ReassignCategory(t *testing.T) {
 	}
 
 	// Reassign to new category
-	cm.AssignCategory("plugin1", CategoryAIML)
+	if err := cm.AssignCategory("plugin1", CategoryAIML); err != nil {
+		t.Fatalf("Failed to reassign category: %v", err)
+	}
 
 	// Verify new assignment
 	if cat := cm.GetCategory("plugin1"); cat != CategoryAIML {
@@ -335,7 +345,9 @@ func TestCategoryManager_MultipleCategories(t *testing.T) {
 	cm := NewCategoryManager()
 
 	// Assign plugin to multiple categories
-	cm.AssignCategory("plugin1", "AI/ML, Data Processing")
+	if err := cm.AssignCategory("plugin1", "AI/ML, Data Processing"); err != nil {
+		t.Fatalf("Failed to assign multiple categories: %v", err)
+	}
 
 	// Verify plugin appears in both categories
 	aimlPlugins := cm.GetPluginsByCategory("AI/ML")

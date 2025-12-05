@@ -7,10 +7,7 @@ version: 2
 # Project metadata
 project_name: ori-agent
 
-# Release behavior
-release:
-  # Allow re-running the same tag by replacing existing assets instead of failing
-  mode: replace
+# Release behavior - full configuration at end of file (line ~255)
 
 # Before hooks - run before the build
 before:
