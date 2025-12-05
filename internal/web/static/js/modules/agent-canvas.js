@@ -94,6 +94,13 @@ class AgentCanvas {
     this.state.on(EVENT_TYPES.ATTACHMENT_MOVED, () => this.draw());
     this.state.on(EVENT_TYPES.CANVAS_PANNED, () => this.draw());
     this.state.on(EVENT_TYPES.CANVAS_ZOOMED, () => this.draw());
+
+    // Start periodic countdown timer for scheduler nodes (update every 10 seconds)
+    this.countdownTimer = setInterval(() => {
+      if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+        this.draw(); // Redraw to update countdown displays
+      }
+    }, 10000); // 10 seconds
   }
 
   // ==================== PROPERTY ACCESSORS (Backward Compatibility) ====================
@@ -961,6 +968,9 @@ class AgentCanvas {
     }
     if (this.eventSource) {
       this.eventSource.close();
+    }
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
     }
   }
 

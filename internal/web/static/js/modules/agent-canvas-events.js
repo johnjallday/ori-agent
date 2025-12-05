@@ -25,6 +25,9 @@ export function createEventStream(studioId, handlers) {
   source.addEventListener('attachment.created', (event) => safe(handlers.onAttachmentEvent)(event));
   source.addEventListener('attachment.updated', (event) => safe(handlers.onAttachmentEvent)(event));
   source.addEventListener('attachment.deleted', (event) => safe(handlers.onAttachmentEvent)(event));
+  source.addEventListener('scheduled_task.triggered', (event) => safe(handlers.onScheduledTaskEvent)(event));
+  source.addEventListener('scheduled_task.failed', (event) => safe(handlers.onScheduledTaskEvent)(event));
+  source.addEventListener('scheduled_task.completed', (event) => safe(handlers.onScheduledTaskEvent)(event));
 
   source.onerror = (error) => safe(handlers.onError)(error);
 
@@ -81,6 +84,10 @@ export function connectProgressStream(studioId, handlers) {
     onAttachmentEvent: (event) => {
       const data = parseJSON(event);
       if (data && handlers.onAttachmentEvent) handlers.onAttachmentEvent(event.type, data);
+    },
+    onScheduledTaskEvent: (event) => {
+      const data = parseJSON(event);
+      if (data && handlers.onScheduledTaskEvent) handlers.onScheduledTaskEvent(event.type, data);
     },
     onError: (error) => {
       if (handlers.onError) handlers.onError(error);
