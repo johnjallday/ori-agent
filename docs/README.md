@@ -11,6 +11,9 @@ This directory contains detailed documentation for Ori Agent.
 - [API Reference](./api/API_REFERENCE.md) - HTTP API endpoint documentation
 - [LLM Provider Guide](../internal/llm/README.md) - LLM provider abstraction and implementation
 
+### Feature Guides
+- [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
+
 ### Testing & Quality
 - [Smoke Tests Guide](./SMOKE_TESTS.md) - Automated installer smoke testing (CI/CD)
 - [Testing Installers](./TESTING_INSTALLERS.md) - Manual installer testing guide (VMs, Docker)
@@ -42,6 +45,7 @@ docs/
 ├── TESTING_INSTALLERS.md               # Manual installer testing guide
 ├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
 ├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
+├── SCHEDULER_NODES_GUIDE.md            # Scheduler nodes usage guide
 │
 ├── api/
 │   └── API_REFERENCE.md                # HTTP API documentation
