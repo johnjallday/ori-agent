@@ -896,7 +896,7 @@ class AgentCanvas {
       return;
     }
     try {
-      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}`);
+      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}?studio_id=${this.studioId}`);
       this.state.removeSchedulerNode(schedulerNode.id);
       this.saveLayout();
       this.draw();
