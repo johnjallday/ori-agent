@@ -27,17 +27,27 @@ export class RendererConnections {
   }
 
   drawConnections() {
-    this.ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-    this.ctx.lineWidth = 1;
+    if (!this.state.connections || this.state.connections.length === 0) return;
 
-    for (let i = 0; i < this.state.agents.length; i++) {
-      for (let j = i + 1; j < this.state.agents.length; j++) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(this.state.agents[i].x, this.state.agents[i].y);
-        this.ctx.lineTo(this.state.agents[j].x, this.state.agents[j].y);
-        this.ctx.stroke();
-      }
-    }
+    this.state.connections.forEach(conn => {
+      const fromData = this.parent.helpers.getNodeById(conn.from);
+      const toData = this.parent.helpers.getNodeById(conn.to);
+      if (!fromData || !toData) return;
+
+      const fromCenter = this.getNodeCenter(fromData);
+      const toCenter = this.getNodeCenter(toData);
+      if (!fromCenter || !toCenter) return;
+
+      const fromRect = this.getNodeRect(fromData);
+      const toRect = this.getNodeRect(toData);
+
+      const startPoint = this.getEdgePoint(fromRect, fromCenter, toCenter) ||
+        this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData));
+      const endPoint = this.getEdgePoint(toRect, fromCenter, toCenter) ||
+        this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData));
+
+      this.primitives.drawArrow(startPoint.x, startPoint.y, endPoint.x, endPoint.y, '#22c55e', 2, true);
+    });
   }
 
   drawResultConnections() {
@@ -72,22 +82,30 @@ export class RendererConnections {
         // Draw a more prominent line with glow effect to indicate result flow
         this.ctx.save();
 
-        // Offset arrow so the head doesn't sit on top of the task card
-        const angle = Math.atan2(task.y - sourceAgent.y, task.x - sourceAgent.x);
-        const startOffset = 50; // move start off agent node center
-        const endOffset = 80;   // stop before target card center
-        const startX = sourceAgent.x + startOffset * Math.cos(angle);
-        const startY = sourceAgent.y + startOffset * Math.sin(angle);
-        const endX = task.x - endOffset * Math.cos(angle);
-        const endY = task.y - endOffset * Math.sin(angle);
+        const fromData = { type: 'agent', node: sourceAgent };
+        const toData = { type: 'task', node: task };
+        const fromCenter = this.getNodeCenter(fromData);
+        const toCenter = this.getNodeCenter(toData);
+        if (!fromCenter || !toCenter) {
+          this.ctx.restore();
+          return;
+        }
+
+        const fromRect = this.getNodeRect(fromData);
+        const toRect = this.getNodeRect(toData);
+
+        const startPoint = this.getEdgePoint(fromRect, fromCenter, toCenter) ||
+          this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData) + 10);
+        const endPoint = this.getEdgePoint(toRect, fromCenter, toCenter) ||
+          this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData) + 6);
 
         // Draw softened line (no arrowhead) for result flow
         this.ctx.strokeStyle = 'rgba(155, 89, 182, 0.35)';
         this.ctx.lineWidth = 2;
         this.ctx.setLineDash([6, 10]);
         this.ctx.beginPath();
-        this.ctx.moveTo(startX, startY);
-        this.ctx.lineTo(endX, endY);
+        this.ctx.moveTo(startPoint.x, startPoint.y);
+        this.ctx.lineTo(endPoint.x, endPoint.y);
         this.ctx.stroke();
         this.ctx.setLineDash([]);
         this.ctx.restore();
@@ -446,4 +464,112 @@ export class RendererConnections {
     this.ctx.restore();
   }
 
+  getNodeCenter(nodeData) {
+    const { node } = nodeData;
+    if (!node) return null;
+
+    const center = { x: node.x, y: node.y };
+    if (node.cardBounds) {
+      center.x = node.cardBounds.x + node.cardBounds.width / 2;
+      center.y = node.cardBounds.y + node.cardBounds.height / 2;
+    }
+    return center;
+  }
+
+  getNodeRadius(nodeData) {
+    const { type, node } = nodeData;
+    if (node && node.cardBounds) {
+      return Math.max(0, Math.min(node.cardBounds.width, node.cardBounds.height) / 2 - 4);
+    }
+
+    switch (type) {
+      case 'task':
+        return 40;
+      case 'scheduler':
+        return 50;
+      case 'agent':
+        return 45;
+      case 'attachment':
+        return 30;
+      default:
+        return 40;
+    }
+  }
+
+  getNodeRect(nodeData) {
+    const { type, node } = nodeData;
+    if (node && node.cardBounds) {
+      return node.cardBounds;
+    }
+    // Fallback sizes
+    switch (type) {
+      case 'task':
+        return { x: (node.x || 0) - 80, y: (node.y || 0) - 50, width: 160, height: 100 };
+      case 'scheduler':
+        return { x: (node.x || 0) - 90, y: (node.y || 0) - 45, width: 180, height: 90 };
+      case 'agent':
+        const halfW = (node.width || 120) / 2;
+        const halfH = (node.height || 70) / 2;
+        return { x: node.x - halfW, y: node.y - halfH, width: halfW * 2, height: halfH * 2 };
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Get the intersection point of a line from "from" to "to" with a rectangle boundary.
+   * Returns null if not found.
+   */
+  getEdgePoint(rect, from, to) {
+    if (!rect || !from || !to) return null;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (dx === 0 && dy === 0) return null;
+
+    const candidates = [];
+    // Left
+    if (dx !== 0) {
+      const t = (rect.x - from.x) / dx;
+      const y = from.y + dy * t;
+      if (t > 0 && t < 1 && y >= rect.y && y <= rect.y + rect.height) {
+        candidates.push({ t, x: rect.x, y });
+      }
+    }
+    // Right
+    if (dx !== 0) {
+      const t = ((rect.x + rect.width) - from.x) / dx;
+      const y = from.y + dy * t;
+      if (t > 0 && t < 1 && y >= rect.y && y <= rect.y + rect.height) {
+        candidates.push({ t, x: rect.x + rect.width, y });
+      }
+    }
+    // Top
+    if (dy !== 0) {
+      const t = (rect.y - from.y) / dy;
+      const x = from.x + dx * t;
+      if (t > 0 && t < 1 && x >= rect.x && x <= rect.x + rect.width) {
+        candidates.push({ t, x, y: rect.y });
+      }
+    }
+    // Bottom
+    if (dy !== 0) {
+      const t = ((rect.y + rect.height) - from.y) / dy;
+      const x = from.x + dx * t;
+      if (t > 0 && t < 1 && x >= rect.x && x <= rect.x + rect.width) {
+        candidates.push({ t, x, y: rect.y + rect.height });
+      }
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.t - b.t);
+    return { x: candidates[0].x, y: candidates[0].y };
+  }
+
+  offsetByRadius(from, to, radius) {
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    return {
+      x: from.x + Math.cos(angle) * radius,
+      y: from.y + Math.sin(angle) * radius
+    };
+  }
 }

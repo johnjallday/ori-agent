@@ -246,7 +246,12 @@ export class DashboardTasks {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
+      const params = new URLSearchParams({ id: taskId });
+      if (this.parent?.workspaceId) {
+        params.append('workspace_id', this.parent.workspaceId);
+      }
+
+      const response = await fetch(`/api/orchestration/tasks?${params.toString()}`, {
         method: 'DELETE',
       });
 

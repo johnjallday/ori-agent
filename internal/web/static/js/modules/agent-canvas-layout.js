@@ -230,6 +230,14 @@ export class AgentCanvasLayoutManager {
         taskId: node.taskId // Include taskId for backend task association
       }));
 
+      // Collect scheduler positions
+      const schedulerPositions = {};
+      this.state.schedulerNodes.forEach(s => {
+        if (s.x == null || s.y == null) return;
+        const key = s.canvas_node_id || s.id;
+        schedulerPositions[key] = { x: s.x, y: s.y };
+      });
+
       // Collect workflow connections (agents/tasks/combiners)
       const workflowConnections = this.state.connections.map(conn => ({
         id: conn.id,
@@ -242,7 +250,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Connections: ${workflowConnections.length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
@@ -252,6 +260,7 @@ export class AgentCanvasLayoutManager {
         task_positions: taskPositions,
         agent_positions: agentPositions,
         attachment_positions: attachmentPositions,
+        scheduler_positions: schedulerPositions,
         combiner_nodes: combinerNodes,
         workflow_connections: workflowConnections,
         scale: this.state.scale,
@@ -353,6 +362,18 @@ export class AgentCanvasLayoutManager {
     // Remove stale combiner input ports so only active connections are shown
     if (this.state.combinerNodes.length > 0) {
       this.state.combinerNodes.forEach(node => this.parent.cleanupCombinerInputPorts(node));
+    }
+
+    // Restore scheduler positions
+    if (layout.scheduler_positions) {
+      this.state.schedulerNodes.forEach(s => {
+        const key = s.canvas_node_id || s.id;
+        const savedPos = layout.scheduler_positions[key];
+        if (savedPos) {
+          s.x = savedPos.x;
+          s.y = savedPos.y;
+        }
+      });
     }
 
     // Skip restoring zoom and pan - will be set by zoomToFit() in init

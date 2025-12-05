@@ -436,31 +436,24 @@ func (c *Communicator) DeleteTask(taskID string) error {
 		}
 
 		// Check if this workspace contains the task
-		_, err = ws.GetTask(taskID)
-		if err != nil {
+		if _, err = ws.GetTask(taskID); err != nil {
 			continue // Task not in this workspace
 		}
 
-		// Filter out the task to delete
-		newTasks := make([]agentstudio.Task, 0, len(ws.Tasks))
-		for _, task := range ws.Tasks {
-			if task.ID != taskID {
-				newTasks = append(newTasks, task)
-			}
+		if err := ws.DeleteTask(taskID); err != nil {
+			return fmt.Errorf("failed to delete task %s: %w", taskID, err)
 		}
-
-		// Update workspace
-		ws.Tasks = newTasks
-		ws.UpdatedAt = time.Now()
 
 		// Save workspace
 		if err := c.studioStore.Save(ws); err != nil {
 			return fmt.Errorf("failed to save workspace: %w", err)
 		}
 
-		logger.Debug("🗑️ Task deleted from workspace", logger.Fields{"workspace_id": taskID, "wsID": wsID})
+		logger.Debug("🗑️ Task deleted from workspace", logger.Fields{"workspace_id": wsID, "task_id": taskID})
 		return nil
 	}
 
-	return fmt.Errorf("task %s not found", taskID)
+	// Treat missing tasks as a no-op to keep deletion idempotent
+	logger.Warn("Task delete requested but task not found; treating as no-op", logger.Fields{"task_id": taskID})
+	return nil
 }

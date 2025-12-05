@@ -385,6 +385,41 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.orchestrationHandler.ScheduledTasksHandler)
 	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.orchestrationHandler.ScheduledTaskHandler)
 
+	// Scheduler node endpoints (canvas-based scheduled tasks)
+	mux.HandleFunc("/api/orchestration/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		// Route scheduler node endpoints
+		if strings.Contains(r.URL.Path, "/scheduler-nodes") {
+			// Check if this is a specific node operation (contains node ID after scheduler-nodes/)
+			parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+			schedulerNodesIndex := -1
+			for i, part := range parts {
+				if part == "scheduler-nodes" {
+					schedulerNodesIndex = i
+					break
+				}
+			}
+
+			if schedulerNodesIndex != -1 && len(parts) > schedulerNodesIndex+1 {
+				// Has node ID: /workspaces/{id}/scheduler-nodes/{node_id}
+				// Check for /trigger action
+				if len(parts) > schedulerNodesIndex+2 && parts[schedulerNodesIndex+2] == "trigger" {
+					s.orchestrationHandler.SchedulerNodeTriggerHandler(w, r)
+					return
+				}
+
+				// Regular node operations (GET/PUT/DELETE)
+				s.orchestrationHandler.SchedulerNodeHandler(w, r)
+			} else {
+				// No node ID: /workspaces/{id}/scheduler-nodes (list/create)
+				s.orchestrationHandler.SchedulerNodesHandler(w, r)
+			}
+			return
+		}
+
+		// Fall through to other workspace endpoints (handled elsewhere)
+		http.NotFound(w, r)
+	})
+
 	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================

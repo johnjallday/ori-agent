@@ -117,6 +117,60 @@ export class AgentCanvasInitialization {
         this.state.setAttachments(attachments);
       }
 
+      // Load scheduler nodes from studio (canvas-based scheduled tasks only)
+      if (this.parent.studio.scheduled_tasks) {
+        console.log('📅 Raw scheduled_tasks from API:', this.parent.studio.scheduled_tasks);
+
+        // Filter to only include canvas-based scheduler nodes (those with canvas_node_id)
+        const schedulerNodes = this.parent.studio.scheduled_tasks
+          .filter(task => {
+            console.log('📅 Checking scheduled task:', task.id, 'canvas_node_id:', task.canvas_node_id);
+            return task.canvas_node_id && task.canvas_node_id !== '';
+          })
+          .map(task => {
+            // Get position from layout if available
+            let x = 300, y = 300;
+            if (this.parent.studio.layout && this.parent.studio.layout.scheduler_positions) {
+              const pos = this.parent.studio.layout.scheduler_positions[task.canvas_node_id];
+              if (pos) {
+                x = pos.x;
+                y = pos.y;
+                console.log('📅 Using layout position for', task.canvas_node_id, ':', pos);
+              }
+            }
+
+            return {
+              ...task,
+              x: x,
+              y: y
+            };
+          });
+
+        console.log('📅 Loaded scheduler nodes:', schedulerNodes.length, schedulerNodes);
+        this.state.setSchedulerNodes(schedulerNodes);
+
+        // Seed visual connections for linked tasks so arrows render on load
+        schedulerNodes.forEach(scheduler => {
+          if (!scheduler.target_task_id) return;
+          const fromId = scheduler.canvas_node_id || scheduler.id;
+          const toId = scheduler.target_task_id;
+          const exists = this.state.connections.find(conn => conn.from === fromId && conn.to === toId);
+          if (!exists) {
+            this.state.connections.push({
+              id: `conn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+              from: fromId,
+              fromPort: 'out',
+              to: toId,
+              toPort: 'in',
+              color: '#cbd5e1',
+              animated: false
+            });
+          }
+        });
+      } else {
+        console.log('📅 No scheduled_tasks in studio data');
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 
@@ -143,7 +197,7 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length}`;
+        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Schedulers: ${this.state.schedulerNodes.length}`;
 
 
     } catch (error) {

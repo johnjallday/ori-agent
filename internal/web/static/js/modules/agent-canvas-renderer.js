@@ -99,6 +99,10 @@ export class AgentCanvasRenderer {
     return this.nodes.drawAttachments();
   }
 
+  drawSchedulerNodes() {
+    return this.nodes.drawSchedulerNodes();
+  }
+
   drawCombinerNodes() {
     return this.nodes.drawCombinerNodes();
   }

@@ -44,8 +44,17 @@ export class AgentCanvasInteractionHandler {
     }
 
     // H key - Toggle help overlay
+    // Don't trigger if user is typing in any input/textarea (modals, forms, etc.)
     if (e.key === 'h' || e.key === 'H') {
-      if (!this.state.forms.createTaskDescriptionFocused) {
+      const activeElement = document.activeElement;
+      const isTyping = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.isContentEditable ||
+        this.state.forms.createTaskDescriptionFocused
+      );
+
+      if (!isTyping) {
         e.preventDefault();
         this.parent.toggleHelpOverlay();
         return;
@@ -120,6 +129,14 @@ export class AgentCanvasInteractionHandler {
         this.canvas.style.cursor = 'grab';
         this.parent.draw();
         console.log('Result connection mode cancelled');
+      } else if (this.state.schedulerAssignmentMode) {
+        this.state.schedulerAssignmentMode = false;
+        this.state.schedulerAssignmentSource = null;
+        this.state.schedulerAssignmentMouseX = 0;
+        this.state.schedulerAssignmentMouseY = 0;
+        this.canvas.style.cursor = 'grab';
+        this.parent.draw();
+        console.log('Scheduler assignment mode cancelled');
       } else if (this.state.assignmentMode) {
         this.state.assignmentMode = false;
         this.state.assignmentSourceTask = null;
@@ -341,6 +358,20 @@ export class AgentCanvasInteractionHandler {
 
           if (x >= cardX && x <= cardX + cardWidth &&
               y >= cardY && y <= cardY + cardHeight) {
+            // If assigning scheduler to a task, link immediately
+            if (this.state.schedulerAssignmentMode && this.state.schedulerAssignmentSource) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.assignSchedulerToTask(task);
+              this.state.schedulerAssignmentMode = false;
+              this.state.schedulerAssignmentSource = null;
+              this.state.schedulerAssignmentMouseX = 0;
+              this.state.schedulerAssignmentMouseY = 0;
+              this.canvas.style.cursor = 'grab';
+              this.parent.draw();
+              return;
+            }
+
             // Start dragging this task
             e.stopPropagation();
             e.preventDefault();
@@ -348,6 +379,73 @@ export class AgentCanvasInteractionHandler {
             this.state.draggedTask = task;
             this.state.dragStartX = x;
             this.state.dragStartY = y;
+            this.canvas.style.cursor = 'move';
+            return;
+          }
+        }
+      }
+    }
+
+    // Check if clicking on a scheduler node
+    if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+      for (let i = this.state.schedulerNodes.length - 1; i >= 0; i--) {
+        const schedulerNode = this.state.schedulerNodes[i];
+        if (schedulerNode && schedulerNode.x != null && schedulerNode.y != null) {
+          const cardBounds = schedulerNode.cardBounds || {
+            x: schedulerNode.x - 90,
+            y: schedulerNode.y - 45,
+            width: 180,
+            height: 90
+          };
+
+          // Delete button first (highest priority)
+          if (schedulerNode.deleteButton) {
+            const btn = schedulerNode.deleteButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              if (confirm('Delete this scheduler node?')) {
+                this.parent.deleteSchedulerNode(schedulerNode);
+              }
+              return;
+            }
+          }
+
+          // Assign button
+          if (schedulerNode.assignBtnBounds) {
+            const btn = schedulerNode.assignBtnBounds;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.toggleSchedulerAssignmentMode(schedulerNode);
+              return;
+            }
+          }
+
+          // Trigger button
+          if (schedulerNode.triggerButton) {
+            const btn = schedulerNode.triggerButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.triggerSchedulerNode(schedulerNode);
+              return;
+            }
+          }
+
+          // Check if clicking inside the card (for dragging or selecting)
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            e.stopPropagation();
+            e.preventDefault();
+            this.state.isDraggingSchedulerNode = true;
+            this.state.draggedSchedulerNode = schedulerNode;
+            this.state.dragStartX = x;
+            this.state.dragStartY = y;
+            this.state.schedulerNodeClickTarget = schedulerNode; // Track for click detection
             this.canvas.style.cursor = 'move';
             return;
           }
@@ -544,6 +642,15 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
+    if (this.state.isDraggingSchedulerNode && this.state.draggedSchedulerNode) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.draggedSchedulerNode.x = x;
+      this.state.draggedSchedulerNode.y = y;
+      this.parent.draw();
+      return;
+    }
+
     if (this.state.isDraggingAttachment && this.state.draggedAttachment) {
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
@@ -603,6 +710,7 @@ export class AgentCanvasInteractionHandler {
   onMouseUp(e) {
     const wasDraggingAgent = this.state.isDraggingAgent;
     const wasDraggingTask = this.state.isDraggingTask;
+    const wasDraggingSchedulerNode = this.state.isDraggingSchedulerNode;
     const wasDraggingAttachment = this.state.isDraggingAttachment;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
@@ -799,10 +907,31 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
+    // Detect scheduler node click (vs drag)
+    if (wasDraggingSchedulerNode && this.state.schedulerNodeClickTarget) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      const dragDistance = Math.sqrt(
+        Math.pow(x - this.state.dragStartX, 2) +
+        Math.pow(y - this.state.dragStartY, 2)
+      );
+
+      // If drag distance is small (< 5 pixels), treat as a click
+      if (dragDistance < 5) {
+        if (window.showSchedulerDetails) {
+          window.showSchedulerDetails(this.state.schedulerNodeClickTarget);
+        }
+      }
+      this.state.schedulerNodeClickTarget = null;
+    }
+
     this.state.isDragging = false;
     this.state.isDraggingAgent = false;
     this.state.draggedAgent = null;
     this.state.isDraggingTask = false;
+    this.state.isDraggingSchedulerNode = false;
+    this.state.draggedSchedulerNode = null;
     this.state.isDraggingAttachment = false;
     this.state.draggedAttachment = null;
     this.state.isDraggingCombiner = false;
@@ -810,7 +939,7 @@ export class AgentCanvasInteractionHandler {
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingAttachment || wasDraggingCombiner) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingSchedulerNode || wasDraggingAttachment || wasDraggingCombiner) {
       this.parent.saveLayout();
     }
 
@@ -895,7 +1024,7 @@ export class AgentCanvasInteractionHandler {
    */
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingAttachment) {
+    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingSchedulerNode || this.state.isDraggingAttachment) {
       return;
     }
 

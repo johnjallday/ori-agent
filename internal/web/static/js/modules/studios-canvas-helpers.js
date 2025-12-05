@@ -1054,10 +1054,135 @@ async function unassignCurrentTask() {
   }
 }
 
+function showSchedulerDetails(schedulerNode) {
+  console.log('[SIDEBAR] showSchedulerDetails called for:', schedulerNode.name);
+  const canvas = window.agentCanvas;
+  const tasks = canvas?.state?.tasks || [];
+  const targetTask = tasks.find(t => t.id === schedulerNode.target_task_id);
+  const targetTaskLabel = targetTask
+    ? `${targetTask.description || targetTask.id} (${targetTask.id})`
+    : (schedulerNode.target_task_id ? `Task: ${schedulerNode.target_task_id}` : null);
+
+  // Hide other details
+  hideAgentDetails();
+  hideAttachmentDetails();
+  const taskPanel = document.getElementById('task-details-panel');
+  if (taskPanel) taskPanel.style.display = 'none';
+
+  // Use the same task details panel but rename title
+  const panel = document.getElementById('task-details-panel');
+  const content = document.getElementById('task-details-content');
+
+  if (!panel || !content) {
+    console.error('[SIDEBAR] Panel or content not found!');
+    return;
+  }
+
+  // Show panel
+  panel.style.display = 'block';
+
+  // Change title
+  const titleElement = panel.querySelector('h6');
+  if (titleElement) {
+    titleElement.textContent = 'Scheduler Details';
+  }
+
+  // Format schedule details
+  const scheduleTypes = {
+    'interval': 'Interval',
+    'daily': 'Daily',
+    'weekly': 'Weekly',
+    'cron': 'Cron Expression',
+    'relative_delay': 'Relative Delay'
+  };
+
+  const scheduleType = scheduleTypes[schedulerNode.schedule?.type] || 'Unknown';
+  let scheduleDetails = '';
+
+  if (schedulerNode.schedule) {
+    const sched = schedulerNode.schedule;
+    switch (sched.type) {
+      case 'interval':
+        const intervalMins = Math.floor(sched.interval / (60 * 1e9));
+        scheduleDetails = `Every ${intervalMins} minutes`;
+        break;
+      case 'daily':
+        scheduleDetails = `Every day at ${sched.time_of_day || '09:00'}`;
+        break;
+      case 'weekly':
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        scheduleDetails = `Every ${days[sched.day_of_week || 0]} at ${sched.time_of_day || '09:00'}`;
+        break;
+      case 'cron':
+        scheduleDetails = `Cron: ${sched.cron_expr}`;
+        break;
+      case 'relative_delay':
+        const delayMins = Math.floor(sched.delay_duration / (60 * 1e9));
+        scheduleDetails = `${delayMins} minutes after trigger`;
+        if (sched.trigger_once) scheduleDetails += ' (once)';
+        break;
+    }
+  }
+
+  const statusBadge = schedulerNode.enabled !== false
+    ? '<span class="badge bg-success">Enabled</span>'
+    : '<span class="badge bg-secondary">Paused</span>';
+
+  const html = `
+    <div class="mb-3">
+      <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">⏰</div>
+      <strong style="color: var(--text-primary); font-size: 1.1rem;">${schedulerNode.name || 'Scheduler'}</strong>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Status:</strong>
+      <div>${statusBadge}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Linked Task:</strong>
+      <div style="color: var(--text-secondary);">
+        ${targetTaskLabel ? targetTaskLabel : '<span style="color:#94a3b8;font-style:italic;">(not linked)</span>'}
+      </div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Schedule Type:</strong>
+      <div style="color: var(--text-secondary);">${scheduleType}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Schedule:</strong>
+      <div style="color: var(--text-secondary);">${scheduleDetails}</div>
+    </div>
+    ${schedulerNode.prompt ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Task Prompt:</strong>
+        <div style="color: var(--text-secondary); white-space: pre-wrap; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 4px;">${schedulerNode.prompt}</div>
+      </div>
+    ` : ''}
+    ${schedulerNode.next_run ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Next Run:</strong>
+        <div style="color: var(--text-secondary);">${new Date(schedulerNode.next_run).toLocaleString()}</div>
+      </div>
+    ` : ''}
+    ${schedulerNode.last_run ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Last Run:</strong>
+        <div style="color: var(--text-secondary);">${new Date(schedulerNode.last_run).toLocaleString()}</div>
+      </div>
+    ` : ''}
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Execution Count:</strong>
+      <div style="color: var(--text-secondary);">${schedulerNode.execution_count || 0}</div>
+    </div>
+  `;
+
+  content.innerHTML = html;
+}
+
 // Make functions globally available
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
+window.showSchedulerDetails = showSchedulerDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
 window.editAttachment = editAttachment;
@@ -2378,3 +2503,336 @@ window.resetCanvasView = resetCanvasView;
 window.editAgentSettings = editAgentSettings;
 window.cancelEditAgentSettings = cancelEditAgentSettings;
 window.saveAgentSettings = saveAgentSettings;
+
+// ============================================================================
+// Scheduler Node Functions
+// ============================================================================
+
+/**
+ * Show add scheduler node modal
+ */
+async function showAddSchedulerNodeModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addSchedulerNodeModal'));
+  modal.show();
+}
+
+/**
+ * Update schedule input fields based on selected schedule type
+ */
+function updateScheduleInputs() {
+  const scheduleType = document.getElementById('scheduler-type').value;
+
+  // Hide all config sections
+  document.querySelectorAll('.schedule-type-config').forEach(el => {
+    el.style.display = 'none';
+  });
+
+  // Show relevant config section
+  const configMap = {
+    'interval': 'interval-config',
+    'daily': 'daily-config',
+    'weekly': 'weekly-config',
+    'cron': 'cron-config',
+    'relative_delay': 'relative-delay-config'
+  };
+
+  const configId = configMap[scheduleType];
+  if (configId) {
+    document.getElementById(configId).style.display = 'block';
+  }
+}
+
+/**
+ * Toggle end date input visibility
+ */
+function toggleEndDate() {
+  const checkbox = document.getElementById('has-end-date');
+  const input = document.getElementById('end-date');
+  input.style.display = checkbox.checked ? 'block' : 'none';
+}
+
+/**
+ * Build schedule config object from form inputs
+ */
+function buildScheduleConfig() {
+  const scheduleType = document.getElementById('scheduler-type').value || 'interval';
+  const config = {
+    type: scheduleType  // Backend expects 'type', not 'schedule_type'
+  };
+
+  switch (scheduleType) {
+    case 'interval':
+      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
+      let intervalMinutes = parseInt(document.getElementById('interval-minutes').value, 10);
+      if (isNaN(intervalMinutes) || intervalMinutes <= 0) {
+        intervalMinutes = 60; // sensible default
+      }
+      config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
+      break;
+
+    case 'daily':
+      // Backend expects time_of_day as "HH:MM" string
+      config.time_of_day = document.getElementById('daily-time').value;
+      break;
+
+    case 'weekly':
+      // Backend expects time_of_day as "HH:MM" string
+      config.time_of_day = document.getElementById('weekly-time').value;
+      config.day_of_week = parseInt(document.getElementById('weekly-day').value);
+      break;
+
+    case 'cron':
+      config.cron_expr = document.getElementById('cron-expr').value.trim();
+      if (!config.cron_expr) {
+        throw new Error('Cron expression is required');
+      }
+      break;
+
+    case 'relative_delay':
+      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
+      let delayMinutes = parseInt(document.getElementById('delay-minutes').value, 10);
+      if (isNaN(delayMinutes) || delayMinutes <= 0) {
+        delayMinutes = 5; // small default
+      }
+      config.delay_duration = delayMinutes * 60 * 1000000000;  // minutes to nanoseconds
+      config.trigger_once = document.getElementById('delay-trigger-once').checked;
+      break;
+  }
+
+  // Add end date if specified
+  if (document.getElementById('has-end-date').checked) {
+    const endDateStr = document.getElementById('end-date').value;
+    if (endDateStr) {
+      config.end_date = new Date(endDateStr).toISOString();
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Submit scheduler node creation
+ */
+async function submitSchedulerNode() {
+  try {
+    const name = document.getElementById('scheduler-name').value.trim();
+    if (!name) {
+      alert('Please enter a name for the scheduler');
+      return;
+    }
+
+    const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+    if (!studioId) {
+      alert('No workspace loaded');
+      return;
+    }
+
+    // Build schedule config
+    let scheduleConfig;
+    try {
+      scheduleConfig = buildScheduleConfig();
+    } catch (err) {
+      alert(err.message || 'Invalid schedule configuration');
+      return;
+    }
+
+    const enabled = document.getElementById('scheduler-enabled').checked;
+
+    // Create scheduler node (without 'to' - assign agent later using ASSIGN button)
+    const schedulerNode = {
+      name: name,
+      to: '',  // Empty - use ASSIGN button to set target agent
+      from: 'scheduler',  // Scheduler nodes always use 'scheduler' as the source
+      schedule: scheduleConfig,
+      enabled: enabled,
+      x: 300,  // Default position
+      y: 300
+    };
+
+    console.log('Creating scheduler node:', schedulerNode);
+
+    const response = await fetch(`/api/orchestration/workspaces/${studioId}/scheduler-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(schedulerNode)
+    });
+
+    if (response.ok) {
+      console.log('Scheduler node created successfully');
+
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addSchedulerNodeModal'));
+      modal.hide();
+
+      // Reset form
+      document.getElementById('schedulerNodeForm').reset();
+
+      // Reload page to show new scheduler node
+      window.location.reload();
+    } else {
+      const error = await response.text();
+      alert(`Failed to create scheduler node: ${error}`);
+    }
+  } catch (error) {
+    console.error('Error creating scheduler node:', error);
+    alert(`Error creating scheduler node: ${error.message}`);
+  }
+}
+
+/**
+ * Set a cron preset value
+ */
+function setCronPreset(cronExpr) {
+  document.getElementById('cron-expr').value = cronExpr;
+  updateCronDescription();
+}
+
+/**
+ * Toggle the cron builder panel
+ */
+function toggleCronBuilder() {
+  const builder = document.getElementById('cron-builder');
+  const icon = document.getElementById('cron-builder-icon');
+
+  if (builder.style.display === 'none') {
+    builder.style.display = 'block';
+    // Change icon to collapse (up arrow)
+    icon.innerHTML = '<path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>';
+
+    // Populate fields from current expression
+    const cronExpr = document.getElementById('cron-expr').value.trim();
+    if (cronExpr) {
+      const parts = cronExpr.split(/\s+/);
+      if (parts.length === 5) {
+        document.getElementById('cron-minute').value = parts[0];
+        document.getElementById('cron-hour').value = parts[1];
+        document.getElementById('cron-day').value = parts[2];
+        document.getElementById('cron-month').value = parts[3];
+        document.getElementById('cron-weekday').value = parts[4];
+      }
+    }
+  } else {
+    builder.style.display = 'none';
+    // Change icon to expand (down arrow)
+    icon.innerHTML = '<path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>';
+  }
+}
+
+/**
+ * Build cron expression from individual fields
+ */
+function buildCronFromFields() {
+  const minute = document.getElementById('cron-minute').value.trim() || '*';
+  const hour = document.getElementById('cron-hour').value.trim() || '*';
+  const day = document.getElementById('cron-day').value.trim() || '*';
+  const month = document.getElementById('cron-month').value.trim() || '*';
+  const weekday = document.getElementById('cron-weekday').value.trim() || '*';
+
+  const cronExpr = `${minute} ${hour} ${day} ${month} ${weekday}`;
+  document.getElementById('cron-expr').value = cronExpr;
+  updateCronDescription();
+}
+
+/**
+ * Update the human-readable cron description
+ */
+function updateCronDescription() {
+  const cronExpr = document.getElementById('cron-expr').value.trim();
+  const descriptionDiv = document.getElementById('cron-description');
+  const descriptionText = document.getElementById('cron-description-text');
+
+  if (!cronExpr) {
+    descriptionDiv.style.display = 'none';
+    return;
+  }
+
+  const description = parseCronExpression(cronExpr);
+  if (description) {
+    descriptionText.textContent = description;
+    descriptionDiv.style.display = 'block';
+  } else {
+    descriptionDiv.style.display = 'none';
+  }
+}
+
+/**
+ * Parse a cron expression and return a human-readable description
+ */
+function parseCronExpression(cronExpr) {
+  const parts = cronExpr.split(/\s+/);
+  if (parts.length !== 5) {
+    return 'Invalid cron expression (must have 5 fields)';
+  }
+
+  const [minute, hour, day, month, weekday] = parts;
+
+  // Build description
+  let desc = 'Runs ';
+
+  // Check for every minute
+  if (minute === '*' && hour === '*' && day === '*' && month === '*' && weekday === '*') {
+    return 'Runs every minute';
+  }
+
+  // Check for specific intervals
+  if (minute.startsWith('*/')) {
+    const interval = minute.substring(2);
+    desc += `every ${interval} minutes`;
+  } else if (minute === '0' && hour.startsWith('*/')) {
+    const interval = hour.substring(2);
+    desc += `every ${interval} hours`;
+  } else if (minute === '0' && hour === '0' && day.startsWith('*/')) {
+    const interval = day.substring(2);
+    desc += `every ${interval} days`;
+  } else if (minute !== '*' && hour !== '*') {
+    // Specific time
+    const h = hour === '*' ? 'every hour' : `at ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    desc += h;
+  } else if (minute !== '*') {
+    desc += `at minute ${minute}`;
+  } else if (hour !== '*') {
+    desc += `at hour ${hour}`;
+  } else {
+    desc += 'at a specific time';
+  }
+
+  // Add day/month/weekday constraints
+  const constraints = [];
+
+  if (weekday !== '*') {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayNames = weekday.split(',').map(d => days[parseInt(d)] || `day ${d}`);
+    constraints.push(`on ${dayNames.join(', ')}`);
+  }
+
+  if (day !== '*' && weekday === '*') {
+    if (day.includes(',')) {
+      constraints.push(`on days ${day}`);
+    } else {
+      constraints.push(`on day ${day} of the month`);
+    }
+  }
+
+  if (month !== '*') {
+    const months = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthNames = month.split(',').map(m => months[parseInt(m)] || `month ${m}`);
+    constraints.push(`in ${monthNames.join(', ')}`);
+  }
+
+  if (constraints.length > 0) {
+    desc += ' ' + constraints.join(' ');
+  }
+
+  return desc;
+}
+
+// Export functions to window
+window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
+window.updateScheduleInputs = updateScheduleInputs;
+window.toggleEndDate = toggleEndDate;
+window.submitSchedulerNode = submitSchedulerNode;
+window.setCronPreset = setCronPreset;
+window.toggleCronBuilder = toggleCronBuilder;
+window.buildCronFromFields = buildCronFromFields;
+window.updateCronDescription = updateCronDescription;

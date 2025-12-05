@@ -65,6 +65,7 @@ type CanvasLayout struct {
 	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
 	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
 	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
+	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -181,11 +182,12 @@ type TaskProgress struct {
 type ScheduleType string
 
 const (
-	ScheduleOnce     ScheduleType = "once"     // Execute once at specific time
-	ScheduleInterval ScheduleType = "interval" // Every X duration
-	ScheduleDaily    ScheduleType = "daily"    // Every day at specific time
-	ScheduleWeekly   ScheduleType = "weekly"   // Every week on specific day/time
-	ScheduleCron     ScheduleType = "cron"     // Cron expression (advanced)
+	ScheduleOnce          ScheduleType = "once"           // Execute once at specific time
+	ScheduleInterval      ScheduleType = "interval"       // Every X duration
+	ScheduleDaily         ScheduleType = "daily"          // Every day at specific time
+	ScheduleWeekly        ScheduleType = "weekly"         // Every week on specific day/time
+	ScheduleCron          ScheduleType = "cron"           // Cron expression (advanced)
+	ScheduleRelativeDelay ScheduleType = "relative_delay" // Delay from trigger/enable time
 )
 
 // ScheduleConfig defines how a scheduled task should be executed
@@ -207,6 +209,10 @@ type ScheduleConfig struct {
 	// For "weekly" type
 	DayOfWeek int `json:"day_of_week,omitempty"` // 0=Sunday, 1=Monday, ..., 6=Saturday
 
+	// For "relative_delay" type
+	DelayDuration time.Duration `json:"delay_duration,omitempty"` // e.g., 30s, 5m, 1h
+	TriggerOnce   bool          `json:"trigger_once,omitempty"`   // true = one-time after delay, false = repeat after each delay
+
 	// Limits
 	MaxRuns int        `json:"max_runs,omitempty"` // 0 = infinite
 	EndDate *time.Time `json:"end_date,omitempty"` // nil = no end date
@@ -223,15 +229,17 @@ type TaskExecution struct {
 
 // ScheduledTask represents a recurring or one-time scheduled task template
 type ScheduledTask struct {
-	ID          string                 `json:"id"`
-	WorkspaceID string                 `json:"studio_id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	From        string                 `json:"from"`   // Sender agent
-	To          string                 `json:"to"`     // Recipient agent
-	Prompt      string                 `json:"prompt"` // Task description/prompt
-	Priority    int                    `json:"priority"`
-	Context     map[string]interface{} `json:"context"`
+	ID           string                 `json:"id"`
+	WorkspaceID  string                 `json:"studio_id"`
+	CanvasNodeID string                 `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
+	TargetTaskID string                 `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	From         string                 `json:"from"`   // Sender agent
+	To           string                 `json:"to"`     // Recipient agent
+	Prompt       string                 `json:"prompt"` // Task description/prompt
+	Priority     int                    `json:"priority"`
+	Context      map[string]interface{} `json:"context"`
 
 	// Scheduling configuration
 	Schedule ScheduleConfig `json:"schedule"`
@@ -870,8 +878,14 @@ func (w *Workspace) AddTask(task Task) error {
 	logger.Debug("[DEBUG] AddTask - hasAgent(From)", logger.Fields{"agent": w.hasAgent(task.From)})
 
 	// Validate sender is part of workspace
-	// Allow "user", "system", and empty string as special senders for UI-created tasks
-	if task.From != "" && task.From != "user" && task.From != "system" && !w.hasAgent(task.From) {
+	// Allow "user", "system", "scheduler", and empty string as special senders for UI-created tasks
+	systemSources := map[string]bool{
+		"user":      true,
+		"system":    true,
+		"scheduler": true,
+		"":          true, // empty string allowed
+	}
+	if !systemSources[task.From] && !w.hasAgent(task.From) {
 		logger.Error("[DEBUG] AddTask - Validation FAILED: From agent not valid", logger.Fields{})
 		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
 	}
@@ -1006,6 +1020,25 @@ func (w *Workspace) UpdateTask(task Task) error {
 	return fmt.Errorf("task %s not found in workspace", task.ID)
 }
 
+// DeleteTask removes a task from the workspace by ID and cleans up layout metadata.
+func (w *Workspace) DeleteTask(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == id {
+			w.Tasks = append(w.Tasks[:i], w.Tasks[i+1:]...)
+			if w.Layout != nil && w.Layout.TaskPositions != nil {
+				delete(w.Layout.TaskPositions, id)
+			}
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("task %s not found in workspace", id)
+}
+
 // GetTasksForAgent returns all tasks assigned to a specific agent
 func (w *Workspace) GetTasksForAgent(agentName string) []Task {
 	w.mu.RLock()
@@ -1078,8 +1111,12 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Validate sender is part of workspace
-	if !w.hasAgent(st.From) {
+	// Validate sender is part of workspace (allow system sources like "scheduler", "system")
+	systemSources := map[string]bool{
+		"scheduler": true,
+		"system":    true,
+	}
+	if !systemSources[st.From] && !w.hasAgent(st.From) {
 		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
 	}
 
