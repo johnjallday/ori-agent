@@ -916,7 +916,7 @@ class AgentCanvas {
       return;
     }
     try {
-      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}/trigger`, {});
+      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}/trigger?studio_id=${this.studioId}`, {});
       this.notifications?.showNotification?.('Scheduler node triggered', 'success');
     } catch (err) {
       console.error('Failed to trigger scheduler node', err);
