@@ -2437,9 +2437,9 @@ function buildScheduleConfig() {
 
   switch (scheduleType) {
     case 'interval':
-      // Convert minutes to duration string (e.g., "60m", "2h")
+      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
       const intervalMinutes = parseInt(document.getElementById('interval-minutes').value);
-      config.interval = `${intervalMinutes}m`;  // Backend expects duration string
+      config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
       break;
 
     case 'daily':
@@ -2461,9 +2461,9 @@ function buildScheduleConfig() {
       break;
 
     case 'relative_delay':
-      // Convert minutes to duration string (e.g., "5m", "1h")
+      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
       const delayMinutes = parseInt(document.getElementById('delay-minutes').value);
-      config.delay_duration = `${delayMinutes}m`;  // Backend expects duration string
+      config.delay_duration = delayMinutes * 60 * 1000000000;  // minutes to nanoseconds
       config.trigger_once = document.getElementById('delay-trigger-once').checked;
       break;
   }
