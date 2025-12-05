@@ -44,8 +44,17 @@ export class AgentCanvasInteractionHandler {
     }
 
     // H key - Toggle help overlay
+    // Don't trigger if user is typing in any input/textarea (modals, forms, etc.)
     if (e.key === 'h' || e.key === 'H') {
-      if (!this.state.forms.createTaskDescriptionFocused) {
+      const activeElement = document.activeElement;
+      const isTyping = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.isContentEditable ||
+        this.state.forms.createTaskDescriptionFocused
+      );
+
+      if (!isTyping) {
         e.preventDefault();
         this.parent.toggleHelpOverlay();
         return;
