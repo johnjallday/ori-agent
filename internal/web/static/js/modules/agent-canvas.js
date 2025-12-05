@@ -890,12 +890,13 @@ class AgentCanvas {
    * Delete a scheduler node
    */
   async deleteSchedulerNode(schedulerNode) {
-    if (!schedulerNode || !schedulerNode.id || !this.studioId) {
+    const nodeId = schedulerNode?.canvas_node_id;
+    if (!schedulerNode || !nodeId || !this.studioId) {
       alert('Cannot delete scheduler node: missing ID or workspace');
       return;
     }
     try {
-      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}`);
+      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}`);
       this.state.removeSchedulerNode(schedulerNode.id);
       this.saveLayout();
       this.draw();
