@@ -134,6 +134,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"status":             studio.Status,
 		"tasks":              studio.Tasks,
 		"attachments":        studio.Attachments,
+		"scheduled_tasks":    studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
 		"messages":           studio.Messages,
 		"shared_data":        studio.SharedData,
 		"layout":             studio.Layout,
