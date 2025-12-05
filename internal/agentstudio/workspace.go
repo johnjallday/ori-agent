@@ -232,6 +232,7 @@ type ScheduledTask struct {
 	ID           string                 `json:"id"`
 	WorkspaceID  string                 `json:"studio_id"`
 	CanvasNodeID string                 `json:"canvas_node_id,omitempty"` // Links to canvas scheduler node (empty for dashboard-created tasks)
+	TargetTaskID string                 `json:"target_task_id,omitempty"` // Links to a canvas task node to execute on schedule
 	Name         string                 `json:"name"`
 	Description  string                 `json:"description"`
 	From         string                 `json:"from"`   // Sender agent

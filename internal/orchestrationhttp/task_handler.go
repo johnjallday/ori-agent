@@ -1858,16 +1858,17 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 // handleUpdateSchedulerNode updates a scheduler node
 func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	var req struct {
-		WorkspaceID string                      `json:"studio_id"`
-		To          *string                     `json:"to,omitempty"`
-		Name        *string                     `json:"name,omitempty"`
-		Description *string                     `json:"description,omitempty"`
-		Prompt      *string                     `json:"prompt,omitempty"`
-		Priority    *int                        `json:"priority,omitempty"`
-		Schedule    *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
-		Enabled     *bool                       `json:"enabled,omitempty"`
-		X           *float64                    `json:"x,omitempty"`
-		Y           *float64                    `json:"y,omitempty"`
+		WorkspaceID  string                      `json:"studio_id"`
+		To           *string                     `json:"to,omitempty"`
+		TargetTaskID *string                     `json:"target_task_id,omitempty"`
+		Name         *string                     `json:"name,omitempty"`
+		Description  *string                     `json:"description,omitempty"`
+		Prompt       *string                     `json:"prompt,omitempty"`
+		Priority     *int                        `json:"priority,omitempty"`
+		Schedule     *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
+		Enabled      *bool                       `json:"enabled,omitempty"`
+		X            *float64                    `json:"x,omitempty"`
+		Y            *float64                    `json:"y,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1920,6 +1921,9 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	// Update fields if provided
 	if req.To != nil {
 		st.To = *req.To
+	}
+	if req.TargetTaskID != nil {
+		st.TargetTaskID = *req.TargetTaskID
 	}
 	if req.Name != nil {
 		st.Name = *req.Name

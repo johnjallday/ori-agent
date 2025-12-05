@@ -984,11 +984,11 @@ class AgentCanvas {
       throw new Error('Cannot update scheduler: missing ID or workspace');
     }
     try {
-      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNodeId}`, {
+      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNodeId}?studio_id=${this.studioId}`, {
         target_task_id: targetTaskId
       });
-      // Update local state
-      const scheduler = this.state.schedulerNodes.find(s => s.id === schedulerNodeId);
+      // Update local state (search by canvas_node_id)
+      const scheduler = this.state.schedulerNodes.find(s => s.canvas_node_id === schedulerNodeId);
       if (scheduler) {
         scheduler.target_task_id = targetTaskId;
       }
@@ -1209,7 +1209,8 @@ class AgentCanvas {
 
     // If this is a scheduler→task connection, update the scheduler's target_task_id
     if (fromNode.type === 'scheduler' && toNode.type === 'task') {
-      this.updateSchedulerTargetTask(fromNode.node.id, toNode.node.id).catch(err => {
+      const schedulerNodeId = fromNode.node.canvas_node_id || fromNode.node.id;
+      this.updateSchedulerTargetTask(schedulerNodeId, toNode.node.id).catch(err => {
         console.error('Failed to update scheduler target task', err);
         this.notifications?.showNotification?.('Failed to link scheduler to task', 'error');
       });

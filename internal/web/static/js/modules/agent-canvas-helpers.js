@@ -119,8 +119,8 @@ export class AgentCanvasHelpers {
     const attachment = this.state.attachments.find(a => a.id === nodeId);
     if (attachment) return { type: 'attachment', node: attachment };
 
-    // Check if it's a scheduler node
-    const schedulerNode = this.state.schedulerNodes.find(s => s.id === nodeId);
+    // Check if it's a scheduler node (search by canvas_node_id or id)
+    const schedulerNode = this.state.schedulerNodes.find(s => s.canvas_node_id === nodeId || s.id === nodeId);
     if (schedulerNode) return { type: 'scheduler', node: schedulerNode };
 
     return null;
@@ -259,7 +259,7 @@ export class AgentCanvasHelpers {
       const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
       if (dist <= portRadius) {
         return {
-          nodeId: scheduler.id,
+          nodeId: scheduler.canvas_node_id || scheduler.id,
           nodeType: 'scheduler',
           portId: 'output',
           type: 'output'
