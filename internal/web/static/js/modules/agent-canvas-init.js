@@ -119,17 +119,37 @@ export class AgentCanvasInitialization {
 
       // Load scheduler nodes from studio (canvas-based scheduled tasks only)
       if (this.parent.studio.scheduled_tasks) {
+        console.log('📅 Raw scheduled_tasks from API:', this.parent.studio.scheduled_tasks);
+
         // Filter to only include canvas-based scheduler nodes (those with canvas_node_id)
         const schedulerNodes = this.parent.studio.scheduled_tasks
-          .filter(task => task.canvas_node_id && task.canvas_node_id !== '')
-          .map(task => ({
-            ...task,
-            x: task.x ?? 300,  // Default position if not set
-            y: task.y ?? 300
-          }));
+          .filter(task => {
+            console.log('📅 Checking scheduled task:', task.id, 'canvas_node_id:', task.canvas_node_id);
+            return task.canvas_node_id && task.canvas_node_id !== '';
+          })
+          .map(task => {
+            // Get position from layout if available
+            let x = 300, y = 300;
+            if (this.parent.studio.layout && this.parent.studio.layout.scheduler_positions) {
+              const pos = this.parent.studio.layout.scheduler_positions[task.canvas_node_id];
+              if (pos) {
+                x = pos.x;
+                y = pos.y;
+                console.log('📅 Using layout position for', task.canvas_node_id, ':', pos);
+              }
+            }
 
-        console.log('Loaded scheduler nodes:', schedulerNodes.length);
+            return {
+              ...task,
+              x: x,
+              y: y
+            };
+          });
+
+        console.log('📅 Loaded scheduler nodes:', schedulerNodes.length, schedulerNodes);
         this.state.setSchedulerNodes(schedulerNodes);
+      } else {
+        console.log('📅 No scheduled_tasks in studio data');
       }
 
       // Initialize agent positions
