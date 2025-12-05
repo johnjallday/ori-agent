@@ -1615,8 +1615,30 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 
 // handleCreateSchedulerNode creates a new scheduler node (scheduled task with canvas position)
 func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.Request) {
+	// Extract workspace_id from URL path
+	// Path format: /api/orchestration/workspaces/{workspace_id}/scheduler-nodes
+	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
+
+	// Find workspace_id in path (should be after "workspaces")
+	var workspaceID string
+	for i, part := range parts {
+		if part == "workspaces" && i+1 < len(parts) {
+			workspaceID = parts[i+1]
+			break
+		}
+	}
+
+	// Fallback: try getting from query param if not in path
+	if workspaceID == "" {
+		workspaceID = r.URL.Query().Get("studio_id")
+	}
+
+	if workspaceID == "" {
+		http.Error(w, "workspace_id is required in URL path", http.StatusBadRequest)
+		return
+	}
+
 	var req struct {
-		WorkspaceID string                     `json:"studio_id"`
 		Name        string                     `json:"name"`
 		Description string                     `json:"description"`
 		From        string                     `json:"from"`
@@ -1635,10 +1657,6 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Validate required fields
-	if req.WorkspaceID == "" {
-		http.Error(w, "studio_id is required", http.StatusBadRequest)
-		return
-	}
 	if req.Name == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return
@@ -1663,9 +1681,9 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Get workspace
-	ws, err := th.workspaceStore.Get(req.WorkspaceID)
+	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
-		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "err": err})
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
 		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
@@ -1688,7 +1706,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	// Create scheduled task
 	now := time.Now()
 	st := agentstudio.ScheduledTask{
-		WorkspaceID:  req.WorkspaceID,
+		WorkspaceID:  workspaceID,
 		CanvasNodeID: nodeID,
 		Name:         req.Name,
 		Description:  req.Description,
@@ -1748,7 +1766,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	logger.Info("Created scheduler node in workspace", logger.Fields{
 		"node_id":           nodeID,
 		"scheduled_task_id": createdTask.ID,
-		"workspace_id":      req.WorkspaceID,
+		"workspace_id":      workspaceID,
 		"name":              req.Name,
 	})
 
