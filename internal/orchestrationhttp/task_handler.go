@@ -406,9 +406,41 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Delete task
-	err := th.communicator.DeleteTask(taskID)
-	if err != nil {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		workspaceID = r.URL.Query().Get("studio_id")
+	}
+
+	if workspaceID != "" {
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+			return
+		}
+
+		if err := ws.DeleteTask(taskID); err != nil {
+			httputil.RespondError(w, http.StatusNotFound, "Task not found", err)
+			return
+		}
+
+		if err := th.workspaceStore.Save(ws); err != nil {
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+			return
+		}
+
+		logger.Info("Deleted task", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Task deleted successfully",
+			"task_id": taskID,
+		})
+		return
+	}
+
+	// Fallback: search all workspaces
+	if err := th.communicator.DeleteTask(taskID); err != nil {
 		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -1661,14 +1693,10 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
+
+	// Defaults for scheduler nodes
 	if req.From == "" {
-		http.Error(w, "from is required", http.StatusBadRequest)
-		return
-	}
-	// Note: 'to' is optional - can be assigned later using ASSIGN button
-	if req.Prompt == "" {
-		http.Error(w, "prompt is required", http.StatusBadRequest)
-		return
+		req.From = "scheduler"
 	}
 
 	// Validate schedule configuration
@@ -2098,21 +2126,72 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Use existing trigger endpoint logic by calling handleTriggerScheduledTask
-	// Create a task from the scheduled task
-	task := agentstudio.Task{
-		WorkspaceID: ws.ID,
-		From:        foundTask.From,
-		To:          foundTask.To,
-		Description: foundTask.Prompt,
-		Priority:    foundTask.Priority,
-		Context:     foundTask.Context,
-		Status:      agentstudio.TaskStatusPending,
+	now := time.Now()
+	var taskID string
+
+	// If linked to a specific task node, reset and queue that task for rerun
+	if foundTask.TargetTaskID != "" {
+		targetTask, err := ws.GetTask(foundTask.TargetTaskID)
+		if err != nil {
+			logger.Error("Target task not found for scheduler node", logger.Fields{"node_id": nodeID, "target_task_id": foundTask.TargetTaskID, "err": err})
+			httputil.RespondError(w, http.StatusBadRequest, "Linked task not found for scheduler", err)
+			return
+		}
+
+		if targetTask.Status == agentstudio.TaskStatusInProgress {
+			httputil.RespondError(w, http.StatusBadRequest, "Linked task is already running", fmt.Errorf("task %s in progress", targetTask.ID))
+			return
+		}
+
+		if targetTask.To == "" || targetTask.To == "unassigned" {
+			httputil.RespondError(w, http.StatusBadRequest, "Linked task must be assigned to an agent", fmt.Errorf("task %s unassigned", targetTask.ID))
+			return
+		}
+
+		targetTask.Status = agentstudio.TaskStatusAssigned
+		targetTask.Result = ""
+		targetTask.Error = ""
+		targetTask.Progress = nil
+		targetTask.StartedAt = nil
+		targetTask.CompletedAt = nil
+
+		if err := ws.UpdateTask(*targetTask); err != nil {
+			logger.Error("Failed to queue linked task for rerun", logger.Fields{"node_id": nodeID, "task_id": targetTask.ID, "err": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to queue linked task for rerun", err)
+			return
+		}
+
+		taskID = targetTask.ID
+	} else {
+		httputil.RespondError(w, http.StatusBadRequest, "Scheduler node is not linked to a task. Connect it to a task node first.", fmt.Errorf("missing target_task_id"))
+		return
 	}
 
-	if err := ws.AddTask(task); err != nil {
-		logger.Error("Failed to create task from scheduler node", logger.Fields{"node_id": nodeID, "err": err})
-		httputil.RespondError(w, http.StatusBadRequest, "Failed to trigger scheduler node", err)
+	// Update scheduler bookkeeping
+	foundTask.LastRun = &now
+	foundTask.ExecutionCount++
+	foundTask.FailureCount = 0
+	foundTask.LastError = ""
+
+	execution := agentstudio.TaskExecution{
+		TaskID:     taskID,
+		ExecutedAt: now,
+		Status:     "success",
+	}
+	foundTask.ExecutionHistory = append(foundTask.ExecutionHistory, execution)
+	if len(foundTask.ExecutionHistory) > 20 {
+		foundTask.ExecutionHistory = foundTask.ExecutionHistory[len(foundTask.ExecutionHistory)-20:]
+	}
+
+	nextRun := agentstudio.CalculateNextRun(foundTask.Schedule, now)
+	foundTask.NextRun = nextRun
+	if nextRun == nil {
+		foundTask.Enabled = false
+	}
+
+	if err := ws.UpdateScheduledTask(*foundTask); err != nil {
+		logger.Error("Failed to update scheduler node", logger.Fields{"node_id": nodeID, "err": err})
+		httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduler node", err)
 		return
 	}
 
@@ -2122,13 +2201,20 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Get the created task ID
-	var taskID string
-	if len(ws.Tasks) > 0 {
-		taskID = ws.Tasks[len(ws.Tasks)-1].ID
+	if th.eventBus != nil {
+		payload := map[string]interface{}{
+			"task_id":         taskID,
+			"task_created":    foundTask.TargetTaskID == "",
+			"execution_count": foundTask.ExecutionCount,
+			"next_run":        nextRun,
+			"timestamp":       now,
+			"scheduled_task":  foundTask,
+			"target_task_id":  foundTask.TargetTaskID,
+		}
+		th.eventBus.Publish(agentstudio.NewScheduledTaskEvent(agentstudio.EventScheduledTaskTriggered, ws.ID, foundTask.ID, foundTask.Name, payload))
 	}
 
-	logger.Info("Manually triggered scheduler node, created task", logger.Fields{"node_id": nodeID, "task_id": taskID})
+	logger.Info("Manually triggered scheduler node", logger.Fields{"node_id": nodeID, "task_id": taskID, "target_task_id": foundTask.TargetTaskID})
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,

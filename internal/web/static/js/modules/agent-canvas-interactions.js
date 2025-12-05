@@ -358,6 +358,20 @@ export class AgentCanvasInteractionHandler {
 
           if (x >= cardX && x <= cardX + cardWidth &&
               y >= cardY && y <= cardY + cardHeight) {
+            // If assigning scheduler to a task, link immediately
+            if (this.state.schedulerAssignmentMode && this.state.schedulerAssignmentSource) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.assignSchedulerToTask(task);
+              this.state.schedulerAssignmentMode = false;
+              this.state.schedulerAssignmentSource = null;
+              this.state.schedulerAssignmentMouseX = 0;
+              this.state.schedulerAssignmentMouseY = 0;
+              this.canvas.style.cursor = 'grab';
+              this.parent.draw();
+              return;
+            }
+
             // Start dragging this task
             e.stopPropagation();
             e.preventDefault();
@@ -518,20 +532,6 @@ export class AgentCanvasInteractionHandler {
 
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
-        // If we're assigning a scheduler node, clicking an agent should assign immediately
-        if (this.state.schedulerAssignmentMode && this.state.schedulerAssignmentSource) {
-          e.stopPropagation();
-          e.preventDefault();
-          this.parent.assignSchedulerToAgent(agent);
-          this.state.schedulerAssignmentMode = false;
-          this.state.schedulerAssignmentSource = null;
-          this.state.schedulerAssignmentMouseX = 0;
-          this.state.schedulerAssignmentMouseY = 0;
-          this.canvas.style.cursor = 'grab';
-          this.parent.draw();
-          return;
-        }
-
         // If we're assigning a task, clicking an agent should assign immediately
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();

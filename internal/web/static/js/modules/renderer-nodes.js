@@ -936,7 +936,7 @@ export class RendererNodes {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.font = 'bold 8px system-ui';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText('➜ ASSIGN', assignBtnX + assignBtnWidth / 2, assignBtnY + 10);
+      this.ctx.fillText('⇄ LINK', assignBtnX + assignBtnWidth / 2, assignBtnY + 10);
       this.ctx.textAlign = 'left';
 
       schedulerNode.assignBtnBounds = {

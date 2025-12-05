@@ -382,8 +382,8 @@ class AgentCanvas {
     this.ctx.translate(this.offsetX, this.offsetY);
     this.ctx.scale(this.scale, this.scale);
 
-    // Draw connections between agents (disabled)
-    // this.renderer.drawConnections();
+    // Draw scheduler/task connections
+    this.renderer.drawConnections();
 
     // Draw chain connections (highlighted paths for active chains)
     this.renderer.drawChainConnections();
@@ -717,7 +717,12 @@ class AgentCanvas {
     if (!confirmed) return;
 
     try {
-      await apiDelete(`/api/orchestration/tasks?id=${encodeURIComponent(task.id)}`);
+      const params = new URLSearchParams({ id: task.id });
+      if (this.studioId) {
+        params.append('workspace_id', this.studioId);
+      }
+
+      await apiDelete(`/api/orchestration/tasks?${params.toString()}`);
 
       console.log('✅ Task deleted:', task.id);
 
@@ -949,30 +954,40 @@ class AgentCanvas {
   }
 
   /**
-   * Assign scheduler node to an agent
+   * Assign scheduler node to a task
    */
-  async assignSchedulerToAgent(agent) {
+  async assignSchedulerToTask(task) {
     const schedulerNode = this.state.schedulerAssignmentSource;
-    if (!schedulerNode || !agent) return;
+    if (!schedulerNode || !task) return;
 
     try {
-      // Update the scheduler node's target agent
-      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.canvas_node_id}?studio_id=${this.studioId}`, {
-        to: agent.name
-      });
+      await this.updateSchedulerTargetTask(schedulerNode.canvas_node_id, task.id);
 
-      // Update local state
-      const localScheduler = this.state.schedulerNodes.find(s => s.canvas_node_id === schedulerNode.canvas_node_id);
-      if (localScheduler) {
-        localScheduler.to = agent.name;
+      // Add a visual connection if it doesn't exist
+      const schedulerNodeId = schedulerNode.canvas_node_id || schedulerNode.id;
+      const existing = this.state.connections.find(conn =>
+        conn.from === schedulerNodeId && conn.to === task.id
+      );
+      if (!existing) {
+        const conn = {
+          id: `conn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+          from: schedulerNodeId,
+          fromPort: 'out',
+          to: task.id,
+          toPort: 'in',
+          color: '#cbd5e1',
+          animated: false
+        };
+        this.state.connections.push(conn);
+        this.saveLayout();
+        this.draw();
       }
 
-      this.notifications?.showNotification?.(`Scheduler assigned to ${agent.name}`, 'success');
-      console.log('✅ Scheduler assigned to agent:', agent.name);
-      this.draw();
+      this.notifications?.showNotification?.(`Scheduler linked to task "${task.description || task.id}"`, 'success');
+      console.log('✅ Scheduler linked to task:', task.id);
     } catch (err) {
-      console.error('Failed to assign scheduler to agent', err);
-      alert('Failed to assign scheduler: ' + (err?.message || err));
+      console.error('Failed to link scheduler to task', err);
+      alert('Failed to link scheduler to task: ' + (err?.message || err));
     }
   }
 

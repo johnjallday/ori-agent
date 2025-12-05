@@ -1020,6 +1020,25 @@ func (w *Workspace) UpdateTask(task Task) error {
 	return fmt.Errorf("task %s not found in workspace", task.ID)
 }
 
+// DeleteTask removes a task from the workspace by ID and cleans up layout metadata.
+func (w *Workspace) DeleteTask(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i := range w.Tasks {
+		if w.Tasks[i].ID == id {
+			w.Tasks = append(w.Tasks[:i], w.Tasks[i+1:]...)
+			if w.Layout != nil && w.Layout.TaskPositions != nil {
+				delete(w.Layout.TaskPositions, id)
+			}
+			w.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("task %s not found in workspace", id)
+}
+
 // GetTasksForAgent returns all tasks assigned to a specific agent
 func (w *Workspace) GetTasksForAgent(agentName string) []Task {
 	w.mu.RLock()

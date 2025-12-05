@@ -148,6 +148,25 @@ export class AgentCanvasInitialization {
 
         console.log('📅 Loaded scheduler nodes:', schedulerNodes.length, schedulerNodes);
         this.state.setSchedulerNodes(schedulerNodes);
+
+        // Seed visual connections for linked tasks so arrows render on load
+        schedulerNodes.forEach(scheduler => {
+          if (!scheduler.target_task_id) return;
+          const fromId = scheduler.canvas_node_id || scheduler.id;
+          const toId = scheduler.target_task_id;
+          const exists = this.state.connections.find(conn => conn.from === fromId && conn.to === toId);
+          if (!exists) {
+            this.state.connections.push({
+              id: `conn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+              from: fromId,
+              fromPort: 'out',
+              to: toId,
+              toPort: 'in',
+              color: '#cbd5e1',
+              animated: false
+            });
+          }
+        });
       } else {
         console.log('📅 No scheduled_tasks in studio data');
       }

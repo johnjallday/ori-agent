@@ -1056,6 +1056,12 @@ async function unassignCurrentTask() {
 
 function showSchedulerDetails(schedulerNode) {
   console.log('[SIDEBAR] showSchedulerDetails called for:', schedulerNode.name);
+  const canvas = window.agentCanvas;
+  const tasks = canvas?.state?.tasks || [];
+  const targetTask = tasks.find(t => t.id === schedulerNode.target_task_id);
+  const targetTaskLabel = targetTask
+    ? `${targetTask.description || targetTask.id} (${targetTask.id})`
+    : (schedulerNode.target_task_id ? `Task: ${schedulerNode.target_task_id}` : null);
 
   // Hide other details
   hideAgentDetails();
@@ -1131,17 +1137,12 @@ function showSchedulerDetails(schedulerNode) {
       <strong style="color: var(--text-primary);">Status:</strong>
       <div>${statusBadge}</div>
     </div>
-    ${schedulerNode.to ? `
-      <div class="mb-3">
-        <strong style="color: var(--text-primary);">Assigned To:</strong>
-        <div style="color: var(--text-secondary);">${schedulerNode.to}</div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Linked Task:</strong>
+      <div style="color: var(--text-secondary);">
+        ${targetTaskLabel ? targetTaskLabel : '<span style="color:#94a3b8;font-style:italic;">(not linked)</span>'}
       </div>
-    ` : `
-      <div class="mb-3">
-        <strong style="color: var(--text-primary);">Assigned To:</strong>
-        <div style="color: #94a3b8; font-style: italic;">(unassigned)</div>
-      </div>
-    `}
+    </div>
     <div class="mb-3">
       <strong style="color: var(--text-primary);">Schedule Type:</strong>
       <div style="color: var(--text-secondary);">${scheduleType}</div>
@@ -2554,7 +2555,7 @@ function toggleEndDate() {
  * Build schedule config object from form inputs
  */
 function buildScheduleConfig() {
-  const scheduleType = document.getElementById('scheduler-type').value;
+  const scheduleType = document.getElementById('scheduler-type').value || 'interval';
   const config = {
     type: scheduleType  // Backend expects 'type', not 'schedule_type'
   };
@@ -2562,7 +2563,10 @@ function buildScheduleConfig() {
   switch (scheduleType) {
     case 'interval':
       // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
-      const intervalMinutes = parseInt(document.getElementById('interval-minutes').value);
+      let intervalMinutes = parseInt(document.getElementById('interval-minutes').value, 10);
+      if (isNaN(intervalMinutes) || intervalMinutes <= 0) {
+        intervalMinutes = 60; // sensible default
+      }
       config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
       break;
 
@@ -2586,7 +2590,10 @@ function buildScheduleConfig() {
 
     case 'relative_delay':
       // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
-      const delayMinutes = parseInt(document.getElementById('delay-minutes').value);
+      let delayMinutes = parseInt(document.getElementById('delay-minutes').value, 10);
+      if (isNaN(delayMinutes) || delayMinutes <= 0) {
+        delayMinutes = 5; // small default
+      }
       config.delay_duration = delayMinutes * 60 * 1000000000;  // minutes to nanoseconds
       config.trigger_once = document.getElementById('delay-trigger-once').checked;
       break;
@@ -2621,22 +2628,19 @@ async function submitSchedulerNode() {
     }
 
     // Build schedule config
-    const scheduleConfig = buildScheduleConfig();
-
-    // Get required fields
-    const prompt = document.getElementById('scheduler-prompt').value.trim();
-    const enabled = document.getElementById('scheduler-enabled').checked;
-
-    // Validate required fields
-    if (!prompt) {
-      alert('Please enter a task prompt');
+    let scheduleConfig;
+    try {
+      scheduleConfig = buildScheduleConfig();
+    } catch (err) {
+      alert(err.message || 'Invalid schedule configuration');
       return;
     }
+
+    const enabled = document.getElementById('scheduler-enabled').checked;
 
     // Create scheduler node (without 'to' - assign agent later using ASSIGN button)
     const schedulerNode = {
       name: name,
-      prompt: prompt,
       to: '',  // Empty - use ASSIGN button to set target agent
       from: 'scheduler',  // Scheduler nodes always use 'scheduler' as the source
       schedule: scheduleConfig,

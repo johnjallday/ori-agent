@@ -156,6 +156,20 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 				continue
 			}
 
+			// Canvas scheduler nodes must be linked to a task node before execution
+			if st.CanvasNodeID != "" && st.TargetTaskID == "" {
+				logger.Debug("📅 Skipping scheduler execution - no target task linked", logger.Fields{"task_id": st.ID, "canvas_node_id": st.CanvasNodeID})
+				nextRun := ts.calculateNextRun(st.Schedule, now)
+				st.NextRun = nextRun
+				if err := ws.UpdateScheduledTask(*st); err != nil {
+					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+				}
+				if err := ts.workspaceStore.Save(ws); err != nil {
+					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+				}
+				continue
+			}
+
 			// All checks passed - execute the scheduled task
 			ts.executeScheduledTask(ws, st)
 		}
@@ -172,6 +186,14 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) {
 	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": st.ID, "name": st.Name})
 
+	now := time.Now()
+
+	// If this scheduler is linked to an existing task node, queue that task for rerun
+	if st.TargetTaskID != "" {
+		ts.rerunTargetTask(ws, st, now)
+		return
+	}
+
 	// Create a regular Task from the ScheduledTask template
 	// This converts the scheduled task definition into an executable task
 	task := Task{
@@ -181,55 +203,13 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 		Description: st.Prompt,
 		Priority:    st.Priority,
 		Context:     st.Context,
-		Status:      TaskStatusPending,
+		Status:      TaskStatusAssigned, // Queue for auto-execution
 	}
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
 		// FAILURE PATH: Task creation failed
-		logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": st.ID, "err": err})
-		st.FailureCount++
-		st.LastError = err.Error()
-
-		// Record failed execution in history for debugging/monitoring
-		execution := TaskExecution{
-			TaskID:     "", // No task was created
-			ExecutedAt: time.Now(),
-			Status:     "failed",
-			Error:      err.Error(),
-		}
-		st.ExecutionHistory = append(st.ExecutionHistory, execution)
-
-		// Limit history size to prevent unbounded growth (last 20 executions only)
-		if len(st.ExecutionHistory) > 20 {
-			st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
-		}
-
-		// Auto-disable after 5 consecutive failures to prevent runaway errors
-		// This prevents a broken scheduled task from spamming errors indefinitely
-		if st.FailureCount >= 5 {
-			logger.Warn("Scheduled task disabled after consecutive failures", logger.Fields{"task_id": st.ID, "failurecount": st.FailureCount})
-			st.Enabled = false
-		}
-
-		if err := ws.UpdateScheduledTask(*st); err != nil {
-			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
-		}
-		if err := ts.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		}
-
-		// Publish failure event
-		if ts.eventBus != nil {
-			event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, st.ID, st.Name, map[string]interface{}{
-				"error":         st.LastError,
-				"failure_count": st.FailureCount,
-				"timestamp":     time.Now(),
-				"disabled":      !st.Enabled, // true if disabled after 5 failures
-			})
-			ts.eventBus.Publish(event)
-		}
-
+		ts.recordScheduleFailure(ws, st, err, "")
 		return
 	}
 
@@ -241,7 +221,6 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 	}
 
 	// Update execution tracking with success metrics
-	now := time.Now()
 	st.LastRun = &now
 	st.ExecutionCount++
 	st.FailureCount = 0 // Reset failure count on successful task creation (allows recovery)
@@ -293,6 +272,7 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 			"execution_count": st.ExecutionCount,
 			"next_run":        nextRun,
 			"timestamp":       now,
+			"scheduled_task":  st,
 		})
 		ts.eventBus.Publish(event)
 
@@ -302,8 +282,140 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 			"task_created":      true,
 			"execution_count":   st.ExecutionCount,
 			"next_run":          nextRun,
+			"target_task_id":    st.TargetTaskID,
 		})
 		ts.eventBus.Publish(workspaceEvent)
+	}
+}
+
+// rerunTargetTask resets and queues an existing task for execution based on the scheduler configuration.
+func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now time.Time) {
+	targetTask, err := ws.GetTask(st.TargetTaskID)
+	if err != nil {
+		ts.recordScheduleFailure(ws, st, fmt.Errorf("target task %s not found: %w", st.TargetTaskID, err), st.TargetTaskID)
+		return
+	}
+
+	if targetTask.Status == TaskStatusInProgress {
+		ts.recordScheduleFailure(ws, st, fmt.Errorf("target task %s is already in progress", targetTask.ID), targetTask.ID)
+		return
+	}
+
+	if targetTask.To == "" || targetTask.To == "unassigned" {
+		ts.recordScheduleFailure(ws, st, fmt.Errorf("target task %s is not assigned to an agent", targetTask.ID), targetTask.ID)
+		return
+	}
+
+	// Reset task state for rerun and queue it for the executor
+	targetTask.Status = TaskStatusAssigned
+	targetTask.Result = ""
+	targetTask.Error = ""
+	targetTask.Progress = nil
+	targetTask.StartedAt = nil
+	targetTask.CompletedAt = nil
+
+	if err := ws.UpdateTask(*targetTask); err != nil {
+		ts.recordScheduleFailure(ws, st, fmt.Errorf("failed to queue target task %s: %w", targetTask.ID, err), targetTask.ID)
+		return
+	}
+
+	// Track successful trigger
+	st.LastRun = &now
+	st.ExecutionCount++
+	st.FailureCount = 0
+	st.LastError = ""
+
+	execution := TaskExecution{
+		TaskID:     targetTask.ID,
+		ExecutedAt: now,
+		Status:     "success",
+	}
+	st.ExecutionHistory = append(st.ExecutionHistory, execution)
+	if len(st.ExecutionHistory) > 20 {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	}
+
+	nextRun := ts.calculateNextRun(st.Schedule, now)
+	st.NextRun = nextRun
+
+	if nextRun == nil {
+		st.Enabled = false
+		logger.Info("📅 Scheduled task completed (one-time execution), disabling", logger.Fields{"duration": st.ID})
+	}
+
+	if err := ws.UpdateScheduledTask(*st); err != nil {
+		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+		return
+	}
+
+	if err := ts.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		return
+	}
+
+	if ts.eventBus != nil {
+		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, st.ID, st.Name, map[string]interface{}{
+			"task_id":         targetTask.ID,
+			"task_created":    false,
+			"execution_count": st.ExecutionCount,
+			"next_run":        nextRun,
+			"timestamp":       now,
+			"scheduled_task":  st,
+			"target_task_id":  targetTask.ID,
+		})
+		ts.eventBus.Publish(event)
+
+		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+			"scheduled_task_id": st.ID,
+			"task_created":      false,
+			"execution_count":   st.ExecutionCount,
+			"next_run":          nextRun,
+			"target_task_id":    targetTask.ID,
+		})
+		ts.eventBus.Publish(workspaceEvent)
+	}
+}
+
+// recordScheduleFailure updates scheduler bookkeeping and emits failure events.
+func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask, err error, taskID string) {
+	logger.Error("Failed to execute scheduled task", logger.Fields{"task_id": st.ID, "err": err})
+
+	st.FailureCount++
+	st.LastError = err.Error()
+
+	execution := TaskExecution{
+		TaskID:     taskID,
+		ExecutedAt: time.Now(),
+		Status:     "failed",
+		Error:      err.Error(),
+	}
+	st.ExecutionHistory = append(st.ExecutionHistory, execution)
+	if len(st.ExecutionHistory) > 20 {
+		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
+	}
+
+	if st.FailureCount >= 5 {
+		logger.Warn("Scheduled task disabled after consecutive failures", logger.Fields{"task_id": st.ID, "failurecount": st.FailureCount})
+		st.Enabled = false
+	}
+
+	if err := ws.UpdateScheduledTask(*st); err != nil {
+		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+	}
+	if err := ts.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+	}
+
+	if ts.eventBus != nil {
+		event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, st.ID, st.Name, map[string]interface{}{
+			"error":          st.LastError,
+			"failure_count":  st.FailureCount,
+			"timestamp":      time.Now(),
+			"disabled":       !st.Enabled, // true if disabled after 5 failures
+			"scheduled_task": st,
+			"target_task_id": taskID,
+		})
+		ts.eventBus.Publish(event)
 	}
 }
 
@@ -319,6 +431,11 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 // - ScheduleCron: Uses cron expression to calculate next occurrence
 // - ScheduleRelativeDelay: Adds delay_duration to lastRun (respects trigger_once flag)
 func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
+	return CalculateNextRun(config, lastRun)
+}
+
+// CalculateNextRun calculates the next execution time based on the schedule configuration.
+func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 	switch config.Type {
 	case ScheduleOnce:
 		// One-time execution, no next run
