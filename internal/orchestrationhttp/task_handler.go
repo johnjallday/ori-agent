@@ -1859,6 +1859,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	var req struct {
 		WorkspaceID string                      `json:"studio_id"`
+		To          *string                     `json:"to,omitempty"`
 		Name        *string                     `json:"name,omitempty"`
 		Description *string                     `json:"description,omitempty"`
 		Prompt      *string                     `json:"prompt,omitempty"`
@@ -1874,7 +1875,13 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if req.WorkspaceID == "" {
+	// Get workspace_id from query parameter or request body
+	workspaceID := r.URL.Query().Get("studio_id")
+	if workspaceID == "" {
+		workspaceID = req.WorkspaceID
+	}
+
+	if workspaceID == "" {
 		http.Error(w, "studio_id is required", http.StatusBadRequest)
 		return
 	}
@@ -1887,9 +1894,9 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 		}
 	}
 
-	ws, err := th.workspaceStore.Get(req.WorkspaceID)
+	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
-		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "err": err})
+		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
 		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
@@ -1911,6 +1918,9 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Update fields if provided
+	if req.To != nil {
+		st.To = *req.To
+	}
 	if req.Name != nil {
 		st.Name = *req.Name
 	}
