@@ -911,12 +911,13 @@ class AgentCanvas {
    * Manually trigger a scheduler node
    */
   async triggerSchedulerNode(schedulerNode) {
-    if (!schedulerNode || !schedulerNode.id || !this.studioId) {
+    const nodeId = schedulerNode?.canvas_node_id;
+    if (!schedulerNode || !nodeId || !this.studioId) {
       alert('Cannot trigger scheduler node: missing ID or workspace');
       return;
     }
     try {
-      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNode.id}/trigger?studio_id=${this.studioId}`, {});
+      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}/trigger?studio_id=${this.studioId}`, {});
       this.notifications?.showNotification?.('Scheduler node triggered', 'success');
     } catch (err) {
       console.error('Failed to trigger scheduler node', err);
