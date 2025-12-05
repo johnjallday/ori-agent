@@ -883,6 +883,17 @@ export class RendererNodes {
       const scheduleText = this.getScheduleSummary(schedulerNode.schedule_config);
       this.ctx.fillText(scheduleText, cardX + 10, cardY + 45);
 
+      // Target agent indicator
+      if (schedulerNode.to && schedulerNode.to !== '') {
+        this.ctx.fillStyle = '#8b5cf6';
+        this.ctx.font = 'bold 10px system-ui';
+        this.ctx.fillText(`→ ${schedulerNode.to}`, cardX + 10, cardY + 58);
+      } else {
+        this.ctx.fillStyle = '#94a3b8';
+        this.ctx.font = 'italic 10px system-ui';
+        this.ctx.fillText('(unassigned)', cardX + 10, cardY + 58);
+      }
+
       // Next run time
       if (schedulerNode.next_run) {
         const nextRun = new Date(schedulerNode.next_run);
@@ -904,7 +915,7 @@ export class RendererNodes {
 
         this.ctx.fillStyle = '#64748b';
         this.ctx.font = '10px system-ui';
-        this.ctx.fillText(`Next: ${timeText}`, cardX + 10, cardY + 62);
+        this.ctx.fillText(`Next: ${timeText}`, cardX + 10, cardY + 72);
       }
 
       // Assign button (left side, below schedule text)
