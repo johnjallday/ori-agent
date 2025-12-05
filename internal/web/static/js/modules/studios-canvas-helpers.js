@@ -2500,13 +2500,28 @@ async function submitSchedulerNode() {
     // Build schedule config
     const scheduleConfig = buildScheduleConfig();
 
-    // Get enabled state
+    // Get required fields
+    const prompt = document.getElementById('scheduler-prompt').value.trim();
+    const to = document.getElementById('scheduler-to').value.trim();
     const enabled = document.getElementById('scheduler-enabled').checked;
+
+    // Validate required fields
+    if (!prompt) {
+      alert('Please enter a task prompt');
+      return;
+    }
+    if (!to) {
+      alert('Please specify a target agent');
+      return;
+    }
 
     // Create scheduler node
     const schedulerNode = {
       name: name,
-      schedule_config: scheduleConfig,
+      prompt: prompt,
+      to: to,
+      from: 'scheduler',  // Scheduler nodes always use 'scheduler' as the source
+      schedule: scheduleConfig,
       enabled: enabled,
       x: 300,  // Default position
       y: 300
