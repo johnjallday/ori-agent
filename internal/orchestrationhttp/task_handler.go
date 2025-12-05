@@ -1665,10 +1665,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 		http.Error(w, "from is required", http.StatusBadRequest)
 		return
 	}
-	if req.To == "" {
-		http.Error(w, "to is required", http.StatusBadRequest)
-		return
-	}
+	// Note: 'to' is optional - can be assigned later using ASSIGN button
 	if req.Prompt == "" {
 		http.Error(w, "prompt is required", http.StatusBadRequest)
 		return
