@@ -42,17 +42,47 @@ import (
 )
 
 // Server holds all the dependencies and state for the HTTP server
+// Dependencies are organized into domain-specific facades to reduce coupling
 type Server struct {
-	clientFactory         *client.Factory
-	llmFactory            *llm.Factory
-	registryManager       *registry.Manager
-	st                    store.Store
-	pluginReg             types.PluginRegistry
-	agentStorePath        string
-	configManager         *config.Manager
-	templateRenderer      *web.TemplateRenderer
-	pluginDownloader      *plugindownloader.PluginDownloader
-	updateMgr             *updatemanager.Manager
+	// Domain facades (grouped dependencies) - PUBLIC API
+	Core        *CoreSystemFacade
+	Plugin      *PluginSystemFacade
+	Storage     *StorageSystemFacade
+	Workflow    *WorkflowSystemFacade
+	Integration *IntegrationSystemFacade
+	UI          *UISystemFacade
+
+	// Internal fields (used by builder, kept for backward compatibility)
+	// These are populated during initialization and wrapped in facades
+	clientFactory       *client.Factory
+	llmFactory          *llm.Factory
+	registryManager     *registry.Manager
+	st                  store.Store
+	pluginReg           types.PluginRegistry
+	agentStorePath      string
+	configManager       *config.Manager
+	templateRenderer    *web.TemplateRenderer
+	pluginDownloader    *plugindownloader.PluginDownloader
+	updateMgr           *updatemanager.Manager
+	workspaceStore      agentstudio.Store
+	taskExecutor        *agentstudio.TaskExecutor
+	stepExecutor        *agentstudio.StepExecutor
+	taskScheduler       *agentstudio.TaskScheduler
+	eventBus            *agentstudio.EventBus
+	notificationService *agentstudio.NotificationService
+	studioOrchestrator  *agentstudio.Orchestrator
+	costTracker         *llm.CostTracker
+	mcpRegistry         *mcp.Registry
+	mcpConfigManager    *mcp.ConfigManager
+	locationManager     *location.Manager
+	onboardingMgr       *onboarding.Manager
+	categoryManager     *pluginmanager.CategoryManager
+	permissionManager   *pluginmanager.PermissionManager
+	versionManager      *pluginmanager.VersionManager
+	notificationManager *pluginmanager.NotificationManager
+	backupManager       *pluginmanager.BackupManager
+
+	// HTTP Handlers (kept separate as they're endpoints, not core logic)
 	healthManager         *healthhttp.Manager
 	activityLogger        *agenthttp.ActivityLogger
 	settingsHandler       *settingshttp.Handler
@@ -62,32 +92,15 @@ type Server struct {
 	pluginInitHandler     *pluginhttp.InitHandler
 	healthHandler         *healthhttp.Handler
 	pluginUpdateHandler   *pluginupdate.Handler
-	onboardingMgr         *onboarding.Manager
 	onboardingHandler     *onboardinghttp.Handler
 	deviceHandler         *devicehttp.Handler
 	webPageHandler        *pluginhttp.WebPageHandler
-	workspaceStore        agentstudio.Store
-	taskExecutor          *agentstudio.TaskExecutor
-	stepExecutor          *agentstudio.StepExecutor
-	taskScheduler         *agentstudio.TaskScheduler
-	eventBus              *agentstudio.EventBus
-	notificationService   *agentstudio.NotificationService
 	orchestrationHandler  *orchestrationhttp.Handler
-	studioOrchestrator    *agentstudio.Orchestrator
 	studioHandler         *agentstudio.HTTPHandler
-	costTracker           *llm.CostTracker
 	usageHandler          *usagehttp.Handler
-	mcpRegistry           *mcp.Registry
-	mcpConfigManager      *mcp.ConfigManager
 	mcpHandler            *mcphttp.Handler
 	agentMCPHandler       *agenthttp.MCPHandler
-	locationManager       *location.Manager
 	locationHandler       *locationhttp.Handler
-	categoryManager       *pluginmanager.CategoryManager
-	permissionManager     *pluginmanager.PermissionManager
-	versionManager        *pluginmanager.VersionManager
-	notificationManager   *pluginmanager.NotificationManager
-	backupManager         *pluginmanager.BackupManager
 	pluginsPageHandler    *pluginhttp.PluginsPageHandler
 	rollbackHandler       *pluginhttp.RollbackHandler
 	permissionsHandler    *pluginhttp.PermissionsHandler
@@ -113,34 +126,16 @@ func (s *Server) Handler() http.Handler {
 
 // Start starts background services (task executor, etc.)
 func (s *Server) Start() {
-	if s.taskExecutor != nil {
-		s.taskExecutor.Start()
-	}
-	if s.stepExecutor != nil {
-		s.stepExecutor.Start()
-	}
-	if s.taskScheduler != nil {
-		s.taskScheduler.Start()
+	if s.Workflow != nil {
+		s.Workflow.Start()
 	}
 }
 
 // Shutdown gracefully shuts down background services
 func (s *Server) Shutdown() {
 	// Stop background services
-	if s.taskExecutor != nil {
-		s.taskExecutor.Stop()
-	}
-	if s.stepExecutor != nil {
-		s.stepExecutor.Stop()
-	}
-	if s.taskScheduler != nil {
-		s.taskScheduler.Stop()
-	}
-	if s.notificationService != nil {
-		s.notificationService.Shutdown()
-	}
-	if s.eventBus != nil {
-		s.eventBus.Shutdown()
+	if s.Workflow != nil {
+		s.Workflow.Shutdown()
 	}
 
 	// Clean up all loaded plugins
@@ -151,11 +146,11 @@ func (s *Server) Shutdown() {
 func (s *Server) cleanupPlugins() {
 	log.Println("Cleaning up plugins...")
 
-	agentNames, _ := s.st.ListAgents()
+	agentNames, _ := s.Storage.ListAgents()
 	cleanedCount := 0
 
 	for _, agentName := range agentNames {
-		ag, ok := s.st.GetAgent(agentName)
+		ag, ok := s.Storage.GetAgentByName(agentName)
 		if !ok {
 			continue
 		}
@@ -192,14 +187,14 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data := web.GetDefaultData()
 	data.CurrentPage = pageName
-	data.Theme = s.onboardingMgr.GetTheme()
+	data.Theme = s.Storage.OnboardingMgr.GetTheme()
 
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+	if agents, current := s.Storage.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
 		if currentAgentName == "" {
 			currentAgentName = agents[0]
 		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+		if agent, found := s.Storage.GetAgentByName(currentAgentName); found && agent != nil {
 			data.CurrentAgent = currentAgentName
 			if agent.Settings.Model != "" {
 				data.Model = agent.Settings.Model
@@ -212,7 +207,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 
 // renderAndWritePage renders a template and writes the response
 func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, data web.TemplateData) {
-	html, err := s.templateRenderer.RenderTemplate(templateName, data)
+	html, err := s.UI.TemplateRenderer.RenderTemplate(templateName, data)
 	if err != nil {
 		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

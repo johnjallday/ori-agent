@@ -185,12 +185,73 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		return nil, fmt.Errorf("template manager phase failed: %w", err)
 	}
 
+	// Phase 24: Create Domain Facades (organize dependencies)
+	if err := b.createDomainFacades(); err != nil {
+		return nil, fmt.Errorf("facade creation phase failed: %w", err)
+	}
+
 	// Log success
 	if !verbose {
 		logger.Info("Server initialized successfully", logger.Fields{})
 	}
 
 	return b.server, nil
+}
+
+// createDomainFacades organizes dependencies into domain-specific facades
+func (b *ServerBuilder) createDomainFacades() error {
+	// Core System Facade
+	b.server.Core = NewCoreSystemFacade(
+		b.server.clientFactory,
+		b.server.llmFactory,
+		b.server.configManager,
+		b.server.costTracker,
+	)
+
+	// Plugin System Facade
+	b.server.Plugin = NewPluginSystemFacade(
+		b.server.registryManager,
+		b.server.pluginReg,
+		b.server.pluginDownloader,
+		b.server.categoryManager,
+		b.server.permissionManager,
+		b.server.versionManager,
+		b.server.notificationManager,
+		b.server.backupManager,
+	)
+
+	// Storage System Facade
+	b.server.Storage = NewStorageSystemFacade(
+		b.server.st,
+		b.server.agentStorePath,
+		b.server.workspaceStore,
+		b.server.onboardingMgr,
+		b.server.locationManager,
+	)
+
+	// Workflow System Facade
+	b.server.Workflow = NewWorkflowSystemFacade(
+		b.server.taskExecutor,
+		b.server.stepExecutor,
+		b.server.taskScheduler,
+		b.server.eventBus,
+		b.server.notificationService,
+		b.server.studioOrchestrator,
+	)
+
+	// Integration System Facade
+	b.server.Integration = NewIntegrationSystemFacade(
+		b.server.mcpRegistry,
+		b.server.mcpConfigManager,
+		b.server.updateMgr,
+	)
+
+	// UI System Facade
+	b.server.UI = NewUISystemFacade(
+		b.server.templateRenderer,
+	)
+
+	return nil
 }
 
 // initializeConfiguration loads the configuration manager and default settings.
