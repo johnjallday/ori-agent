@@ -96,6 +96,10 @@ async function loadPlugins() {
   }
 }
 
+// Track sidebar plugin display state
+let sidebarShowAll = false;
+const SIDEBAR_INITIAL_LIMIT = 3;
+
 // Display plugins in the sidebar
 function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map()) {
   const pluginsList = document.getElementById('pluginsList');
@@ -106,7 +110,11 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
     return;
   }
 
-  pluginsList.innerHTML = plugins.map(plugin => {
+  // Determine how many plugins to show
+  const pluginsToShow = sidebarShowAll ? plugins : plugins.slice(0, SIDEBAR_INITIAL_LIMIT);
+  const hasMore = plugins.length > SIDEBAR_INITIAL_LIMIT;
+
+  pluginsList.innerHTML = pluginsToShow.map(plugin => {
     const isActive = activePluginNames.has(plugin.name);
     const pluginPath = plugin.path || '';
     const isUploaded = pluginPath.includes('uploaded_plugins') && !plugin.github_repo;
@@ -170,8 +178,38 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
     `;
   }).join('');
 
+  // Add "Load More" button if there are more plugins
+  if (hasMore && !sidebarShowAll) {
+    pluginsList.innerHTML += `
+      <button id="loadMorePluginsBtn" class="modern-btn modern-btn-secondary w-100 mt-2" style="font-size: 0.875rem;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+          <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+        </svg>
+        Load More (${plugins.length - SIDEBAR_INITIAL_LIMIT} more)
+      </button>
+    `;
+  } else if (hasMore && sidebarShowAll) {
+    pluginsList.innerHTML += `
+      <button id="loadMorePluginsBtn" class="modern-btn modern-btn-secondary w-100 mt-2" style="font-size: 0.875rem;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+          <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
+        </svg>
+        Show Less
+      </button>
+    `;
+  }
+
   // Add event listeners to plugin toggles
   setupPluginToggles();
+
+  // Add event listener for "Load More" button
+  const loadMoreBtn = document.getElementById('loadMorePluginsBtn');
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener('click', () => {
+      sidebarShowAll = !sidebarShowAll;
+      loadPlugins(); // Reload the plugins list with new display state
+    });
+  }
 }
 
 // Setup plugin toggle event listeners
