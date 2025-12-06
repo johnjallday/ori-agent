@@ -10,6 +10,20 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
+// Default max tokens per Claude model
+var claudeModelDefaults = map[string]int64{
+	"claude-opus-4-20250514":     4096,
+	"claude-sonnet-4-20250514":   4096,
+	"claude-3-5-sonnet-20241022": 8192,
+	"claude-3-5-sonnet-latest":   8192,
+	"claude-3-5-haiku-20241022":  8192,
+	"claude-3-5-haiku-latest":    8192,
+	"claude-3-opus-20240229":     4096,
+	"claude-3-opus-latest":       4096,
+	"claude-3-sonnet-20240229":   4096,
+	"claude-3-haiku-20240307":    4096,
+}
+
 // ClaudeProvider implements the Provider interface for Anthropic's Claude
 type ClaudeProvider struct {
 	client     anthropic.Client
@@ -90,7 +104,12 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	// Build Claude request parameters
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens == 0 {
-		maxTokens = 4096 // Default max tokens
+		// Use model-specific default, fallback to 4096
+		if modelDefault, ok := claudeModelDefaults[req.Model]; ok {
+			maxTokens = modelDefault
+		} else {
+			maxTokens = 4096 // Fallback default
+		}
 	}
 
 	params := anthropic.MessageNewParams{

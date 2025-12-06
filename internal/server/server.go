@@ -188,6 +188,43 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 	}
 }
 
+// prepareBasePageData prepares common page data with theme and current agent
+func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
+	data := web.GetDefaultData()
+	data.CurrentPage = pageName
+	data.Theme = s.onboardingMgr.GetTheme()
+
+	if agents, current := s.st.ListAgents(); len(agents) > 0 {
+		currentAgentName := current
+		if currentAgentName == "" {
+			currentAgentName = agents[0]
+		}
+		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
+			data.CurrentAgent = currentAgentName
+			if agent.Settings.Model != "" {
+				data.Model = agent.Settings.Model
+			}
+		}
+	}
+
+	return data
+}
+
+// renderAndWritePage renders a template and writes the response
+func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, data web.TemplateData) {
+	html, err := s.templateRenderer.RenderTemplate(templateName, data)
+	if err != nil {
+		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if _, err := w.Write([]byte(html)); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	// Only handle root path, not other paths
 	if r.URL.Path != "/" {
@@ -195,142 +232,30 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := web.GetDefaultData()
-	data.CurrentPage = "index"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("index", data)
-	if err != nil {
-		logger.Error("Failed to render template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data := s.prepareBasePageData("index")
+	s.renderAndWritePage(w, "index", data)
 }
 
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.CurrentPage = "agents"
+	data := s.prepareBasePageData("agents")
 	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("agents", data)
-	if err != nil {
-		logger.Error("Failed to render agents template", logger.Fields{"agent": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	s.renderAndWritePage(w, "agents", data)
 }
 
 func (s *Server) serveAgentsDetail(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("agents")
 	data.Title = "Agent Details - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.CurrentPage = "agents"
-	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("agents-detail", data)
-	if err != nil {
-		logger.Error("Failed to render agents-detail template", logger.Fields{"agent": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "agents-detail", data)
 }
 
 func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("agents")
 	data.Title = "Edit Agent - Ori Agent"
 	data.BrandText = "Ori Agent"
-	data.CurrentPage = "agents"
-	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("agents-edit", data)
-	if err != nil {
-		logger.Error("Failed to render agents-edit template", logger.Fields{"agent": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "agents-edit", data)
 }
 
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {

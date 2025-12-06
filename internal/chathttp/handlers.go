@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -22,7 +23,33 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
+// Timeout constants for various operations
+const (
+	// ChatRequestTimeout is the maximum time allowed for a chat request to complete
+	ChatRequestTimeout = 180 * time.Second
+
+	// ToolExecutionTimeout is the maximum time allowed for a single tool execution
+	ToolExecutionTimeout = 30 * time.Second
+
+	// ContextTimeout is the timeout for context-based operations
+	ContextTimeout = 45 * time.Second
+
+	// StreamFlushInterval is how often to flush streaming responses
+	StreamFlushInterval = 100 * time.Millisecond
+
+	// PluginDefinitionCacheTTL is how long to cache plugin definitions
+	PluginDefinitionCacheTTL = 5 * time.Minute
+)
+
+// pluginDefinitionCache stores cached plugin definitions with expiration
+type pluginDefinitionCache struct {
+	definition pluginapi.Tool
+	cachedAt   time.Time
+}
+
 type Handler struct {
+	defCache       map[string]*pluginDefinitionCache
+	defMu          sync.RWMutex
 	store          store.Store
 	clientFactory  *client.Factory
 	llmFactory     *llm.Factory
@@ -42,6 +69,36 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 		clientFactory:  clientFactory,
 		llmFactory:     nil,
 		commandHandler: NewCommandHandler(store),
+		defCache:       make(map[string]*pluginDefinitionCache),
+	}
+}
+
+// getCachedDefinition retrieves a plugin definition from cache if valid
+func (h *Handler) getCachedDefinition(pluginName string) (pluginapi.Tool, bool) {
+	h.defMu.RLock()
+	defer h.defMu.RUnlock()
+
+	cached, ok := h.defCache[pluginName]
+	if !ok {
+		return pluginapi.Tool{}, false
+	}
+
+	// Check if cache is still valid
+	if time.Since(cached.cachedAt) > PluginDefinitionCacheTTL {
+		return pluginapi.Tool{}, false
+	}
+
+	return cached.definition, true
+}
+
+// setCachedDefinition stores a plugin definition in cache
+func (h *Handler) setCachedDefinition(pluginName string, definition pluginapi.Tool) {
+	h.defMu.Lock()
+	defer h.defMu.Unlock()
+
+	h.defCache[pluginName] = &pluginDefinitionCache{
+		definition: definition,
+		cachedAt:   time.Now(),
 	}
 }
 
@@ -139,7 +196,7 @@ func (h *Handler) getClientForAgent(ag *agent.Agent) openai.Client {
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
 func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
-	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
+	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
 	// Get Claude provider
@@ -222,7 +279,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				logger.Warn("Tool not found", logger.Fields{"tool": name})
 			} else {
 				// Execute tool with timeout (30s for operations like API calls)
-				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+				toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
 				defer toolCancel()
 
 				// Track tool call stats
@@ -371,7 +428,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
 func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
-	ctx, cancel := context.WithTimeout(baseCtx, 180*time.Second)
+	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
 	// Get Ollama provider
@@ -444,7 +501,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 				result = fmt.Sprintf("❌ Error: Tool %q not found", tc.Name)
 			} else {
 				logger.Debug("Tool found", logger.Fields{"tool": tc.Name})
-				toolCtx, toolCancel := context.WithTimeout(baseCtx, 30*time.Second)
+				toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
 				defer toolCancel()
 
 				startTime := time.Now()
@@ -750,7 +807,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("Chat question received", logger.Fields{"question": q})
 	// Context with timeout per request (prevents indefinite hang)
 	base := r.Context()
-	ctx, cancel := context.WithTimeout(base, 45*time.Second)
+	ctx, cancel := context.WithTimeout(base, ContextTimeout)
 	defer cancel()
 
 	// Load agent - use agent_name from request if provided, otherwise use current agent
@@ -823,24 +880,28 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	tools := []llm.Tool{}
 
 	// Add native plugin tools
-	for _, pl := range ag.Plugins {
-		// Call Tool.Definition() to get fresh definition with dynamic enums
-		if pl.Tool != nil {
-			freshDef := pl.Tool.Definition()
-			// Convert pluginapi.Tool to llm.Tool
-			tools = append(tools, llm.Tool{
-				Name:        freshDef.Name,
-				Description: freshDef.Description,
-				Parameters:  freshDef.Parameters,
-			})
+	for pluginName, pl := range ag.Plugins {
+		var def pluginapi.Tool
+
+		// Try to get from cache first
+		if cachedDef, found := h.getCachedDefinition(pluginName); found {
+			def = cachedDef
+		} else if pl.Tool != nil {
+			// Call Tool.Definition() to get fresh definition
+			def = pl.Tool.Definition()
+			// Cache it for future requests
+			h.setCachedDefinition(pluginName, def)
 		} else {
-			// Fallback to cached definition if tool is not available
-			tools = append(tools, llm.Tool{
-				Name:        pl.Definition.Name,
-				Description: pl.Definition.Description,
-				Parameters:  pl.Definition.Parameters,
-			})
+			// Fallback to stored definition if tool is not available
+			def = pl.Definition
 		}
+
+		// Convert pluginapi.Tool to llm.Tool
+		tools = append(tools, llm.Tool{
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  def.Parameters,
+		})
 	}
 
 	// Add MCP tools for enabled servers
@@ -1026,7 +1087,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
-			toolCtx, toolCancel := context.WithTimeout(base, 30*time.Second)
+			toolCtx, toolCancel := context.WithTimeout(base, ToolExecutionTimeout)
 			defer toolCancel()
 
 			// Track tool call stats
