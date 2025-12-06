@@ -207,7 +207,7 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
   if (loadMoreBtn) {
     loadMoreBtn.addEventListener('click', () => {
       sidebarShowAll = !sidebarShowAll;
-      loadPlugins(); // Reload the plugins list with new display state
+      loadPluginsForSidebar(); // Reload the plugins list with new display state
     });
   }
 }
