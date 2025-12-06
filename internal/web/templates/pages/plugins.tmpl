@@ -765,11 +765,12 @@
 
     <!-- Include app.js for sidebar toggle functionality -->
     <script src="/js/app.js?v=1694538177"></script>
-    <!-- Include modules for sidebar functionality -->
+    <!-- Load page-specific plugins.js first -->
+    <script src="/js/plugins.js"></script>
+    <!-- Then load modules for sidebar functionality (will override loadPlugins for sidebar) -->
     <script src="/js/modules/agents.js"></script>
     <script src="/js/modules/plugins.js"></script>
     <script src="/js/modules/sidebar.js"></script>
-    <script src="/js/plugins.js"></script>
 </body>
 </html>
 {{end}}
