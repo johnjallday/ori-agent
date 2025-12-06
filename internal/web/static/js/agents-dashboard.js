@@ -51,7 +51,7 @@ function setupAutoRefresh() {
 async function loadAgents() {
     try {
         showLoading(true);
-        const response = await fetch('/api/agents/dashboard/list');
+        const response = await fetch('/api/agents');
 
         if (!response.ok) {
             throw new Error('Failed to load agents');
