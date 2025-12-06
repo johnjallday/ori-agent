@@ -1,22 +1,31 @@
 // Agents Dashboard JavaScript
 
-let allAgents = [];
-let filteredAgents = [];
-let currentView = 'table';
-let currentSort = 'name';
-let sortOrder = 'asc';
-let refreshInterval = null;
+let dashboardAllAgents = [];
+let dashboardFilteredAgents = [];
+let dashboardCurrentView = 'table';
+let dashboardCurrentSort = 'name';
+let dashboardSortOrder = 'asc';
+let dashboardRefreshInterval = null;
 
 // Initialize dashboard
-document.addEventListener('DOMContentLoaded', () => {
+function initializeDashboard() {
+    console.log('🚀 Initializing agents dashboard...');
     loadAgents();
     setupAutoRefresh();
-});
+}
+
+// Run initialization when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeDashboard);
+} else {
+    // DOM already loaded, run immediately
+    initializeDashboard();
+}
 
 // Setup auto-refresh for statistics
 function setupAutoRefresh() {
     // Refresh stats every 60 seconds
-    refreshInterval = setInterval(() => {
+    dashboardRefreshInterval = setInterval(() => {
         // Only refresh if page is visible
         if (!document.hidden) {
             updateStatistics();
@@ -25,13 +34,13 @@ function setupAutoRefresh() {
 
     // Stop refreshing when page is hidden
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden && refreshInterval) {
-            clearInterval(refreshInterval);
-            refreshInterval = null;
-        } else if (!document.hidden && !refreshInterval) {
+        if (document.hidden && dashboardRefreshInterval) {
+            clearInterval(dashboardRefreshInterval);
+            dashboardRefreshInterval = null;
+        } else if (!document.hidden && !dashboardRefreshInterval) {
             // Restart when page becomes visible
             updateStatistics(); // Immediate refresh
-            refreshInterval = setInterval(() => {
+            dashboardRefreshInterval = setInterval(() => {
                 if (!document.hidden) {
                     updateStatistics();
                 }
@@ -41,8 +50,8 @@ function setupAutoRefresh() {
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
-        if (refreshInterval) {
-            clearInterval(refreshInterval);
+        if (dashboardRefreshInterval) {
+            clearInterval(dashboardRefreshInterval);
         }
     });
 }
@@ -61,9 +70,9 @@ async function loadAgents() {
 
         const data = await response.json();
         console.log('📊 Data received:', data);
-        allAgents = data.agents || [];
-        filteredAgents = [...allAgents];
-        console.log('✅ Loaded', allAgents.length, 'agents');
+        dashboardAllAgents = data.agents || [];
+        dashboardFilteredAgents = [...dashboardAllAgents];
+        console.log('✅ Loaded', dashboardAllAgents.length, 'agents');
 
         updateStatistics();
         renderAgents();
@@ -84,7 +93,7 @@ async function updateStatistics() {
 
         if (!response.ok) {
             // Fallback to client-side calculation
-            const stats = calculateStatistics(allAgents);
+            const stats = calculateStatistics(dashboardAllAgents);
             displayStatistics(stats.total, stats.messages, stats.cost);
             return;
         }
@@ -98,7 +107,7 @@ async function updateStatistics() {
     } catch (error) {
         console.error('Error loading statistics:', error);
         // Fallback to client-side calculation
-        const stats = calculateStatistics(allAgents);
+        const stats = calculateStatistics(dashboardAllAgents);
         displayStatistics(stats.total, stats.messages, stats.cost);
     }
 }
@@ -128,14 +137,14 @@ function calculateStatistics(agents) {
 
 // Render agents in current view
 function renderAgents() {
-    if (filteredAgents.length === 0) {
+    if (dashboardFilteredAgents.length === 0) {
         showEmptyState();
         return;
     }
 
     hideEmptyState();
 
-    if (currentView === 'table') {
+    if (dashboardCurrentView === 'table') {
         renderTableView();
     } else {
         renderCardView();
@@ -147,7 +156,7 @@ function renderTableView() {
     const tbody = document.getElementById('agentsTableBody');
     tbody.innerHTML = '';
 
-    filteredAgents.forEach(agent => {
+    dashboardFilteredAgents.forEach(agent => {
         const row = document.createElement('tr');
         row.onclick = () => viewAgent(agent.name);
 
@@ -184,7 +193,7 @@ function renderCardView() {
     const grid = document.getElementById('cardView');
     grid.innerHTML = '';
 
-    filteredAgents.forEach(agent => {
+    dashboardFilteredAgents.forEach(agent => {
         const card = document.createElement('div');
         card.className = 'agent-card';
         card.onclick = () => viewAgent(agent.name);
@@ -233,7 +242,7 @@ function renderCardView() {
 function filterAgents() {
     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
 
-    filteredAgents = allAgents.filter(agent => {
+    dashboardFilteredAgents = dashboardAllAgents.filter(agent => {
         // Search filter
         const matchesSearch = !searchTerm ||
             agent.name.toLowerCase().includes(searchTerm) ||
@@ -249,7 +258,7 @@ function filterAgents() {
 function sortAgents() {
     const sortBy = document.getElementById('sortSelect').value;
 
-    filteredAgents.sort((a, b) => {
+    dashboardFilteredAgents.sort((a, b) => {
         let aVal, bVal;
 
         switch (sortBy) {
@@ -278,7 +287,7 @@ function sortAgents() {
 
 // Switch between table and card view
 function switchView(view) {
-    currentView = view;
+    dashboardCurrentView = view;
 
     // Update button states
     document.querySelectorAll('.view-btn').forEach(btn => {
@@ -407,7 +416,7 @@ function showEmptyState() {
 
 function hideEmptyState() {
     document.getElementById('emptyState').classList.add('hidden');
-    if (currentView === 'table') {
+    if (dashboardCurrentView === 'table') {
         document.getElementById('tableView').classList.remove('hidden');
     } else {
         document.getElementById('cardView').classList.remove('hidden');
