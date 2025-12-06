@@ -188,104 +188,28 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 
 	now := time.Now()
 
-	// If this scheduler is linked to an existing task node, queue that task for rerun
-	if st.TargetTaskID != "" {
-		ts.rerunTargetTask(ws, st, now)
-		return
-	}
-
-	// Create a regular Task from the ScheduledTask template
-	// This converts the scheduled task definition into an executable task
-	task := Task{
-		WorkspaceID: ws.ID,
-		From:        st.From,
-		To:          st.To,
-		Description: st.Prompt,
-		Priority:    st.Priority,
-		Context:     st.Context,
-		Status:      TaskStatusAssigned, // Queue for auto-execution
-	}
-
-	// Add task to workspace
-	if err := ws.AddTask(task); err != nil {
-		// FAILURE PATH: Task creation failed
-		ts.recordScheduleFailure(ws, st, err, "")
-		return
-	}
-
-	// SUCCESS PATH: Task created successfully
-	// Get the created task ID (it's the last task in the list)
-	var createdTaskID string
-	if len(ws.Tasks) > 0 {
-		createdTaskID = ws.Tasks[len(ws.Tasks)-1].ID
-	}
-
-	// Update execution tracking with success metrics
-	st.LastRun = &now
-	st.ExecutionCount++
-	st.FailureCount = 0 // Reset failure count on successful task creation (allows recovery)
-
-	// Record successful execution in history for monitoring/debugging
-	execution := TaskExecution{
-		TaskID:     createdTaskID,
-		ExecutedAt: now,
-		Status:     "success",
-	}
-	st.ExecutionHistory = append(st.ExecutionHistory, execution)
-
-	// Limit history size to prevent unbounded growth (last 20 executions only)
-	if len(st.ExecutionHistory) > 20 {
-		st.ExecutionHistory = st.ExecutionHistory[len(st.ExecutionHistory)-20:]
-	}
-
-	// Calculate next run time based on schedule type and configuration
-	// This respects end_date, max_runs, and schedule-specific logic
-	nextRun := ts.calculateNextRun(st.Schedule, now)
-	st.NextRun = nextRun
-
-	// Auto-disable if no next run is scheduled
-	// This handles: once schedules, end_date exceeded, max_runs reached, trigger_once=true
-	if nextRun == nil {
-		st.Enabled = false
-		logger.Info("📅 Scheduled task completed (one-time execution), disabling", logger.Fields{"duration": st.ID})
-	}
-
-	// Update the scheduled task
-	if err := ws.UpdateScheduledTask(*st); err != nil {
-		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
-		return
-	}
-
-	// Save workspace
-	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		return
-	}
-
-	logger.Info("Scheduled task executed successfully (next run: )", logger.Fields{"task_id": st.ID, "nextRun": nextRun})
-
-	// Publish triggered event
-	if ts.eventBus != nil {
-		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, st.ID, st.Name, map[string]interface{}{
-			"task_id":         createdTaskID,
-			"task_created":    true,
-			"execution_count": st.ExecutionCount,
-			"next_run":        nextRun,
-			"timestamp":       now,
-			"scheduled_task":  st,
+	// Schedulers MUST be linked to an existing task node
+	// The prompt-based mode has been removed - all schedulers now rerun existing tasks
+	if st.TargetTaskID == "" {
+		logger.Warn("📅 Scheduler has no target task linked - skipping execution", logger.Fields{
+			"scheduler_id": st.ID,
+			"name":         st.Name,
 		})
-		ts.eventBus.Publish(event)
-
-		// Also publish workspace updated event for backward compatibility
-		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
-			"scheduled_task_id": st.ID,
-			"task_created":      true,
-			"execution_count":   st.ExecutionCount,
-			"next_run":          nextRun,
-			"target_task_id":    st.TargetTaskID,
-		})
-		ts.eventBus.Publish(workspaceEvent)
+		// Calculate next run but don't execute
+		nextRun := ts.calculateNextRun(st.Schedule, now)
+		st.NextRun = nextRun
+		st.LastRun = &now
+		if err := ws.UpdateScheduledTask(*st); err != nil {
+			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+		}
+		if err := ts.workspaceStore.Save(ws); err != nil {
+			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		}
+		return
 	}
+
+	// Execute the linked task (rerunTargetTask handles everything: execution, tracking, next run calculation)
+	ts.rerunTargetTask(ws, st, now)
 }
 
 // rerunTargetTask resets and queues an existing task for execution based on the scheduler configuration.

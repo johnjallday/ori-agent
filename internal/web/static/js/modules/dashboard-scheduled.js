@@ -68,9 +68,9 @@ export class DashboardScheduled {
               </div>
             </div>
 
-            <div class="mb-2">
-              <label class="form-label small" style="color: var(--text-primary);">Task Prompt</label>
-              <textarea id="st-prompt" class="form-control form-control-sm" rows="2" placeholder="What should the agent do when this task runs?" required></textarea>
+            <div class="alert alert-info mb-2" style="font-size: 0.85rem; padding: 0.5rem;">
+              <strong>Note:</strong> After creating the scheduler, go to the <strong>Canvas</strong> tab and link it to a task node.
+              Schedulers without a linked task will not execute.
             </div>
 
             <!-- Schedule-specific fields -->
@@ -316,7 +316,6 @@ export class DashboardScheduled {
     const description = document.getElementById('st-description').value;
     const from = document.getElementById('st-from').value;
     const to = document.getElementById('st-to').value;
-    const prompt = document.getElementById('st-prompt').value;
     const priority = parseInt(document.getElementById('st-priority').value);
     const enabled = document.getElementById('st-enabled').checked;
 
@@ -357,7 +356,7 @@ export class DashboardScheduled {
           description,
           from,
           to,
-          prompt,
+          prompt: '', // Empty prompt - schedulers must be linked to tasks on canvas
           priority,
           schedule,
           enabled
