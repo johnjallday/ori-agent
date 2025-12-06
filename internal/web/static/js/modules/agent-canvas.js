@@ -921,12 +921,27 @@ class AgentCanvas {
       alert('Cannot trigger scheduler node: missing ID or workspace');
       return;
     }
+
+    // Prevent multiple simultaneous triggers
+    if (this._triggering === nodeId) {
+      console.warn('Trigger already in progress for node:', nodeId);
+      return;
+    }
+
+    this._triggering = nodeId;
+    console.log('🎯 Triggering scheduler node:', nodeId);
+
     try {
       await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}/trigger?studio_id=${this.studioId}`, {});
       this.notifications?.showNotification?.('Scheduler node triggered', 'success');
     } catch (err) {
       console.error('Failed to trigger scheduler node', err);
       alert('Failed to trigger scheduler node: ' + (err?.message || err));
+    } finally {
+      // Clear the lock after a short delay to prevent accidental rapid clicks
+      setTimeout(() => {
+        this._triggering = null;
+      }, 1000);
     }
   }
 
