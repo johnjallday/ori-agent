@@ -29,8 +29,8 @@ async function initializeSidebar() {
     console.log('Initializing sidebar modules...');
 
     // Load initial data for each module
-    if (typeof loadAgents === 'function') {
-      await loadAgents();
+    if (typeof loadAgentsForSidebar === 'function') {
+      await loadAgentsForSidebar();
     }
 
     if (typeof loadPluginsForSidebar === 'function') {

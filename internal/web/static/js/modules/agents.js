@@ -240,8 +240,8 @@ async function createNewAgent() {
   }
 }
 
-// Load and display agents
-async function loadAgents() {
+// Load and display agents for sidebar
+async function loadAgentsForSidebar() {
   console.log('📡 Loading agents from /api/agents...');
   try {
     const response = await fetch('/api/agents');
