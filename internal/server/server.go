@@ -6,6 +6,7 @@ import (
 
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -776,12 +777,41 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 
 	// Security: prevent directory traversal
-	if strings.Contains(path, "..") {
+	// Clean the path and validate it's within the agents directory
+	cleanPath := filepath.Clean(path)
+
+	// Ensure path doesn't contain traversal sequences
+	if strings.Contains(cleanPath, "..") {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
 
-	content, err := os.ReadFile(path)
+	// Verify path starts with "agents/" to prevent access to other directories
+	if !strings.HasPrefix(cleanPath, "agents/") && !strings.HasPrefix(cleanPath, "agents\\") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Resolve to absolute path and verify it's still within the agents directory
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	agentsDir, err := filepath.Abs("agents")
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Final check: ensure resolved path is within agents directory
+	if !strings.HasPrefix(absPath, agentsDir+string(filepath.Separator)) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	content, err := os.ReadFile(cleanPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return

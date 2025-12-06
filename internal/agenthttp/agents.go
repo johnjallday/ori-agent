@@ -2,7 +2,9 @@ package agenthttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"regexp"
 
 	"net/http"
 	"time"
@@ -12,6 +14,29 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// validAgentNameRegex defines the allowed characters for agent names
+// Only alphanumeric, underscores, hyphens, and spaces are allowed
+var validAgentNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\- ]+$`)
+
+const (
+	minAgentNameLength = 1
+	maxAgentNameLength = 100
+)
+
+// validateAgentName validates that an agent name is safe for filesystem operations
+func validateAgentName(name string) error {
+	if len(name) < minAgentNameLength {
+		return fmt.Errorf("agent name cannot be empty")
+	}
+	if len(name) > maxAgentNameLength {
+		return fmt.Errorf("agent name too long (max %d characters)", maxAgentNameLength)
+	}
+	if !validAgentNameRegex.MatchString(name) {
+		return fmt.Errorf("agent name contains invalid characters (only alphanumeric, spaces, underscores, and hyphens allowed)")
+	}
+	return nil
+}
 
 type Handler struct {
 	State          store.Store
@@ -116,9 +141,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
 			req.Name, req.Type, req.Model, req.Temperature)
-		if req.Name == "" {
-			logger.Error("CreateAgent error: name is empty", logger.Fields{})
-			http.Error(w, "name required", http.StatusBadRequest)
+
+		// Validate agent name
+		if err := validateAgentName(req.Name); err != nil {
+			logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 

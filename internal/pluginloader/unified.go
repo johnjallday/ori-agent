@@ -12,13 +12,13 @@ import (
 func LoadPluginUnified(path string) (pluginapi.PluginTool, error) {
 	// Verify file exists
 	if _, err := os.Stat(path); err != nil {
-		return nil, fmt.Errorf("plugin file not found: %w", err)
+		return nil, fmt.Errorf("plugin file not found at path %q: %w", path, err)
 	}
 
 	// Load as RPC executable
 	rpcClient, err := LoadPluginRPC(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load RPC plugin: %w", err)
+		return nil, fmt.Errorf("failed to load RPC plugin from %q: %w", path, err)
 	}
 	return rpcClient, nil
 }

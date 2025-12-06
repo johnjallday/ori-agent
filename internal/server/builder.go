@@ -222,7 +222,8 @@ func (b *ServerBuilder) initializeClientFactory() error {
 	} else {
 		verbose := os.Getenv("ORI_VERBOSE") == "true"
 		if verbose {
-			logger.Info("OpenAI API key configured (length: , starts with: )", logger.Fields{"value1": len(apiKey), "value2": apiKey[:min(10, len(apiKey))]})
+			// Log only the length, never partial key content for security
+			logger.Info("OpenAI API key configured", logger.Fields{"key_length": len(apiKey)})
 		}
 	}
 	b.server.clientFactory = client.NewFactory(apiKey)

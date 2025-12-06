@@ -190,6 +190,9 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 
 			logger.Verbosef("🔄 Temporarily loading plugin '%s' from path: %s", registryPlugin.Name, registryPlugin.Path)
 			if tool, err := h.Loader.Load(registryPlugin.Path); err == nil {
+				// Ensure plugin RPC client is cleaned up after checking initialization
+				defer pluginloader.CloseRPCPlugin(tool)
+
 				logger.Verbosef("✓ Plugin loaded, type: %T", tool)
 				logger.Verbosef("✓ Checking InitializationProvider interface...")
 				if initProvider, ok := tool.(pluginapi.InitializationProvider); ok {
@@ -258,19 +261,20 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Close()
 
-	// Make the plugin executable (required for RPC plugins)
-	if err := os.Chmod(pluginFile, 0755); err != nil {
-		os.Remove(pluginFile)
-		http.Error(w, "Failed to set plugin permissions: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Load plugin to get its definition and validate it
+	// Load plugin to get its definition and validate it BEFORE making it executable
+	// This prevents arbitrary code execution if validation is bypassed
 	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {
 		// Clean up the file if plugin is invalid
 		os.Remove(pluginFile)
 		http.Error(w, "Invalid plugin: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Only make the plugin executable AFTER successful validation
+	if err := os.Chmod(pluginFile, 0755); err != nil {
+		os.Remove(pluginFile)
+		http.Error(w, "Failed to set plugin permissions: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	def := tool.Definition()
@@ -468,6 +472,7 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 
 	// If Tool is not loaded, load it now
 	var tool pluginapi.PluginTool
+	var needsCleanup bool
 	if plugin.Tool != nil {
 		logger.Verbosef("✓ Using already loaded tool")
 		tool = plugin.Tool
@@ -480,10 +485,16 @@ func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable
 			return nil, false, fmt.Errorf("failed to load plugin: %w", err)
 		}
 		tool = loadedTool
+		needsCleanup = true // Mark for cleanup since we temporarily loaded it
 		logger.Verbosef("✓ Plugin loaded successfully")
 	} else {
 		logger.Verbosef("❌ Plugin has no tool instance or path")
 		return nil, false, fmt.Errorf("plugin has no tool instance or path")
+	}
+
+	// Clean up temporarily loaded plugin after checking initialization
+	if needsCleanup {
+		defer pluginloader.CloseRPCPlugin(tool)
 	}
 
 	// Check if plugin implements InitializationProvider

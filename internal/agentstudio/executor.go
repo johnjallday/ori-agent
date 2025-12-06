@@ -185,25 +185,31 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 				continue
 			}
 
-			// Skip if already running
-			te.mu.RLock()
+			// Check if already running and claim the task atomically
+			// Use write lock to prevent race condition between check and insert
+			te.mu.Lock()
 			_, isRunning := te.runningTasks[task.ID]
-			te.mu.RUnlock()
 			if isRunning {
+				te.mu.Unlock()
 				continue
 			}
 
 			// Check if we have capacity
-			te.mu.RLock()
-			canRun := len(te.runningTasks) < te.maxConcurrent
-			te.mu.RUnlock()
-
-			if !canRun {
+			if len(te.runningTasks) >= te.maxConcurrent {
+				te.mu.Unlock()
 				logger.Warn("Max concurrent tasks reached (), deferring task", logger.Fields{"error": te.maxConcurrent, "id": task.ID})
 				continue
 			}
 
-			// Execute the task
+			// Mark task as claimed immediately to prevent double execution
+			// Create a placeholder execution entry that will be replaced by executeTask
+			te.runningTasks[task.ID] = &taskExecution{
+				Task:      *task,
+				StartedAt: time.Now(),
+			}
+			te.mu.Unlock()
+
+			// Execute the task (it will update the runningTasks entry with full context)
 			te.executeTask(ws, *task)
 		}
 	}
@@ -218,6 +224,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel() // Ensure context is always cancelled
 
 	// Track running task
 	te.mu.Lock()

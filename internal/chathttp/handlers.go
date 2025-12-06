@@ -45,6 +45,28 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 	}
 }
 
+// writeJSONResponse writes a JSON response and logs errors if encoding fails
+func writeJSONResponse(w http.ResponseWriter, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger.Error("Failed to encode JSON response", logger.Fields{"error": err})
+		// If we've already started writing, we can't change the status code
+		// But at least we've logged the error
+	}
+}
+
+// writeJSONError writes an error response with proper status code and logging
+func writeJSONError(w http.ResponseWriter, statusCode int, message string, err error) {
+	logger.Error(message, logger.Fields{"error": err, "status": statusCode})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"error": message,
+	}); encErr != nil {
+		logger.Error("Failed to encode error response", logger.Fields{"error": encErr})
+	}
+}
+
 // SetLLMFactory sets the LLM factory
 func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 	h.llmFactory = factory
@@ -123,7 +145,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Get Claude provider
 	provider, err := h.llmFactory.GetProvider("claude")
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSONResponse(w, map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: Claude provider not available: %v", err),
 		})
 		return
@@ -154,7 +176,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 		MaxTokens:   4000,
 	})
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSONResponse(w, map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		})
 		return
@@ -292,7 +314,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				response["description"] = structuredResultData.Description
 			}
 
-			_ = json.NewEncoder(w).Encode(response)
+			writeJSONResponse(w, response)
 			return
 		}
 
@@ -344,7 +366,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
-	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
+	writeJSONResponse(w, map[string]any{"response": text})
 }
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
@@ -386,7 +408,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		MaxTokens:   4000,
 	})
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSONResponse(w, map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		})
 		return
@@ -489,7 +511,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// No tool calls - direct response
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 	_ = h.store.SetAgent(agentName, ag)
-	_ = json.NewEncoder(w).Encode(map[string]any{"response": resp.Content})
+	writeJSONResponse(w, map[string]any{"response": resp.Content})
 }
 
 // getPluginEmoji returns an appropriate emoji for a plugin based on its name
@@ -721,7 +743,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Return formatted response
 		response := formatDirectToolResponse(result)
-		_ = json.NewEncoder(w).Encode(response)
+		writeJSONResponse(w, response)
 		return
 	}
 
@@ -924,7 +946,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		errorResponse := map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
 		}
-		_ = json.NewEncoder(w).Encode(errorResponse)
+		writeJSONResponse(w, errorResponse)
 		return
 	}
 	if resp == nil || len(resp.Choices) == 0 {
@@ -1093,7 +1115,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				response["description"] = structuredResultData.Description
 			}
 
-			_ = json.NewEncoder(w).Encode(response)
+			writeJSONResponse(w, response)
 			return
 		}
 
@@ -1147,7 +1169,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
 	_ = h.store.SetAgent(current, ag) // persists settings/plugins only
-	_ = json.NewEncoder(w).Encode(map[string]any{"response": text})
+	writeJSONResponse(w, map[string]any{"response": text})
 }
 
 // trackAgentStatistics records message and token usage in agent statistics
