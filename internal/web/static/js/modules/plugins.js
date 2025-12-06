@@ -43,8 +43,8 @@ async function checkPluginConfigurationStatus(activePluginNames) {
   return configStatus;
 }
 
-// Load available plugins
-async function loadPlugins() {
+// Load available plugins for sidebar
+async function loadPluginsForSidebar() {
   try {
     // Fetch all available plugins from registry
     const registryResponse = await fetch('/api/plugin-registry');

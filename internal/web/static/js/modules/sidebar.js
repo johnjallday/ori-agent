@@ -32,9 +32,9 @@ async function initializeSidebar() {
     if (typeof loadAgents === 'function') {
       await loadAgents();
     }
-    
-    if (typeof loadPlugins === 'function') {
-      await loadPlugins();
+
+    if (typeof loadPluginsForSidebar === 'function') {
+      await loadPluginsForSidebar();
     }
 
     console.log('All sidebar modules initialized successfully');
