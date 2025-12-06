@@ -432,7 +432,8 @@ Click the **Update** button in the top navigation bar to download and install th
 ---
 *This message is shown once per session when an update is available.*`;
 
-      addMessageToChat(message, false);
+      // Pass true for isSystemNotification to prevent storing in chat history
+      addMessageToChat(message, false, false, true);
     }
   }, 1000); // Wait 1 second for DOM to be ready
 }

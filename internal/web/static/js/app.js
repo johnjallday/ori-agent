@@ -514,9 +514,15 @@ function appendMessageToUI(message, isUser = false, isError = false) {
 }
 
 // Public function: Add message and persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false) {
+function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false) {
   // Add to UI
   appendMessageToUI(message, isUser, isError);
+
+  // Skip storing system notifications (like update alerts) in chat history
+  // Only store actual user queries and assistant responses
+  if (isSystemNotification) {
+    return;
+  }
 
   // Store message in memory
   chatMessages.push({
