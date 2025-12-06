@@ -1602,7 +1602,9 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// handleListSchedulerNodes lists all scheduler nodes (scheduled tasks with CanvasNodeID) for a workspace
+// handleListSchedulerNodes lists all scheduler nodes (scheduled tasks) for a workspace
+// This includes both canvas-created schedulers (with CanvasNodeID) and dashboard-created schedulers (without CanvasNodeID)
+// Dashboard-created schedulers are automatically assigned a canvas_node_id when loaded
 func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
@@ -1617,25 +1619,68 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Filter scheduled tasks that have CanvasNodeID (scheduler nodes)
+	// Return ALL scheduled tasks as scheduler nodes (both canvas and dashboard-created)
+	// Auto-assign canvas_node_id to dashboard-created schedulers for display
 	schedulerNodes := make([]map[string]interface{}, 0)
-	for _, st := range ws.ScheduledTasks {
-		if st.CanvasNodeID != "" {
-			// Get position from layout if available
-			var position *agentstudio.Position
-			if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
-				if pos, exists := ws.Layout.SchedulerPositions[st.CanvasNodeID]; exists {
-					position = &pos
+	needsSave := false
+
+	for i := range ws.ScheduledTasks {
+		st := &ws.ScheduledTasks[i]
+
+		// Auto-assign canvas_node_id if missing (dashboard-created scheduler)
+		if st.CanvasNodeID == "" {
+			timestamp := time.Now().Format("20060102150405")
+			st.CanvasNodeID = fmt.Sprintf("scheduler-%s-%d", timestamp, i)
+			needsSave = true
+			logger.Debug("Auto-assigned canvas_node_id to dashboard scheduler", logger.Fields{
+				"scheduler_id":   st.ID,
+				"canvas_node_id": st.CanvasNodeID,
+			})
+		}
+
+		// Get position from layout if available, otherwise use default position
+		var position *agentstudio.Position
+		if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
+			if pos, exists := ws.Layout.SchedulerPositions[st.CanvasNodeID]; exists {
+				position = &pos
+			}
+		}
+
+		// If no position exists, assign a default position (centered, with offset per scheduler)
+		if position == nil {
+			defaultX := 100.0 + float64(i*150) // Offset horizontally for each scheduler
+			defaultY := 100.0
+			position = &agentstudio.Position{X: defaultX, Y: defaultY}
+
+			// Save position to layout
+			if ws.Layout == nil {
+				ws.Layout = &agentstudio.CanvasLayout{
+					SchedulerPositions: make(map[string]agentstudio.Position),
 				}
 			}
-
-			node := map[string]interface{}{
-				"node_id":           st.CanvasNodeID,
-				"scheduled_task":    st,
-				"scheduled_task_id": st.ID,
-				"position":          position,
+			if ws.Layout.SchedulerPositions == nil {
+				ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
 			}
-			schedulerNodes = append(schedulerNodes, node)
+			ws.Layout.SchedulerPositions[st.CanvasNodeID] = *position
+			needsSave = true
+		}
+
+		node := map[string]interface{}{
+			"node_id":           st.CanvasNodeID,
+			"scheduled_task":    st,
+			"scheduled_task_id": st.ID,
+			"position":          position,
+		}
+		schedulerNodes = append(schedulerNodes, node)
+	}
+
+	// Save workspace if any changes were made (auto-assigned IDs or positions)
+	if needsSave {
+		if err := th.workspaceStore.Save(ws); err != nil {
+			logger.Error("Failed to save workspace after auto-assigning canvas IDs", logger.Fields{
+				"workspace_id": workspaceID,
+				"err":          err,
+			})
 		}
 	}
 
