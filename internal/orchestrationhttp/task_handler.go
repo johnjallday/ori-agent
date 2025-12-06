@@ -1628,9 +1628,9 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		st := &ws.ScheduledTasks[i]
 
 		// Auto-assign canvas_node_id if missing (dashboard-created scheduler)
+		// Use scheduler ID to generate a stable, deterministic canvas node ID
 		if st.CanvasNodeID == "" {
-			timestamp := time.Now().Format("20060102150405")
-			st.CanvasNodeID = fmt.Sprintf("scheduler-%s-%d", timestamp, i)
+			st.CanvasNodeID = fmt.Sprintf("scheduler-%s", st.ID)
 			needsSave = true
 			logger.Debug("Auto-assigned canvas_node_id to dashboard scheduler", logger.Fields{
 				"scheduler_id":   st.ID,
