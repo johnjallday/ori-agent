@@ -2173,15 +2173,17 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	now := time.Now()
 	var taskID string
+	var targetTask *agentstudio.Task
 
-	// If linked to a specific task node, reset and queue that task for rerun
+	// If linked to a specific task node, reset and execute that task immediately
 	if foundTask.TargetTaskID != "" {
-		targetTask, err := ws.GetTask(foundTask.TargetTaskID)
+		task, err := ws.GetTask(foundTask.TargetTaskID)
 		if err != nil {
 			logger.Error("Target task not found for scheduler node", logger.Fields{"node_id": nodeID, "target_task_id": foundTask.TargetTaskID, "err": err})
 			httputil.RespondError(w, http.StatusBadRequest, "Linked task not found for scheduler", err)
 			return
 		}
+		targetTask = task
 
 		if targetTask.Status == agentstudio.TaskStatusInProgress {
 			httputil.RespondError(w, http.StatusBadRequest, "Linked task is already running", fmt.Errorf("task %s in progress", targetTask.ID))
@@ -2193,16 +2195,17 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			return
 		}
 
-		targetTask.Status = agentstudio.TaskStatusAssigned
+		// Reset task state for rerun
+		targetTask.Status = agentstudio.TaskStatusInProgress
 		targetTask.Result = ""
 		targetTask.Error = ""
 		targetTask.Progress = nil
-		targetTask.StartedAt = nil
+		targetTask.StartedAt = &now
 		targetTask.CompletedAt = nil
 
 		if err := ws.UpdateTask(*targetTask); err != nil {
-			logger.Error("Failed to queue linked task for rerun", logger.Fields{"node_id": nodeID, "task_id": targetTask.ID, "err": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to queue linked task for rerun", err)
+			logger.Error("Failed to reset task for immediate execution", logger.Fields{"node_id": nodeID, "task_id": targetTask.ID, "err": err})
+			httputil.RespondError(w, http.StatusInternalServerError, "Failed to reset task for execution", err)
 			return
 		}
 
@@ -2246,6 +2249,45 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Execute task immediately in background
+	go func() {
+		ctx := context.Background()
+		logger.Info("Executing scheduler-triggered task", logger.Fields{"task_id": taskID, "agent": targetTask.To})
+
+		result, execErr := th.taskHandler.ExecuteTask(ctx, targetTask.To, *targetTask)
+		if execErr != nil {
+			logger.Error("Task execution failed", logger.Fields{"task_id": taskID, "err": execErr})
+
+			// Update task with error
+			ws, wsErr := th.workspaceStore.Get(workspaceID)
+			if wsErr == nil {
+				if task, getErr := ws.GetTask(taskID); getErr == nil {
+					task.Status = agentstudio.TaskStatusFailed
+					task.Error = execErr.Error()
+					completedAt := time.Now()
+					task.CompletedAt = &completedAt
+					_ = ws.UpdateTask(*task)
+					_ = th.workspaceStore.Save(ws)
+				}
+			}
+		} else {
+			logger.Info("Task execution completed", logger.Fields{"task_id": taskID, "result_length": len(result)})
+
+			// Update task with result
+			ws, wsErr := th.workspaceStore.Get(workspaceID)
+			if wsErr == nil {
+				if task, getErr := ws.GetTask(taskID); getErr == nil {
+					task.Status = agentstudio.TaskStatusCompleted
+					task.Result = result
+					completedAt := time.Now()
+					task.CompletedAt = &completedAt
+					_ = ws.UpdateTask(*task)
+					_ = th.workspaceStore.Save(ws)
+				}
+			}
+		}
+	}()
+
 	if th.eventBus != nil {
 		payload := map[string]interface{}{
 			"task_id":         taskID,
@@ -2264,7 +2306,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"task_id": taskID,
-		"message": "Scheduler node triggered successfully",
+		"message": "Scheduler node triggered successfully - task execution started",
 	})
 }
 
