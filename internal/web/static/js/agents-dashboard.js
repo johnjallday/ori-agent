@@ -50,23 +50,28 @@ function setupAutoRefresh() {
 // Load agents from API
 async function loadAgents() {
     try {
+        console.log('🔄 Loading agents from API...');
         showLoading(true);
         const response = await fetch('/api/agents');
+        console.log('📡 Response received:', response.status);
 
         if (!response.ok) {
             throw new Error('Failed to load agents');
         }
 
         const data = await response.json();
+        console.log('📊 Data received:', data);
         allAgents = data.agents || [];
         filteredAgents = [...allAgents];
+        console.log('✅ Loaded', allAgents.length, 'agents');
 
         updateStatistics();
         renderAgents();
         showLoading(false);
+        console.log('✓ Rendering complete');
 
     } catch (error) {
-        console.error('Error loading agents:', error);
+        console.error('❌ Error loading agents:', error);
         showLoading(false);
         showError('Failed to load agents');
     }
