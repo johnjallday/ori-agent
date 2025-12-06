@@ -20,7 +20,7 @@ type OpenAIProvider struct {
 // NewOpenAIProvider creates a new OpenAI provider
 func NewOpenAIProvider(config ProviderConfig) *OpenAIProvider {
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 10 * time.Minute, // Increased from 30s to support long-running tasks
 	}
 
 	var client openai.Client
