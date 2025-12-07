@@ -11,6 +11,36 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 
+// Remove stored slash-command exchanges from history (user message + immediate assistant reply)
+function filterSlashHistory(messages) {
+  const cleaned = [];
+  let skipNextAssistant = false;
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+
+    if (skipNextAssistant) {
+      // Skip the assistant reply immediately following a slash command
+      if (!msg.isUser) {
+        skipNextAssistant = false;
+        continue;
+      }
+      // If the next message is also user (edge case), keep evaluating
+      skipNextAssistant = false;
+    }
+
+    if (msg.isUser && msg.content && msg.content.trim().startsWith('/')) {
+      // Skip the slash command and mark to skip its direct reply
+      skipNextAssistant = true;
+      continue;
+    }
+
+    cleaned.push(msg);
+  }
+
+  return cleaned;
+}
+
 // ---- Chat Persistence (localStorage) ----
 
 // Save chat messages to localStorage for current agent
@@ -19,7 +49,8 @@ function saveChatToLocalStorage() {
 
   try {
     const storageKey = `ori_chat_${currentAgent}`;
-    localStorage.setItem(storageKey, JSON.stringify(chatMessages));
+    const sanitized = filterSlashHistory(chatMessages);
+    localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
     console.error('Failed to save chat history:', error);
   }
@@ -34,7 +65,9 @@ function loadChatFromLocalStorage() {
     const stored = localStorage.getItem(storageKey);
 
     if (stored) {
-      chatMessages = JSON.parse(stored);
+      chatMessages = filterSlashHistory(JSON.parse(stored));
+      // Persist the cleaned history so old slash entries are removed
+      saveChatToLocalStorage();
       // Restore messages to UI
       restoreChatMessages();
     }
