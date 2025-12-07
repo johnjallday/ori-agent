@@ -642,7 +642,8 @@ async function sendMessage(message) {
     }
 
     if (data.response) {
-      addMessageToChat(data.response, false);
+      // Skip persisting assistant replies for slash commands
+      addMessageToChat(data.response, false, false, false, isSlashCommand);
 
       // Check if this was a successful /switch command and refresh agent display and sidebar
       console.log('Checking for switch command:', {
@@ -671,7 +672,7 @@ async function sendMessage(message) {
   } catch (error) {
     console.error('Chat error:', error);
     hideTypingIndicator();
-    addMessageToChat(`Error: ${error.message}`, false, true);
+    addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
   } finally {
     isWaitingForResponse = false;
     updateSendButton();
