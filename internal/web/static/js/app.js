@@ -513,14 +513,14 @@ function appendMessageToUI(message, isUser = false, isError = false) {
   chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-// Public function: Add message and persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false) {
+// Public function: Add message and optionally persist to localStorage
+function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false) {
   // Add to UI
   appendMessageToUI(message, isUser, isError);
 
-  // Skip storing system notifications (like update alerts) in chat history
-  // Only store actual user queries and assistant responses
-  if (isSystemNotification) {
+  // Skip storing system notifications or intentionally non-persisted messages (e.g., slash commands)
+  // Only store actual user queries and assistant responses that should be remembered
+  if (isSystemNotification || skipHistory) {
     return;
   }
 
@@ -590,7 +590,8 @@ async function sendMessage(message) {
     const fileNames = uploadedFiles.map(f => f.name).join(', ');
     displayMessage += `\n\n📎 Attached: ${fileNames}`;
   }
-  addMessageToChat(displayMessage, true);
+  const isSlashCommand = trimmedMessage.startsWith('/');
+  addMessageToChat(displayMessage, true, false, false, isSlashCommand);
 
   // Clear input
   const input = document.getElementById('input');
