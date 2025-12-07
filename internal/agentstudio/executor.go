@@ -2,6 +2,7 @@ package agentstudio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -374,10 +375,11 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}()
 }
 
-// autoStoreResult automatically stores task result if the agent is connected to a store node
-func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string) {
-	// Find agent's canvas node ID (stored in task.To field for canvas agents)
-	agentNodeID := task.To
+// AutoStoreResult automatically stores task result if the agent is connected to a store node
+// This is a package-level function so it can be called from both executor and HTTP handlers
+func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+	// Find agent's canvas node ID (use AssignedNodeID for multi-instance agents)
+	agentNodeID := task.AssignedNodeID
 	if agentNodeID == "" || agentNodeID == "unassigned" {
 		return
 	}
@@ -416,10 +418,32 @@ func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string
 		ext = "bin"
 	}
 
-	filename := fmt.Sprintf("/task-%s-%s.%s", taskIDShort, timestamp, ext)
+	filename := fmt.Sprintf("task-%s-%s.%s", taskIDShort, timestamp, ext)
+
+	// Prepare data for storage
+	dataToStore := result
+	if assignedStore.Format == "json" {
+		// Wrap plain text result in JSON structure
+		jsonData := map[string]interface{}{
+			"task_id":     task.ID,
+			"agent":       agentNodeID,
+			"result":      result,
+			"timestamp":   timestamp,
+			"description": task.Description,
+		}
+		jsonBytes, err := json.Marshal(jsonData)
+		if err != nil {
+			logger.Error("Failed to marshal result to JSON", logger.Fields{
+				"task_id": task.ID,
+				"err":     err,
+			})
+			return
+		}
+		dataToStore = string(jsonBytes)
+	}
 
 	// Write result to store
-	if err := WriteToStore(assignedStore, filename, result); err != nil {
+	if err := WriteToStore(assignedStore, filename, dataToStore); err != nil {
 		logger.Error("Failed to auto-store task result", logger.Fields{
 			"task_id":       task.ID,
 			"store_node_id": assignedStore.ID,
@@ -438,9 +462,14 @@ func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string
 	})
 
 	// Save workspace to persist store node stats (WriteToStore updated them)
-	if err := te.workspaceStore.Save(ws); err != nil {
+	if err := workspaceStore.Save(ws); err != nil {
 		logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
 	}
+}
+
+// autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store
+func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string) {
+	AutoStoreResult(ws, task, result, te.workspaceStore)
 }
 
 // GetRunningTaskCount returns the number of currently running tasks
