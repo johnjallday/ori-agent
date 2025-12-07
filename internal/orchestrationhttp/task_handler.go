@@ -736,6 +736,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			task.Status = agentstudio.TaskStatusCompleted
 			task.Result = result
 
+			// Automatically store result if agent is connected to a store node
+			agentstudio.AutoStoreResult(ws, task, result, th.workspaceStore)
+
 			// Publish task completed event
 			if th.eventBus != nil {
 				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{

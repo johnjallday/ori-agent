@@ -1178,11 +1178,139 @@ function showSchedulerDetails(schedulerNode) {
   content.innerHTML = html;
 }
 
+/**
+ * Show Store Details in the sidebar
+ */
+function showStoreDetails(storeNode) {
+  console.log('[SIDEBAR] showStoreDetails called for:', storeNode.name);
+
+  // Hide other details
+  hideAgentDetails();
+  hideAttachmentDetails();
+  const taskPanel = document.getElementById('task-details-panel');
+  if (taskPanel) taskPanel.style.display = 'none';
+
+  // Use the same task details panel but rename title
+  const panel = document.getElementById('task-details-panel');
+  const content = document.getElementById('task-details-content');
+
+  if (!panel || !content) {
+    console.error('[SIDEBAR] Panel or content not found!');
+    return;
+  }
+
+  // Show panel
+  panel.style.display = 'block';
+
+  // Change title
+  const titleElement = panel.querySelector('h6');
+  if (titleElement) {
+    titleElement.textContent = 'Store Details';
+  }
+
+  // Find assigned agent if any
+  const canvas = window.agentCanvas;
+  const agents = canvas?.state?.agents || [];
+  const assignedAgent = storeNode.agent_node_id
+    ? agents.find(a => a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id)
+    : null;
+  const assignedAgentLabel = assignedAgent
+    ? `${assignedAgent.name} (${assignedAgent.nodeId || assignedAgent.id})`
+    : null;
+
+  // Format details
+  const formatBadges = {
+    'json': '<span class="badge" style="background-color: #14b8a6;">JSON</span>',
+    'text': '<span class="badge" style="background-color: #6366f1;">TEXT</span>',
+    'markdown': '<span class="badge" style="background-color: #8b5cf6;">MARKDOWN</span>',
+    'binary': '<span class="badge" style="background-color: #64748b;">BINARY</span>'
+  };
+
+  const writeModeBadges = {
+    'append': '<span class="badge bg-info">Append</span>',
+    'overwrite': '<span class="badge bg-warning">Overwrite</span>'
+  };
+
+  const formatBadge = formatBadges[storeNode.format] || '<span class="badge bg-secondary">Unknown</span>';
+  const writeModeBadge = writeModeBadges[storeNode.write_mode] || '<span class="badge bg-secondary">Unknown</span>';
+  const autoCreateBadge = storeNode.auto_create_dir
+    ? '<span class="badge bg-success">Auto-create enabled</span>'
+    : '<span class="badge bg-secondary">Manual directory</span>';
+
+  const html = `
+    <div class="mb-3">
+      <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">💾</div>
+      <strong style="color: var(--text-primary); font-size: 1.1rem;">${storeNode.name || 'Store'}</strong>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Assigned Agent:</strong>
+      <div style="color: var(--text-secondary);">
+        ${assignedAgentLabel ? assignedAgentLabel : '<span style="color:#94a3b8;font-style:italic;">(not assigned)</span>'}
+      </div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Base Directory:</strong>
+      <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.85rem; padding: 6px; background: rgba(20, 184, 166, 0.1); border-radius: 4px; word-break: break-all;">
+        ${storeNode.base_dir || '/path/to/store'}
+      </div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Format:</strong>
+      <div>${formatBadge}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Write Mode:</strong>
+      <div>${writeModeBadge}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Directory Creation:</strong>
+      <div>${autoCreateBadge}</div>
+    </div>
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Write Count:</strong>
+      <div style="color: var(--text-secondary);">
+        <span style="color: #10b981; font-weight: bold;">${storeNode.write_count || 0}</span> writes
+      </div>
+    </div>
+    ${storeNode.last_write_time ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Last Write:</strong>
+        <div style="color: var(--text-secondary);">${new Date(storeNode.last_write_time).toLocaleString()}</div>
+      </div>
+    ` : ''}
+    ${storeNode.last_file_path ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Last File:</strong>
+        <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.85rem; word-break: break-all;">
+          ${storeNode.last_file_path}
+        </div>
+      </div>
+    ` : ''}
+    ${storeNode.last_error && storeNode.last_error !== '' ? `
+      <div class="mb-3">
+        <strong style="color: var(--text-primary);">Last Error:</strong>
+        <div style="color: #ef4444; font-size: 0.9rem; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
+          ⚠️ ${storeNode.last_error}
+        </div>
+      </div>
+    ` : ''}
+    <div class="mb-3">
+      <strong style="color: var(--text-primary);">Node ID:</strong>
+      <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.75rem;">
+        ${storeNode.canvas_node_id || storeNode.id || 'N/A'}
+      </div>
+    </div>
+  `;
+
+  content.innerHTML = html;
+}
+
 // Make functions globally available
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
 window.showSchedulerDetails = showSchedulerDetails;
+window.showStoreDetails = showStoreDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
 window.editAttachment = editAttachment;
@@ -2917,6 +3045,88 @@ function parseCronExpression(cronExpr) {
   return desc;
 }
 
+// =============================================================================
+// Store Node Functions
+// =============================================================================
+
+/**
+ * Show the add store node modal
+ */
+async function showAddStoreNodeModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addStoreNodeModal'));
+
+  // Reset form
+  document.getElementById('storeNodeForm').reset();
+  document.getElementById('store-auto-create-dir').checked = true;
+
+  modal.show();
+}
+
+/**
+ * Submit the store node form
+ */
+async function submitStoreNode() {
+  const name = document.getElementById('store-name').value.trim();
+  const baseDir = document.getElementById('store-base-dir').value.trim();
+  const format = document.getElementById('store-format').value;
+  const writeMode = document.getElementById('store-write-mode').value;
+  const autoCreateDir = document.getElementById('store-auto-create-dir').checked;
+
+  if (!name || !baseDir) {
+    alert('Please fill in all required fields');
+    return;
+  }
+
+  const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+
+  if (!studioId) {
+    alert('Error: Workspace ID not found. Please refresh the page.');
+    console.error('Cannot create store node: studioId is missing');
+    return;
+  }
+
+  console.log('Using studioId:', studioId);
+
+  try {
+    const response = await fetch(`/api/studios/${studioId}/canvas/store-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        base_dir: baseDir,
+        format: format,
+        write_mode: writeMode,
+        auto_create_dir: autoCreateDir,
+        x: 100 + Math.random() * 200,  // Random position
+        y: 100 + Math.random() * 200
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create store node: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('Store node created:', result);
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
+    modal.hide();
+
+    // Refresh canvas
+    if (typeof loadCanvas === 'function') {
+      await loadCanvas();
+    }
+
+    // Show success message
+    alert('Store node created successfully!');
+  } catch (error) {
+    console.error('Error creating store node:', error);
+    alert(`Error creating store node: ${error.message}`);
+  }
+}
+
 // Export functions to window
 window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
 window.updateScheduleInputs = updateScheduleInputs;
@@ -2926,3 +3136,5 @@ window.setCronPreset = setCronPreset;
 window.toggleCronBuilder = toggleCronBuilder;
 window.buildCronFromFields = buildCronFromFields;
 window.updateCronDescription = updateCronDescription;
+window.showAddStoreNodeModal = showAddStoreNodeModal;
+window.submitStoreNode = submitStoreNode;

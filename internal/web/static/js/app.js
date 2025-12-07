@@ -11,6 +11,50 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 
+// Remove stored slash-command exchanges and system announcements from history
+function sanitizeHistory(messages) {
+  const cleaned = [];
+  let skipNextAssistant = false;
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const content = (msg && msg.content) ? String(msg.content) : '';
+
+    if (!msg || !content) {
+      continue;
+    }
+
+    // Remove update-available announcements that may have been persisted in older sessions
+    const isUpdateAnnouncement =
+      content.includes('Update Available') &&
+      content.includes('Latest Version:');
+
+    if (isUpdateAnnouncement) {
+      continue;
+    }
+
+    if (skipNextAssistant) {
+      // Skip the assistant reply immediately following a slash command
+      if (!msg.isUser) {
+        skipNextAssistant = false;
+        continue;
+      }
+      // If the next message is also user (edge case), keep evaluating
+      skipNextAssistant = false;
+    }
+
+    if (msg.isUser && content.trim().startsWith('/')) {
+      // Skip the slash command and mark to skip its direct reply
+      skipNextAssistant = true;
+      continue;
+    }
+
+    cleaned.push(msg);
+  }
+
+  return cleaned;
+}
+
 // ---- Chat Persistence (localStorage) ----
 
 // Save chat messages to localStorage for current agent
@@ -19,7 +63,8 @@ function saveChatToLocalStorage() {
 
   try {
     const storageKey = `ori_chat_${currentAgent}`;
-    localStorage.setItem(storageKey, JSON.stringify(chatMessages));
+    const sanitized = sanitizeHistory(chatMessages);
+    localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
     console.error('Failed to save chat history:', error);
   }
@@ -34,7 +79,9 @@ function loadChatFromLocalStorage() {
     const stored = localStorage.getItem(storageKey);
 
     if (stored) {
-      chatMessages = JSON.parse(stored);
+      chatMessages = sanitizeHistory(JSON.parse(stored));
+      // Persist the cleaned history so old slash entries are removed
+      saveChatToLocalStorage();
       // Restore messages to UI
       restoreChatMessages();
     }
@@ -513,14 +560,14 @@ function appendMessageToUI(message, isUser = false, isError = false) {
   chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-// Public function: Add message and persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false) {
+// Public function: Add message and optionally persist to localStorage
+function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false) {
   // Add to UI
   appendMessageToUI(message, isUser, isError);
 
-  // Skip storing system notifications (like update alerts) in chat history
-  // Only store actual user queries and assistant responses
-  if (isSystemNotification) {
+  // Skip storing system notifications or intentionally non-persisted messages (e.g., slash commands)
+  // Only store actual user queries and assistant responses that should be remembered
+  if (isSystemNotification || skipHistory) {
     return;
   }
 
@@ -590,7 +637,8 @@ async function sendMessage(message) {
     const fileNames = uploadedFiles.map(f => f.name).join(', ');
     displayMessage += `\n\n📎 Attached: ${fileNames}`;
   }
-  addMessageToChat(displayMessage, true);
+  const isSlashCommand = trimmedMessage.startsWith('/');
+  addMessageToChat(displayMessage, true, false, false, isSlashCommand);
 
   // Clear input
   const input = document.getElementById('input');
@@ -641,7 +689,8 @@ async function sendMessage(message) {
     }
 
     if (data.response) {
-      addMessageToChat(data.response, false);
+      // Skip persisting assistant replies for slash commands
+      addMessageToChat(data.response, false, false, false, isSlashCommand);
 
       // Check if this was a successful /switch command and refresh agent display and sidebar
       console.log('Checking for switch command:', {
@@ -670,7 +719,7 @@ async function sendMessage(message) {
   } catch (error) {
     console.error('Chat error:', error);
     hideTypingIndicator();
-    addMessageToChat(`Error: ${error.message}`, false, true);
+    addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
   } finally {
     isWaitingForResponse = false;
     updateSendButton();
