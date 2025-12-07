@@ -341,6 +341,9 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
 
+			// Automatically store result if agent is connected to a store node
+			te.autoStoreResult(ws, &task, result)
+
 			// Publish task completed event
 			if te.eventBus != nil {
 				event := NewTaskEvent(EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
@@ -369,6 +372,75 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			te.eventBus.Publish(event)
 		}
 	}()
+}
+
+// autoStoreResult automatically stores task result if the agent is connected to a store node
+func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string) {
+	// Find agent's canvas node ID (stored in task.To field for canvas agents)
+	agentNodeID := task.To
+	if agentNodeID == "" || agentNodeID == "unassigned" {
+		return
+	}
+
+	// Find store node assigned to this agent
+	var assignedStore *StoreNode
+	for i := range ws.StoreNodes {
+		if ws.StoreNodes[i].AgentNodeID == agentNodeID {
+			assignedStore = &ws.StoreNodes[i]
+			break
+		}
+	}
+
+	// No store assigned - skip automatic storage
+	if assignedStore == nil {
+		return
+	}
+
+	// Generate filename: task-{short-id}-{timestamp}.{format}
+	taskIDShort := task.ID
+	if len(taskIDShort) > 8 {
+		taskIDShort = taskIDShort[:8]
+	}
+	timestamp := time.Now().Format("20060102-150405")
+
+	// Determine file extension based on store format
+	ext := "txt"
+	switch assignedStore.Format {
+	case "json":
+		ext = "json"
+	case "markdown":
+		ext = "md"
+	case "text":
+		ext = "txt"
+	case "binary":
+		ext = "bin"
+	}
+
+	filename := fmt.Sprintf("/task-%s-%s.%s", taskIDShort, timestamp, ext)
+
+	// Write result to store
+	if err := WriteToStore(assignedStore, filename, result); err != nil {
+		logger.Error("Failed to auto-store task result", logger.Fields{
+			"task_id":       task.ID,
+			"store_node_id": assignedStore.ID,
+			"filename":      filename,
+			"err":           err,
+		})
+		// Don't fail the task - storage is best-effort
+		return
+	}
+
+	logger.Info("✅ Task result auto-stored", logger.Fields{
+		"task_id":       task.ID,
+		"store_node_id": assignedStore.ID,
+		"filename":      filename,
+		"write_count":   assignedStore.WriteCount,
+	})
+
+	// Save workspace to persist store node stats (WriteToStore updated them)
+	if err := te.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
+	}
 }
 
 // GetRunningTaskCount returns the number of currently running tasks
