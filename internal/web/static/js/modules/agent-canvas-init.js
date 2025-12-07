@@ -226,7 +226,7 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Schedulers: ${this.state.schedulerNodes.length}`;
+        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Schedulers: ${this.state.schedulerNodes.length} | Stores: ${this.state.storeNodes.length}`;
 
 
     } catch (error) {
