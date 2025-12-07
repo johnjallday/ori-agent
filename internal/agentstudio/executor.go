@@ -224,7 +224,8 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel() // Ensure context is always cancelled
+	// NOTE: Don't defer cancel() here because we launch a goroutine below
+	// The goroutine will defer cancel() when it completes (see line ~290)
 
 	// Track running task
 	te.mu.Lock()
