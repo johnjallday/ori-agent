@@ -135,6 +135,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"tasks":              studio.Tasks,
 		"attachments":        studio.Attachments,
 		"scheduled_tasks":    studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
+		"store_nodes":        studio.StoreNodes,     // Include store nodes
 		"messages":           studio.Messages,
 		"shared_data":        studio.SharedData,
 		"layout":             studio.Layout,
@@ -1004,6 +1005,453 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 		"message": "Task execution started",
 		"task_id": taskID,
 		"studio":  studioID,
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// CreateStoreNodeRequest represents the request to create a store node
+type CreateStoreNodeRequest struct {
+	Name          string  `json:"name"`
+	BaseDir       string  `json:"base_dir"`
+	Format        string  `json:"format"`
+	WriteMode     string  `json:"write_mode"`
+	AutoCreateDir bool    `json:"auto_create_dir"`
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
+}
+
+// CreateStoreNode handles POST /api/studios/:id/canvas/store-nodes
+func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+
+	// Parse request body
+	var req CreateStoreNodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if req.Name == "" {
+		http.Error(w, "Store node name is required", http.StatusBadRequest)
+		return
+	}
+	if req.BaseDir == "" {
+		http.Error(w, "Base directory is required", http.StatusBadRequest)
+		return
+	}
+	if req.Format == "" {
+		req.Format = "json" // Default format
+	}
+	if req.WriteMode == "" {
+		req.WriteMode = "overwrite" // Default write mode
+	}
+
+	// Validate format
+	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+	if !validFormats[req.Format] {
+		http.Error(w, "Invalid format. Must be one of: json, text, markdown, binary", http.StatusBadRequest)
+		return
+	}
+
+	// Validate write mode
+	validModes := map[string]bool{"overwrite": true, "append": true}
+	if !validModes[req.WriteMode] {
+		http.Error(w, "Invalid write mode. Must be one of: overwrite, append", http.StatusBadRequest)
+		return
+	}
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Create store node
+	storeNode := StoreNode{
+		ID:            uuid.New().String(),
+		CanvasNodeID:  fmt.Sprintf("store-node-%d", len(studio.StoreNodes)+1),
+		WorkspaceID:   studioID,
+		Name:          req.Name,
+		BaseDir:       req.BaseDir,
+		Format:        req.Format,
+		WriteMode:     req.WriteMode,
+		AutoCreateDir: req.AutoCreateDir,
+		LastWriteTime: time.Time{},
+		WriteCount:    0,
+		LastError:     "",
+		LastFilePath:  "",
+		X:             req.X,
+		Y:             req.Y,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	// Add to workspace
+	studio.StoreNodes = append(studio.StoreNodes, storeNode)
+
+	// Update layout positions
+	if studio.Layout.StorePositions == nil {
+		studio.Layout.StorePositions = make(map[string]Position)
+	}
+	studio.Layout.StorePositions[storeNode.CanvasNodeID] = Position{
+		X: req.X,
+		Y: req.Y,
+	}
+
+	studio.UpdatedAt = time.Now()
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Info("Created store node in studio", logger.Fields{"name": req.Name, "store_node_id": storeNode.CanvasNodeID, "studioID": studioID})
+
+	// Publish event for live updates
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventType("store_node_created"),
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"store_node": storeNode,
+			},
+		})
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":    "Store node created successfully",
+		"store_node": storeNode,
+		"studio":     studioID,
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// GetStoreNodes handles GET /api/studios/:id/canvas/store-nodes
+func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Return store nodes
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"store_nodes": studio.StoreNodes,
+		"count":       len(studio.StoreNodes),
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// UpdateStoreNodeRequest represents the request to update a store node
+type UpdateStoreNodeRequest struct {
+	Name          *string  `json:"name,omitempty"`
+	AgentNodeID   *string  `json:"agent_node_id,omitempty"`
+	BaseDir       *string  `json:"base_dir,omitempty"`
+	Format        *string  `json:"format,omitempty"`
+	WriteMode     *string  `json:"write_mode,omitempty"`
+	AutoCreateDir *bool    `json:"auto_create_dir,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
+}
+
+// UpdateStoreNode handles PATCH /api/studios/:id/canvas/store-nodes/:node_id
+func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and node ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	nodeID := parts[3]
+
+	// Parse request body
+	var req UpdateStoreNodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find and update store node
+	found := false
+	for i := range studio.StoreNodes {
+		if studio.StoreNodes[i].CanvasNodeID == nodeID {
+			// Update fields if provided
+			if req.Name != nil {
+				studio.StoreNodes[i].Name = *req.Name
+			}
+			if req.AgentNodeID != nil {
+				studio.StoreNodes[i].AgentNodeID = *req.AgentNodeID
+			}
+			if req.BaseDir != nil {
+				studio.StoreNodes[i].BaseDir = *req.BaseDir
+			}
+			if req.Format != nil {
+				// Validate format
+				validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
+				if !validFormats[*req.Format] {
+					http.Error(w, "Invalid format. Must be one of: json, text, markdown, binary", http.StatusBadRequest)
+					return
+				}
+				studio.StoreNodes[i].Format = *req.Format
+			}
+			if req.WriteMode != nil {
+				// Validate write mode
+				validModes := map[string]bool{"overwrite": true, "append": true}
+				if !validModes[*req.WriteMode] {
+					http.Error(w, "Invalid write mode. Must be one of: overwrite, append", http.StatusBadRequest)
+					return
+				}
+				studio.StoreNodes[i].WriteMode = *req.WriteMode
+			}
+			if req.AutoCreateDir != nil {
+				studio.StoreNodes[i].AutoCreateDir = *req.AutoCreateDir
+			}
+			if req.X != nil || req.Y != nil {
+				// Update position
+				if req.X != nil {
+					studio.StoreNodes[i].X = *req.X
+				}
+				if req.Y != nil {
+					studio.StoreNodes[i].Y = *req.Y
+				}
+				// Update layout
+				if studio.Layout.StorePositions == nil {
+					studio.Layout.StorePositions = make(map[string]Position)
+				}
+				studio.Layout.StorePositions[nodeID] = Position{
+					X: studio.StoreNodes[i].X,
+					Y: studio.StoreNodes[i].Y,
+				}
+			}
+			studio.StoreNodes[i].UpdatedAt = time.Now()
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Store node not found", http.StatusNotFound)
+		return
+	}
+
+	studio.UpdatedAt = time.Now()
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Debug("Updated store node in studio", logger.Fields{"node_id": nodeID, "studioID": studioID})
+
+	// Publish event for live updates
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventType("store_node_updated"),
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"node_id": nodeID,
+			},
+		})
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Store node updated successfully",
+		"node_id": nodeID,
+		"studio":  studioID,
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// DeleteStoreNode handles DELETE /api/studios/:id/canvas/store-nodes/:node_id
+func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and node ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	nodeID := parts[3]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find and remove store node
+	found := false
+	newStoreNodes := make([]StoreNode, 0)
+	for _, node := range studio.StoreNodes {
+		if node.CanvasNodeID != nodeID {
+			newStoreNodes = append(newStoreNodes, node)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		http.Error(w, "Store node not found", http.StatusNotFound)
+		return
+	}
+
+	studio.StoreNodes = newStoreNodes
+
+	// Remove from layout
+	if studio.Layout.StorePositions != nil {
+		delete(studio.Layout.StorePositions, nodeID)
+	}
+
+	studio.UpdatedAt = time.Now()
+
+	// Save updated studio
+	if err := h.store.Save(studio); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	logger.Debug("Deleted store node from studio", logger.Fields{"node_id": nodeID, "studioID": studioID})
+
+	// Publish event for live updates
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventType("store_node_deleted"),
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"node_id": nodeID,
+			},
+		})
+	}
+
+	// Return success
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Store node deleted successfully",
+		"node_id": nodeID,
+		"studio":  studioID,
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// GetStoreNodeStatus handles GET /api/studios/:id/canvas/store-nodes/:node_id/status
+func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract studio ID and node ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 5 {
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		return
+	}
+	studioID := parts[0]
+	nodeID := parts[3]
+
+	// Get studio
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Find store node
+	var storeNode *StoreNode
+	for i := range studio.StoreNodes {
+		if studio.StoreNodes[i].CanvasNodeID == nodeID {
+			storeNode = &studio.StoreNodes[i]
+			break
+		}
+	}
+
+	if storeNode == nil {
+		http.Error(w, "Store node not found", http.StatusNotFound)
+		return
+	}
+
+	// Return status
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":         storeNode.CanvasNodeID,
+		"name":            storeNode.Name,
+		"base_dir":        storeNode.BaseDir,
+		"format":          storeNode.Format,
+		"write_mode":      storeNode.WriteMode,
+		"auto_create_dir": storeNode.AutoCreateDir,
+		"write_count":     storeNode.WriteCount,
+		"last_write_time": storeNode.LastWriteTime,
+		"last_file_path":  storeNode.LastFilePath,
+		"last_error":      storeNode.LastError,
+		"created_at":      storeNode.CreatedAt,
+		"updated_at":      storeNode.UpdatedAt,
 	}); err != nil {
 		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}

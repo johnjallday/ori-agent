@@ -52,6 +52,7 @@ type Workspace struct {
 	Tasks          []Task                 `json:"tasks"`
 	Attachments    []Attachment           `json:"attachments,omitempty"`
 	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
+	StoreNodes     []StoreNode            `json:"store_nodes,omitempty"`
 	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
 	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status         WorkspaceStatus        `json:"status"`
@@ -66,6 +67,7 @@ type CanvasLayout struct {
 	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
 	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
 	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
+	StorePositions      map[string]Position        `json:"store_positions,omitempty"`      // store node ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -259,6 +261,27 @@ type ScheduledTask struct {
 	// Metadata
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// StoreNode represents a file storage node in the workspace canvas
+type StoreNode struct {
+	ID            string    `json:"id"`              // Unique ID
+	CanvasNodeID  string    `json:"canvas_node_id"`  // Canvas node ID (e.g., "store-node-1")
+	WorkspaceID   string    `json:"workspace_id"`    // Parent workspace ID
+	Name          string    `json:"name"`            // Display name
+	AgentNodeID   string    `json:"agent_node_id"`   // Connected agent node ID (optional)
+	BaseDir       string    `json:"base_dir"`        // Base directory for writes (e.g., "outputs/", "reports/")
+	Format        string    `json:"format"`          // File format: json, text, markdown, binary
+	WriteMode     string    `json:"write_mode"`      // Write mode: overwrite, append
+	AutoCreateDir bool      `json:"auto_create_dir"` // Automatically create parent directories
+	LastWriteTime time.Time `json:"last_write_time"` // Last successful write
+	WriteCount    int       `json:"write_count"`     // Total write count
+	LastError     string    `json:"last_error"`      // Last error message (empty if no error)
+	LastFilePath  string    `json:"last_file_path"`  // Last file path written
+	X             float64   `json:"x"`               // Canvas X position
+	Y             float64   `json:"y"`               // Canvas Y position
+	CreatedAt     time.Time `json:"created_at"`      // Creation time
+	UpdatedAt     time.Time `json:"updated_at"`      // Last update time
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace

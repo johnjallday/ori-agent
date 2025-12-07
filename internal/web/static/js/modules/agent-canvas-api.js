@@ -40,6 +40,15 @@ export async function apiPut(url, body) {
   return handleResponse(resp);
 }
 
+export async function apiPatch(url, body) {
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(resp);
+}
+
 export async function apiDelete(url) {
   const resp = await fetch(url, { method: 'DELETE' });
   return handleResponse(resp);

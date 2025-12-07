@@ -1002,6 +1002,181 @@ export class RendererNodes {
   }
 
   /**
+   * Draw store nodes
+   */
+  drawStoreNodes() {
+    if (!this.state.storeNodes || this.state.storeNodes.length === 0) return;
+
+    this.state.storeNodes.forEach((storeNode) => {
+      if (storeNode.x == null || storeNode.y == null) return;
+
+      const cardWidth = 180;
+      const cardHeight = 110;
+      const cardX = storeNode.x - cardWidth / 2;
+      const cardY = storeNode.y - cardHeight / 2;
+
+      // Store bounds for hit testing
+      storeNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Base color (teal/cyan for storage)
+      const baseColor = '#14b8a6';
+
+      // Background
+      this.ctx.save();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.1)';
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowOffsetY = 2;
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Border
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.stroke();
+
+      // Storage icon (disk/database icon)
+      const iconSize = 20;
+      const iconX = cardX + 10;
+      const iconY = cardY + 16;
+
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.fillStyle = baseColor;
+      this.ctx.lineWidth = 2;
+
+      // Draw disk icon
+      this.ctx.beginPath();
+      this.ctx.arc(iconX + iconSize / 2, iconY, iconSize / 3, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Draw disk platter lines
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(iconX + 5, iconY - 3);
+      this.ctx.lineTo(iconX + 15, iconY + 3);
+      this.ctx.stroke();
+
+      // Title
+      this.ctx.fillStyle = '#0f172a';
+      this.ctx.font = 'bold 12px system-ui';
+      const title = storeNode.name || 'Store';
+      this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
+
+      // Format badge
+      const formatText = storeNode.format || 'json';
+      const badgeX = cardX + cardWidth - 60;
+      const badgeY = cardY + 8;
+      this.ctx.fillStyle = baseColor + '20'; // 20% opacity background
+      this.primitives.roundRect(badgeX, badgeY, 50, 18, 4);
+      this.ctx.fill();
+      this.ctx.fillStyle = baseColor;
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText(formatText.toUpperCase(), badgeX + 8, badgeY + 12);
+
+      // Write mode
+      this.ctx.fillStyle = '#475569';
+      this.ctx.font = '11px system-ui';
+      const writeModeText = storeNode.write_mode === 'append' ? 'Append mode' : 'Overwrite mode';
+      this.ctx.fillText(writeModeText, cardX + 10, cardY + 45);
+
+      // Directory path (truncated if too long)
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = '10px system-ui';
+      let basedir = storeNode.base_dir || '/path/to/store';
+      if (basedir.length > 25) {
+        basedir = '...' + basedir.slice(-22);
+      }
+      this.ctx.fillText(basedir, cardX + 10, cardY + 62);
+
+      // Stats
+      const writeCount = storeNode.write_count || 0;
+      this.ctx.fillStyle = '#10b981';
+      this.ctx.font = 'bold 10px system-ui';
+      this.ctx.fillText(`${writeCount} writes`, cardX + 10, cardY + 78);
+
+      // Last error (if any)
+      if (storeNode.last_error && storeNode.last_error !== '') {
+        this.ctx.fillStyle = '#ef4444';
+        this.ctx.font = '9px system-ui';
+        this.ctx.fillText('⚠ Error', cardX + 10, cardY + 92);
+      }
+
+      // Assign Agent button (bottom left)
+      const assignBtnWidth = 70;
+      const assignBtnHeight = 16;
+      const assignBtnX = cardX + 10;
+      const assignBtnY = cardY + cardHeight - assignBtnHeight - 6;
+
+      // Check if in assignment mode for this store
+      const isActiveAssignment = this.state.storeAssignmentMode &&
+                                  this.state.storeAssignmentSource &&
+                                  this.state.storeAssignmentSource.canvas_node_id === storeNode.canvas_node_id;
+
+      this.ctx.fillStyle = isActiveAssignment ? '#fd7e14' : '#6c757d';
+      this.primitives.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 9px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⇄ ASSIGN', assignBtnX + assignBtnWidth / 2, assignBtnY + 11);
+      this.ctx.textAlign = 'left';
+
+      storeNode.assignBtnBounds = {
+        x: assignBtnX,
+        y: assignBtnY,
+        width: assignBtnWidth,
+        height: assignBtnHeight
+      };
+
+      // Delete button (top-right corner)
+      const deleteSize = 18;
+      const deleteX = cardX + cardWidth - deleteSize - 6;
+      const deleteY = cardY + 6;
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteX + 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
+      this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
+      this.ctx.stroke();
+
+      storeNode.deleteButton = {
+        x: deleteX,
+        y: deleteY,
+        width: deleteSize,
+        height: deleteSize
+      };
+
+      // Input port (for receiving data)
+      const inputPortSize = 10;
+      const inputPortX = cardX - inputPortSize / 2;
+      const inputPortY = cardY + cardHeight / 2 - inputPortSize / 2;
+
+      this.ctx.fillStyle = baseColor;
+      this.ctx.beginPath();
+      this.ctx.arc(inputPortX + inputPortSize / 2, inputPortY + inputPortSize / 2, inputPortSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Store port bounds for connections
+      storeNode.inPort = {
+        x: inputPortX + inputPortSize / 2,
+        y: inputPortY + inputPortSize / 2
+      };
+    });
+  }
+
+  /**
    * Get human-readable schedule summary
    */
   getScheduleSummary(config) {

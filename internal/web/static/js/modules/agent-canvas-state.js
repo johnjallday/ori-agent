@@ -98,6 +98,12 @@ export const EVENT_TYPES = {
   SCHEDULER_NODE_MOVED: 'scheduler_node.moved',
   SCHEDULER_NODE_DELETED: 'scheduler_node.deleted',
 
+  // Store Node events
+  STORE_NODE_CREATED: 'store_node.created',
+  STORE_NODE_UPDATED: 'store_node.updated',
+  STORE_NODE_MOVED: 'store_node.moved',
+  STORE_NODE_DELETED: 'store_node.deleted',
+
   // Canvas events
   CANVAS_PANNED: 'canvas.panned',
   CANVAS_ZOOMED: 'canvas.zoomed',
@@ -147,6 +153,7 @@ export class AgentCanvasState {
     this.tasks = [];
     this.attachments = [];
     this.schedulerNodes = [];  // Scheduler nodes (canvas-based scheduled tasks)
+    this.storeNodes = [];  // Store nodes (file storage nodes)
 
     // Data & Communication
     this.messages = [];
@@ -450,6 +457,13 @@ export class AgentCanvasState {
   }
 
   /**
+   * Set store nodes
+   */
+  setStoreNodes(storeNodes) {
+    this.storeNodes = storeNodes || [];
+  }
+
+  /**
    * Add scheduler node
    */
   addSchedulerNode(schedulerNode) {
@@ -482,6 +496,18 @@ export class AgentCanvasState {
       const schedulerNode = this.schedulerNodes[index];
       this.schedulerNodes.splice(index, 1);
       this.eventBus.emit(EVENT_TYPES.SCHEDULER_NODE_DELETED, { schedulerNode });
+    }
+  }
+
+  /**
+   * Remove store node by ID
+   */
+  removeStoreNode(storeNodeId) {
+    const index = this.storeNodes.findIndex(s => s.id === storeNodeId);
+    if (index !== -1) {
+      const storeNode = this.storeNodes[index];
+      this.storeNodes.splice(index, 1);
+      this.eventBus.emit(EVENT_TYPES.STORE_NODE_DELETED, { storeNode });
     }
   }
 

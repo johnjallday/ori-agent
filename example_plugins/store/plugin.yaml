@@ -1,0 +1,28 @@
+name: store
+version: 1.0.0
+description: Write data to files in configured store locations
+maintainers:
+  - name: Ori Agent Team
+    email: team@ori.com
+license: MIT
+repository: https://github.com/johnjallday/ori-agent
+
+tool_definition:
+  description: "Write data to a file in a store node's configured base directory. The store node provides secure, sandboxed file storage with validation."
+  parameters:
+    - name: store_node_id
+      type: string
+      description: "The canvas node ID of the store node (e.g., 'store-node-1')"
+      required: true
+    - name: file_path
+      type: string
+      description: "Relative path within the store node's base directory (e.g., 'reports/daily.json'). Path is validated to prevent directory traversal."
+      required: true
+    - name: data
+      type: string
+      description: "The data to write. Format depends on the store node's configured format (json, text, markdown, or base64-encoded binary)."
+      required: true
+    - name: metadata
+      type: object
+      description: "Optional metadata about the write operation (for logging/tracking)"
+      required: false

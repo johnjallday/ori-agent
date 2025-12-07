@@ -453,6 +453,56 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
+    // Check if clicking on a store node
+    if (this.state.storeNodes && this.state.storeNodes.length > 0) {
+      for (let i = this.state.storeNodes.length - 1; i >= 0; i--) {
+        const storeNode = this.state.storeNodes[i];
+        if (storeNode && storeNode.cardBounds) {
+          const cardBounds = storeNode.cardBounds;
+
+          // Delete button first (highest priority)
+          if (storeNode.deleteButton) {
+            const btn = storeNode.deleteButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              if (confirm('Delete this store node?')) {
+                this.parent.deleteStoreNode(storeNode);
+              }
+              return;
+            }
+          }
+
+          // Assign button
+          if (storeNode.assignBtnBounds) {
+            const btn = storeNode.assignBtnBounds;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.toggleStoreAssignmentMode(storeNode);
+              return;
+            }
+          }
+
+          // Check if clicking inside the card (for dragging or selecting)
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            e.stopPropagation();
+            e.preventDefault();
+            this.state.isDraggingStoreNode = true;
+            this.state.draggedStoreNode = storeNode;
+            this.state.dragStartX = x;
+            this.state.dragStartY = y;
+            this.state.storeNodeClickTarget = storeNode; // Track for click detection
+            this.canvas.style.cursor = 'move';
+            return;
+          }
+        }
+      }
+    }
+
     // Check if clicking on an attachment card
     if (this.state.attachments && this.state.attachments.length > 0) {
       for (let i = this.state.attachments.length - 1; i >= 0; i--) {
@@ -543,6 +593,14 @@ export class AgentCanvasInteractionHandler {
           this.state.assignmentMouseY = 0;
           this.canvas.style.cursor = 'grab';
           this.parent.draw();
+          return;
+        }
+
+        // If we're assigning a store node, clicking an agent should assign immediately
+        if (this.state.storeAssignmentMode && this.state.storeAssignmentSource) {
+          e.stopPropagation();
+          e.preventDefault();
+          this.parent.assignAgentToStore(agent);
           return;
         }
 
@@ -647,6 +705,16 @@ export class AgentCanvasInteractionHandler {
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
       this.state.draggedSchedulerNode.x = x;
       this.state.draggedSchedulerNode.y = y;
+      this.parent.draw();
+      return;
+    }
+
+    if (this.state.isDraggingStoreNode && this.state.draggedStoreNode) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.draggedStoreNode.x = x;
+      this.state.draggedStoreNode.y = y;
       this.parent.draw();
       return;
     }
@@ -926,12 +994,34 @@ export class AgentCanvasInteractionHandler {
       this.state.schedulerNodeClickTarget = null;
     }
 
+    // Detect store node click (vs drag)
+    const wasDraggingStoreNode = this.state.isDraggingStoreNode;
+    if (wasDraggingStoreNode && this.state.storeNodeClickTarget) {
+      const rect = this.canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      const dragDistance = Math.sqrt(
+        Math.pow(x - this.state.dragStartX, 2) +
+        Math.pow(y - this.state.dragStartY, 2)
+      );
+
+      // If drag distance is small (< 5 pixels), treat as a click
+      if (dragDistance < 5) {
+        if (window.showStoreDetails) {
+          window.showStoreDetails(this.state.storeNodeClickTarget);
+        }
+      }
+      this.state.storeNodeClickTarget = null;
+    }
+
     this.state.isDragging = false;
     this.state.isDraggingAgent = false;
     this.state.draggedAgent = null;
     this.state.isDraggingTask = false;
     this.state.isDraggingSchedulerNode = false;
     this.state.draggedSchedulerNode = null;
+    this.state.isDraggingStoreNode = false;
+    this.state.draggedStoreNode = null;
     this.state.isDraggingAttachment = false;
     this.state.draggedAttachment = null;
     this.state.isDraggingCombiner = false;
@@ -939,7 +1029,7 @@ export class AgentCanvasInteractionHandler {
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingSchedulerNode || wasDraggingAttachment || wasDraggingCombiner) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingSchedulerNode || wasDraggingStoreNode || wasDraggingAttachment || wasDraggingCombiner) {
       this.parent.saveLayout();
     }
 

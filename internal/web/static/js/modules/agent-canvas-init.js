@@ -171,6 +171,35 @@ export class AgentCanvasInitialization {
         console.log('📅 No scheduled_tasks in studio data');
       }
 
+      // Load store nodes from studio
+      if (this.parent.studio.store_nodes) {
+        console.log('💾 Raw store_nodes from API:', this.parent.studio.store_nodes);
+
+        const storeNodes = this.parent.studio.store_nodes.map(node => {
+          // Get position from layout if available
+          let x = 400, y = 400;
+          if (this.parent.studio.layout && this.parent.studio.layout.store_positions) {
+            const pos = this.parent.studio.layout.store_positions[node.canvas_node_id];
+            if (pos) {
+              x = pos.x;
+              y = pos.y;
+              console.log('💾 Using layout position for', node.canvas_node_id, ':', pos);
+            }
+          }
+
+          return {
+            ...node,
+            x: x,
+            y: y
+          };
+        });
+
+        console.log('💾 Loaded store nodes:', storeNodes.length, storeNodes);
+        this.state.setStoreNodes(storeNodes);
+      } else {
+        console.log('💾 No store_nodes in studio data');
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 
