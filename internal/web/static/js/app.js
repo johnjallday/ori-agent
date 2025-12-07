@@ -11,13 +11,27 @@ let historyIndex = -1;
 // Chat messages storage
 let chatMessages = [];
 
-// Remove stored slash-command exchanges from history (user message + immediate assistant reply)
-function filterSlashHistory(messages) {
+// Remove stored slash-command exchanges and system announcements from history
+function sanitizeHistory(messages) {
   const cleaned = [];
   let skipNextAssistant = false;
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    const content = (msg && msg.content) ? String(msg.content) : '';
+
+    if (!msg || !content) {
+      continue;
+    }
+
+    // Remove update-available announcements that may have been persisted in older sessions
+    const isUpdateAnnouncement =
+      content.includes('Update Available') &&
+      content.includes('Latest Version:');
+
+    if (isUpdateAnnouncement) {
+      continue;
+    }
 
     if (skipNextAssistant) {
       // Skip the assistant reply immediately following a slash command
@@ -29,7 +43,7 @@ function filterSlashHistory(messages) {
       skipNextAssistant = false;
     }
 
-    if (msg.isUser && msg.content && msg.content.trim().startsWith('/')) {
+    if (msg.isUser && content.trim().startsWith('/')) {
       // Skip the slash command and mark to skip its direct reply
       skipNextAssistant = true;
       continue;
@@ -49,7 +63,7 @@ function saveChatToLocalStorage() {
 
   try {
     const storageKey = `ori_chat_${currentAgent}`;
-    const sanitized = filterSlashHistory(chatMessages);
+    const sanitized = sanitizeHistory(chatMessages);
     localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
     console.error('Failed to save chat history:', error);
@@ -65,7 +79,7 @@ function loadChatFromLocalStorage() {
     const stored = localStorage.getItem(storageKey);
 
     if (stored) {
-      chatMessages = filterSlashHistory(JSON.parse(stored));
+      chatMessages = sanitizeHistory(JSON.parse(stored));
       // Persist the cleaned history so old slash entries are removed
       saveChatToLocalStorage();
       // Restore messages to UI
