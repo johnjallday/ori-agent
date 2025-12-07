@@ -61,6 +61,8 @@ builds:
       - arm64
 
   # Menu bar app (macOS only)
+  # IMPORTANT: This build requires CGO and can ONLY be built on macOS runners
+  # Linux/Windows smoke tests must use: goreleaser build --id=server --id=server-macos
   - id: menubar
     main: ./cmd/menubar
     binary: ori-menubar

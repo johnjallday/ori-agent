@@ -135,7 +135,10 @@ jobs:
           sudo apt-get install -y goreleaser
 
       - name: Build packages
-        run: goreleaser release --snapshot --clean --skip=publish
+        run: |
+          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
+          goreleaser build --id=server --snapshot --clean
+          goreleaser release --snapshot --skip=publish --skip=before --skip=build
 
       - name: Install package
         run: |
@@ -210,7 +213,10 @@ jobs:
           dnf install -y goreleaser
 
       - name: Build packages
-        run: goreleaser release --snapshot --clean --skip=publish
+        run: |
+          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
+          goreleaser build --id=server --snapshot --clean
+          goreleaser release --snapshot --skip=publish --skip=before --skip=build
 
       - name: Install package
         run: |
@@ -283,7 +289,11 @@ jobs:
         run: choco install goreleaser -y
 
       - name: Build binaries
-        run: goreleaser release --snapshot --clean --skip=publish
+        shell: bash
+        run: |
+          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Windows)
+          goreleaser build --id=server --snapshot --clean
+          goreleaser release --snapshot --skip=publish --skip=before --skip=build
 
       - name: Create MSI
         shell: pwsh
