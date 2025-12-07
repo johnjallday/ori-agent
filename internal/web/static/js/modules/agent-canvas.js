@@ -397,6 +397,9 @@ class AgentCanvas {
     // Draw scheduler nodes
     this.renderer.drawSchedulerNodes();
 
+    // Draw store nodes
+    this.renderer.drawStoreNodes();
+
     // Draw task input connections (task-to-task and task-to-merge)
     this.renderer.drawResultConnections();
 
@@ -909,6 +912,27 @@ class AgentCanvas {
     } catch (err) {
       console.error('Failed to delete scheduler node', err);
       alert('Failed to delete scheduler node: ' + (err?.message || err));
+    }
+  }
+
+  /**
+   * Delete a store node
+   */
+  async deleteStoreNode(storeNode) {
+    const nodeId = storeNode?.canvas_node_id;
+    if (!storeNode || !nodeId || !this.studioId) {
+      alert('Cannot delete store node: missing ID or workspace');
+      return;
+    }
+    try {
+      await apiDelete(`/api/studios/${this.studioId}/store-nodes/${nodeId}`);
+      this.state.removeStoreNode(storeNode.id);
+      this.saveLayout();
+      this.draw();
+      this.notifications?.showNotification?.('Store node deleted', 'success');
+    } catch (err) {
+      console.error('Failed to delete store node', err);
+      alert('Failed to delete store node: ' + (err?.message || err));
     }
   }
 

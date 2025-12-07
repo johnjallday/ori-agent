@@ -238,6 +238,14 @@ export class AgentCanvasLayoutManager {
         schedulerPositions[key] = { x: s.x, y: s.y };
       });
 
+      // Collect store node positions
+      const storePositions = {};
+      this.state.storeNodes.forEach(s => {
+        if (s.x == null || s.y == null) return;
+        const key = s.canvas_node_id || s.id;
+        storePositions[key] = { x: s.x, y: s.y };
+      });
+
       // Collect workflow connections (agents/tasks/combiners)
       const workflowConnections = this.state.connections.map(conn => ({
         id: conn.id,
@@ -250,7 +258,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Connections: ${workflowConnections.length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Store Nodes: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
@@ -261,6 +269,7 @@ export class AgentCanvasLayoutManager {
         agent_positions: agentPositions,
         attachment_positions: attachmentPositions,
         scheduler_positions: schedulerPositions,
+        store_positions: storePositions,
         combiner_nodes: combinerNodes,
         workflow_connections: workflowConnections,
         scale: this.state.scale,

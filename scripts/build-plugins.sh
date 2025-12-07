@@ -63,9 +63,10 @@ build_plugin "math" "math"
 build_plugin "result-handler" "result-handler"
 build_plugin "minimal" "minimal"
 build_plugin "webapp" "webapp"
+build_plugin "store" "store"
 
 echo ""
 echo -e "${GREEN}All plugins built successfully!${NC}"
 echo -e "${BLUE}Plugin executables in uploaded_plugins/:${NC}"
-ls -lh uploaded_plugins/weather uploaded_plugins/math uploaded_plugins/result-handler uploaded_plugins/minimal uploaded_plugins/webapp 2>/dev/null || true
+ls -lh uploaded_plugins/weather uploaded_plugins/math uploaded_plugins/result-handler uploaded_plugins/minimal uploaded_plugins/webapp uploaded_plugins/store 2>/dev/null || true
 echo ""

@@ -28,6 +28,11 @@ export function createEventStream(studioId, handlers) {
   source.addEventListener('scheduled_task.triggered', (event) => safe(handlers.onScheduledTaskEvent)(event));
   source.addEventListener('scheduled_task.failed', (event) => safe(handlers.onScheduledTaskEvent)(event));
   source.addEventListener('scheduled_task.completed', (event) => safe(handlers.onScheduledTaskEvent)(event));
+  source.addEventListener('store_node.write.success', (event) => safe(handlers.onStoreNodeEvent)(event));
+  source.addEventListener('store_node.write.failed', (event) => safe(handlers.onStoreNodeEvent)(event));
+  source.addEventListener('store_node.created', (event) => safe(handlers.onStoreNodeEvent)(event));
+  source.addEventListener('store_node.updated', (event) => safe(handlers.onStoreNodeEvent)(event));
+  source.addEventListener('store_node.deleted', (event) => safe(handlers.onStoreNodeEvent)(event));
 
   source.onerror = (error) => safe(handlers.onError)(error);
 

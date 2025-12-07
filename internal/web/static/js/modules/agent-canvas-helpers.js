@@ -123,6 +123,10 @@ export class AgentCanvasHelpers {
     const schedulerNode = this.state.schedulerNodes.find(s => s.canvas_node_id === nodeId || s.id === nodeId);
     if (schedulerNode) return { type: 'scheduler', node: schedulerNode };
 
+    // Check if it's a store node (search by canvas_node_id or id)
+    const storeNode = this.state.storeNodes.find(s => s.canvas_node_id === nodeId || s.id === nodeId);
+    if (storeNode) return { type: 'store', node: storeNode };
+
     return null;
   }
 

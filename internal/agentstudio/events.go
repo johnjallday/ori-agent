@@ -37,6 +37,13 @@ const (
 	EventScheduledTaskTriggered EventType = "scheduled_task.triggered" // Scheduled task executed successfully
 	EventScheduledTaskFailed    EventType = "scheduled_task.failed"    // Scheduled task execution failed
 
+	// Store node events
+	EventStoreNodeWriteSuccess EventType = "store_node.write.success" // Store node write succeeded
+	EventStoreNodeWriteFailed  EventType = "store_node.write.failed"  // Store node write failed
+	EventStoreNodeCreated      EventType = "store_node.created"       // Store node created
+	EventStoreNodeUpdated      EventType = "store_node.updated"       // Store node updated
+	EventStoreNodeDeleted      EventType = "store_node.deleted"       // Store node deleted
+
 	// Attachment events
 	EventAttachmentCreated EventType = "attachment.created"
 	EventAttachmentUpdated EventType = "attachment.updated"
@@ -367,6 +374,22 @@ func NewScheduledTaskEvent(eventType EventType, workspaceID, scheduledTaskID, sc
 		Type:        eventType,
 		WorkspaceID: workspaceID,
 		Source:      "scheduler",
+		Data:        data,
+		Metadata:    make(map[string]string),
+	}
+}
+
+// NewStoreNodeEvent creates a store node-related event
+func NewStoreNodeEvent(eventType EventType, workspaceID, storeNodeID string, data map[string]interface{}) Event {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	data["store_node_id"] = storeNodeID
+
+	return Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		Source:      "store",
 		Data:        data,
 		Metadata:    make(map[string]string),
 	}

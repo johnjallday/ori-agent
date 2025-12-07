@@ -56,6 +56,12 @@
                   </svg>
                   Add Scheduler
                 </button>
+                <button class="modern-btn modern-btn-primary" onclick="showAddStoreNodeModal()" title="Add Store Node">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M2 6C2 4.9 2.9 4 4 4H10L12 6H20C21.1 6 22 6.9 22 8V18C22 19.1 21.1 20 20 20H4C2.9 20 2 19.1 2 18V6M4 6V18H20V8H11.2L9.2 6H4Z"/>
+                  </svg>
+                  Add Store
+                </button>
                 <button class="modern-btn modern-btn-secondary" onclick="toggleCanvasSidebar()" title="Toggle Sidebar">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M3,9H17V7H3V9M3,13H17V11H3V13M3,17H17V15H3V17M19,17H21V15H19V17M19,7V9H21V7H19M19,13H21V11H19V13Z"/>
@@ -459,6 +465,79 @@
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="modern-btn modern-btn-primary" onclick="submitSchedulerNode()">Create Scheduler</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Store Node Modal -->
+  <div class="modal fade" id="addStoreNodeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M2 6C2 4.9 2.9 4 4 4H10L12 6H20C21.1 6 22 6.9 22 8V18C22 19.1 21.1 20 20 20H4C2.9 20 2 19.1 2 18V6M4 6V18H20V8H11.2L9.2 6H4Z"/>
+            </svg>
+            Add Store Node
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="storeNodeForm">
+            <!-- Name -->
+            <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Node Name</label>
+              <input type="text" class="form-control" id="store-name" placeholder="e.g., Report Storage" required>
+              <small class="text-muted">Friendly name for this storage location</small>
+            </div>
+
+            <!-- Base Directory -->
+            <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Base Directory</label>
+              <input type="text" class="form-control" id="store-base-dir" placeholder="e.g., reports/" required>
+              <small class="text-muted">
+                Agents will specify filenames within this directory. Allowed zones: agents/, outputs/, reports/, data/
+              </small>
+            </div>
+
+            <!-- Format -->
+            <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">File Format</label>
+              <select class="form-select" id="store-format">
+                <option value="json" selected>JSON (pretty-printed)</option>
+                <option value="text">Plain Text</option>
+                <option value="markdown">Markdown</option>
+                <option value="binary">Binary (base64)</option>
+              </select>
+              <small class="text-muted">How data should be formatted when written</small>
+            </div>
+
+            <!-- Write Mode -->
+            <div class="mb-3">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Write Mode</label>
+              <select class="form-select" id="store-write-mode">
+                <option value="overwrite" selected>Overwrite (replace file)</option>
+                <option value="append">Append (add to end)</option>
+              </select>
+              <small class="text-muted">What happens when writing to an existing file</small>
+            </div>
+
+            <!-- Auto-create directories -->
+            <div class="mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="store-auto-create" checked>
+                <label class="form-check-label" for="store-auto-create">
+                  Auto-create directories
+                </label>
+              </div>
+              <small class="text-muted">Automatically create parent directories if they don't exist</small>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" onclick="submitStoreNode()">Create Store Node</button>
         </div>
       </div>
     </div>

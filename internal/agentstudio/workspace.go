@@ -52,6 +52,7 @@ type Workspace struct {
 	Tasks          []Task                 `json:"tasks"`
 	Attachments    []Attachment           `json:"attachments,omitempty"`
 	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
+	StoreNodes     []StoreNode            `json:"store_nodes,omitempty"`
 	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
 	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status         WorkspaceStatus        `json:"status"`
@@ -66,6 +67,7 @@ type CanvasLayout struct {
 	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
 	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
 	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
+	StorePositions      map[string]Position        `json:"store_positions,omitempty"`      // store node ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -259,6 +261,26 @@ type ScheduledTask struct {
 	// Metadata
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// StoreNode represents a file storage node on the canvas
+type StoreNode struct {
+	ID            string    `json:"id"`
+	CanvasNodeID  string    `json:"canvas_node_id"`
+	WorkspaceID   string    `json:"workspace_id"`
+	Name          string    `json:"name"`
+	BaseDir       string    `json:"base_dir"`   // Base directory (e.g., "reports/")
+	Format        string    `json:"format"`     // "json", "text", "markdown", "binary"
+	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
+	AutoCreateDir bool      `json:"auto_create_dir"`
+	LastWriteTime time.Time `json:"last_write_time"`
+	WriteCount    int       `json:"write_count"`
+	LastError     string    `json:"last_error"`
+	LastFilePath  string    `json:"last_file_path"` // Last written file (relative to base_dir)
+	X             float64   `json:"x"`
+	Y             float64   `json:"y"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace

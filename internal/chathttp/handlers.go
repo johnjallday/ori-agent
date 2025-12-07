@@ -112,18 +112,6 @@ func writeJSONResponse(w http.ResponseWriter, data any) {
 	}
 }
 
-// writeJSONError writes an error response with proper status code and logging
-func writeJSONError(w http.ResponseWriter, statusCode int, message string, err error) {
-	logger.Error(message, logger.Fields{"error": err, "status": statusCode})
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"error": message,
-	}); encErr != nil {
-		logger.Error("Failed to encode error response", logger.Fields{"error": encErr})
-	}
-}
-
 // SetLLMFactory sets the LLM factory
 func (h *Handler) SetLLMFactory(factory *llm.Factory) {
 	h.llmFactory = factory

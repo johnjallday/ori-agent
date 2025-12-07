@@ -453,6 +453,48 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
+    // Check if clicking on a store node
+    if (this.state.storeNodes && this.state.storeNodes.length > 0) {
+      for (let i = this.state.storeNodes.length - 1; i >= 0; i--) {
+        const storeNode = this.state.storeNodes[i];
+        if (storeNode && storeNode.x != null && storeNode.y != null) {
+          const cardBounds = storeNode.cardBounds || {
+            x: storeNode.x - 90,
+            y: storeNode.y - 45,
+            width: 180,
+            height: 90
+          };
+
+          // Delete button first (highest priority)
+          if (storeNode.deleteButton) {
+            const btn = storeNode.deleteButton;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              if (confirm('Delete this store node?')) {
+                this.parent.deleteStoreNode(storeNode);
+              }
+              return;
+            }
+          }
+
+          // Check if clicking inside the card (for dragging)
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            e.stopPropagation();
+            e.preventDefault();
+            this.state.isDraggingStoreNode = true;
+            this.state.draggedStoreNode = storeNode;
+            this.state.dragStartX = x;
+            this.state.dragStartY = y;
+            this.canvas.style.cursor = 'move';
+            return;
+          }
+        }
+      }
+    }
+
     // Check if clicking on an attachment card
     if (this.state.attachments && this.state.attachments.length > 0) {
       for (let i = this.state.attachments.length - 1; i >= 0; i--) {
@@ -651,6 +693,15 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
+    if (this.state.isDraggingStoreNode && this.state.draggedStoreNode) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.draggedStoreNode.x = x;
+      this.state.draggedStoreNode.y = y;
+      this.parent.draw();
+      return;
+    }
+
     if (this.state.isDraggingAttachment && this.state.draggedAttachment) {
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
@@ -711,6 +762,7 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingAgent = this.state.isDraggingAgent;
     const wasDraggingTask = this.state.isDraggingTask;
     const wasDraggingSchedulerNode = this.state.isDraggingSchedulerNode;
+    const wasDraggingStoreNode = this.state.isDraggingStoreNode;
     const wasDraggingAttachment = this.state.isDraggingAttachment;
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
@@ -932,6 +984,8 @@ export class AgentCanvasInteractionHandler {
     this.state.isDraggingTask = false;
     this.state.isDraggingSchedulerNode = false;
     this.state.draggedSchedulerNode = null;
+    this.state.isDraggingStoreNode = false;
+    this.state.draggedStoreNode = null;
     this.state.isDraggingAttachment = false;
     this.state.draggedAttachment = null;
     this.state.isDraggingCombiner = false;
@@ -939,7 +993,7 @@ export class AgentCanvasInteractionHandler {
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingSchedulerNode || wasDraggingAttachment || wasDraggingCombiner) {
+    if (wasDraggingAgent || wasDraggingTask || wasDraggingSchedulerNode || wasDraggingStoreNode || wasDraggingAttachment || wasDraggingCombiner) {
       this.parent.saveLayout();
     }
 
@@ -1024,7 +1078,7 @@ export class AgentCanvasInteractionHandler {
    */
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingSchedulerNode || this.state.isDraggingAttachment) {
+    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingSchedulerNode || this.state.isDraggingStoreNode || this.state.isDraggingAttachment) {
       return;
     }
 

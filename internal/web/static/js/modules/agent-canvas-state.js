@@ -98,6 +98,13 @@ export const EVENT_TYPES = {
   SCHEDULER_NODE_MOVED: 'scheduler_node.moved',
   SCHEDULER_NODE_DELETED: 'scheduler_node.deleted',
 
+  // Store Node events
+  STORE_NODE_CREATED: 'store_node.created',
+  STORE_NODE_UPDATED: 'store_node.updated',
+  STORE_NODE_MOVED: 'store_node.moved',
+  STORE_NODE_DELETED: 'store_node.deleted',
+  STORE_NODE_STATUS_CHANGED: 'store_node.status.changed',
+
   // Canvas events
   CANVAS_PANNED: 'canvas.panned',
   CANVAS_ZOOMED: 'canvas.zoomed',
@@ -147,6 +154,7 @@ export class AgentCanvasState {
     this.tasks = [];
     this.attachments = [];
     this.schedulerNodes = [];  // Scheduler nodes (canvas-based scheduled tasks)
+    this.storeNodes = [];      // Store nodes (file storage nodes)
 
     // Data & Communication
     this.messages = [];
@@ -179,6 +187,10 @@ export class AgentCanvasState {
     // Drag State - Scheduler Node
     this.isDraggingSchedulerNode = false;
     this.draggedSchedulerNode = null;
+
+    // Drag State - Store Node
+    this.isDraggingStoreNode = false;
+    this.draggedStoreNode = null;
 
     // Drag State - Connection
     this.isDraggingConnection = false;
@@ -484,6 +496,62 @@ export class AgentCanvasState {
       this.eventBus.emit(EVENT_TYPES.SCHEDULER_NODE_DELETED, { schedulerNode });
     }
   }
+
+  // ==================== STORE NODE STATE MANAGEMENT ====================
+
+  /**
+   * Set store nodes
+   */
+  setStoreNodes(storeNodes) {
+    this.storeNodes = storeNodes || [];
+  }
+
+  /**
+   * Add store node
+   */
+  addStoreNode(storeNode) {
+    this.storeNodes.push(storeNode);
+    this.eventBus.emit(EVENT_TYPES.STORE_NODE_CREATED, { storeNode });
+  }
+
+  /**
+   * Get store node by ID
+   */
+  getStoreNode(storeNodeId) {
+    return this.storeNodes.find(s => s.id === storeNodeId);
+  }
+
+  /**
+   * Update store node position
+   */
+  updateStoreNodePosition(storeNode, x, y) {
+    storeNode.x = x;
+    storeNode.y = y;
+    this.eventBus.emit(EVENT_TYPES.STORE_NODE_MOVED, { storeNode, x, y });
+  }
+
+  /**
+   * Update store node status
+   */
+  updateStoreNodeStatus(storeNode, status) {
+    const oldStatus = { ...storeNode };
+    Object.assign(storeNode, status);
+    this.eventBus.emit(EVENT_TYPES.STORE_NODE_STATUS_CHANGED, { storeNode, oldStatus });
+  }
+
+  /**
+   * Remove store node by ID
+   */
+  removeStoreNode(storeNodeId) {
+    const index = this.storeNodes.findIndex(s => s.id === storeNodeId);
+    if (index !== -1) {
+      const storeNode = this.storeNodes[index];
+      this.storeNodes.splice(index, 1);
+      this.eventBus.emit(EVENT_TYPES.STORE_NODE_DELETED, { storeNode });
+    }
+  }
+
+  // ========================================================================
 
   /**
    * Remove attachment by ID

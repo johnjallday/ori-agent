@@ -462,6 +462,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
+		} else if strings.Contains(r.URL.Path, "/store-nodes") {
+			// Handle store node operations
+			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodeStatus(w, r)
+			} else if r.Method == http.MethodPost {
+				s.studioHandler.CreateStoreNode(w, r)
+			} else if r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodes(w, r)
+			} else if r.Method == http.MethodPut {
+				s.studioHandler.UpdateStoreNode(w, r)
+			} else if r.Method == http.MethodDelete {
+				s.studioHandler.DeleteStoreNode(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		} else if strings.Contains(r.URL.Path, "/agents") {
 			// Handle agent add/remove operations
 			if r.Method == http.MethodPost {

@@ -1865,12 +1865,9 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	}
 	nodeID := parts[len(parts)-1]
 
-	// Handle special actions (e.g., /trigger)
-	if len(parts) >= 2 && parts[len(parts)-2] == "scheduler-nodes" {
-		// Check if there's an action after the node ID
-		// This would be like: /scheduler-nodes/{node_id}/trigger
-		// But our path only has node_id as last part, so no action here
-	}
+	// Note: Special actions like /trigger would be handled here if needed
+	// Example: /scheduler-nodes/{node_id}/trigger
+	// Currently only supporting direct node operations (GET, PUT, DELETE)
 
 	switch r.Method {
 	case http.MethodGet:

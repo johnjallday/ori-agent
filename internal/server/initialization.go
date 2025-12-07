@@ -48,6 +48,13 @@ func createRegistryManager() (*registry.Manager, error) {
 		logger.Debug("Will use cached or local registry", logger.Fields{})
 	}
 
+	// Scan uploaded_plugins directory and auto-register any new plugins
+	if err := mgr.ScanUploadedPlugins(); err != nil {
+		logger.Error("Failed to scan uploaded_plugins directory", logger.Fields{"error": err})
+	} else {
+		logger.Debug("Scanned uploaded_plugins directory for new plugins", logger.Fields{})
+	}
+
 	return mgr, nil
 }
 

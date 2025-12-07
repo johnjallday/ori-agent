@@ -1002,6 +1002,158 @@ export class RendererNodes {
   }
 
   /**
+   * Draw store nodes (file storage nodes)
+   */
+  drawStoreNodes() {
+    if (!this.state.storeNodes || this.state.storeNodes.length === 0) return;
+
+    this.state.storeNodes.forEach((storeNode) => {
+      if (storeNode.x == null || storeNode.y == null) return;
+
+      const cardWidth = 180;
+      const cardHeight = 90;
+      const cardX = storeNode.x - cardWidth / 2;
+      const cardY = storeNode.y - cardHeight / 2;
+
+      // Store bounds for hit testing
+      storeNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Determine node color based on errors
+      const hasError = storeNode.last_error && storeNode.last_error !== '';
+      const baseColor = hasError ? '#ef4444' : '#10b981'; // Red if error, green if ok
+
+      // Background
+      this.ctx.save();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.1)';
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowOffsetY = 2;
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Border
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.stroke();
+
+      // Storage icon (database/folder icon)
+      const iconSize = 20;
+      const iconX = cardX + 10;
+      const iconY = cardY + 16;
+
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 2;
+
+      // Draw folder icon
+      this.ctx.beginPath();
+      // Folder tab
+      this.ctx.moveTo(iconX, iconY - 2);
+      this.ctx.lineTo(iconX + 8, iconY - 2);
+      this.ctx.lineTo(iconX + 10, iconY);
+      // Folder body
+      this.ctx.lineTo(iconX + iconSize, iconY);
+      this.ctx.lineTo(iconX + iconSize, iconY + iconSize - 4);
+      this.ctx.lineTo(iconX, iconY + iconSize - 4);
+      this.ctx.closePath();
+      this.ctx.stroke();
+
+      // Title
+      this.ctx.fillStyle = '#0f172a';
+      this.ctx.font = 'bold 12px system-ui';
+      const title = storeNode.name || 'Store';
+      this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
+
+      // Format badge
+      const format = storeNode.format || 'json';
+      const formatText = format.toUpperCase();
+      const badgeX = cardX + cardWidth - 50;
+      const badgeY = cardY + 8;
+      this.ctx.fillStyle = '#3b82f6' + '20'; // Blue with 20% opacity
+      this.primitives.roundRect(badgeX, badgeY, 42, 18, 4);
+      this.ctx.fill();
+      this.ctx.fillStyle = '#3b82f6';
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText(formatText, badgeX + 6, badgeY + 12);
+
+      // Base directory path
+      this.ctx.fillStyle = '#475569';
+      this.ctx.font = '11px monospace';
+      const baseDir = storeNode.base_dir || './';
+      const truncatedDir = baseDir.length > 20 ? '...' + baseDir.slice(-17) : baseDir;
+      this.ctx.fillText(truncatedDir, cardX + 10, cardY + 45);
+
+      // Write statistics
+      const writeCount = storeNode.write_count || 0;
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText(`Writes: ${writeCount}`, cardX + 10, cardY + 60);
+
+      // Last write time or error
+      if (hasError) {
+        this.ctx.fillStyle = '#ef4444';
+        this.ctx.font = 'italic 10px system-ui';
+        this.ctx.fillText('Error', cardX + 10, cardY + 72);
+      } else if (storeNode.last_write_time) {
+        const lastWrite = new Date(storeNode.last_write_time);
+        const now = new Date();
+        const diff = now - lastWrite;
+
+        let timeText;
+        if (diff < 60000) {
+          timeText = `${Math.floor(diff / 1000)}s ago`;
+        } else if (diff < 3600000) {
+          timeText = `${Math.floor(diff / 60000)}m ago`;
+        } else if (diff < 86400000) {
+          timeText = `${Math.floor(diff / 3600000)}h ago`;
+        } else {
+          timeText = `${Math.floor(diff / 86400000)}d ago`;
+        }
+
+        this.ctx.fillStyle = '#64748b';
+        this.ctx.font = '10px system-ui';
+        this.ctx.fillText(`Last: ${timeText}`, cardX + 10, cardY + 72);
+      }
+
+      // Delete button (top-right)
+      const deleteSize = 18;
+      const deleteX = cardX + cardWidth - deleteSize - 6;
+      const deleteY = cardY + 30;
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteX + 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
+      this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
+      this.ctx.stroke();
+
+      storeNode.deleteButton = {
+        x: deleteX,
+        y: deleteY,
+        width: deleteSize,
+        height: deleteSize
+      };
+
+      // Input port indicator (for receiving data from agents/tasks)
+      this.ctx.fillStyle = baseColor;
+      this.ctx.beginPath();
+      this.ctx.arc(storeNode.x, cardY - 5, 6, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 1;
+      this.ctx.stroke();
+    });
+  }
+
+  /**
    * Get human-readable schedule summary
    */
   getScheduleSummary(config) {

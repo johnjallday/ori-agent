@@ -74,6 +74,10 @@ export class AgentCanvasEventHandler {
         const evt = { type, data };
         this.handleScheduledTaskEvent(evt);
       },
+      onStoreNodeEvent: (type, data) => {
+        const evt = { type, data };
+        this.handleStoreNodeEvent(evt);
+      },
       onError: (error) => {
         console.error('EventSource error:', error);
         setTimeout(() => {
@@ -338,6 +342,65 @@ export class AgentCanvasEventHandler {
       schedulerNode.next_run = scheduledTask.next_run;
 
       console.log(`Scheduler "${schedulerNode.name}" completed successfully`);
+    }
+
+    // Trigger redraw to update visual state
+    this.parent.draw();
+  }
+
+  /**
+   * Handle store node events from SSE.
+   * Updates store nodes with write status, error messages, etc.
+   */
+  handleStoreNodeEvent(eventData) {
+    const storeNodeId = eventData.data?.store_node_id;
+    if (!storeNodeId) {
+      console.warn('Store node event missing data:', eventData);
+      return;
+    }
+
+    // Find the store node in state
+    const storeNode = this.state.storeNodes.find(s => s.id === storeNodeId || s.canvas_node_id === storeNodeId);
+    if (!storeNode) {
+      console.log('Store node not found in canvas:', storeNodeId);
+      return;
+    }
+
+    // Update store node based on event type
+    if (eventData.type === 'store_node.write.success') {
+      // Update write statistics
+      storeNode.write_count = (eventData.data.write_count || storeNode.write_count || 0);
+      storeNode.last_write_time = eventData.data.last_write_time || new Date().toISOString();
+      storeNode.last_file_path = eventData.data.file_path || storeNode.last_file_path;
+      storeNode.last_error = ''; // Clear error
+
+      console.log(`Store node "${storeNode.name}" write succeeded (${storeNode.write_count} writes)`);
+
+      // Show success notification
+      this.parent.notifications?.showNotification?.(
+        `Stored to ${storeNode.name}: ${eventData.data.file_path}`,
+        'success'
+      );
+    } else if (eventData.type === 'store_node.write.failed') {
+      // Update error status
+      storeNode.last_error = eventData.data?.error || 'Write failed';
+      storeNode.last_write_time = new Date().toISOString();
+
+      console.error(`Store node "${storeNode.name}" write failed:`, storeNode.last_error);
+
+      // Show error notification
+      this.parent.notifications?.showNotification?.(
+        `Store write failed (${storeNode.name}): ${storeNode.last_error}`,
+        'error'
+      );
+    } else if (eventData.type === 'store_node.created') {
+      console.log(`Store node "${storeNode.name}" created`);
+    } else if (eventData.type === 'store_node.updated') {
+      console.log(`Store node "${storeNode.name}" updated`);
+    } else if (eventData.type === 'store_node.deleted') {
+      // Remove from state
+      this.state.removeStoreNode(storeNodeId);
+      console.log(`Store node deleted: ${storeNodeId}`);
     }
 
     // Trigger redraw to update visual state

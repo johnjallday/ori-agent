@@ -2679,6 +2679,96 @@ async function submitSchedulerNode() {
   }
 }
 
+// ==================== STORE NODE FUNCTIONS ====================
+
+/**
+ * Show the Add Store Node modal
+ */
+async function showAddStoreNodeModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addStoreNodeModal'));
+  modal.show();
+}
+
+/**
+ * Submit the Store Node creation form
+ */
+async function submitStoreNode() {
+  try {
+    // Get form values
+    const name = document.getElementById('store-name').value.trim();
+    const baseDir = document.getElementById('store-base-dir').value.trim();
+    const format = document.getElementById('store-format').value;
+    const writeMode = document.getElementById('store-write-mode').value;
+    const autoCreate = document.getElementById('store-auto-create').checked;
+
+    // Validate required fields
+    if (!name) {
+      alert('Please enter a node name');
+      return;
+    }
+
+    if (!baseDir) {
+      alert('Please enter a base directory');
+      return;
+    }
+
+    // Get studio ID from global variable (set by template)
+    const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+
+    if (!studioId) {
+      alert('Error: Workspace ID not found. Please refresh the page.');
+      console.error('Cannot create store node: studioId is missing');
+      return;
+    }
+
+    console.log('Using studioId:', studioId);
+
+    // Calculate position (center of viewport)
+    // Note: This will be replaced with proper canvas position calculation
+    const x = 400;
+    const y = 400;
+
+    // Create store node object
+    const storeNode = {
+      name: name,
+      base_dir: baseDir,
+      format: format,
+      write_mode: writeMode,
+      auto_create_dir: autoCreate,
+      x: x,
+      y: y
+    };
+
+    console.log('Creating store node:', storeNode);
+
+    const response = await fetch(`/api/studios/${studioId}/store-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(storeNode)
+    });
+
+    if (response.ok) {
+      console.log('Store node created successfully');
+
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
+      modal.hide();
+
+      // Reset form
+      document.getElementById('storeNodeForm').reset();
+
+      // Reload page to show new store node
+      window.location.reload();
+    } else {
+      const error = await response.text();
+      alert(`Failed to create store node: ${error}`);
+    }
+  } catch (error) {
+    console.error('Error creating store node:', error);
+    alert(`Error creating store node: ${error.message}`);
+  }
+}
+
 /**
  * Set a cron preset value
  */
