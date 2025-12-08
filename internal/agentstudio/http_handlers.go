@@ -1098,6 +1098,7 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 		Format:        req.Format,
 		WriteMode:     req.WriteMode,
 		AutoCreateDir: req.AutoCreateDir,
+		AutoStore:     true,        // Default to enabled for automatic task result storage
 		LastWriteTime: time.Time{}, // Zero value
 		WriteCount:    0,
 		LastError:     "",
@@ -1187,6 +1188,7 @@ type UpdateStoreNodeRequest struct {
 	Format        *string  `json:"format"`
 	WriteMode     *string  `json:"write_mode"`
 	AutoCreateDir *bool    `json:"auto_create_dir"`
+	AutoStore     *bool    `json:"auto_store"`
 	AgentNodeID   *string  `json:"agent_node_id"`
 	X             *float64 `json:"x"`
 	Y             *float64 `json:"y"`
@@ -1275,6 +1277,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentNodeID != nil {
 		storeNode.AgentNodeID = *req.AgentNodeID
+	}
+	if req.AutoStore != nil {
+		storeNode.AutoStore = *req.AutoStore
 	}
 
 	// Update position if provided

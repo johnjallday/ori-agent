@@ -845,17 +845,60 @@ export class RendererNodes {
       const title = schedulerNode.name || 'Scheduler';
       this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
 
-      // Status badge
-      const statusText = enabled ? 'Enabled' : 'Paused';
+      // Pause/Play toggle button (top right, before status badge)
+      const toggleBtnSize = 22;
+      const toggleBtnX = cardX + cardWidth - toggleBtnSize - 8;
+      const toggleBtnY = cardY + 6;
+
+      // Button background
+      this.ctx.fillStyle = enabled ? '#f59e0b' : '#10b981'; // Orange to pause, green to play
+      this.ctx.beginPath();
+      this.ctx.arc(toggleBtnX + toggleBtnSize / 2, toggleBtnY + toggleBtnSize / 2, toggleBtnSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Draw pause or play icon
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+
+      if (enabled) {
+        // Draw pause icon (two vertical bars)
+        const barWidth = 3;
+        const barHeight = 10;
+        const barY = toggleBtnY + toggleBtnSize / 2 - barHeight / 2;
+        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 - barWidth - 2, barY, barWidth, barHeight);
+        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 + 2, barY, barWidth, barHeight);
+      } else {
+        // Draw play icon (triangle)
+        const centerX = toggleBtnX + toggleBtnSize / 2;
+        const centerY = toggleBtnY + toggleBtnSize / 2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(centerX - 3, centerY - 5);
+        this.ctx.lineTo(centerX - 3, centerY + 5);
+        this.ctx.lineTo(centerX + 5, centerY);
+        this.ctx.closePath();
+        this.ctx.fill();
+      }
+
+      // Store toggle button bounds
+      schedulerNode.toggleBtnBounds = {
+        x: toggleBtnX,
+        y: toggleBtnY,
+        width: toggleBtnSize,
+        height: toggleBtnSize
+      };
+
+      // Status badge (moved left to make room for toggle button)
+      const statusText = enabled ? 'Active' : 'Paused';
       const statusColor = enabled ? '#10b981' : '#64748b';
-      const badgeX = cardX + cardWidth - 65;
+      const badgeX = cardX + cardWidth - toggleBtnSize - 65;
       const badgeY = cardY + 8;
       this.ctx.fillStyle = statusColor + '20'; // 20% opacity background
-      this.primitives.roundRect(badgeX, badgeY, 55, 18, 4);
+      this.primitives.roundRect(badgeX, badgeY, 50, 18, 4);
       this.ctx.fill();
       this.ctx.fillStyle = statusColor;
       this.ctx.font = '10px system-ui';
-      this.ctx.fillText(statusText, badgeX + 8, badgeY + 12);
+      this.ctx.fillText(statusText, badgeX + 6, badgeY + 12);
 
       // Connection indicator (small link icon if connected)
       if (isConnected) {

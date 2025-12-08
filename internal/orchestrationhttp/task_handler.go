@@ -1875,7 +1875,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	switch r.Method {
 	case http.MethodGet:
 		th.handleGetSchedulerNode(w, r, nodeID)
-	case http.MethodPut:
+	case http.MethodPut, http.MethodPatch:
 		th.handleUpdateSchedulerNode(w, r, nodeID)
 	case http.MethodDelete:
 		th.handleDeleteSchedulerNode(w, r, nodeID)

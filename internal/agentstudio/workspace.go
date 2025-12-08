@@ -274,6 +274,7 @@ type StoreNode struct {
 	Format        string    `json:"format"`     // "json", "text", "markdown", "binary"
 	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
 	AutoCreateDir bool      `json:"auto_create_dir"`
+	AutoStore     bool      `json:"auto_store"` // Automatically store task results on completion
 	LastWriteTime time.Time `json:"last_write_time"`
 	WriteCount    int       `json:"write_count"`
 	LastError     string    `json:"last_error"`

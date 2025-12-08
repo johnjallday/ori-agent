@@ -1026,6 +1026,37 @@ class AgentCanvas {
   }
 
   /**
+   * Toggle scheduler enabled/paused state
+   */
+  async toggleSchedulerEnabled(schedulerNode) {
+    const nodeId = schedulerNode?.canvas_node_id;
+    if (!schedulerNode || !nodeId || !this.studioId) {
+      alert('Cannot toggle scheduler: missing ID or workspace');
+      return;
+    }
+
+    const newEnabled = schedulerNode.enabled === false ? true : false;
+    const action = newEnabled ? 'resume' : 'pause';
+
+    console.log(`⏯️ ${action} scheduler node:`, nodeId);
+
+    try {
+      await apiPatch(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}?studio_id=${this.studioId}`, {
+        enabled: newEnabled
+      });
+
+      // Update local state
+      schedulerNode.enabled = newEnabled;
+
+      this.notifications?.showNotification?.(`Scheduler ${newEnabled ? 'resumed' : 'paused'}`, 'success');
+      this.draw();
+    } catch (err) {
+      console.error('Failed to toggle scheduler enabled state', err);
+      alert('Failed to toggle scheduler: ' + (err?.message || err));
+    }
+  }
+
+  /**
    * Toggle scheduler assignment mode
    */
   toggleSchedulerAssignmentMode(schedulerNode) {

@@ -424,6 +424,18 @@ export class AgentCanvasInteractionHandler {
             }
           }
 
+          // Toggle (pause/play) button
+          if (schedulerNode.toggleBtnBounds) {
+            const btn = schedulerNode.toggleBtnBounds;
+            if (x >= btn.x && x <= btn.x + btn.width &&
+                y >= btn.y && y <= btn.y + btn.height) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.parent.toggleSchedulerEnabled(schedulerNode);
+              return;
+            }
+          }
+
           // Trigger button
           if (schedulerNode.triggerButton) {
             const btn = schedulerNode.triggerButton;

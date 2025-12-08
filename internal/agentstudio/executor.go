@@ -398,6 +398,11 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 		return
 	}
 
+	// Check if auto-store is enabled for this store node
+	if !assignedStore.AutoStore {
+		return
+	}
+
 	// Generate filename: task-{short-id}-{timestamp}.{format}
 	taskIDShort := task.ID
 	if len(taskIDShort) > 8 {
