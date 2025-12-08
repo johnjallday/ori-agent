@@ -267,6 +267,7 @@ type ScheduledTask struct {
 type StoreNode struct {
 	ID            string    `json:"id"`
 	CanvasNodeID  string    `json:"canvas_node_id"`
+	AgentNodeID   string    `json:"agent_node_id"` // Agent instance this store is connected to
 	WorkspaceID   string    `json:"workspace_id"`
 	Name          string    `json:"name"`
 	BaseDir       string    `json:"base_dir"`   // Base directory (e.g., "reports/")

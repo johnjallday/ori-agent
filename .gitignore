@@ -114,7 +114,7 @@ local_plugin_registry.json
 workspaces/
 
 ori-agent
-server
+/server
 settings.json
 app_state.json
 location.json

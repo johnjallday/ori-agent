@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
@@ -22,6 +23,7 @@ type Manager struct {
 	uploadedPluginsDir string
 	lastFetchTime      time.Time
 	fetchInterval      time.Duration
+	mu                 sync.RWMutex // Protects concurrent access to local registry file
 }
 
 // NewManager creates a new registry manager
@@ -172,8 +174,8 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	return reg, nil
 }
 
-// LoadLocal loads the user's local plugin registry
-func (m *Manager) LoadLocal() (types.PluginRegistry, error) {
+// loadLocalUnlocked loads the user's local plugin registry without locking (internal use only)
+func (m *Manager) loadLocalUnlocked() (types.PluginRegistry, error) {
 	var reg types.PluginRegistry
 
 	if b, err := os.ReadFile(m.localRegistryPath); err == nil {
@@ -184,8 +186,8 @@ func (m *Manager) LoadLocal() (types.PluginRegistry, error) {
 	return reg, nil
 }
 
-// SaveLocal saves the local plugin registry to file
-func (m *Manager) SaveLocal(reg types.PluginRegistry) error {
+// saveLocalUnlocked saves the local plugin registry to file without locking (internal use only)
+func (m *Manager) saveLocalUnlocked(reg types.PluginRegistry) error {
 	data, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal local registry: %w", err)
@@ -196,6 +198,20 @@ func (m *Manager) SaveLocal(reg types.PluginRegistry) error {
 	}
 
 	return nil
+}
+
+// LoadLocal loads the user's local plugin registry
+func (m *Manager) LoadLocal() (types.PluginRegistry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.loadLocalUnlocked()
+}
+
+// SaveLocal saves the local plugin registry to file
+func (m *Manager) SaveLocal(reg types.PluginRegistry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.saveLocalUnlocked(reg)
 }
 
 // ScanUploadedPlugins scans the uploaded_plugins directory and adds any new plugins to local registry
@@ -700,7 +716,10 @@ func (m *Manager) UpdatePluginPermissions(pluginName string, perms map[string]in
 
 // UpdatePluginStatus updates the enabled status and health for a plugin
 func (m *Manager) UpdatePluginStatus(pluginName string, enabled bool, healthStatus string) error {
-	localReg, err := m.LoadLocal()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	localReg, err := m.loadLocalUnlocked()
 	if err != nil {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
@@ -719,12 +738,15 @@ func (m *Manager) UpdatePluginStatus(pluginName string, enabled bool, healthStat
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
-	return m.SaveLocal(localReg)
+	return m.saveLocalUnlocked(localReg)
 }
 
 // UpdatePluginLastUsed updates the last used timestamp for a plugin
 func (m *Manager) UpdatePluginLastUsed(pluginName string, lastUsed time.Time) error {
-	localReg, err := m.LoadLocal()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	localReg, err := m.loadLocalUnlocked()
 	if err != nil {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
@@ -742,12 +764,15 @@ func (m *Manager) UpdatePluginLastUsed(pluginName string, lastUsed time.Time) er
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
-	return m.SaveLocal(localReg)
+	return m.saveLocalUnlocked(localReg)
 }
 
 // AddVersionToHistory adds a version entry to a plugin's version history
 func (m *Manager) AddVersionToHistory(pluginName string, versionEntry types.VersionHistoryEntry) error {
-	localReg, err := m.LoadLocal()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	localReg, err := m.loadLocalUnlocked()
 	if err != nil {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
@@ -765,12 +790,15 @@ func (m *Manager) AddVersionToHistory(pluginName string, versionEntry types.Vers
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
-	return m.SaveLocal(localReg)
+	return m.saveLocalUnlocked(localReg)
 }
 
 // RemovePlugin removes a plugin from the local registry
 func (m *Manager) RemovePlugin(pluginName string) error {
-	localReg, err := m.LoadLocal()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	localReg, err := m.loadLocalUnlocked()
 	if err != nil {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
@@ -790,12 +818,15 @@ func (m *Manager) RemovePlugin(pluginName string) error {
 	}
 
 	localReg.Plugins = updatedPlugins
-	return m.SaveLocal(localReg)
+	return m.saveLocalUnlocked(localReg)
 }
 
 // MigrateExistingPlugins adds default values for new metadata fields to existing plugins
 func (m *Manager) MigrateExistingPlugins() error {
-	localReg, err := m.LoadLocal()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	localReg, err := m.loadLocalUnlocked()
 	if err != nil {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
@@ -841,7 +872,7 @@ func (m *Manager) MigrateExistingPlugins() error {
 	}
 
 	if updated {
-		if err := m.SaveLocal(localReg); err != nil {
+		if err := m.saveLocalUnlocked(localReg); err != nil {
 			return fmt.Errorf("failed to save migrated registry: %w", err)
 		}
 		fmt.Println("✅ Migrated local plugin registry with new metadata fields")

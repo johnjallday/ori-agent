@@ -67,7 +67,20 @@ function hideUpdateNotificationButton() {
 
 // Show update modal with details
 async function showUpdateModal() {
-  const modal = new bootstrap.Modal(document.getElementById('updateModal'));
+  try {
+    await ensureBootstrapModal();
+  } catch (error) {
+    console.error('Bootstrap not available for update modal:', error);
+    return;
+  }
+
+  const modalElement = ensureUpdateModalElement();
+  if (!modalElement) {
+    console.error('Update modal container is missing and could not be created.');
+    return;
+  }
+
+  const modal = new bootstrap.Modal(modalElement);
   modal.show();
 
   // If we have cached update info, use it; otherwise fetch fresh
@@ -442,6 +455,87 @@ Click the **Update** button in the top navigation bar to download and install th
 window.initUpdateChecker = initUpdateChecker;
 window.checkForUpdates = checkForUpdates;
 window.showUpdateModal = showUpdateModal;
+
+// Ensure update modal exists (for pages that don't include modals.tmpl)
+function ensureUpdateModalElement() {
+  let modalElement = document.getElementById('updateModal');
+  if (modalElement) return modalElement;
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = `
+    <div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="updateModalLabel">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+              </svg>
+              Update Available
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="updateModalBody">
+            <div class="text-center py-4">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Later</button>
+            <a id="downloadUpdateBtn" href="#" class="modern-btn modern-btn-primary" target="_blank" style="display:none;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+              </svg>
+              Download Update
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const created = wrapper.firstElementChild;
+  if (created) {
+    document.body.appendChild(created);
+    modalElement = created;
+  }
+
+  return modalElement;
+}
+
+// Ensure bootstrap is available before showing modal
+let bootstrapReadyPromise = null;
+function ensureBootstrapModal() {
+  if (window.bootstrap && window.bootstrap.Modal) {
+    return Promise.resolve(window.bootstrap);
+  }
+
+  if (!bootstrapReadyPromise) {
+    bootstrapReadyPromise = new Promise((resolve, reject) => {
+      // If a script tag is already loading bootstrap, reuse it
+      let script = document.querySelector('script[data-ensure-bootstrap]');
+      const onReady = () => (window.bootstrap ? resolve(window.bootstrap) : reject(new Error('Bootstrap failed to load')));
+
+      if (script) {
+        script.addEventListener('load', onReady, { once: true });
+        script.addEventListener('error', () => reject(new Error('Bootstrap script failed to load')), { once: true });
+        return;
+      }
+
+      script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js';
+      script.defer = true;
+      script.setAttribute('data-ensure-bootstrap', 'true');
+      script.addEventListener('load', onReady, { once: true });
+      script.addEventListener('error', () => reject(new Error('Bootstrap script failed to load')), { once: true });
+      document.head.appendChild(script);
+    });
+  }
+
+  return bootstrapReadyPromise;
+}
 
 // Auto-initialize on page load
 if (document.readyState === 'loading') {

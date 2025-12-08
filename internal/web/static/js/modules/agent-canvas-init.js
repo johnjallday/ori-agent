@@ -171,27 +171,28 @@ export class AgentCanvasInitialization {
         console.log('📅 No scheduled_tasks in studio data');
       }
 
-      // Load store nodes from studio if they exist
-      if (this.parent.studio.store_nodes && Array.isArray(this.parent.studio.store_nodes)) {
-        const storeNodes = this.parent.studio.store_nodes
-          .map(node => {
-            // Get position from layout if available
-            let x = 400, y = 400;
-            if (this.parent.studio.layout && this.parent.studio.layout.store_positions) {
-              const pos = this.parent.studio.layout.store_positions[node.canvas_node_id];
-              if (pos) {
-                x = pos.x;
-                y = pos.y;
-                console.log('💾 Using layout position for', node.canvas_node_id, ':', pos);
-              }
-            }
+      // Load store nodes from studio
+      if (this.parent.studio.store_nodes) {
+        console.log('💾 Raw store_nodes from API:', this.parent.studio.store_nodes);
 
-            return {
-              ...node,
-              x: x,
-              y: y
-            };
-          });
+        const storeNodes = this.parent.studio.store_nodes.map(node => {
+          // Get position from layout if available
+          let x = 400, y = 400;
+          if (this.parent.studio.layout && this.parent.studio.layout.store_positions) {
+            const pos = this.parent.studio.layout.store_positions[node.canvas_node_id];
+            if (pos) {
+              x = pos.x;
+              y = pos.y;
+              console.log('💾 Using layout position for', node.canvas_node_id, ':', pos);
+            }
+          }
+
+          return {
+            ...node,
+            x: x,
+            y: y
+          };
+        });
 
         console.log('💾 Loaded store nodes:', storeNodes.length, storeNodes);
         this.state.setStoreNodes(storeNodes);
@@ -225,7 +226,7 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Schedulers: ${this.state.schedulerNodes.length}`;
+        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Schedulers: ${this.state.schedulerNodes.length} | Stores: ${this.state.storeNodes.length}`;
 
 
     } catch (error) {

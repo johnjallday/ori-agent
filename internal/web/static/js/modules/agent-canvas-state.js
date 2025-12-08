@@ -103,7 +103,6 @@ export const EVENT_TYPES = {
   STORE_NODE_UPDATED: 'store_node.updated',
   STORE_NODE_MOVED: 'store_node.moved',
   STORE_NODE_DELETED: 'store_node.deleted',
-  STORE_NODE_STATUS_CHANGED: 'store_node.status.changed',
 
   // Canvas events
   CANVAS_PANNED: 'canvas.panned',
@@ -154,7 +153,7 @@ export class AgentCanvasState {
     this.tasks = [];
     this.attachments = [];
     this.schedulerNodes = [];  // Scheduler nodes (canvas-based scheduled tasks)
-    this.storeNodes = [];      // Store nodes (file storage nodes)
+    this.storeNodes = [];  // Store nodes (file storage nodes)
 
     // Data & Communication
     this.messages = [];
@@ -187,10 +186,6 @@ export class AgentCanvasState {
     // Drag State - Scheduler Node
     this.isDraggingSchedulerNode = false;
     this.draggedSchedulerNode = null;
-
-    // Drag State - Store Node
-    this.isDraggingStoreNode = false;
-    this.draggedStoreNode = null;
 
     // Drag State - Connection
     this.isDraggingConnection = false;
@@ -462,6 +457,13 @@ export class AgentCanvasState {
   }
 
   /**
+   * Set store nodes
+   */
+  setStoreNodes(storeNodes) {
+    this.storeNodes = storeNodes || [];
+  }
+
+  /**
    * Add scheduler node
    */
   addSchedulerNode(schedulerNode) {
@@ -497,48 +499,6 @@ export class AgentCanvasState {
     }
   }
 
-  // ==================== STORE NODE STATE MANAGEMENT ====================
-
-  /**
-   * Set store nodes
-   */
-  setStoreNodes(storeNodes) {
-    this.storeNodes = storeNodes || [];
-  }
-
-  /**
-   * Add store node
-   */
-  addStoreNode(storeNode) {
-    this.storeNodes.push(storeNode);
-    this.eventBus.emit(EVENT_TYPES.STORE_NODE_CREATED, { storeNode });
-  }
-
-  /**
-   * Get store node by ID
-   */
-  getStoreNode(storeNodeId) {
-    return this.storeNodes.find(s => s.id === storeNodeId);
-  }
-
-  /**
-   * Update store node position
-   */
-  updateStoreNodePosition(storeNode, x, y) {
-    storeNode.x = x;
-    storeNode.y = y;
-    this.eventBus.emit(EVENT_TYPES.STORE_NODE_MOVED, { storeNode, x, y });
-  }
-
-  /**
-   * Update store node status
-   */
-  updateStoreNodeStatus(storeNode, status) {
-    const oldStatus = { ...storeNode };
-    Object.assign(storeNode, status);
-    this.eventBus.emit(EVENT_TYPES.STORE_NODE_STATUS_CHANGED, { storeNode, oldStatus });
-  }
-
   /**
    * Remove store node by ID
    */
@@ -550,8 +510,6 @@ export class AgentCanvasState {
       this.eventBus.emit(EVENT_TYPES.STORE_NODE_DELETED, { storeNode });
     }
   }
-
-  // ========================================================================
 
   /**
    * Remove attachment by ID

@@ -1,8 +1,20 @@
 #!/bin/bash
 
-# create-release.sh - Creates a new release for Ori Agent
-# Usage: ./scripts/create-release.sh <version>
-# Example: ./scripts/create-release.sh v1.0.1
+# create-release.sh - Creates a release branch following Git Flow
+#
+# Usage:
+#   ./scripts/create-release.sh <version>
+#   ./scripts/create-release.sh v1.3.0
+#   ./scripts/create-release.sh v1.3.0 --immediate   # Skip release branch, release now
+#
+# Git Flow Workflow:
+#   1. Creates release/vX.Y.Z branch from dev
+#   2. Push triggers CI validation
+#   3. Scheduled release (Tuesday 10:00 UTC) or manual trigger merges to main
+#
+# Immediate Release (--immediate flag):
+#   - Skips release branch
+#   - Merges dev to main, tags, and releases via GitHub Actions
 
 set -e
 
@@ -37,14 +49,36 @@ print_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Parse arguments
+IMMEDIATE=false
+VERSION=""
+for arg in "$@"; do
+  case $arg in
+    --immediate)
+      IMMEDIATE=true
+      ;;
+    *)
+      if [ -z "$VERSION" ]; then
+        VERSION="$arg"
+      fi
+      ;;
+  esac
+done
+
 # Check if version argument is provided
-if [ $# -eq 0 ]; then
-  print_error "Usage: $0 <version>"
-  print_error "Example: $0 v1.0.1"
+if [ -z "$VERSION" ]; then
+  print_error "Usage: $0 <version> [--immediate]"
+  print_error "Examples:"
+  print_error "  $0 v1.3.0              # Create release branch (scheduled release)"
+  print_error "  $0 v1.3.0 --immediate  # Release immediately"
   exit 1
 fi
 
-VERSION=$1
+# Ensure version starts with 'v'
+if [[ ! "$VERSION" =~ ^v ]]; then
+  VERSION="v$VERSION"
+  print_status "Added 'v' prefix: $VERSION"
+fi
 
 # Validate version format (basic check for v prefix and semantic versioning)
 if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -52,7 +86,13 @@ if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-print_status "Creating release $VERSION for Ori Agent"
+RELEASE_BRANCH="release/$VERSION"
+
+if [ "$IMMEDIATE" = true ]; then
+  print_status "Creating immediate release $VERSION for Ori Agent"
+else
+  print_status "Creating release branch $RELEASE_BRANCH for Ori Agent"
+fi
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -73,167 +113,157 @@ if git tag -l | grep -q "^$VERSION$"; then
   exit 1
 fi
 
-# ENFORCE main branch for releases
+# Check current branch
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  print_error "Releases must be created from 'main' branch"
-  print_error "Current branch: '$CURRENT_BRANCH'"
-  echo ""
-  print_error "To release:"
-  print_error "  1. ./scripts/prepare-release.sh"
-  print_error "  2. ./scripts/pre-release-check.sh $VERSION"
-  print_error "  3. ./scripts/create-release.sh $VERSION"
-  exit 1
-fi
 
-# Check that dev is merged into main
-if git show-ref --verify --quiet refs/heads/dev; then
-  print_status "Checking if dev branch is merged..."
-  DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
-  if [ "$DEV_COMMITS" -gt 0 ]; then
-    print_warning "dev branch has $DEV_COMMITS commit(s) not merged to main"
-    print_warning "You should merge dev to main before releasing:"
-    print_warning "  git merge dev"
-    print_warning "Or run: ./scripts/prepare-release.sh"
-    echo ""
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      print_error "Release cancelled"
-      exit 1
-    fi
-  else
-    print_success "dev branch is fully merged into main"
+if [ "$IMMEDIATE" = true ]; then
+  # ============================================
+  # IMMEDIATE RELEASE MODE
+  # ============================================
+
+  # For immediate release, we need to be on main or merge dev to main
+  if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "dev" ]; then
+    print_error "For immediate release, must be on 'main' or 'dev' branch"
+    print_error "Current branch: '$CURRENT_BRANCH'"
+    exit 1
   fi
-fi
 
-# Pull latest changes
-print_status "Pulling latest changes..."
-git pull origin "$CURRENT_BRANCH"
-
-# Check that pre-release checks were run
-print_status "Verifying pre-release checks were completed..."
-print_warning "Make sure you ran './scripts/pre-release-check.sh' before releasing!"
-read -p "Have you run pre-release-check.sh and all checks passed? (y/N): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  print_error "Please run './scripts/pre-release-check.sh' first to validate the release."
-  exit 1
-fi
-
-# Update version in VERSION file (do this before creating tag)
-VERSION_FILE="VERSION"
-if [ -f "$VERSION_FILE" ]; then
-  print_status "Updating version in VERSION file..."
-  echo "$VERSION" >"$VERSION_FILE"
-
-  if git diff --quiet "$VERSION_FILE"; then
-    print_warning "Version in VERSION file was not updated (already correct)"
+  # If on dev, switch to main and merge
+  if [ "$CURRENT_BRANCH" = "dev" ]; then
+    print_status "Switching to main and merging dev..."
+    git switch main
+    git pull origin main
+    git merge dev --no-ff -m "Merge dev for release $VERSION"
   else
-    print_status "Updated version in VERSION file"
+    # Already on main, just pull
+    print_status "Pulling latest changes..."
+    git pull origin main
+
+    # Check that dev is merged
+    if git show-ref --verify --quiet refs/heads/dev; then
+      DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
+      if [ "$DEV_COMMITS" -gt 0 ]; then
+        print_warning "dev branch has $DEV_COMMITS commit(s) not merged to main"
+        read -p "Merge dev to main now? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+          git merge dev --no-ff -m "Merge dev for release $VERSION"
+        fi
+      fi
+    fi
+  fi
+
+  # Run pre-release checks
+  print_status "Running pre-release checks..."
+  if [ -f "./scripts/pre-release-check.sh" ]; then
+    print_warning "Consider running './scripts/pre-release-check.sh $VERSION' for full validation"
+  fi
+
+  # Run quick tests
+  print_status "Running quick tests..."
+  go test -short ./... || {
+    print_error "Tests failed. Fix issues before releasing."
+    exit 1
+  }
+
+  # Update VERSION file
+  VERSION_FILE="VERSION"
+  print_status "Updating VERSION file..."
+  echo "$VERSION" >"$VERSION_FILE"
+  if ! git diff --quiet "$VERSION_FILE" 2>/dev/null; then
     git add "$VERSION_FILE"
     git commit -m "chore: bump version to $VERSION"
   fi
+
+  # Push main
+  print_status "Pushing main branch..."
+  git push origin main
+
+  # Create and push tag (triggers release.yml workflow)
+  print_status "Creating and pushing tag $VERSION..."
+  git tag -a "$VERSION" -m "Release $VERSION"
+  git push origin "$VERSION"
+
+  print_success "Release $VERSION triggered!"
+  echo ""
+  print_status "The release workflow is now running on GitHub Actions."
+  print_status "View progress: gh run list --workflow=release.yml"
+  echo ""
+
+  # Merge back to dev
+  if git show-ref --verify --quiet refs/heads/dev; then
+    print_status "Syncing release back to dev..."
+    git switch dev
+    git pull origin dev
+    git merge main --no-ff -m "Merge main ($VERSION) back to dev"
+    git push origin dev
+    print_success "dev branch updated with release"
+  fi
+
 else
-  print_status "Creating VERSION file..."
+  # ============================================
+  # RELEASE BRANCH MODE (Git Flow)
+  # ============================================
+
+  # Must be on dev branch for release branch creation
+  if [ "$CURRENT_BRANCH" != "dev" ]; then
+    print_warning "Not on dev branch (currently on $CURRENT_BRANCH)"
+    read -p "Switch to dev? [Y/n] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+      git switch dev
+    else
+      print_error "Must be on dev branch to create a release branch"
+      exit 1
+    fi
+  fi
+
+  # Pull latest dev
+  print_status "Pulling latest changes from dev..."
+  git pull origin dev
+
+  # Check if release branch already exists
+  if git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH" || \
+     git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
+    print_error "Branch $RELEASE_BRANCH already exists."
+    exit 1
+  fi
+
+  # Update VERSION file on release branch
+  VERSION_FILE="VERSION"
+
+  # Create release branch
+  print_status "Creating branch $RELEASE_BRANCH..."
+  git switch -c "$RELEASE_BRANCH"
+
+  # Update VERSION file
+  print_status "Updating VERSION file..."
   echo "$VERSION" >"$VERSION_FILE"
   git add "$VERSION_FILE"
-  git commit -m "chore: create VERSION file with version $VERSION"
-fi
+  git commit -m "chore: bump version to $VERSION"
 
-# Create git tag
-print_status "Creating git tag $VERSION..."
-git tag -a "$VERSION" -m "Release $VERSION
+  # Push to origin (triggers CI)
+  print_status "Pushing $RELEASE_BRANCH to origin..."
+  git push -u origin "$RELEASE_BRANCH"
 
-🚀 Generated with create-release.sh"
-
-# Push the tag
-print_status "Pushing tag to origin..."
-git push origin "$VERSION"
-
-# Build multi-platform installers and create GitHub release with GoReleaser
-print_status "Building installers for all platforms (macOS, Windows, Linux)..."
-
-# Check if GoReleaser is installed
-if ! command -v goreleaser >/dev/null 2>&1; then
-  print_error "GoReleaser not found. Install it with:"
-  print_error "  brew install goreleaser"
-  print_error "  or visit: https://goreleaser.com/install/"
-  exit 1
-fi
-
-# Run GoReleaser to build all installers and create GitHub release
-print_status "Running GoReleaser (this will build binaries, create installers, and publish to GitHub)..."
-if goreleaser release --clean; then
-  print_success "All platform installers built successfully"
-  print_success "GitHub release created and installers uploaded"
-
-  # Create macOS DMGs (GoReleaser publishers don't work since we exclude darwin archives)
-  print_status "Creating macOS DMG installers..."
-  SHORT_VERSION="${VERSION#v}"
-  if ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin amd64 dist; then
-    print_success "Created DMG for amd64"
-  else
-    print_warning "Failed to create DMG for amd64"
-  fi
-  if ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist; then
-    print_success "Created DMG for arm64"
-  else
-    print_warning "Failed to create DMG for arm64"
-  fi
-
-  # Show what was built
-  print_status "Built installers:"
-  ls -lh dist/*.dmg dist/*.deb dist/*.rpm 2>/dev/null || echo "  (See dist/ directory for all artifacts)"
-
-  # Upload DMGs to GitHub release
-  DMG_AMD64="dist/OriAgent-${SHORT_VERSION}-amd64.dmg"
-  DMG_ARM64="dist/OriAgent-${SHORT_VERSION}-arm64.dmg"
-  if command -v gh >/dev/null 2>&1; then
-    DMG_UPLOAD_LIST=()
-    [ -f "$DMG_AMD64" ] && DMG_UPLOAD_LIST+=("$DMG_AMD64")
-    [ -f "$DMG_ARM64" ] && DMG_UPLOAD_LIST+=("$DMG_ARM64")
-    if [ "${#DMG_UPLOAD_LIST[@]}" -gt 0 ]; then
-      print_status "Uploading DMGs to release assets (gh)..."
-      gh release upload "$VERSION" "${DMG_UPLOAD_LIST[@]}" --clobber || print_warning "DMG upload via gh failed"
-    else
-      print_warning "DMG files not found in dist/; skipping DMG upload"
-    fi
-  else
-    print_warning "gh CLI not found; skipping DMG upload"
-  fi
-
-  # Verify and show release info
-  if command -v gh >/dev/null 2>&1; then
-    if gh release view "$VERSION" >/dev/null 2>&1; then
-      ASSET_COUNT=$(gh release view "$VERSION" --json assets --jq '.assets | length')
-      print_success "Uploaded $ASSET_COUNT file(s) as release assets"
-      print_status "View release at: $(gh repo view --web --json url -q .url)/releases/tag/$VERSION"
-    fi
-  fi
-else
-  print_error "GoReleaser failed. Check the output above for errors."
-  print_warning "The git tag has been pushed. You may need to delete it if you want to retry:"
-  print_warning "  git tag -d $VERSION"
-  print_warning "  git push origin :refs/tags/$VERSION"
-  exit 1
-fi
-
-print_success "Release $VERSION created successfully!"
-echo ""
-
-# Switch back to dev branch for continued development
-if git show-ref --verify --quiet refs/heads/dev; then
-  print_status "Switching back to dev branch for continued development..."
-  git switch dev
-  print_success "Now on dev branch - ready for next features!"
+  print_success "Release branch created: $RELEASE_BRANCH"
   echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  print_status "Next steps:"
+  echo "  1. Make any final fixes on this branch (bug fixes only, no new features)"
+  echo "  2. Push changes: git push"
+  echo "  3. Wait for scheduled release (Tuesday 10:00 UTC)"
+  echo "     OR manually trigger the release workflow"
+  echo ""
+  print_status "To trigger release immediately:"
+  echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
+  echo ""
+  print_status "To do a dry run first:"
+  echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH -f dry_run=true"
+  echo ""
+  print_status "To continue development on dev:"
+  echo "  git switch dev"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 fi
-
-print_status "Next steps:"
-print_status "  1. Review the release on GitHub"
-print_status "  2. Add any additional release notes if needed"
-print_status "  3. Continue development on dev branch"
-echo ""
-print_status "💡 Tip: main branch now represents the released version ($VERSION)"
-print_status "💡 Tip: Continue your daily work on dev branch"

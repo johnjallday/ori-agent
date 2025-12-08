@@ -258,7 +258,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Store Nodes: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Stores: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
