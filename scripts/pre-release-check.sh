@@ -396,17 +396,23 @@ fi
 # Check current branch
 CURRENT_BRANCH=$(git branch --show-current)
 if [ "$CURRENT_BRANCH" = "dev" ]; then
-  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (testing before merge)${NC}"
+  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (testing before release branch)${NC}"
   echo ""
   echo -e "${BLUE}ℹ️  Running pre-release checks on dev branch${NC}"
-  echo -e "${BLUE}   This ensures code is stable before merging to main${NC}"
+  echo -e "${BLUE}   This ensures code is stable before creating release branch${NC}"
+  echo ""
+elif [[ "$CURRENT_BRANCH" =~ ^release/ ]]; then
+  echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH (release stabilization)${NC}"
+  echo ""
+  echo -e "${BLUE}ℹ️  Running pre-release checks on release branch${NC}"
+  echo -e "${BLUE}   This validates the release before merging to main${NC}"
   echo ""
 elif [ "$CURRENT_BRANCH" = "main" ]; then
   echo -e "${GREEN}✅ Git Branch: $CURRENT_BRANCH${NC}"
   echo ""
 
   echo -e "${YELLOW}⚠️  You're running checks on main (after merge)${NC}"
-  echo -e "${YELLOW}   Best practice: Run checks on dev first, then merge${NC}"
+  echo -e "${YELLOW}   Best practice: Run checks on release branch first${NC}"
   echo ""
 
   # Check if dev is merged into main
@@ -414,7 +420,7 @@ elif [ "$CURRENT_BRANCH" = "main" ]; then
     DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
     if [ "$DEV_COMMITS" -gt 0 ]; then
       echo -e "${RED}❌ Warning: dev branch has $DEV_COMMITS commit(s) not in main${NC}"
-      echo -e "${YELLOW}   Merge dev to main with: ./scripts/prepare-release.sh${NC}"
+      echo -e "${YELLOW}   Create release branch: ./scripts/create-release.sh vX.Y.Z${NC}"
       echo ""
       FAILED_CHECKS+=("dev branch not merged to main")
     else
@@ -426,9 +432,9 @@ elif [ "$CURRENT_BRANCH" = "main" ]; then
     echo ""
   fi
 else
-  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'dev' or 'main')${NC}"
+  echo -e "${RED}❌ Git Branch: $CURRENT_BRANCH (must be on 'dev', 'release/*', or 'main')${NC}"
   echo ""
-  FAILED_CHECKS+=("Not on dev or main branch")
+  FAILED_CHECKS+=("Not on dev, release, or main branch")
 fi
 
 # 7. SMOKE TESTS (OPTIONAL)
@@ -485,7 +491,7 @@ if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
   CURRENT_BRANCH=$(git branch --show-current)
 
   if [ "$CURRENT_BRANCH" = "dev" ]; then
-    # Checks passed on dev - ready to merge to main
+    # Checks passed on dev - ready to create release branch
     if [ -n "$VERSION" ]; then
       echo -e "${GREEN}dev branch is ready to release $VERSION${NC}"
     else
@@ -493,32 +499,45 @@ if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
     fi
     echo ""
     echo "Next steps:"
-    echo "  1. ./scripts/prepare-release.sh"
-    echo "     (Merges dev → main)"
-    echo ""
     if [ -n "$VERSION" ]; then
-      echo "  2. ./scripts/create-release.sh $VERSION"
-      echo "     (Creates release from main)"
+      echo "  ./scripts/create-release.sh $VERSION"
+      echo "     (Creates release/vX.Y.Z branch for stabilization)"
     else
-      echo "  2. ./scripts/create-release.sh v0.0.X"
-      echo "     (Creates release from main)"
+      echo "  ./scripts/create-release.sh vX.Y.Z"
+      echo "     (Creates release branch for stabilization)"
     fi
     echo ""
-    echo -e "${BLUE}💡 Tip: All checks passed on dev, safe to merge!${NC}"
+    echo -e "${BLUE}💡 Tip: All checks passed on dev, safe to create release branch!${NC}"
+    echo ""
+  elif [[ "$CURRENT_BRANCH" =~ ^release/ ]]; then
+    # Checks passed on release branch - ready to trigger release
+    RELEASE_VERSION="${CURRENT_BRANCH#release/}"
+    echo -e "${GREEN}Release branch is ready: $CURRENT_BRANCH${NC}"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Wait for scheduled release (Tuesday 10:00 UTC)"
+    echo "     OR trigger manually:"
+    echo ""
+    echo "  gh workflow run scheduled-release.yml -f release_branch=$CURRENT_BRANCH"
+    echo ""
+    echo "  Optional dry run first:"
+    echo "  gh workflow run scheduled-release.yml -f release_branch=$CURRENT_BRANCH -f dry_run=true"
+    echo ""
+    echo -e "${BLUE}💡 Tip: All checks passed, release branch is ready!${NC}"
     echo ""
   elif [ "$CURRENT_BRANCH" = "main" ]; then
-    # Checks passed on main - ready to release
+    # Checks passed on main - unusual but ok
     if [ -n "$VERSION" ]; then
       echo "Ready to release $VERSION"
       echo ""
       echo "Next steps:"
-      echo "  ./scripts/create-release.sh $VERSION"
+      echo "  ./scripts/create-release.sh $VERSION --immediate"
       echo ""
     else
       echo "Ready to release!"
       echo ""
       echo "Next steps:"
-      echo "  ./scripts/create-release.sh v0.0.X"
+      echo "  ./scripts/create-release.sh vX.Y.Z --immediate"
       echo ""
     fi
   else
