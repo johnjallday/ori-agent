@@ -9,10 +9,12 @@ import (
 
 // Settings represents LLM configuration shared across agents
 type Settings struct {
-	Model        string  `json:"model"`
-	Temperature  float64 `json:"temperature"`
-	APIKey       string  `json:"api_key,omitempty"`       // OpenAI API key (optional, falls back to env var)
-	SystemPrompt string  `json:"system_prompt,omitempty"` // Custom system prompt for the agent
+	Model           string  `json:"model"`
+	Temperature     float64 `json:"temperature"`
+	APIKey          string  `json:"api_key,omitempty"`           // OpenAI API key (optional, falls back to env var)
+	SystemPrompt    string  `json:"system_prompt,omitempty"`     // Custom system prompt for the agent
+	Provider        string  `json:"provider,omitempty"`          // LLM provider backing the model (e.g., openai, anthropic)
+	MaxOutputTokens int     `json:"max_output_tokens,omitempty"` // Optional max tokens for responses
 }
 
 // OnboardingState tracks user's onboarding progress

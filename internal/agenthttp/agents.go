@@ -79,14 +79,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"name":            agentName,
-				"type":            agent.Type,
-				"role":            agent.Role,
-				"capabilities":    agent.Capabilities,
-				"model":           agent.Settings.Model,
-				"temperature":     agent.Settings.Temperature,
-				"system_prompt":   agent.Settings.SystemPrompt,
-				"enabled_plugins": enabledPlugins,
+				"name":              agentName,
+				"type":              agent.Type,
+				"role":              agent.Role,
+				"capabilities":      agent.Capabilities,
+				"model":             agent.Settings.Model,
+				"temperature":       agent.Settings.Temperature,
+				"provider":          agent.Settings.Provider,
+				"max_output_tokens": agent.Settings.MaxOutputTokens,
+				"system_prompt":     agent.Settings.SystemPrompt,
+				"enabled_plugins":   enabledPlugins,
 			})
 			return
 		}
@@ -124,14 +126,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Name         string   `json:"name"`
-			Type         string   `json:"type,omitempty"`
-			Model        string   `json:"model,omitempty"`
-			Temperature  float64  `json:"temperature,omitempty"`
-			SystemPrompt string   `json:"system_prompt,omitempty"`
-			Description  string   `json:"description,omitempty"`
-			Tags         []string `json:"tags,omitempty"`
-			AvatarColor  string   `json:"avatar_color,omitempty"`
+			Name            string   `json:"name"`
+			Type            string   `json:"type,omitempty"`
+			Model           string   `json:"model,omitempty"`
+			Temperature     float64  `json:"temperature,omitempty"`
+			SystemPrompt    string   `json:"system_prompt,omitempty"`
+			Description     string   `json:"description,omitempty"`
+			Tags            []string `json:"tags,omitempty"`
+			AvatarColor     string   `json:"avatar_color,omitempty"`
+			LLMProvider     string   `json:"llm_provider,omitempty"`
+			MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
@@ -151,10 +155,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Build config from request
 		config := &store.CreateAgentConfig{
-			Type:         req.Type,
-			Model:        req.Model,
-			Temperature:  req.Temperature,
-			SystemPrompt: req.SystemPrompt,
+			Type:            req.Type,
+			Model:           req.Model,
+			Temperature:     req.Temperature,
+			SystemPrompt:    req.SystemPrompt,
+			LLMProvider:     req.LLMProvider,
+			MaxOutputTokens: req.MaxOutputTokens,
 		}
 
 		logger.Debug("🔄 Creating agent", logger.Fields{"agent": req.Name})
@@ -245,6 +251,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Role         *string  `json:"role,omitempty"`
 			Model        *string  `json:"model,omitempty"`
 			Temperature  *float64 `json:"temperature,omitempty"`
+			LLMProvider  *string  `json:"llm_provider,omitempty"`
+			MaxTokens    *int     `json:"max_output_tokens,omitempty"`
 			SystemPrompt *string  `json:"system_prompt,omitempty"`
 			// Metadata
 			Description *string   `json:"description,omitempty"`
@@ -274,6 +282,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Temperature != nil {
 			agent.Settings.Temperature = *req.Temperature
+		}
+		if req.LLMProvider != nil {
+			agent.Settings.Provider = *req.LLMProvider
+		}
+		if req.MaxTokens != nil {
+			agent.Settings.MaxOutputTokens = *req.MaxTokens
 		}
 		if req.SystemPrompt != nil {
 			agent.Settings.SystemPrompt = *req.SystemPrompt
@@ -349,6 +363,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.Temperature != nil {
 				updatedFields = append(updatedFields, "temperature")
+			}
+			if req.LLMProvider != nil {
+				updatedFields = append(updatedFields, "llm_provider")
+			}
+			if req.MaxTokens != nil {
+				updatedFields = append(updatedFields, "max_output_tokens")
 			}
 			if req.SystemPrompt != nil {
 				updatedFields = append(updatedFields, "system_prompt")

@@ -190,3 +190,104 @@
   background: rgba(255, 193, 7, 0.1);
   color: #ffc107;
 }
+
+/* Task Collapsible Sections */
+.task-collapsible {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.5rem;
+}
+
+.task-collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.task-collapsible-header:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.task-collapsible-header.expanded {
+  color: var(--primary-color);
+}
+
+.task-collapsible-header .chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+}
+
+.task-collapsible-header.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+.task-collapsible-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease, padding 0.2s ease;
+  padding: 0 0.5rem;
+}
+
+.task-collapsible-content.expanded {
+  max-height: 300px;
+  padding: 0.5rem;
+}
+
+.task-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.375rem 0;
+  font-size: 0.8125rem;
+}
+
+.task-detail-row:not(:last-child) {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.task-detail-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.task-detail-value {
+  color: var(--text-primary);
+  max-width: 65%;
+  text-align: right;
+  word-break: break-word;
+}
+
+.task-detail-value code {
+  background: var(--bg-tertiary);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-xs);
+  font-size: 0.75rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-xs);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.status-badge.enabled {
+  background: rgba(40, 167, 69, 0.1);
+  color: var(--success-color);
+}
+
+.status-badge.disabled {
+  background: rgba(108, 117, 125, 0.1);
+  color: var(--text-muted);
+}

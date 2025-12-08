@@ -316,9 +316,9 @@ function renderAgents() {
     if (visibleAgentCount < allAgents.length) {
       // Show "Load More" button
       paginationBtn.innerHTML = `
-        <button class="btn btn-sm text-muted w-100 mt-2" style="border: 1px dashed var(--border-color); background: transparent; color: var(--text-secondary);" onclick="loadMoreAgents()">
+        <button class="modern-btn modern-btn-secondary w-100 mt-2" style="font-size: 0.875rem;" onclick="loadMoreAgents()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
           </svg>
           Load More (${allAgents.length - visibleAgentCount} more)
         </button>
@@ -326,11 +326,11 @@ function renderAgents() {
     } else {
       // Show "Hide" button
       paginationBtn.innerHTML = `
-        <button class="btn btn-sm text-muted w-100 mt-2" style="border: 1px dashed var(--border-color); background: transparent; color: var(--text-secondary);" onclick="hideAgents()">
+        <button class="modern-btn modern-btn-secondary w-100 mt-2" style="font-size: 0.875rem;" onclick="hideAgents()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-            <path d="M19,13H5V11H19V13Z"/>
+            <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
           </svg>
-          Hide (show only 3)
+          Show Less
         </button>
       `;
     }

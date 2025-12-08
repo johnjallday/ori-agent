@@ -2,6 +2,8 @@
 
 let currentAgent = null;
 let agentName = '';
+let isEditingConfig = false;
+let isEditingPrompt = false;
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
@@ -20,31 +22,43 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAgentDetails();
 });
 
+async function fetchAgentDetail() {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);
+
+    if (!response.ok) {
+        if (response.status === 404) {
+            throw new Error('Agent not found');
+        }
+        throw new Error('Failed to load agent details');
+    }
+
+    return response.json();
+}
+
 // Load agent details from API
 async function loadAgentDetails() {
     try {
         showLoading(true);
-
-        const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                throw new Error('Agent not found');
-            }
-            throw new Error('Failed to load agent details');
-        }
-
-        currentAgent = await response.json();
+        currentAgent = await fetchAgentDetail();
         renderAgentDetails();
-        showLoading(false);
-
     } catch (error) {
         console.error('Error loading agent details:', error);
-        showLoading(false);
         showError(error.message || 'Failed to load agent details');
         setTimeout(() => {
             window.location.href = '/agents-dashboard';
         }, 3000);
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function refreshAgentDetails() {
+    try {
+        currentAgent = await fetchAgentDetail();
+        renderAgentDetails();
+    } catch (error) {
+        console.error('Error refreshing agent details:', error);
+        setConfigStatus(error.message || 'Failed to refresh agent details', 'error');
     }
 }
 
@@ -73,13 +87,14 @@ function renderAgentDetails() {
     if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
     const providerEl = document.getElementById('agentProvider');
-    if (providerEl) providerEl.textContent = currentAgent.provider || 'Not set';
+    const provider = currentAgent.provider || currentAgent.llm_provider || '';
+    if (providerEl) providerEl.textContent = provider || 'Not set';
 
     const tempEl = document.getElementById('agentTemperature');
     if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
 
     const maxTokensEl = document.getElementById('agentMaxTokens');
-    if (maxTokensEl) maxTokensEl.textContent = currentAgent.max_output_tokens ?? 'Not set';
+    if (maxTokensEl) maxTokensEl.textContent = formatMaxTokens(currentAgent.max_output_tokens);
 
     const pluginCountEl = document.getElementById('pluginCount');
     if (pluginCountEl) pluginCountEl.textContent = currentAgent.enabled_plugins?.length || 0;
@@ -108,7 +123,7 @@ function renderAgentDetails() {
     const configModel = document.getElementById('configModel');
     if (configModel) configModel.textContent = currentAgent.model || 'Not set';
     const configTemp = document.getElementById('configTemp');
-    if (configTemp) configTemp.textContent = currentAgent.temperature || 1.0;
+    if (configTemp) configTemp.textContent = currentAgent.temperature ?? 1.0;
     const configType = document.getElementById('configType');
     if (configType) configType.textContent = capitalize(currentAgent.type || 'tool-calling');
     const configRole = document.getElementById('configRole');
@@ -117,9 +132,11 @@ function renderAgentDetails() {
     const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
     const promptEl = document.getElementById('configPrompt');
     if (promptEl) {
-        promptEl.textContent = systemPrompt.length > 100
-            ? systemPrompt.substring(0, 100) + '...'
-            : systemPrompt;
+        promptEl.textContent = systemPrompt || 'No system prompt set';
+    }
+    const promptDisplay = document.getElementById('promptDisplay');
+    if (promptDisplay) {
+        promptDisplay.textContent = systemPrompt || 'No system prompt set';
     }
 
     // Plugins
@@ -136,6 +153,264 @@ function renderAgentDetails() {
     if (header) header.style.display = 'flex';
     const grid = document.getElementById('contentGrid');
     if (grid) grid.style.display = 'grid';
+
+    // Keep edit form in sync with latest data
+    populateConfigForm();
+    setConfigEditMode(isEditingConfig);
+    populatePromptForm();
+    setPromptEditMode(isEditingPrompt);
+}
+
+function setConfigEditMode(enabled) {
+    const display = document.getElementById('configDisplay');
+    const form = document.getElementById('configEditForm');
+    const editBtn = document.getElementById('editConfigBtn');
+    const actions = document.getElementById('configEditActions');
+    const saveBtn = document.getElementById('saveConfigBtn');
+
+    isEditingConfig = enabled;
+
+    if (display) display.style.display = enabled ? 'none' : 'block';
+    if (form) form.style.display = enabled ? 'block' : 'none';
+    if (actions) actions.style.display = enabled ? 'flex' : 'none';
+    if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
+    if (editBtn) {
+        editBtn.textContent = enabled ? 'Cancel' : 'Edit';
+    }
+
+    if (enabled) {
+        populateConfigForm();
+        setConfigStatus('');
+    }
+}
+
+function toggleConfigEditMode() {
+    if (isEditingConfig) {
+        setConfigEditMode(false);
+        setConfigStatus('');
+        populateConfigForm(); // reset any unsaved edits
+    } else {
+        setConfigEditMode(true);
+    }
+}
+
+function populateConfigForm() {
+    if (!currentAgent) return;
+    const modelInput = document.getElementById('editModel');
+    const providerInput = document.getElementById('editProvider');
+    const tempInput = document.getElementById('editTemperature');
+    const maxTokensInput = document.getElementById('editMaxTokens');
+    const typeSelect = document.getElementById('editType');
+    const roleSelect = document.getElementById('editRole');
+
+    if (modelInput) modelInput.value = currentAgent.model || '';
+    if (providerInput) providerInput.value = currentAgent.provider || currentAgent.llm_provider || '';
+    if (tempInput) tempInput.value = currentAgent.temperature ?? '';
+    if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
+    if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
+    if (roleSelect) roleSelect.value = currentAgent.role || 'general';
+}
+
+async function saveConfigChanges() {
+    if (!currentAgent) return;
+
+    const model = document.getElementById('editModel')?.value.trim() || '';
+    const provider = document.getElementById('editProvider')?.value.trim() || '';
+    const tempRaw = document.getElementById('editTemperature')?.value;
+    const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
+    const type = document.getElementById('editType')?.value || 'tool-calling';
+    const role = document.getElementById('editRole')?.value || 'general';
+
+    if (!model) {
+        setConfigStatus('Model is required to save configuration.', 'error');
+        return;
+    }
+
+    const payload = {
+        model,
+        type,
+        role,
+    };
+
+    const temp = parseFloat(tempRaw);
+    if (!Number.isNaN(temp)) {
+        payload.temperature = temp;
+    }
+
+    const maxTokens = parseInt(maxTokensRaw, 10);
+    if (!Number.isNaN(maxTokens)) {
+        payload.max_output_tokens = maxTokens;
+    }
+
+    if (provider) {
+        payload.llm_provider = provider;
+    }
+
+    try {
+        setConfigSavingState(true);
+        setConfigStatus('Saving changes...');
+
+        const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to save changes');
+        }
+
+        await refreshAgentDetails();
+        setConfigStatus('Configuration updated successfully.', 'success');
+        setConfigEditMode(false);
+    } catch (error) {
+        console.error('Failed to save configuration:', error);
+        setConfigStatus(error.message || 'Failed to save configuration', 'error');
+    } finally {
+        setConfigSavingState(false);
+    }
+}
+
+function setConfigSavingState(isSaving) {
+    const saveBtn = document.getElementById('saveConfigBtn');
+    const editBtn = document.getElementById('editConfigBtn');
+    if (saveBtn) {
+        saveBtn.disabled = isSaving;
+        if (isSaving) {
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+        } else {
+            saveBtn.innerHTML = 'Save';
+        }
+    }
+    if (editBtn) {
+        editBtn.disabled = isSaving;
+    }
+}
+
+function setConfigStatus(message, type = 'info') {
+    const statusEl = document.getElementById('configEditStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message || '';
+    if (!message) return;
+
+    if (type === 'error') {
+        statusEl.style.color = 'var(--danger-color)';
+    } else if (type === 'success') {
+        statusEl.style.color = 'var(--success-color, #22c55e)';
+    } else {
+        statusEl.style.color = 'var(--text-secondary)';
+    }
+}
+
+function setPromptEditMode(enabled) {
+    const display = document.getElementById('promptDisplay');
+    const form = document.getElementById('promptEditForm');
+    const editBtn = document.getElementById('editPromptBtn');
+    const actions = document.getElementById('promptEditActions');
+    const saveBtn = document.getElementById('savePromptBtn');
+
+    isEditingPrompt = enabled;
+
+    if (display) display.style.display = enabled ? 'none' : 'block';
+    if (form) form.style.display = enabled ? 'block' : 'none';
+    if (actions) actions.style.display = enabled ? 'flex' : 'none';
+    if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
+    if (editBtn) {
+        editBtn.textContent = enabled ? 'Cancel' : 'Edit';
+    }
+
+    if (enabled) {
+        populatePromptForm();
+        setPromptStatus('');
+    }
+}
+
+function togglePromptEditMode() {
+    if (isEditingPrompt) {
+        setPromptEditMode(false);
+        setPromptStatus('');
+        populatePromptForm(); // reset unsaved edits
+    } else {
+        setPromptEditMode(true);
+    }
+}
+
+function populatePromptForm() {
+    if (!currentAgent) return;
+    const promptInput = document.getElementById('editSystemPrompt');
+    if (promptInput) promptInput.value = currentAgent.system_prompt || '';
+}
+
+async function savePromptChanges() {
+    if (!currentAgent) return;
+    const promptInput = document.getElementById('editSystemPrompt');
+    const systemPrompt = promptInput ? promptInput.value.trim() : '';
+
+    try {
+        setPromptSavingState(true);
+        setPromptStatus('Saving system prompt...');
+
+        const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ system_prompt: systemPrompt })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to save system prompt');
+        }
+
+        await refreshAgentDetails();
+        setPromptStatus('System prompt updated successfully.', 'success');
+        setPromptEditMode(false);
+    } catch (error) {
+        console.error('Failed to save system prompt:', error);
+        setPromptStatus(error.message || 'Failed to save system prompt', 'error');
+    } finally {
+        setPromptSavingState(false);
+    }
+}
+
+function setPromptSavingState(isSaving) {
+    const saveBtn = document.getElementById('savePromptBtn');
+    const editBtn = document.getElementById('editPromptBtn');
+    if (saveBtn) {
+        saveBtn.disabled = isSaving;
+        if (isSaving) {
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+        } else {
+            saveBtn.innerHTML = 'Save';
+        }
+    }
+    if (editBtn) {
+        editBtn.disabled = isSaving;
+    }
+}
+
+function setPromptStatus(message, type = 'info') {
+    const statusEl = document.getElementById('promptEditStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message || '';
+    if (!message) return;
+
+    if (type === 'error') {
+        statusEl.style.color = 'var(--danger-color)';
+    } else if (type === 'success') {
+        statusEl.style.color = 'var(--success-color, #22c55e)';
+    } else {
+        statusEl.style.color = 'var(--text-secondary)';
+    }
+}
+
+function formatMaxTokens(value) {
+    if (!value || value <= 0) return 'Not set';
+    return value.toLocaleString();
 }
 
 // Render plugins list
@@ -348,10 +623,6 @@ function chatWithAgent() {
         console.error('Error switching agent:', error);
         showError('Failed to switch to agent');
     });
-}
-
-function editAgent() {
-    window.location.href = `/agents-edit.html?name=${encodeURIComponent(agentName)}`;
 }
 
 async function confirmDelete() {

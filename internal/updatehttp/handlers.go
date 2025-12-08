@@ -35,8 +35,8 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 
 	updateInfo, err := h.updateManager.CheckUpdates(includePrerelease)
 	if err != nil {
-		logger.Error("Error checking for updates", logger.Fields{"error": err})
-		http.Error(w, "Failed to check for updates", http.StatusInternalServerError)
+		logger.Warn("Update check unavailable", logger.Fields{"error": err})
+		http.Error(w, "Update check unavailable. Provide GITHUB_TOKEN/GH_TOKEN to increase GitHub API limits.", http.StatusServiceUnavailable)
 		return
 	}
 

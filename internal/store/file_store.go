@@ -72,7 +72,7 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		// Get default settings - either from current agent or use hardcoded defaults
 		var defaultSettings types.Settings
 		if s.current != "" && s.agents[s.current] != nil {
-			// Copy from current agent
+			// Copy from current agent (preserve provider/max tokens too)
 			defaultSettings = s.agents[s.current].Settings
 		} else {
 			// Use hardcoded defaults if no current agent exists
@@ -97,6 +97,12 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			}
 			if config.SystemPrompt != "" {
 				defaultSettings.SystemPrompt = config.SystemPrompt
+			}
+			if config.LLMProvider != "" {
+				defaultSettings.Provider = config.LLMProvider
+			}
+			if config.MaxOutputTokens > 0 {
+				defaultSettings.MaxOutputTokens = config.MaxOutputTokens
 			}
 		}
 

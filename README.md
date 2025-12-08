@@ -246,10 +246,9 @@ While this app is very functional, there will be a lot of breaking changes. Feel
 MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
 
 ## 🛣️Roadmap
-- blockchain integration
-- white paper
-- web3 integration for markets.
-- sqlite to save conversation history (maybe)
+- v0.1.0 => AI Agent Functionality
+- v0.2.0 => Blockchain Integration
+
 
 
 ---

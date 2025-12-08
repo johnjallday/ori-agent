@@ -22,6 +22,8 @@ type Manager struct {
 	CurrentVersion string
 	RepoOwner      string
 	RepoName       string
+	httpClient     *http.Client
+	githubToken    string
 }
 
 // GitHubRelease represents a GitHub release
@@ -69,10 +71,20 @@ type ReleaseInfo struct {
 
 // NewManager creates a new update manager
 func NewManager(currentVersion, repoOwner, repoName string) *Manager {
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		token = os.Getenv("GH_TOKEN")
+	}
+	if token == "" {
+		token = os.Getenv("ORI_GITHUB_TOKEN")
+	}
+
 	return &Manager{
 		CurrentVersion: currentVersion,
 		RepoOwner:      repoOwner,
 		RepoName:       repoName,
+		httpClient:     &http.Client{Timeout: 15 * time.Second},
+		githubToken:    token,
 	}
 }
 
@@ -195,14 +207,38 @@ func (m *Manager) GetCurrentVersion() map[string]string {
 func (m *Manager) fetchReleases() ([]GitHubRelease, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", m.RepoOwner, m.RepoName)
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", fmt.Sprintf("ori-agent/%s (+https://github.com/%s/%s)", m.CurrentVersion, m.RepoOwner, m.RepoName))
+
+	if m.githubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+m.githubToken)
+	}
+
+	client := m.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = "GitHub API returned an empty error response"
+		}
+
+		hint := "Set GITHUB_TOKEN or GH_TOKEN to increase GitHub API limits."
+		return nil, fmt.Errorf("GitHub API returned status %d: %s (%s)", resp.StatusCode, detail, hint)
 	}
 
 	var releases []GitHubRelease

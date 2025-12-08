@@ -41,18 +41,20 @@ type AgentListItem struct {
 
 // AgentDetailResponse represents detailed agent information
 type AgentDetailResponse struct {
-	Name           string                 `json:"name"`
-	Type           string                 `json:"type"`
-	Role           types.AgentRole        `json:"role"`
-	Capabilities   []string               `json:"capabilities"`
-	Status         types.AgentStatus      `json:"status"`
-	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
-	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
-	Model          string                 `json:"model"`
-	Temperature    float64                `json:"temperature"`
-	SystemPrompt   string                 `json:"system_prompt"`
-	EnabledPlugins []PluginInfo           `json:"enabled_plugins"`
-	MCPServers     []string               `json:"mcp_servers,omitempty"`
+	Name            string                 `json:"name"`
+	Type            string                 `json:"type"`
+	Role            types.AgentRole        `json:"role"`
+	Capabilities    []string               `json:"capabilities"`
+	Status          types.AgentStatus      `json:"status"`
+	Statistics      *types.AgentStatistics `json:"statistics,omitempty"`
+	Metadata        *types.AgentMetadata   `json:"metadata,omitempty"`
+	Model           string                 `json:"model"`
+	Temperature     float64                `json:"temperature"`
+	Provider        string                 `json:"provider,omitempty"`
+	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
+	SystemPrompt    string                 `json:"system_prompt"`
+	EnabledPlugins  []PluginInfo           `json:"enabled_plugins"`
+	MCPServers      []string               `json:"mcp_servers,omitempty"`
 }
 
 // PluginInfo represents plugin information in the detail view
@@ -190,18 +192,20 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 
 	// Build response
 	response := AgentDetailResponse{
-		Name:           agentName,
-		Type:           ag.Type,
-		Role:           ag.Role,
-		Capabilities:   ag.Capabilities,
-		Status:         ag.Status,
-		Statistics:     ag.Statistics,
-		Metadata:       ag.Metadata,
-		Model:          ag.Settings.Model,
-		Temperature:    ag.Settings.Temperature,
-		SystemPrompt:   ag.Settings.SystemPrompt,
-		EnabledPlugins: pluginInfos,
-		MCPServers:     ag.MCPServers,
+		Name:            agentName,
+		Type:            ag.Type,
+		Role:            ag.Role,
+		Capabilities:    ag.Capabilities,
+		Status:          ag.Status,
+		Statistics:      ag.Statistics,
+		Metadata:        ag.Metadata,
+		Model:           ag.Settings.Model,
+		Temperature:     ag.Settings.Temperature,
+		Provider:        ag.Settings.Provider,
+		MaxOutputTokens: ag.Settings.MaxOutputTokens,
+		SystemPrompt:    ag.Settings.SystemPrompt,
+		EnabledPlugins:  pluginInfos,
+		MCPServers:      ag.MCPServers,
 	}
 
 	// Return JSON response

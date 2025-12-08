@@ -292,6 +292,98 @@ function showTaskDetails(task) {
           </div>
         ` : '';
       })()}
+      ${(() => {
+        // Find scheduler targeting this task
+        const schedulers = window.agentCanvas?.state?.schedulerNodes || [];
+        const scheduler = schedulers.find(s => s.target_task_id === task.id);
+        if (!scheduler) return '';
+
+        const scheduleType = scheduler.schedule?.type || 'unknown';
+        const interval = scheduler.schedule?.interval;
+        const cronExpr = scheduler.schedule?.cron_expression;
+        let scheduleDesc = '';
+        if (scheduleType === 'interval' && interval) {
+          const mins = Math.floor(interval / 60000000000);
+          scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
+        } else if (scheduleType === 'cron' && cronExpr) {
+          scheduleDesc = `Cron: ${cronExpr}`;
+        }
+        const nextRun = scheduler.next_run ? new Date(scheduler.next_run).toLocaleString() : 'N/A';
+        const lastRun = scheduler.last_run ? new Date(scheduler.last_run).toLocaleString() : 'Never';
+
+        return `
+          <div class="mb-3">
+            <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
+              <span style="color: #10b981; font-weight: 600;">
+                <span style="margin-right: 6px;">⏰</span> Schedule
+                <span class="badge bg-success ms-2" style="font-size: 0.7rem;">${scheduler.enabled ? 'Active' : 'Disabled'}</span>
+              </span>
+              <svg class="collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="transition: transform 0.2s;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="collapsible-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+              <div style="padding: 10px; background: rgba(16, 185, 129, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(16, 185, 129, 0.2); border-top: none;">
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                  <div class="mb-1"><strong>Name:</strong> ${scheduler.name || 'Unnamed'}</div>
+                  <div class="mb-1"><strong>Type:</strong> ${scheduleDesc}</div>
+                  <div class="mb-1"><strong>Next Run:</strong> ${nextRun}</div>
+                  <div class="mb-1"><strong>Last Run:</strong> ${lastRun}</div>
+                  <div><strong>Executions:</strong> ${scheduler.execution_count || 0} (${scheduler.failure_count || 0} failed)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <style>
+            .collapsible-header:hover { background: rgba(16, 185, 129, 0.15) !important; }
+            .expanded .collapsible-content { max-height: 200px !important; }
+            .expanded .collapse-icon { transform: rotate(180deg); }
+          </style>
+        `;
+      })()}
+      ${(() => {
+        // Find store node connected to this task's agent
+        const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+        if (!assignedNodeId) return '';
+
+        const storeNodes = window.agentCanvas?.state?.storeNodes || [];
+        const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
+        if (!store) return '';
+
+        const lastWrite = store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
+          ? new Date(store.last_write_time).toLocaleString()
+          : 'Never';
+
+        return `
+          <div class="mb-3">
+            <div class="collapsible-header-store" onclick="this.parentElement.classList.toggle('expanded-store')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(20, 184, 166, 0.1); border-radius: 6px; border: 1px solid rgba(20, 184, 166, 0.3);">
+              <span style="color: #14b8a6; font-weight: 600;">
+                <span style="margin-right: 6px;">💾</span> Storage
+                <span class="badge ms-2" style="font-size: 0.7rem; background: #14b8a6;">${store.write_count || 0} writes</span>
+              </span>
+              <svg class="collapse-icon-store" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" stroke-width="2" style="transition: transform 0.2s;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="collapsible-content-store" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+              <div style="padding: 10px; background: rgba(20, 184, 166, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(20, 184, 166, 0.2); border-top: none;">
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                  <div class="mb-1"><strong>Store:</strong> ${store.name || 'Unnamed'}</div>
+                  <div class="mb-1"><strong>Path:</strong> <span style="font-family: monospace; font-size: 0.8rem;">${store.base_dir}</span></div>
+                  <div class="mb-1"><strong>Format:</strong> ${(store.format || 'json').toUpperCase()}</div>
+                  <div class="mb-1"><strong>Last Write:</strong> ${lastWrite}</div>
+                  ${store.last_file_path ? `<div><strong>Last File:</strong> <span style="font-family: monospace; font-size: 0.8rem;">${store.last_file_path}</span></div>` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+          <style>
+            .collapsible-header-store:hover { background: rgba(20, 184, 166, 0.15) !important; }
+            .expanded-store .collapsible-content-store { max-height: 200px !important; }
+            .expanded-store .collapse-icon-store { transform: rotate(180deg); }
+          </style>
+        `;
+      })()}
       ${task.result ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Result:</strong>
