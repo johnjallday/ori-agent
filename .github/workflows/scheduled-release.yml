@@ -2,14 +2,18 @@ name: Scheduled Release
 
 # This workflow handles scheduled and manual releases from release branches
 # It follows Git Flow: release/vX.Y.Z branches are merged to main and tagged
+#
+# Usage:
+#   1. Create release branch: ./scripts/create-release.sh v1.3.0
+#   2. Schedule for later:    ./scripts/schedule-release.sh 2d   (or specific date)
+#   3. Or release immediately: gh workflow run scheduled-release.yml -f release_branch=release/v1.3.0
 
 on:
-  # Scheduled release - runs every Tuesday at 10:00 UTC
-  # Adjust cron as needed: https://crontab.guru
+  # Daily check for scheduled releases (runs at 10:00 UTC)
   schedule:
-    - cron: '0 10 * * 2'  # Tuesday 10:00 UTC
+    - cron: '0 10 * * *'  # Daily at 10:00 UTC
 
-  # Manual trigger with options
+  # Manual trigger for immediate release
   workflow_dispatch:
     inputs:
       release_branch:
@@ -46,33 +50,73 @@ jobs:
       - name: Find release branch
         id: find_branch
         run: |
-          # Use provided branch or find the latest release/* branch
+          TODAY=$(date -u +%Y-%m-%d)
+          echo "Today's date: $TODAY"
+
+          # If manual trigger with specific branch
           if [ -n "${{ inputs.release_branch }}" ]; then
             BRANCH="${{ inputs.release_branch }}"
-          else
-            # Find the most recent release branch
-            BRANCH=$(git branch -r --list 'origin/release/v*' --sort=-committerdate | head -1 | sed 's/origin\///' | xargs)
+            echo "Manual trigger for branch: $BRANCH"
+
+            # Extract version
+            VERSION=$(echo "$BRANCH" | sed 's/release\///')
+
+            # Check if already released
+            if git tag -l "$VERSION" | grep -q "$VERSION"; then
+              echo "Version $VERSION already released"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          if [ -z "$BRANCH" ]; then
-            echo "No release branch found"
+          # Scheduled run: find release branches with RELEASE_DATE file
+          echo "Checking for scheduled releases..."
+
+          RELEASE_BRANCH=""
+          RELEASE_VERSION=""
+
+          for BRANCH in $(git branch -r --list 'origin/release/v*' --sort=-committerdate); do
+            BRANCH_NAME=$(echo "$BRANCH" | sed 's/origin\///' | xargs)
+            VERSION=$(echo "$BRANCH_NAME" | sed 's/release\///')
+
+            # Skip if already released
+            if git tag -l "$VERSION" | grep -q "$VERSION"; then
+              echo "Skipping $BRANCH_NAME - already released"
+              continue
+            fi
+
+            # Check for RELEASE_DATE file
+            if git show "origin/$BRANCH_NAME:RELEASE_DATE" >/dev/null 2>&1; then
+              RELEASE_DATE=$(git show "origin/$BRANCH_NAME:RELEASE_DATE" | tr -d '[:space:]')
+              echo "Found $BRANCH_NAME with RELEASE_DATE=$RELEASE_DATE"
+
+              # Check if release date has arrived
+              if [[ "$TODAY" >= "$RELEASE_DATE" ]]; then
+                echo "Release date reached for $BRANCH_NAME"
+                RELEASE_BRANCH="$BRANCH_NAME"
+                RELEASE_VERSION="$VERSION"
+                break
+              else
+                echo "Release date not yet reached (scheduled for $RELEASE_DATE)"
+              fi
+            else
+              echo "No RELEASE_DATE file in $BRANCH_NAME - skipping"
+            fi
+          done
+
+          if [ -z "$RELEASE_BRANCH" ]; then
+            echo "No release branches ready for release today"
             echo "should_release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Extract version from branch name (release/v1.2.3 -> v1.2.3)
-          VERSION=$(echo "$BRANCH" | sed 's/release\///')
-
-          # Check if this version is already released
-          if git tag -l "$VERSION" | grep -q "$VERSION"; then
-            echo "Version $VERSION already released"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Found release branch: $BRANCH (version: $VERSION)"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
           echo "should_release=true" >> $GITHUB_OUTPUT
 
       - name: Summary

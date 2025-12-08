@@ -42,6 +42,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create macOS DMG installers
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          SHORT_VERSION="${VERSION#v}"
+
+          echo "Creating DMGs for version $SHORT_VERSION..."
+
+          # Create DMG for Intel Macs
+          ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin amd64 dist || echo "Warning: amd64 DMG creation failed"
+
+          # Create DMG for Apple Silicon
+          ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist || echo "Warning: arm64 DMG creation failed"
+
+          # List created DMGs
+          echo "Created DMGs:"
+          ls -la dist/*.dmg 2>/dev/null || echo "No DMGs found"
+
+      - name: Upload DMGs to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Windows MSI build job
   build-msi:
     name: Build Windows MSI

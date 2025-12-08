@@ -62,6 +62,7 @@ dist/
 build/
 !build/macos/
 !build/linux/
+!build/windows/
 build-dmg/
 release/
 releases/

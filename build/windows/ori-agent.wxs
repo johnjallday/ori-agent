@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ori Agent MSI Installer
+  WiX Toolset v3 Template for GoReleaser
+
+  This file is processed by GoReleaser's template engine.
+  Available variables: {{.ProjectName}}, {{.Version}}, {{.Binary}}, {{.Arch}}, {{.MsiArch}}
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <!-- Product Definition -->
+  <Product Id="*"
+           Name="Ori Agent"
+           Language="1033"
+           Version="{{.Version}}"
+           Manufacturer="Ori"
+           UpgradeCode="F8A3B2C1-4D5E-6F7A-8B9C-0D1E2F3A4B5C">
+
+    <!-- Package Configuration -->
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Ori Agent - Modular AI Agent Framework"
+             Comments="Visit https://github.com/johnjallday/ori-agent"
+             Manufacturer="Ori" />
+
+    <!-- Media -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Upgrade Logic -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                  AllowSameVersionUpgrades="yes" />
+
+    <!-- Icons -->
+    <Icon Id="OriAgentIcon.exe" SourceFile="{{.Binary}}" />
+    <Property Id="ARPPRODUCTICON" Value="OriAgentIcon.exe" />
+
+    <!-- Add/Remove Programs Configuration -->
+    <Property Id="ARPHELPLINK" Value="https://github.com/johnjallday/ori-agent" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/johnjallday/ori-agent" />
+    <Property Id="ARPNOMODIFY" Value="yes" Secure="yes" />
+
+    <!-- Directory Structure -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+
+      <!-- Program Files -->
+      <?if $(var.Platform) = x64 ?>
+        <Directory Id="ProgramFiles64Folder">
+          <Directory Id="INSTALLFOLDER" Name="OriAgent">
+            <Directory Id="BinFolder" Name="bin" />
+          </Directory>
+        </Directory>
+      <?else?>
+        <Directory Id="ProgramFilesFolder">
+          <Directory Id="INSTALLFOLDER" Name="OriAgent">
+            <Directory Id="BinFolder" Name="bin" />
+          </Directory>
+        </Directory>
+      <?endif?>
+
+      <!-- Start Menu -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Ori Agent" />
+      </Directory>
+
+      <!-- Desktop -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+
+    </Directory>
+
+    <!-- Main Application Component -->
+    <DirectoryRef Id="BinFolder">
+      <Component Id="OriAgentExecutable" Guid="*" Win64="$(var.Win64)">
+        <File Id="OriAgentEXE"
+              Name="ori-agent.exe"
+              Source="{{.Binary}}"
+              KeyPath="yes"
+              Checksum="yes" />
+
+        <!-- Add to PATH environment variable (optional - commented out by default) -->
+        <!--
+        <Environment Id="PATH"
+                     Name="PATH"
+                     Value="[BinFolder]"
+                     Permanent="no"
+                     Part="last"
+                     Action="set"
+                     System="yes" />
+        -->
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start Menu Shortcut Component -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="*" Win64="$(var.Win64)">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Ori Agent"
+                  Description="Launch Ori Agent"
+                  Target="[#OriAgentEXE]"
+                  WorkingDirectory="BinFolder"
+                  Icon="OriAgentIcon.exe" />
+
+        <!-- README shortcut -->
+        <Shortcut Id="ReadmeStartMenuShortcut"
+                  Name="Ori Agent Documentation"
+                  Description="Visit Ori Agent Documentation"
+                  Target="https://github.com/johnjallday/ori-agent" />
+
+        <!-- Uninstall shortcut -->
+        <Shortcut Id="UninstallProduct"
+                  Name="Uninstall Ori Agent"
+                  Description="Uninstalls Ori Agent"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+
+        <RegistryValue Root="HKCU"
+                       Key="Software\Ori\OriAgent"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Desktop Shortcut Component (optional) -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*" Win64="$(var.Win64)">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="Ori Agent"
+                  Description="Launch Ori Agent"
+                  Target="[#OriAgentEXE]"
+                  WorkingDirectory="BinFolder"
+                  Icon="OriAgentIcon.exe" />
+
+        <RemoveFolder Id="DesktopFolder" On="uninstall" />
+
+        <RegistryValue Root="HKCU"
+                       Key="Software\Ori\OriAgent"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Features -->
+    <Feature Id="MainApplication"
+             Title="Ori Agent"
+             Description="Ori Agent core application"
+             Level="1"
+             ConfigurableDirectory="INSTALLFOLDER"
+             AllowAdvertise="no"
+             Display="expand"
+             Absent="disallow">
+
+      <ComponentRef Id="OriAgentExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+
+      <!-- Desktop shortcut as optional feature -->
+      <Feature Id="DesktopShortcutFeature"
+               Title="Desktop Shortcut"
+               Description="Create a desktop shortcut for Ori Agent"
+               Level="1"
+               AllowAdvertise="no">
+        <ComponentRef Id="DesktopShortcut" />
+      </Feature>
+
+    </Feature>
+
+    <!-- UI Configuration -->
+    <UIRef Id="WixUI_FeatureTree" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- License Agreement (optional - commented out if you don't have a license RTF) -->
+    <!--
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    -->
+
+  </Product>
+</Wix>
