@@ -325,6 +325,11 @@ export class RendererConnections {
         return; // Skip - use purple dotted line instead
       }
 
+      // Skip attachment connections (already shown as green arrows in drawConnections)
+      if (fromNode?.type === 'attachment') {
+        return;
+      }
+
       const fromPos = this.parent.getPortPosition(conn.from, conn.fromPort);
       const toPos = this.parent.getPortPosition(conn.to, conn.toPort);
 

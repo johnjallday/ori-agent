@@ -1,4 +1,4 @@
-# 🦆 Ori Agent
+# <img src="assets/logo.svg" alt="Ori Agent logo" width="28" /> Ori Agent
 
 <!-- AUTO:VERSION -->
 ![Version](https://img.shields.io/badge/Version-v0.0.18-blue)
@@ -39,7 +39,7 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 #### Option 1: macOS DMG Installer (Recommended for macOS)
 
 1. **Download the DMG** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest):
-   - **Apple Silicon (M1/M2/M3)**: `OriAgent-{version}-arm64.dmg`
+   - **Apple Silicon**: `OriAgent-{version}-arm64.dmg`
    - **Intel Macs**: `OriAgent-{version}-amd64.dmg`
 
 2. **Open the DMG** and drag `OriAgent.app` to Applications
