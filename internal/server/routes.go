@@ -462,6 +462,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
+		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
+			// Handle canvas store node operations (must be before /store-nodes check)
+			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodeStatus(w, r)
+			} else if r.Method == http.MethodPost {
+				s.studioHandler.CreateStoreNode(w, r)
+			} else if r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodes(w, r)
+			} else if r.Method == http.MethodPatch {
+				s.studioHandler.UpdateStoreNode(w, r)
+			} else if r.Method == http.MethodDelete {
+				s.studioHandler.DeleteStoreNode(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		} else if strings.Contains(r.URL.Path, "/store-nodes") {
 			// Handle store node operations
 			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
@@ -470,7 +485,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				s.studioHandler.CreateStoreNode(w, r)
 			} else if r.Method == http.MethodGet {
 				s.studioHandler.GetStoreNodes(w, r)
-			} else if r.Method == http.MethodPut {
+			} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
 				s.studioHandler.UpdateStoreNode(w, r)
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
@@ -483,21 +498,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				s.studioHandler.AddAgent(w, r)
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.RemoveAgent(w, r)
-			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
-			// Handle store node operations
-			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodeStatus(w, r)
-			} else if r.Method == http.MethodPost {
-				s.studioHandler.CreateStoreNode(w, r)
-			} else if r.Method == http.MethodGet {
-				s.studioHandler.GetStoreNodes(w, r)
-			} else if r.Method == http.MethodPatch {
-				s.studioHandler.UpdateStoreNode(w, r)
-			} else if r.Method == http.MethodDelete {
-				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}

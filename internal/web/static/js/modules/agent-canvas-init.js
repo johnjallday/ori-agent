@@ -176,8 +176,11 @@ export class AgentCanvasInitialization {
         console.log('💾 Raw store_nodes from API:', this.parent.studio.store_nodes);
 
         const storeNodes = this.parent.studio.store_nodes.map(node => {
-          // Get position from layout if available
-          let x = 400, y = 400;
+          // Use position from node (API), then layout, then defaults
+          let x = node.x ?? 400;
+          let y = node.y ?? 400;
+
+          // Override with layout position if available
           if (this.parent.studio.layout && this.parent.studio.layout.store_positions) {
             const pos = this.parent.studio.layout.store_positions[node.canvas_node_id];
             if (pos) {

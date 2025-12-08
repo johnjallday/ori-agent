@@ -1073,9 +1073,9 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate base directory (allow agents/ and workspace-specific dirs)
-	allowedDirs := []string{"agents/", "outputs/", "reports/", "data/"}
-	if err := ValidateBaseDir(req.BaseDir, allowedDirs); err != nil {
+	// Validate base directory - absolute paths allowed, relative paths must use these prefixes
+	allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
+	if err := ValidateBaseDir(req.BaseDir, allowedRelativeDirs); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid base directory: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -1187,13 +1187,14 @@ type UpdateStoreNodeRequest struct {
 	Format        *string  `json:"format"`
 	WriteMode     *string  `json:"write_mode"`
 	AutoCreateDir *bool    `json:"auto_create_dir"`
+	AgentNodeID   *string  `json:"agent_node_id"`
 	X             *float64 `json:"x"`
 	Y             *float64 `json:"y"`
 }
 
 // UpdateStoreNode handles PUT /api/studios/:id/store-nodes/:node_id
 func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
+	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -1205,7 +1206,14 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	studioID := parts[0]
-	nodeID := parts[2]
+
+	// Handle both /store-nodes/{id} and /canvas/store-nodes/{id} patterns
+	var nodeID string
+	if parts[1] == "canvas" && len(parts) >= 4 {
+		nodeID = parts[3] // /canvas/store-nodes/{id}
+	} else {
+		nodeID = parts[2] // /store-nodes/{id}
+	}
 
 	var req UpdateStoreNodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1219,10 +1227,10 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find store node
+	// Find store node by ID or CanvasNodeID
 	var storeNode *StoreNode
 	for i := range studio.StoreNodes {
-		if studio.StoreNodes[i].ID == nodeID {
+		if studio.StoreNodes[i].ID == nodeID || studio.StoreNodes[i].CanvasNodeID == nodeID {
 			storeNode = &studio.StoreNodes[i]
 			break
 		}
@@ -1238,9 +1246,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		storeNode.Name = *req.Name
 	}
 	if req.BaseDir != nil {
-		// Re-validate base directory
-		allowedDirs := []string{"agents/", "outputs/", "reports/", "data/"}
-		if err := ValidateBaseDir(*req.BaseDir, allowedDirs); err != nil {
+		// Re-validate base directory - absolute paths allowed, relative paths must use prefixes
+		allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
+		if err := ValidateBaseDir(*req.BaseDir, allowedRelativeDirs); err != nil {
 			http.Error(w, fmt.Sprintf("Invalid base directory: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -1264,6 +1272,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AutoCreateDir != nil {
 		storeNode.AutoCreateDir = *req.AutoCreateDir
+	}
+	if req.AgentNodeID != nil {
+		storeNode.AgentNodeID = *req.AgentNodeID
 	}
 
 	// Update position if provided

@@ -3088,6 +3088,19 @@ async function submitStoreNode() {
   console.log('Using studioId:', studioId);
 
   try {
+    // Calculate center of visible viewport
+    let x = 400, y = 400;
+    if (window.agentCanvas) {
+      const canvas = window.agentCanvas;
+      const scale = canvas.state?.scale || canvas.scale || 1;
+      const offsetX = canvas.state?.offsetX || canvas.offsetX || 0;
+      const offsetY = canvas.state?.offsetY || canvas.offsetY || 0;
+      const width = canvas.width || 800;
+      const height = canvas.height || 600;
+      x = (width / 2 - offsetX) / scale + (Math.random() - 0.5) * 100;
+      y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
+    }
+
     const response = await fetch(`/api/studios/${studioId}/canvas/store-nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3097,8 +3110,8 @@ async function submitStoreNode() {
         format: format,
         write_mode: writeMode,
         auto_create_dir: autoCreateDir,
-        x: 100 + Math.random() * 200,  // Random position
-        y: 100 + Math.random() * 200
+        x: x,
+        y: y
       })
     });
 
@@ -3114,13 +3127,13 @@ async function submitStoreNode() {
     const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
     modal.hide();
 
-    // Refresh canvas
-    if (typeof loadCanvas === 'function') {
-      await loadCanvas();
+    // Refresh canvas to show the new store node
+    if (window.agentCanvas && window.agentCanvas.init) {
+      await window.agentCanvas.init();
     }
 
     // Show success message
-    alert('Store node created successfully!');
+    console.log('Store node created successfully!');
   } catch (error) {
     console.error('Error creating store node:', error);
     alert(`Error creating store node: ${error.message}`);
