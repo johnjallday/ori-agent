@@ -665,8 +665,14 @@
                             </svg>
                             <span class="notification-count" id="notificationCount" style="display: none;">0</span>
                         </div>
-                    </div>
-                    <div class="header-actions">
+                </div>
+                <div class="header-actions">
+                        <a class="btn-modern btn-secondary" href="/marketplace" style="text-decoration: none;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
+                            </svg>
+                            Plugin Marketplace
+                        </a>
                         <button class="btn-modern btn-primary" id="uploadBtn">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
@@ -831,6 +837,13 @@
     <script src="/js/modules/agents.js"></script>
     <script src="/js/modules/plugins.js"></script>
     <script src="/js/modules/sidebar.js"></script>
+    <script src="/js/modules/themeManager.js"></script>
+    <script>
+        // Initialize theme toggle so the icon/text match the active theme
+        document.addEventListener('DOMContentLoaded', function() {
+            themeManager.initialize();
+        });
+    </script>
 </body>
 </html>
 {{end}}

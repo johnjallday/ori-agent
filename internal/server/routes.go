@@ -166,9 +166,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.rollbackHandler.HandleRollbackPlugin(w, r)
 			return
 		}
-		// Check if this is a config update endpoint
+		// Check if this is a config endpoint
 		if strings.HasSuffix(r.URL.Path, "/config") {
-			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			if r.Method == http.MethodPut {
+				// PUT - update config
+				s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			} else {
+				// GET - fetch config info (delegated to init handler)
+				s.pluginInitHandler.PluginInitHandler(w, r)
+			}
 			return
 		}
 		// Check if this is a test endpoint

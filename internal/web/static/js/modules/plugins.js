@@ -268,7 +268,7 @@ function setupPluginToggles() {
       try {
         await removePlugin(pluginName, pluginPath);
         // Refresh plugins list
-        await loadPlugins();
+        await loadPluginsForSidebar();
       } catch (error) {
         console.error('Failed to remove plugin:', error);
         alert(`Failed to remove plugin: ${error.message}`);
@@ -355,14 +355,14 @@ async function togglePlugin(pluginName, pluginPath, enable) {
     if (enableResponseData && enableResponseData.show_config_modal === true) {
       console.log(`Plugin ${pluginName} requires configuration, showing modal...`);
       // Refresh plugins list first
-      await loadPlugins();
+      await loadPluginsForSidebar();
       // Show configuration modal
       await showPluginConfigModal(pluginName);
       return; // Don't refresh again after modal
     }
 
     // Refresh the plugins list to show the updated state
-    await loadPlugins();
+    await loadPluginsForSidebar();
 
   } else {
     // For disabling, unload from cache
@@ -378,7 +378,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
     console.log(`Plugin ${pluginName} disabled successfully`);
 
     // Refresh the plugins list to show the updated state
-    await loadPlugins();
+    await loadPluginsForSidebar();
   }
 }
 
@@ -518,7 +518,7 @@ async function uploadPluginFile(file) {
 
         // Refresh plugins in sidebar
         setTimeout(() => {
-          loadPlugins();
+          loadPluginsForSidebar();
         }, 1000);
 
         // Reset file input
@@ -600,3 +600,9 @@ if (document.readyState === 'loading') {
 } else {
   setupPluginManagement();
 }
+
+// Make functions globally available for other modules
+window.loadPluginsForSidebar = loadPluginsForSidebar;
+window.togglePlugin = togglePlugin;
+window.removePlugin = removePlugin;
+window.showPluginUploadModal = showPluginUploadModal;

@@ -373,7 +373,7 @@
 
     .agent-card-stats {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 12px;
         padding-top: 16px;
         border-top: 1px solid var(--border-color);
@@ -457,19 +457,15 @@
 
         <!-- Statistics -->
         <div class="stats-grid" id="statsGrid">
-            <div class="stat-card">
-                <div class="stat-label">Total Agents</div>
-                <div class="stat-value" id="totalAgents">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Messages</div>
-                <div class="stat-value" id="totalMessages">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Cost</div>
-                <div class="stat-value" id="totalCost">$0.00</div>
-            </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Agents</div>
+            <div class="stat-value" id="totalAgents">-</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Cost</div>
+            <div class="stat-value" id="totalCost">$0.00</div>
+        </div>
+    </div>
 
         <!-- Controls -->
         <div class="controls-bar">
@@ -502,7 +498,6 @@
                     <tr>
                         <th onclick="sortTable('name')">Agent <span class="sort-icon">▼</span></th>
                         <th onclick="sortTable('type')">Type</th>
-                        <th onclick="sortTable('messages')">Messages</th>
                         <th onclick="sortTable('cost')">Cost</th>
                         <th>Actions</th>
                     </tr>

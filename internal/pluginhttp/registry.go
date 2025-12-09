@@ -81,6 +81,19 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 
+		// Optional: return only online registry entries (exclude locally added plugins)
+		if r.URL.Query().Get("online_only") == "true" {
+			filtered := make([]types.PluginRegistryEntry, 0, len(reg.Plugins))
+			for _, p := range reg.Plugins {
+				if strings.TrimSpace(p.Path) != "" {
+					// Path is set for locally added/uploaded plugins; skip these when online_only is requested
+					continue
+				}
+				filtered = append(filtered, p)
+			}
+			reg.Plugins = filtered
+		}
+
 		// Get filter_compatible query parameter (defaults to "true")
 		filterCompatible := r.URL.Query().Get("filter_compatible")
 		if filterCompatible == "" || filterCompatible == "true" {

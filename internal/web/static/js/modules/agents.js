@@ -520,6 +520,8 @@ async function switchToAgent(agentName) {
     // Reload plugins for the new agent
     if (typeof loadPlugins === 'function') {
       await loadPlugins();
+    } else if (typeof loadPluginsForSidebar === 'function') {
+      await loadPluginsForSidebar();
     }
     
     // Reload settings for the new agent

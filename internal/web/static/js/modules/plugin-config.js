@@ -67,50 +67,63 @@ async function showPluginConfigModal(pluginName) {
                     'This plugin requires configuration before it can be used. Please provide the following information:'}
                 </p>
                 ${finalConfigVars.map(configVar => {
-                  const currentValue = currentValues[configVar.name] || '';
+                  // Support both 'key' (new format) and 'name' (old format) for field identifier
+                  const fieldKey = configVar.key || configVar.name;
+                  const fieldLabel = configVar.name || configVar.key;
+                  const placeholder = configVar.placeholder || configVar.default_value || '';
+                  // Get current value, falling back to default_value if not set
+                  let currentValue = currentValues[fieldKey];
+                  if (currentValue === undefined || currentValue === null || currentValue === '') {
+                    currentValue = configVar.default_value !== undefined ? configVar.default_value : '';
+                  }
+                  // Check if this is a multiline field (contains newlines in value, placeholder, or default)
+                  const isMultiline = (typeof currentValue === 'string' && currentValue.includes('\n')) ||
+                                     (typeof placeholder === 'string' && placeholder.includes('\n')) ||
+                                     fieldKey.includes('patterns') || fieldKey.includes('dirs');
+                  // Normalize type names (API uses 'bool'/'int', JS typically uses 'boolean'/'number')
+                  const normalizedType = configVar.type === 'bool' ? 'boolean' :
+                                        configVar.type === 'int' ? 'number' : configVar.type;
                   return `
                   <div class="mb-3">
-                    <label for="config_${configVar.name}" class="form-label" style="color: var(--text-primary);">
-                      ${configVar.name}
+                    <label for="config_${fieldKey}" class="form-label" style="color: var(--text-primary);">
+                      ${fieldLabel}
                       ${configVar.required ? '<span style="color: var(--danger-color);">*</span>' : ''}
                     </label>
-                    ${configVar.type === 'password' ? `
-                      <input type="password" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
-                             placeholder="${configVar.placeholder}"
+                    ${normalizedType === 'password' ? `
+                      <input type="password" class="form-control" id="config_${fieldKey}" name="${fieldKey}"
+                             placeholder="${placeholder}"
                              value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                    ` : configVar.type === 'number' ? `
-                      <input type="number" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
-                             placeholder="${configVar.placeholder}"
+                    ` : normalizedType === 'number' ? `
+                      <input type="number" class="form-control" id="config_${fieldKey}" name="${fieldKey}"
+                             placeholder="${placeholder}"
                              value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                    ` : configVar.type === 'boolean' ? `
-                      <div class="form-check">
-                        <input type="checkbox" class="form-check-input" id="config_${configVar.name}" name="${configVar.name}"
-                               ${currentValue ? 'checked' : ''}>
-                        <label class="form-check-label" for="config_${configVar.name}" style="color: var(--text-secondary);">
-                          ${configVar.placeholder}
+                    ` : normalizedType === 'boolean' ? `
+                      <div class="form-check form-switch">
+                        <input type="checkbox" class="form-check-input" id="config_${fieldKey}" name="${fieldKey}"
+                               ${currentValue === true || currentValue === 'true' ? 'checked' : ''}>
+                        <label class="form-check-label" for="config_${fieldKey}" style="color: var(--text-secondary);">
+                          ${currentValue === true || currentValue === 'true' ? 'Enabled' : 'Disabled'}
                         </label>
                       </div>
-                    ` : (configVar.name.includes('dir') || configVar.name.includes('path') || configVar.name.includes('template') || configVar.name.includes('file')) ? `
-                      <div class="input-group">
-                        <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
-                               placeholder="${configVar.placeholder}"
-                               value="${currentValue}"
-                               ${configVar.required ? 'required' : ''}
-                               style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                      </div>
+                    ` : isMultiline ? `
+                      <textarea class="form-control" id="config_${fieldKey}" name="${fieldKey}"
+                             placeholder="${placeholder.replace(/\n/g, '&#10;')}"
+                             rows="5"
+                             ${configVar.required ? 'required' : ''}
+                             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: monospace; font-size: 13px;">${currentValue}</textarea>
                     ` : `
-                      <input type="text" class="form-control" id="config_${configVar.name}" name="${configVar.name}"
-                             placeholder="${configVar.placeholder}"
+                      <input type="text" class="form-control" id="config_${fieldKey}" name="${fieldKey}"
+                             placeholder="${placeholder}"
                              value="${currentValue}"
                              ${configVar.required ? 'required' : ''}
                              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
                     `}
                     <div class="form-text" style="color: var(--text-secondary);">
-                      ${configVar.description}
+                      ${configVar.description || ''}
                     </div>
                   </div>
                 `;}).join('')}
@@ -299,13 +312,20 @@ async function savePluginConfig(pluginName, configVars) {
 
     // Convert form data to config object
     for (const configVar of configVars) {
-      const value = formData.get(configVar.name);
-      if (configVar.type === 'boolean') {
-        configData[configVar.name] = document.getElementById(`config_${configVar.name}`).checked;
-      } else if (configVar.type === 'number') {
-        configData[configVar.name] = value ? Number(value) : null;
+      // Support both 'key' (new format) and 'name' (old format)
+      const fieldKey = configVar.key || configVar.name;
+      const normalizedType = configVar.type === 'bool' ? 'boolean' :
+                            configVar.type === 'int' ? 'number' : configVar.type;
+
+      const element = document.getElementById(`config_${fieldKey}`);
+      if (!element) continue;
+
+      // Server expects all values as strings
+      if (normalizedType === 'boolean') {
+        configData[fieldKey] = element.checked ? 'true' : 'false';
       } else {
-        configData[configVar.name] = value;
+        // For text/textarea/number, get value directly as string
+        configData[fieldKey] = element.value;
       }
     }
 
@@ -333,9 +353,11 @@ async function savePluginConfig(pluginName, configVars) {
     // Show success message
     alert(`Plugin "${pluginName}" has been configured successfully!`);
 
-    // Refresh plugins list to update status - call loadPlugins from main plugins module
+    // Refresh plugins list to update status
     if (typeof loadPlugins === 'function') {
       await loadPlugins();
+    } else if (typeof loadPluginsForSidebar === 'function') {
+      await loadPluginsForSidebar();
     }
 
   } catch (error) {
