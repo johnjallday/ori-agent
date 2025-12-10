@@ -319,6 +319,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Save updated agent (handle rename if needed)
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
+			// Validate the new agent name
+			if err := validateAgentName(*req.Name); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
 			if _, exists := h.State.GetAgent(*req.Name); exists {
 				http.Error(w, "Agent with that name already exists", http.StatusConflict)
 				return
