@@ -32,27 +32,17 @@ export class RendererNodes {
 
       const fromAgent = fromCandidates[0];
 
-      // Resolve target agent instance (prefer assigned_node_id, else closest)
+      // Resolve target agent instance (prefer assigned_node_id, then assignedNodeId, then first matching agent)
+      // IMPORTANT: Never use proximity - always use the assigned agent to avoid arrow snapping to wrong agent
       let toAgent = null;
-      if (task.assigned_node_id && toCandidates.length) {
-        toAgent = toCandidates.find(a => a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id) || null;
+      const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+      if (assignedNodeId && toCandidates.length) {
+        toAgent = toCandidates.find(a => a.nodeId === assignedNodeId || a.id === assignedNodeId) || null;
       }
-      // Fallback: if assigned_node_id didn't match OR wasn't specified, use proximity/first agent
+      // Fallback: if assigned_node_id didn't match OR wasn't specified, use first agent with matching name
+      // Do NOT use proximity - that causes the arrow to snap to wrong agents when dragging
       if (!toAgent && toCandidates.length) {
-        if (task.x != null && task.y != null) {
-          let best = null;
-          let bestDist = Infinity;
-          toCandidates.forEach(a => {
-            const d = Math.hypot((a.x || 0) - task.x, (a.y || 0) - task.y);
-            if (d < bestDist) {
-              bestDist = d;
-              best = a;
-            }
-          });
-          toAgent = best;
-        } else {
-          toAgent = toCandidates[0];
-        }
+        toAgent = toCandidates[0];
       }
 
       // Handle unassigned tasks (to: "unassigned" or empty string)
