@@ -241,6 +241,27 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// SECURITY: Sanitize filename to prevent path traversal attacks
+	cleanFilename := filepath.Base(header.Filename)
+	if cleanFilename == "" || cleanFilename == "." || cleanFilename == ".." {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	// SECURITY: Reject hidden files (files starting with .)
+	if strings.HasPrefix(cleanFilename, ".") {
+		http.Error(w, "Hidden files not allowed", http.StatusBadRequest)
+		return
+	}
+
+	// SECURITY: Only allow alphanumeric characters, hyphens, underscores, and dots in filename
+	for _, c := range cleanFilename {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			http.Error(w, "Invalid characters in filename", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Create a permanent directory for uploaded plugins
 	uploadsDir := "uploaded_plugins"
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
@@ -248,7 +269,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pluginFile := filepath.Join(uploadsDir, header.Filename)
+	pluginFile := filepath.Join(uploadsDir, cleanFilename)
 	out, err := os.Create(pluginFile)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -729,6 +750,19 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SECURITY: Sanitize filename to prevent path traversal attacks
+	cleanFilename := filepath.Base(req.Filename)
+	if cleanFilename != req.Filename || strings.Contains(req.Filename, "..") {
+		http.Error(w, "Invalid filename: path traversal not allowed", http.StatusBadRequest)
+		return
+	}
+
+	// SECURITY: Only allow .json files
+	if !strings.HasSuffix(cleanFilename, ".json") {
+		http.Error(w, "Invalid filename: only .json files allowed", http.StatusBadRequest)
+		return
+	}
+
 	// Get current agent
 	_, current := h.State.ListAgents()
 
@@ -739,8 +773,8 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Save uploaded config to file
-	configPath := filepath.Join(agentDir, req.Filename)
+	// Save uploaded config to file (using sanitized filename)
+	configPath := filepath.Join(agentDir, cleanFilename)
 
 	// Convert config to JSON
 	configData, err := json.MarshalIndent(req.Config, "", "  ")
