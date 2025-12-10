@@ -1185,6 +1185,8 @@ function showSchedulerDetails(schedulerNode) {
   const cronExpr = sched.cron_expr || '0 9 * * *';
   const delayMins = schedType === 'relative_delay' ? Math.floor((sched.delay_duration || 0) / (60 * 1e9)) : 5;
   const triggerOnce = sched.trigger_once || false;
+  // For 'once' type, format the execute_at datetime for the input
+  const executeAt = sched.execute_at ? new Date(sched.execute_at).toISOString().slice(0, 16) : '';
 
   // Build task options for dropdown
   let taskOptions = '<option value="">-- Not linked --</option>';
@@ -1242,12 +1244,22 @@ function showSchedulerDetails(schedulerNode) {
       <select id="scheduler-type" class="form-select form-select-sm"
               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
               onchange="updateSchedulerTypeFields()">
+        <option value="once" ${schedType === 'once' ? 'selected' : ''}>One-time (specific date/time)</option>
         <option value="interval" ${schedType === 'interval' ? 'selected' : ''}>Interval</option>
         <option value="daily" ${schedType === 'daily' ? 'selected' : ''}>Daily</option>
         <option value="weekly" ${schedType === 'weekly' ? 'selected' : ''}>Weekly</option>
         <option value="cron" ${schedType === 'cron' ? 'selected' : ''}>Cron Expression</option>
         <option value="relative_delay" ${schedType === 'relative_delay' ? 'selected' : ''}>Relative Delay</option>
       </select>
+    </div>
+
+    <!-- Once (specific date/time) fields -->
+    <div id="scheduler-once-fields" class="mb-3" style="display: ${schedType === 'once' ? 'block' : 'none'};">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Execute At</label>
+      <input type="datetime-local" id="scheduler-execute-at" class="form-control form-control-sm"
+             value="${executeAt}"
+             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      <small style="color: var(--text-muted);">Select the exact date and time for execution</small>
     </div>
 
     <!-- Interval fields -->
@@ -1369,7 +1381,7 @@ function updateSchedulerTypeFields() {
   const schedType = document.getElementById('scheduler-type')?.value || 'interval';
 
   // Hide all type-specific fields
-  const fieldGroups = ['interval', 'daily', 'weekly', 'cron', 'delay'];
+  const fieldGroups = ['once', 'interval', 'daily', 'weekly', 'cron', 'delay'];
   fieldGroups.forEach(group => {
     const el = document.getElementById(`scheduler-${group}-fields`);
     if (el) el.style.display = 'none';
@@ -1377,6 +1389,9 @@ function updateSchedulerTypeFields() {
 
   // Show relevant fields
   switch (schedType) {
+    case 'once':
+      document.getElementById('scheduler-once-fields').style.display = 'block';
+      break;
     case 'interval':
       document.getElementById('scheduler-interval-fields').style.display = 'block';
       break;
@@ -1422,6 +1437,12 @@ async function saveSchedulerDetails(schedulerNode) {
   const schedule = { type: schedType };
 
   switch (schedType) {
+    case 'once':
+      const executeAtStr = document.getElementById('scheduler-execute-at')?.value;
+      if (executeAtStr) {
+        schedule.execute_at = new Date(executeAtStr).toISOString();
+      }
+      break;
     case 'interval':
       const intervalMins = parseInt(document.getElementById('scheduler-interval')?.value) || 60;
       schedule.interval = intervalMins * 60 * 1e9; // Convert to nanoseconds
@@ -3101,6 +3122,7 @@ function updateScheduleInputs() {
 
   // Show relevant config section
   const configMap = {
+    'once': 'once-config',
     'interval': 'interval-config',
     'daily': 'daily-config',
     'weekly': 'weekly-config',
@@ -3133,6 +3155,19 @@ function buildScheduleConfig() {
   };
 
   switch (scheduleType) {
+    case 'once':
+      // One-time execution at a specific date/time
+      const executeAtStr = document.getElementById('execute-at').value;
+      if (!executeAtStr) {
+        throw new Error('Please select a date and time for the one-time execution');
+      }
+      const executeAt = new Date(executeAtStr);
+      if (executeAt <= new Date()) {
+        throw new Error('Execution time must be in the future');
+      }
+      config.execute_at = executeAt.toISOString();
+      break;
+
     case 'interval':
       // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
       let intervalMinutes = parseInt(document.getElementById('interval-minutes').value, 10);
