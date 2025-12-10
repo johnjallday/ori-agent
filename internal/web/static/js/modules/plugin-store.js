@@ -155,6 +155,8 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
     // Refresh plugins in sidebar - call loadPlugins from main plugins module
     if (typeof loadPlugins === 'function') {
       await loadPlugins();
+    } else if (typeof loadPluginsForSidebar === 'function') {
+      await loadPluginsForSidebar();
     }
 
     console.log(`Plugin ${pluginName} installed successfully`);

@@ -1,7 +1,7 @@
-# 🦆 Ori Agent
+# <img src="assets/logo.svg" alt="Ori Agent logo" width="28" /> Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.18-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.19-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25.3-00add8)
@@ -39,7 +39,7 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 #### Option 1: macOS DMG Installer (Recommended for macOS)
 
 1. **Download the DMG** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest):
-   - **Apple Silicon (M1/M2/M3)**: `OriAgent-{version}-arm64.dmg`
+   - **Apple Silicon**: `OriAgent-{version}-arm64.dmg`
    - **Intel Macs**: `OriAgent-{version}-amd64.dmg`
 
 2. **Open the DMG** and drag `OriAgent.app` to Applications
@@ -246,10 +246,9 @@ While this app is very functional, there will be a lot of breaking changes. Feel
 MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
 
 ## 🛣️Roadmap
-- blockchain integration
-- white paper
-- web3 integration for markets.
-- sqlite to save conversation history (maybe)
+- v0.1.0 => AI Agent Functionality
+- v0.2.0 => Blockchain Integration
+
 
 
 ---

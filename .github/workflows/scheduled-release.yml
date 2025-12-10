@@ -1,0 +1,231 @@
+name: Scheduled Release
+
+# This workflow handles scheduled and manual releases from release branches
+# It follows Git Flow: release/vX.Y.Z branches are merged to main and tagged
+#
+# Usage:
+#   1. Create release branch: ./scripts/create-release.sh v1.3.0
+#   2. Schedule for later:    ./scripts/schedule-release.sh 2d   (or specific date)
+#   3. Or release immediately: gh workflow run scheduled-release.yml -f release_branch=release/v1.3.0
+
+on:
+  # Daily check for scheduled releases (runs at 10:00 UTC)
+  schedule:
+    - cron: '0 10 * * *'  # Daily at 10:00 UTC
+
+  # Manual trigger for immediate release
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Release branch to deploy (e.g., release/v1.3.0)'
+        required: false
+        type: string
+      force_release:
+        description: 'Force release even if checks fail'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run - validate but do not release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # Find and validate release branch
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_branch: ${{ steps.find_branch.outputs.branch }}
+      version: ${{ steps.find_branch.outputs.version }}
+      should_release: ${{ steps.find_branch.outputs.should_release }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Find release branch
+        id: find_branch
+        run: |
+          TODAY=$(date -u +%Y-%m-%d)
+          echo "Today's date: $TODAY"
+
+          # If manual trigger with specific branch
+          if [ -n "${{ inputs.release_branch }}" ]; then
+            BRANCH="${{ inputs.release_branch }}"
+            echo "Manual trigger for branch: $BRANCH"
+
+            # Extract version
+            VERSION=$(echo "$BRANCH" | sed 's/release\///')
+
+            # Check if already released
+            if git tag -l "$VERSION" | grep -q "$VERSION"; then
+              echo "Version $VERSION already released"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Scheduled run: find release branches with RELEASE_DATE file
+          echo "Checking for scheduled releases..."
+
+          RELEASE_BRANCH=""
+          RELEASE_VERSION=""
+
+          for BRANCH in $(git branch -r --list 'origin/release/v*' --sort=-committerdate); do
+            BRANCH_NAME=$(echo "$BRANCH" | sed 's/origin\///' | xargs)
+            VERSION=$(echo "$BRANCH_NAME" | sed 's/release\///')
+
+            # Skip if already released
+            if git tag -l "$VERSION" | grep -q "$VERSION"; then
+              echo "Skipping $BRANCH_NAME - already released"
+              continue
+            fi
+
+            # Check for RELEASE_DATE file
+            if git show "origin/$BRANCH_NAME:RELEASE_DATE" >/dev/null 2>&1; then
+              RELEASE_DATE=$(git show "origin/$BRANCH_NAME:RELEASE_DATE" | tr -d '[:space:]')
+              echo "Found $BRANCH_NAME with RELEASE_DATE=$RELEASE_DATE"
+
+              # Check if release date has arrived
+              if [[ "$TODAY" >= "$RELEASE_DATE" ]]; then
+                echo "Release date reached for $BRANCH_NAME"
+                RELEASE_BRANCH="$BRANCH_NAME"
+                RELEASE_VERSION="$VERSION"
+                break
+              else
+                echo "Release date not yet reached (scheduled for $RELEASE_DATE)"
+              fi
+            else
+              echo "No RELEASE_DATE file in $BRANCH_NAME - skipping"
+            fi
+          done
+
+          if [ -z "$RELEASE_BRANCH" ]; then
+            echo "No release branches ready for release today"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "version=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        run: |
+          echo "## Release Preparation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.find_branch.outputs.should_release }}" == "true" ]; then
+            echo "- **Branch:** ${{ steps.find_branch.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ steps.find_branch.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status:** Ready to release" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** No release branch ready" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Run tests on the release branch
+  validate:
+    name: Validate Release
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.release_branch }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run tests
+        run: go test -v -short ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+  # Merge to main and create tag
+  release:
+    name: Create Release
+    needs: [prepare, validate]
+    if: |
+      needs.prepare.outputs.should_release == 'true' &&
+      (success() || inputs.force_release) &&
+      !inputs.dry_run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge release to main
+        run: |
+          BRANCH="${{ needs.prepare.outputs.release_branch }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          # Checkout main and merge release branch
+          git checkout main
+          git merge "origin/$BRANCH" --no-ff -m "Release $VERSION"
+
+          # Create and push tag
+          git tag -a "$VERSION" -m "Release $VERSION"
+
+          # Push main and tag
+          git push origin main
+          git push origin "$VERSION"
+
+          echo "## Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** [$VERSION](https://github.com/${{ github.repository }}/releases/tag/$VERSION)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Merge back to dev
+        continue-on-error: true  # Don't fail if merge conflicts
+        run: |
+          BRANCH="${{ needs.prepare.outputs.release_branch }}"
+
+          git checkout dev
+          git merge "origin/$BRANCH" --no-ff -m "Merge $BRANCH back to dev"
+          git push origin dev
+
+          echo "- **Dev sync:** Merged release fixes back to dev" >> $GITHUB_STEP_SUMMARY
+
+  # Dry run summary
+  dry-run:
+    name: Dry Run Summary
+    needs: [prepare, validate]
+    if: inputs.dry_run && needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Summary
+        run: |
+          echo "## Dry Run Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Would release:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ needs.prepare.outputs.release_branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run again without dry_run to create the release." >> $GITHUB_STEP_SUMMARY

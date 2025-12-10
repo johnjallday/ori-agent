@@ -76,27 +76,27 @@ Merge these commits to main? (y/N): y
 
 ---
 
-### 3️⃣ Release from `main`
+### 3️⃣ Create the release (branch by default)
 
 ```bash
-# Creates tag, builds installers, publishes
+# Default: open release/v0.5.0 from dev for stabilization
 ./scripts/create-release.sh v0.5.0
+
+# Need to publish immediately from main after prepare-release?
+# ./scripts/create-release.sh v0.5.0 --immediate
 ```
 
-**Output:**
+**Output (branch flow):**
 ```
-✅ All platform installers built successfully
-✅ GitHub release created and installers uploaded
-✅ Release v0.5.0 created successfully!
-
-[INFO] Switching back to dev branch...
-✅ Now on dev branch - ready for next features!
-
-💡 Tip: main represents v0.5.0 (released)
-💡 Tip: Continue daily work on dev
+✅ Release branch created: release/v0.5.0
+Next steps:
+  - Ship fixes on the release branch if needed
+  - Wait for scheduled release workflow
+  - Or trigger manually:
+      gh workflow run scheduled-release.yml -f release_branch=release/v0.5.0
 ```
 
-**You're automatically back on `dev`** - ready for v0.6.0!
+**Using `--immediate` (main only) will tag/publish now and auto-switch you back to `dev`.**
 
 ---
 
@@ -130,9 +130,10 @@ git switch dev
 ./scripts/prepare-release.sh
 # ✅ dev → main merged
 
-# Step 3: Release
-./scripts/create-release.sh v0.5.0
-# 🚀 v0.5.0 released!
+# Step 3: Release (pick one)
+#   a) Stabilization branch: ./scripts/create-release.sh v0.5.0
+#   b) Immediate publish:    ./scripts/create-release.sh v0.5.0 --immediate
+# 🚀 v0.5.0 released with --immediate!
 # ✅ Auto-switched back to dev
 
 # ============================================
@@ -168,9 +169,9 @@ git switch -c feature/next-thing
 └──────────────────────────────────┘
               ↓
 ┌──────────────────────────────────┐
-│  3. Release from main            │
+│  3. Release                      │
 │     create-release.sh            │
-│     → Auto-switch back to dev    │
+│     (release branch or --immediate)
 └──────────────────────────────────┘
               ↓
         Back on dev!
@@ -224,8 +225,10 @@ git branch --show-current
 ## One-Liner Cheat Sheet
 
 ```bash
-# Release in 3 commands:
-./scripts/pre-release-check.sh v0.X.Y && ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.X.Y
+# Release in 3 commands (immediate publish):
+./scripts/pre-release-check.sh v0.X.Y && ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.X.Y --immediate
+
+# For a release branch instead, drop --immediate
 ```
 
 ---

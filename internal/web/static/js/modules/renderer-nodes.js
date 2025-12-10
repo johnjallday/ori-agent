@@ -845,17 +845,60 @@ export class RendererNodes {
       const title = schedulerNode.name || 'Scheduler';
       this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
 
-      // Status badge
-      const statusText = enabled ? 'Enabled' : 'Paused';
+      // Pause/Play toggle button (top right, before status badge)
+      const toggleBtnSize = 22;
+      const toggleBtnX = cardX + cardWidth - toggleBtnSize - 8;
+      const toggleBtnY = cardY + 6;
+
+      // Button background
+      this.ctx.fillStyle = enabled ? '#f59e0b' : '#10b981'; // Orange to pause, green to play
+      this.ctx.beginPath();
+      this.ctx.arc(toggleBtnX + toggleBtnSize / 2, toggleBtnY + toggleBtnSize / 2, toggleBtnSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Draw pause or play icon
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+
+      if (enabled) {
+        // Draw pause icon (two vertical bars)
+        const barWidth = 3;
+        const barHeight = 10;
+        const barY = toggleBtnY + toggleBtnSize / 2 - barHeight / 2;
+        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 - barWidth - 2, barY, barWidth, barHeight);
+        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 + 2, barY, barWidth, barHeight);
+      } else {
+        // Draw play icon (triangle)
+        const centerX = toggleBtnX + toggleBtnSize / 2;
+        const centerY = toggleBtnY + toggleBtnSize / 2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(centerX - 3, centerY - 5);
+        this.ctx.lineTo(centerX - 3, centerY + 5);
+        this.ctx.lineTo(centerX + 5, centerY);
+        this.ctx.closePath();
+        this.ctx.fill();
+      }
+
+      // Store toggle button bounds
+      schedulerNode.toggleBtnBounds = {
+        x: toggleBtnX,
+        y: toggleBtnY,
+        width: toggleBtnSize,
+        height: toggleBtnSize
+      };
+
+      // Status badge (moved left to make room for toggle button)
+      const statusText = enabled ? 'Active' : 'Paused';
       const statusColor = enabled ? '#10b981' : '#64748b';
-      const badgeX = cardX + cardWidth - 65;
+      const badgeX = cardX + cardWidth - toggleBtnSize - 65;
       const badgeY = cardY + 8;
       this.ctx.fillStyle = statusColor + '20'; // 20% opacity background
-      this.primitives.roundRect(badgeX, badgeY, 55, 18, 4);
+      this.primitives.roundRect(badgeX, badgeY, 50, 18, 4);
       this.ctx.fill();
       this.ctx.fillStyle = statusColor;
       this.ctx.font = '10px system-ui';
-      this.ctx.fillText(statusText, badgeX + 8, badgeY + 12);
+      this.ctx.fillText(statusText, badgeX + 6, badgeY + 12);
 
       // Connection indicator (small link icon if connected)
       if (isConnected) {
@@ -1002,7 +1045,7 @@ export class RendererNodes {
   }
 
   /**
-   * Draw store nodes (file storage nodes)
+   * Draw store nodes
    */
   drawStoreNodes() {
     if (!this.state.storeNodes || this.state.storeNodes.length === 0) return;
@@ -1011,16 +1054,15 @@ export class RendererNodes {
       if (storeNode.x == null || storeNode.y == null) return;
 
       const cardWidth = 180;
-      const cardHeight = 90;
+      const cardHeight = 110;
       const cardX = storeNode.x - cardWidth / 2;
       const cardY = storeNode.y - cardHeight / 2;
 
       // Store bounds for hit testing
       storeNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
 
-      // Determine node color based on errors
-      const hasError = storeNode.last_error && storeNode.last_error !== '';
-      const baseColor = hasError ? '#ef4444' : '#10b981'; // Red if error, green if ok
+      // Base color (teal/cyan for storage)
+      const baseColor = '#14b8a6';
 
       // Background
       this.ctx.save();
@@ -1039,25 +1081,26 @@ export class RendererNodes {
       this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
       this.ctx.stroke();
 
-      // Storage icon (database/folder icon)
+      // Storage icon (disk/database icon)
       const iconSize = 20;
       const iconX = cardX + 10;
       const iconY = cardY + 16;
 
       this.ctx.strokeStyle = baseColor;
+      this.ctx.fillStyle = baseColor;
       this.ctx.lineWidth = 2;
 
-      // Draw folder icon
+      // Draw disk icon
       this.ctx.beginPath();
-      // Folder tab
-      this.ctx.moveTo(iconX, iconY - 2);
-      this.ctx.lineTo(iconX + 8, iconY - 2);
-      this.ctx.lineTo(iconX + 10, iconY);
-      // Folder body
-      this.ctx.lineTo(iconX + iconSize, iconY);
-      this.ctx.lineTo(iconX + iconSize, iconY + iconSize - 4);
-      this.ctx.lineTo(iconX, iconY + iconSize - 4);
-      this.ctx.closePath();
+      this.ctx.arc(iconX + iconSize / 2, iconY, iconSize / 3, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Draw disk platter lines
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(iconX + 5, iconY - 3);
+      this.ctx.lineTo(iconX + 15, iconY + 3);
       this.ctx.stroke();
 
       // Title
@@ -1067,60 +1110,76 @@ export class RendererNodes {
       this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
 
       // Format badge
-      const format = storeNode.format || 'json';
-      const formatText = format.toUpperCase();
-      const badgeX = cardX + cardWidth - 50;
+      const formatText = storeNode.format || 'json';
+      const badgeX = cardX + cardWidth - 60;
       const badgeY = cardY + 8;
-      this.ctx.fillStyle = '#3b82f6' + '20'; // Blue with 20% opacity
-      this.primitives.roundRect(badgeX, badgeY, 42, 18, 4);
+      this.ctx.fillStyle = baseColor + '20'; // 20% opacity background
+      this.primitives.roundRect(badgeX, badgeY, 50, 18, 4);
       this.ctx.fill();
-      this.ctx.fillStyle = '#3b82f6';
+      this.ctx.fillStyle = baseColor;
       this.ctx.font = '10px system-ui';
-      this.ctx.fillText(formatText, badgeX + 6, badgeY + 12);
+      this.ctx.fillText(formatText.toUpperCase(), badgeX + 8, badgeY + 12);
 
-      // Base directory path
+      // Write mode
       this.ctx.fillStyle = '#475569';
-      this.ctx.font = '11px monospace';
-      const baseDir = storeNode.base_dir || './';
-      const truncatedDir = baseDir.length > 20 ? '...' + baseDir.slice(-17) : baseDir;
-      this.ctx.fillText(truncatedDir, cardX + 10, cardY + 45);
+      this.ctx.font = '11px system-ui';
+      const writeModeText = storeNode.write_mode === 'append' ? 'Append mode' : 'Overwrite mode';
+      this.ctx.fillText(writeModeText, cardX + 10, cardY + 45);
 
-      // Write statistics
-      const writeCount = storeNode.write_count || 0;
+      // Directory path (truncated if too long)
       this.ctx.fillStyle = '#64748b';
       this.ctx.font = '10px system-ui';
-      this.ctx.fillText(`Writes: ${writeCount}`, cardX + 10, cardY + 60);
+      let basedir = storeNode.base_dir || '/path/to/store';
+      if (basedir.length > 25) {
+        basedir = '...' + basedir.slice(-22);
+      }
+      this.ctx.fillText(basedir, cardX + 10, cardY + 62);
 
-      // Last write time or error
-      if (hasError) {
+      // Stats
+      const writeCount = storeNode.write_count || 0;
+      this.ctx.fillStyle = '#10b981';
+      this.ctx.font = 'bold 10px system-ui';
+      this.ctx.fillText(`${writeCount} writes`, cardX + 10, cardY + 78);
+
+      // Last error (if any)
+      if (storeNode.last_error && storeNode.last_error !== '') {
         this.ctx.fillStyle = '#ef4444';
-        this.ctx.font = 'italic 10px system-ui';
-        this.ctx.fillText('Error', cardX + 10, cardY + 72);
-      } else if (storeNode.last_write_time) {
-        const lastWrite = new Date(storeNode.last_write_time);
-        const now = new Date();
-        const diff = now - lastWrite;
-
-        let timeText;
-        if (diff < 60000) {
-          timeText = `${Math.floor(diff / 1000)}s ago`;
-        } else if (diff < 3600000) {
-          timeText = `${Math.floor(diff / 60000)}m ago`;
-        } else if (diff < 86400000) {
-          timeText = `${Math.floor(diff / 3600000)}h ago`;
-        } else {
-          timeText = `${Math.floor(diff / 86400000)}d ago`;
-        }
-
-        this.ctx.fillStyle = '#64748b';
-        this.ctx.font = '10px system-ui';
-        this.ctx.fillText(`Last: ${timeText}`, cardX + 10, cardY + 72);
+        this.ctx.font = '9px system-ui';
+        this.ctx.fillText('⚠ Error', cardX + 10, cardY + 92);
       }
 
-      // Delete button (top-right)
+      // Assign Agent button (bottom left)
+      const assignBtnWidth = 70;
+      const assignBtnHeight = 16;
+      const assignBtnX = cardX + 10;
+      const assignBtnY = cardY + cardHeight - assignBtnHeight - 6;
+
+      // Check if in assignment mode for this store
+      const isActiveAssignment = this.state.storeAssignmentMode &&
+                                  this.state.storeAssignmentSource &&
+                                  this.state.storeAssignmentSource.canvas_node_id === storeNode.canvas_node_id;
+
+      this.ctx.fillStyle = isActiveAssignment ? '#fd7e14' : '#6c757d';
+      this.primitives.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 9px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('⇄ ASSIGN', assignBtnX + assignBtnWidth / 2, assignBtnY + 11);
+      this.ctx.textAlign = 'left';
+
+      storeNode.assignBtnBounds = {
+        x: assignBtnX,
+        y: assignBtnY,
+        width: assignBtnWidth,
+        height: assignBtnHeight
+      };
+
+      // Delete button (top-right corner)
       const deleteSize = 18;
       const deleteX = cardX + cardWidth - deleteSize - 6;
-      const deleteY = cardY + 30;
+      const deleteY = cardY + 6;
       this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
       this.ctx.beginPath();
       this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
@@ -1142,14 +1201,21 @@ export class RendererNodes {
         height: deleteSize
       };
 
-      // Input port indicator (for receiving data from agents/tasks)
+      // Input port (for receiving data)
+      const inputPortSize = 10;
+      const inputPortX = cardX - inputPortSize / 2;
+      const inputPortY = cardY + cardHeight / 2 - inputPortSize / 2;
+
       this.ctx.fillStyle = baseColor;
       this.ctx.beginPath();
-      this.ctx.arc(storeNode.x, cardY - 5, 6, 0, Math.PI * 2);
+      this.ctx.arc(inputPortX + inputPortSize / 2, inputPortY + inputPortSize / 2, inputPortSize / 2, 0, Math.PI * 2);
       this.ctx.fill();
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = 1;
-      this.ctx.stroke();
+
+      // Store port bounds for connections
+      storeNode.inPort = {
+        x: inputPortX + inputPortSize / 2,
+        y: inputPortY + inputPortSize / 2
+      };
     });
   }
 

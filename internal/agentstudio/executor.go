@@ -2,6 +2,7 @@ package agentstudio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -224,7 +225,8 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel() // Ensure context is always cancelled
+	// NOTE: Don't defer cancel() here because we launch a goroutine below
+	// The goroutine will defer cancel() when it completes (see line ~290)
 
 	// Track running task
 	te.mu.Lock()
@@ -340,6 +342,9 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			updatedTask.Status = TaskStatusCompleted
 			updatedTask.Result = result
 
+			// Automatically store result if agent is connected to a store node
+			te.autoStoreResult(ws, &task, result)
+
 			// Publish task completed event
 			if te.eventBus != nil {
 				event := NewTaskEvent(EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
@@ -368,6 +373,108 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			te.eventBus.Publish(event)
 		}
 	}()
+}
+
+// AutoStoreResult automatically stores task result if the agent is connected to a store node
+// This is a package-level function so it can be called from both executor and HTTP handlers
+func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+	// Find agent's canvas node ID (use AssignedNodeID for multi-instance agents)
+	agentNodeID := task.AssignedNodeID
+	if agentNodeID == "" || agentNodeID == "unassigned" {
+		return
+	}
+
+	// Find store node assigned to this agent
+	var assignedStore *StoreNode
+	for i := range ws.StoreNodes {
+		if ws.StoreNodes[i].AgentNodeID == agentNodeID {
+			assignedStore = &ws.StoreNodes[i]
+			break
+		}
+	}
+
+	// No store assigned - skip automatic storage
+	if assignedStore == nil {
+		return
+	}
+
+	// Check if auto-store is enabled for this store node
+	if !assignedStore.AutoStore {
+		return
+	}
+
+	// Generate filename: task-{short-id}-{timestamp}.{format}
+	taskIDShort := task.ID
+	if len(taskIDShort) > 8 {
+		taskIDShort = taskIDShort[:8]
+	}
+	timestamp := time.Now().Format("20060102-150405")
+
+	// Determine file extension based on store format
+	ext := "txt"
+	switch assignedStore.Format {
+	case "json":
+		ext = "json"
+	case "markdown":
+		ext = "md"
+	case "text":
+		ext = "txt"
+	case "binary":
+		ext = "bin"
+	}
+
+	filename := fmt.Sprintf("task-%s-%s.%s", taskIDShort, timestamp, ext)
+
+	// Prepare data for storage
+	dataToStore := result
+	if assignedStore.Format == "json" {
+		// Wrap plain text result in JSON structure
+		jsonData := map[string]interface{}{
+			"task_id":     task.ID,
+			"agent":       agentNodeID,
+			"result":      result,
+			"timestamp":   timestamp,
+			"description": task.Description,
+		}
+		jsonBytes, err := json.Marshal(jsonData)
+		if err != nil {
+			logger.Error("Failed to marshal result to JSON", logger.Fields{
+				"task_id": task.ID,
+				"err":     err,
+			})
+			return
+		}
+		dataToStore = string(jsonBytes)
+	}
+
+	// Write result to store
+	if err := WriteToStore(assignedStore, filename, dataToStore); err != nil {
+		logger.Error("Failed to auto-store task result", logger.Fields{
+			"task_id":       task.ID,
+			"store_node_id": assignedStore.ID,
+			"filename":      filename,
+			"err":           err,
+		})
+		// Don't fail the task - storage is best-effort
+		return
+	}
+
+	logger.Info("✅ Task result auto-stored", logger.Fields{
+		"task_id":       task.ID,
+		"store_node_id": assignedStore.ID,
+		"filename":      filename,
+		"write_count":   assignedStore.WriteCount,
+	})
+
+	// Save workspace to persist store node stats (WriteToStore updated them)
+	if err := workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
+	}
+}
+
+// autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store
+func (te *TaskExecutor) autoStoreResult(ws *Workspace, task *Task, result string) {
+	AutoStoreResult(ws, task, result, te.workspaceStore)
 }
 
 // GetRunningTaskCount returns the number of currently running tasks

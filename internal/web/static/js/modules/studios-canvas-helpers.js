@@ -292,6 +292,98 @@ function showTaskDetails(task) {
           </div>
         ` : '';
       })()}
+      ${(() => {
+        // Find scheduler targeting this task
+        const schedulers = window.agentCanvas?.state?.schedulerNodes || [];
+        const scheduler = schedulers.find(s => s.target_task_id === task.id);
+        if (!scheduler) return '';
+
+        const scheduleType = scheduler.schedule?.type || 'unknown';
+        const interval = scheduler.schedule?.interval;
+        const cronExpr = scheduler.schedule?.cron_expression;
+        let scheduleDesc = '';
+        if (scheduleType === 'interval' && interval) {
+          const mins = Math.floor(interval / 60000000000);
+          scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
+        } else if (scheduleType === 'cron' && cronExpr) {
+          scheduleDesc = `Cron: ${cronExpr}`;
+        }
+        const nextRun = scheduler.next_run ? new Date(scheduler.next_run).toLocaleString() : 'N/A';
+        const lastRun = scheduler.last_run ? new Date(scheduler.last_run).toLocaleString() : 'Never';
+
+        return `
+          <div class="mb-3">
+            <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
+              <span style="color: #10b981; font-weight: 600;">
+                <span style="margin-right: 6px;">⏰</span> Schedule
+                <span class="badge bg-success ms-2" style="font-size: 0.7rem;">${scheduler.enabled ? 'Active' : 'Disabled'}</span>
+              </span>
+              <svg class="collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="transition: transform 0.2s;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="collapsible-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+              <div style="padding: 10px; background: rgba(16, 185, 129, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(16, 185, 129, 0.2); border-top: none;">
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                  <div class="mb-1"><strong>Name:</strong> ${scheduler.name || 'Unnamed'}</div>
+                  <div class="mb-1"><strong>Type:</strong> ${scheduleDesc}</div>
+                  <div class="mb-1"><strong>Next Run:</strong> ${nextRun}</div>
+                  <div class="mb-1"><strong>Last Run:</strong> ${lastRun}</div>
+                  <div><strong>Executions:</strong> ${scheduler.execution_count || 0} (${scheduler.failure_count || 0} failed)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <style>
+            .collapsible-header:hover { background: rgba(16, 185, 129, 0.15) !important; }
+            .expanded .collapsible-content { max-height: 200px !important; }
+            .expanded .collapse-icon { transform: rotate(180deg); }
+          </style>
+        `;
+      })()}
+      ${(() => {
+        // Find store node connected to this task's agent
+        const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+        if (!assignedNodeId) return '';
+
+        const storeNodes = window.agentCanvas?.state?.storeNodes || [];
+        const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
+        if (!store) return '';
+
+        const lastWrite = store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
+          ? new Date(store.last_write_time).toLocaleString()
+          : 'Never';
+
+        return `
+          <div class="mb-3">
+            <div class="collapsible-header-store" onclick="this.parentElement.classList.toggle('expanded-store')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(20, 184, 166, 0.1); border-radius: 6px; border: 1px solid rgba(20, 184, 166, 0.3);">
+              <span style="color: #14b8a6; font-weight: 600;">
+                <span style="margin-right: 6px;">💾</span> Storage
+                <span class="badge ms-2" style="font-size: 0.7rem; background: #14b8a6;">${store.write_count || 0} writes</span>
+              </span>
+              <svg class="collapse-icon-store" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" stroke-width="2" style="transition: transform 0.2s;">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+            <div class="collapsible-content-store" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
+              <div style="padding: 10px; background: rgba(20, 184, 166, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(20, 184, 166, 0.2); border-top: none;">
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                  <div class="mb-1"><strong>Store:</strong> ${store.name || 'Unnamed'}</div>
+                  <div class="mb-1"><strong>Path:</strong> <span style="font-family: monospace; font-size: 0.8rem;">${store.base_dir}</span></div>
+                  <div class="mb-1"><strong>Format:</strong> ${(store.format || 'json').toUpperCase()}</div>
+                  <div class="mb-1"><strong>Last Write:</strong> ${lastWrite}</div>
+                  ${store.last_file_path ? `<div><strong>Last File:</strong> <span style="font-family: monospace; font-size: 0.8rem;">${store.last_file_path}</span></div>` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+          <style>
+            .collapsible-header-store:hover { background: rgba(20, 184, 166, 0.15) !important; }
+            .expanded-store .collapsible-content-store { max-height: 200px !important; }
+            .expanded-store .collapse-icon-store { transform: rotate(180deg); }
+          </style>
+        `;
+      })()}
       ${task.result ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Result:</strong>
@@ -1059,9 +1151,6 @@ function showSchedulerDetails(schedulerNode) {
   const canvas = window.agentCanvas;
   const tasks = canvas?.state?.tasks || [];
   const targetTask = tasks.find(t => t.id === schedulerNode.target_task_id);
-  const targetTaskLabel = targetTask
-    ? `${targetTask.description || targetTask.id} (${targetTask.id})`
-    : (schedulerNode.target_task_id ? `Task: ${schedulerNode.target_task_id}` : null);
 
   // Hide other details
   hideAgentDetails();
@@ -1087,95 +1176,577 @@ function showSchedulerDetails(schedulerNode) {
     titleElement.textContent = 'Scheduler Details';
   }
 
-  // Format schedule details
-  const scheduleTypes = {
-    'interval': 'Interval',
-    'daily': 'Daily',
-    'weekly': 'Weekly',
-    'cron': 'Cron Expression',
-    'relative_delay': 'Relative Delay'
-  };
+  // Extract current schedule values
+  const sched = schedulerNode.schedule || {};
+  const schedType = sched.type || 'interval';
+  const intervalMins = schedType === 'interval' ? Math.floor((sched.interval || 0) / (60 * 1e9)) : 60;
+  const timeOfDay = sched.time_of_day || '09:00';
+  const dayOfWeek = sched.day_of_week || 0;
+  const cronExpr = sched.cron_expr || '0 9 * * *';
+  const delayMins = schedType === 'relative_delay' ? Math.floor((sched.delay_duration || 0) / (60 * 1e9)) : 5;
+  const triggerOnce = sched.trigger_once || false;
 
-  const scheduleType = scheduleTypes[schedulerNode.schedule?.type] || 'Unknown';
-  let scheduleDetails = '';
+  // Build task options for dropdown
+  let taskOptions = '<option value="">-- Not linked --</option>';
+  tasks.forEach(t => {
+    const selected = t.id === schedulerNode.target_task_id ? 'selected' : '';
+    const label = t.description || t.id;
+    taskOptions += `<option value="${t.id}" ${selected}>${label}</option>`;
+  });
 
-  if (schedulerNode.schedule) {
-    const sched = schedulerNode.schedule;
-    switch (sched.type) {
-      case 'interval':
-        const intervalMins = Math.floor(sched.interval / (60 * 1e9));
-        scheduleDetails = `Every ${intervalMins} minutes`;
-        break;
-      case 'daily':
-        scheduleDetails = `Every day at ${sched.time_of_day || '09:00'}`;
-        break;
-      case 'weekly':
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        scheduleDetails = `Every ${days[sched.day_of_week || 0]} at ${sched.time_of_day || '09:00'}`;
-        break;
-      case 'cron':
-        scheduleDetails = `Cron: ${sched.cron_expr}`;
-        break;
-      case 'relative_delay':
-        const delayMins = Math.floor(sched.delay_duration / (60 * 1e9));
-        scheduleDetails = `${delayMins} minutes after trigger`;
-        if (sched.trigger_once) scheduleDetails += ' (once)';
-        break;
-    }
-  }
-
-  const statusBadge = schedulerNode.enabled !== false
-    ? '<span class="badge bg-success">Enabled</span>'
-    : '<span class="badge bg-secondary">Paused</span>';
+  // Day of week options
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  let dayOptions = '';
+  days.forEach((day, idx) => {
+    const selected = idx === dayOfWeek ? 'selected' : '';
+    dayOptions += `<option value="${idx}" ${selected}>${day}</option>`;
+  });
 
   const html = `
     <div class="mb-3">
       <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">⏰</div>
-      <strong style="color: var(--text-primary); font-size: 1.1rem;">${schedulerNode.name || 'Scheduler'}</strong>
     </div>
+
+    <!-- Editable Name -->
     <div class="mb-3">
-      <strong style="color: var(--text-primary);">Status:</strong>
-      <div>${statusBadge}</div>
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Name</label>
+      <input type="text" id="scheduler-name" class="form-control form-control-sm"
+             value="${schedulerNode.name || 'Scheduler'}"
+             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
     </div>
+
+    <!-- Enabled Toggle -->
     <div class="mb-3">
-      <strong style="color: var(--text-primary);">Linked Task:</strong>
-      <div style="color: var(--text-secondary);">
-        ${targetTaskLabel ? targetTaskLabel : '<span style="color:#94a3b8;font-style:italic;">(not linked)</span>'}
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Status</label>
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="scheduler-enabled"
+               ${schedulerNode.enabled !== false ? 'checked' : ''}>
+        <label class="form-check-label" for="scheduler-enabled" style="color: var(--text-secondary);">
+          ${schedulerNode.enabled !== false ? 'Enabled' : 'Paused'}
+        </label>
       </div>
     </div>
+
+    <!-- Linked Task -->
     <div class="mb-3">
-      <strong style="color: var(--text-primary);">Schedule Type:</strong>
-      <div style="color: var(--text-secondary);">${scheduleType}</div>
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Linked Task</label>
+      <select id="scheduler-target-task" class="form-select form-select-sm"
+              style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+        ${taskOptions}
+      </select>
     </div>
+
+    <!-- Schedule Type -->
     <div class="mb-3">
-      <strong style="color: var(--text-primary);">Schedule:</strong>
-      <div style="color: var(--text-secondary);">${scheduleDetails}</div>
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Schedule Type</label>
+      <select id="scheduler-type" class="form-select form-select-sm"
+              style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
+              onchange="updateSchedulerTypeFields()">
+        <option value="interval" ${schedType === 'interval' ? 'selected' : ''}>Interval</option>
+        <option value="daily" ${schedType === 'daily' ? 'selected' : ''}>Daily</option>
+        <option value="weekly" ${schedType === 'weekly' ? 'selected' : ''}>Weekly</option>
+        <option value="cron" ${schedType === 'cron' ? 'selected' : ''}>Cron Expression</option>
+        <option value="relative_delay" ${schedType === 'relative_delay' ? 'selected' : ''}>Relative Delay</option>
+      </select>
     </div>
-    ${schedulerNode.prompt ? `
+
+    <!-- Interval fields -->
+    <div id="scheduler-interval-fields" class="mb-3" style="display: ${schedType === 'interval' ? 'block' : 'none'};">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Interval (minutes)</label>
+      <input type="number" id="scheduler-interval" class="form-control form-control-sm"
+             value="${intervalMins}" min="1"
+             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+    </div>
+
+    <!-- Daily fields -->
+    <div id="scheduler-daily-fields" class="mb-3" style="display: ${schedType === 'daily' ? 'block' : 'none'};">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Time of Day</label>
+      <input type="time" id="scheduler-time-daily" class="form-control form-control-sm"
+             value="${timeOfDay}"
+             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+    </div>
+
+    <!-- Weekly fields -->
+    <div id="scheduler-weekly-fields" style="display: ${schedType === 'weekly' ? 'block' : 'none'};">
       <div class="mb-3">
-        <strong style="color: var(--text-primary);">Task Prompt:</strong>
-        <div style="color: var(--text-secondary); white-space: pre-wrap; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 4px;">${schedulerNode.prompt}</div>
+        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Day of Week</label>
+        <select id="scheduler-day-of-week" class="form-select form-select-sm"
+                style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+          ${dayOptions}
+        </select>
       </div>
-    ` : ''}
+      <div class="mb-3">
+        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Time of Day</label>
+        <input type="time" id="scheduler-time-weekly" class="form-control form-control-sm"
+               value="${timeOfDay}"
+               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      </div>
+    </div>
+
+    <!-- Cron fields -->
+    <div id="scheduler-cron-fields" class="mb-3" style="display: ${schedType === 'cron' ? 'block' : 'none'};">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Cron Expression</label>
+      <input type="text" id="scheduler-cron" class="form-control form-control-sm"
+             value="${cronExpr}" placeholder="0 9 * * *"
+             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      <small style="color: var(--text-muted);">Format: minute hour day month weekday</small>
+    </div>
+
+    <!-- Relative Delay fields -->
+    <div id="scheduler-delay-fields" style="display: ${schedType === 'relative_delay' ? 'block' : 'none'};">
+      <div class="mb-3">
+        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Delay (minutes)</label>
+        <input type="number" id="scheduler-delay" class="form-control form-control-sm"
+               value="${delayMins}" min="1"
+               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      </div>
+      <div class="mb-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="scheduler-trigger-once"
+                 ${triggerOnce ? 'checked' : ''}>
+          <label class="form-check-label" for="scheduler-trigger-once" style="color: var(--text-secondary);">
+            Trigger once only
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Task Prompt</label>
+      <textarea id="scheduler-prompt" class="form-control form-control-sm" rows="3"
+                style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
+                placeholder="Optional prompt for scheduled task">${schedulerNode.prompt || ''}</textarea>
+    </div>
+
+    <!-- Read-only stats -->
     ${schedulerNode.next_run ? `
-      <div class="mb-3">
-        <strong style="color: var(--text-primary);">Next Run:</strong>
-        <div style="color: var(--text-secondary);">${new Date(schedulerNode.next_run).toLocaleString()}</div>
+      <div class="mb-2">
+        <small style="color: var(--text-muted);">Next Run:</small>
+        <div style="color: var(--text-secondary); font-size: 0.85rem;">${new Date(schedulerNode.next_run).toLocaleString()}</div>
       </div>
     ` : ''}
     ${schedulerNode.last_run ? `
-      <div class="mb-3">
-        <strong style="color: var(--text-primary);">Last Run:</strong>
-        <div style="color: var(--text-secondary);">${new Date(schedulerNode.last_run).toLocaleString()}</div>
+      <div class="mb-2">
+        <small style="color: var(--text-muted);">Last Run:</small>
+        <div style="color: var(--text-secondary); font-size: 0.85rem;">${new Date(schedulerNode.last_run).toLocaleString()}</div>
       </div>
     ` : ''}
     <div class="mb-3">
-      <strong style="color: var(--text-primary);">Execution Count:</strong>
-      <div style="color: var(--text-secondary);">${schedulerNode.execution_count || 0}</div>
+      <small style="color: var(--text-muted);">Execution Count:</small>
+      <div style="color: var(--text-secondary); font-size: 0.85rem;">${schedulerNode.execution_count || 0}</div>
+    </div>
+
+    <!-- Save Button -->
+    <div class="mt-3">
+      <button class="btn btn-primary btn-sm w-100" onclick="saveSchedulerDetails(window.currentSchedulerNode)">
+        Save Changes
+      </button>
     </div>
   `;
 
   content.innerHTML = html;
+
+  // Store the scheduler node reference for saving
+  window.currentSchedulerNode = schedulerNode;
+
+  // Update enabled label on toggle change
+  const enabledCheckbox = document.getElementById('scheduler-enabled');
+  if (enabledCheckbox) {
+    enabledCheckbox.addEventListener('change', function() {
+      const label = this.nextElementSibling;
+      if (label) {
+        label.textContent = this.checked ? 'Enabled' : 'Paused';
+      }
+    });
+  }
+}
+
+/**
+ * Update schedule type-specific fields visibility
+ */
+function updateSchedulerTypeFields() {
+  const schedType = document.getElementById('scheduler-type')?.value || 'interval';
+
+  // Hide all type-specific fields
+  const fieldGroups = ['interval', 'daily', 'weekly', 'cron', 'delay'];
+  fieldGroups.forEach(group => {
+    const el = document.getElementById(`scheduler-${group}-fields`);
+    if (el) el.style.display = 'none';
+  });
+
+  // Show relevant fields
+  switch (schedType) {
+    case 'interval':
+      document.getElementById('scheduler-interval-fields').style.display = 'block';
+      break;
+    case 'daily':
+      document.getElementById('scheduler-daily-fields').style.display = 'block';
+      break;
+    case 'weekly':
+      document.getElementById('scheduler-weekly-fields').style.display = 'block';
+      break;
+    case 'cron':
+      document.getElementById('scheduler-cron-fields').style.display = 'block';
+      break;
+    case 'relative_delay':
+      document.getElementById('scheduler-delay-fields').style.display = 'block';
+      break;
+  }
+}
+
+/**
+ * Save scheduler node details
+ */
+async function saveSchedulerDetails(schedulerNode) {
+  const canvas = window.agentCanvas;
+  if (!canvas || !schedulerNode) {
+    console.error('[SIDEBAR] Cannot save: missing canvas or schedulerNode');
+    return;
+  }
+
+  const nodeId = schedulerNode.canvas_node_id;
+  if (!nodeId) {
+    console.error('[SIDEBAR] Cannot save: missing canvas_node_id');
+    return;
+  }
+
+  // Gather form values
+  const name = document.getElementById('scheduler-name')?.value || 'Scheduler';
+  const enabled = document.getElementById('scheduler-enabled')?.checked ?? true;
+  const targetTaskId = document.getElementById('scheduler-target-task')?.value || '';
+  const schedType = document.getElementById('scheduler-type')?.value || 'interval';
+  const prompt = document.getElementById('scheduler-prompt')?.value || '';
+
+  // Build schedule config based on type
+  const schedule = { type: schedType };
+
+  switch (schedType) {
+    case 'interval':
+      const intervalMins = parseInt(document.getElementById('scheduler-interval')?.value) || 60;
+      schedule.interval = intervalMins * 60 * 1e9; // Convert to nanoseconds
+      break;
+    case 'daily':
+      schedule.time_of_day = document.getElementById('scheduler-time-daily')?.value || '09:00';
+      break;
+    case 'weekly':
+      schedule.day_of_week = parseInt(document.getElementById('scheduler-day-of-week')?.value) || 0;
+      schedule.time_of_day = document.getElementById('scheduler-time-weekly')?.value || '09:00';
+      break;
+    case 'cron':
+      schedule.cron_expr = document.getElementById('scheduler-cron')?.value || '0 9 * * *';
+      break;
+    case 'relative_delay':
+      const delayMins = parseInt(document.getElementById('scheduler-delay')?.value) || 5;
+      schedule.delay_duration = delayMins * 60 * 1e9; // Convert to nanoseconds
+      schedule.trigger_once = document.getElementById('scheduler-trigger-once')?.checked || false;
+      break;
+  }
+
+  // Build update request
+  const updateData = {
+    name: name,
+    enabled: enabled,
+    schedule: schedule,
+    prompt: prompt
+  };
+
+  // Only include target_task_id if set
+  if (targetTaskId) {
+    updateData.target_task_id = targetTaskId;
+  }
+
+  console.log('[SIDEBAR] Saving scheduler details:', updateData);
+
+  try {
+    const response = await fetch(`/api/orchestration/workspaces/${canvas.studioId}/scheduler-nodes/${nodeId}?studio_id=${canvas.studioId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateData)
+    });
+
+    if (response.ok) {
+      console.log('[SIDEBAR] Scheduler updated successfully');
+
+      // Update local scheduler node data
+      schedulerNode.name = name;
+      schedulerNode.enabled = enabled;
+      schedulerNode.schedule = schedule;
+      schedulerNode.prompt = prompt;
+      if (targetTaskId) {
+        schedulerNode.target_task_id = targetTaskId;
+      }
+
+      // Update in canvas state
+      if (canvas.state?.layout?.scheduler_nodes) {
+        const idx = canvas.state.layout.scheduler_nodes.findIndex(sn => sn.canvas_node_id === nodeId);
+        if (idx >= 0) {
+          Object.assign(canvas.state.layout.scheduler_nodes[idx], schedulerNode);
+        }
+      }
+
+      // Redraw canvas
+      canvas.draw();
+
+      // Show success feedback
+      const saveBtn = document.querySelector('#task-details-content button.btn-primary');
+      if (saveBtn) {
+        const originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saved!';
+        saveBtn.classList.remove('btn-primary');
+        saveBtn.classList.add('btn-success');
+        setTimeout(() => {
+          saveBtn.textContent = originalText;
+          saveBtn.classList.remove('btn-success');
+          saveBtn.classList.add('btn-primary');
+        }, 1500);
+      }
+    } else {
+      const error = await response.text();
+      console.error('[SIDEBAR] Failed to save scheduler:', error);
+      alert(`Failed to save scheduler: ${error}`);
+    }
+  } catch (error) {
+    console.error('[SIDEBAR] Error saving scheduler:', error);
+    alert(`Error saving scheduler: ${error.message}`);
+  }
+}
+
+/**
+ * Show Store Details in the sidebar with edit capabilities
+ */
+function showStoreDetails(storeNode) {
+  console.log('[SIDEBAR] showStoreDetails called for:', storeNode.name);
+
+  // Hide other details
+  hideAgentDetails();
+  hideAttachmentDetails();
+  const taskPanel = document.getElementById('task-details-panel');
+  if (taskPanel) taskPanel.style.display = 'none';
+
+  // Use the same task details panel but rename title
+  const panel = document.getElementById('task-details-panel');
+  const content = document.getElementById('task-details-content');
+
+  if (!panel || !content) {
+    console.error('[SIDEBAR] Panel or content not found!');
+    return;
+  }
+
+  // Show panel
+  panel.style.display = 'block';
+
+  // Change title
+  const titleElement = panel.querySelector('h6');
+  if (titleElement) {
+    titleElement.textContent = 'Store Details';
+  }
+
+  // Find assigned agent if any
+  const canvas = window.agentCanvas;
+  const agents = canvas?.state?.agents || [];
+  const assignedAgent = storeNode.agent_node_id
+    ? agents.find(a => a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id)
+    : null;
+  const assignedAgentLabel = assignedAgent
+    ? `${assignedAgent.name} #${assignedAgent.instanceNumber || 1}`
+    : null;
+
+  // Build agent options for dropdown
+  const agentOptions = agents.map(a => {
+    const nodeId = a.nodeId || a.id;
+    const label = `${a.name} #${a.instanceNumber || 1}`;
+    const selected = nodeId === storeNode.agent_node_id ? 'selected' : '';
+    return `<option value="${nodeId}" ${selected}>${label}</option>`;
+  }).join('');
+
+  const html = `
+    <div class="mb-3">
+      <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">💾</div>
+    </div>
+
+    <!-- Editable Name -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Name</label>
+      <input type="text" id="store-edit-name" class="form-control form-control-sm"
+             value="${storeNode.name || 'Store'}"
+             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+    </div>
+
+    <!-- Editable Base Directory -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Base Directory</label>
+      <input type="text" id="store-edit-basedir" class="form-control form-control-sm"
+             value="${storeNode.base_dir || ''}"
+             placeholder="/path/to/store"
+             style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: monospace; font-size: 0.85rem;">
+    </div>
+
+    <!-- Assigned Agent Dropdown -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Assigned Agent</label>
+      <select id="store-edit-agent" class="form-select form-select-sm"
+              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+        <option value="">Not assigned</option>
+        ${agentOptions}
+      </select>
+    </div>
+
+    <!-- Format Dropdown -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Format</label>
+      <select id="store-edit-format" class="form-select form-select-sm"
+              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+        <option value="json" ${storeNode.format === 'json' ? 'selected' : ''}>JSON</option>
+        <option value="text" ${storeNode.format === 'text' ? 'selected' : ''}>Text</option>
+        <option value="markdown" ${storeNode.format === 'markdown' ? 'selected' : ''}>Markdown</option>
+      </select>
+    </div>
+
+    <!-- Write Mode Dropdown -->
+    <div class="mb-3">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Write Mode</label>
+      <select id="store-edit-writemode" class="form-select form-select-sm"
+              style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+        <option value="overwrite" ${storeNode.write_mode === 'overwrite' ? 'selected' : ''}>Overwrite</option>
+        <option value="append" ${storeNode.write_mode === 'append' ? 'selected' : ''}>Append</option>
+      </select>
+    </div>
+
+    <!-- Toggles -->
+    <div class="mb-3">
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="store-edit-autocreate" ${storeNode.auto_create_dir ? 'checked' : ''}>
+        <label class="form-check-label" for="store-edit-autocreate" style="color: var(--text-primary); font-size: 0.85rem;">
+          Auto-create directory
+        </label>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="store-edit-autostore" ${storeNode.auto_store !== false ? 'checked' : ''}>
+        <label class="form-check-label" for="store-edit-autostore" style="color: var(--text-primary); font-size: 0.85rem;">
+          Auto-store on task completion
+        </label>
+      </div>
+    </div>
+
+    <!-- Save Button -->
+    <div class="mb-3">
+      <button id="store-save-btn" class="btn btn-sm w-100" style="background: #14b8a6; color: white; font-weight: 500;">
+        Save Changes
+      </button>
+    </div>
+
+    <hr style="border-color: var(--border-color); margin: 1rem 0;">
+
+    <!-- Stats (read-only) -->
+    <div class="mb-2">
+      <small style="color: var(--text-muted);">Statistics</small>
+    </div>
+    <div class="mb-2" style="font-size: 0.85rem;">
+      <span style="color: var(--text-secondary);">Write Count:</span>
+      <span style="color: #10b981; font-weight: bold;">${storeNode.write_count || 0}</span>
+    </div>
+    ${storeNode.last_write_time ? `
+      <div class="mb-2" style="font-size: 0.85rem;">
+        <span style="color: var(--text-secondary);">Last Write:</span>
+        <span style="color: var(--text-primary);">${new Date(storeNode.last_write_time).toLocaleString()}</span>
+      </div>
+    ` : ''}
+    ${storeNode.last_file_path ? `
+      <div class="mb-2" style="font-size: 0.85rem;">
+        <span style="color: var(--text-secondary);">Last File:</span>
+        <div style="color: var(--text-primary); font-family: monospace; font-size: 0.75rem; word-break: break-all;">
+          ${storeNode.last_file_path}
+        </div>
+      </div>
+    ` : ''}
+    ${storeNode.last_error && storeNode.last_error !== '' ? `
+      <div class="mb-2">
+        <div style="color: #ef4444; font-size: 0.85rem; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
+          ⚠️ ${storeNode.last_error}
+        </div>
+      </div>
+    ` : ''}
+    <div class="mb-2" style="font-size: 0.75rem;">
+      <span style="color: var(--text-muted);">ID:</span>
+      <span style="color: var(--text-secondary); font-family: monospace;">
+        ${storeNode.canvas_node_id || storeNode.id || 'N/A'}
+      </span>
+    </div>
+  `;
+
+  content.innerHTML = html;
+
+  // Attach save handler
+  const saveBtn = document.getElementById('store-save-btn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => saveStoreDetails(storeNode));
+  }
+}
+
+/**
+ * Save store node details
+ */
+async function saveStoreDetails(storeNode) {
+  const canvas = window.agentCanvas;
+  if (!canvas || !canvas.studioId) {
+    alert('Canvas not available');
+    return;
+  }
+
+  const name = document.getElementById('store-edit-name')?.value?.trim();
+  const baseDir = document.getElementById('store-edit-basedir')?.value?.trim();
+  const agentNodeId = document.getElementById('store-edit-agent')?.value || null;
+  const format = document.getElementById('store-edit-format')?.value;
+  const writeMode = document.getElementById('store-edit-writemode')?.value;
+  const autoCreateDir = document.getElementById('store-edit-autocreate')?.checked;
+  const autoStore = document.getElementById('store-edit-autostore')?.checked;
+
+  const nodeId = storeNode.canvas_node_id || storeNode.id;
+
+  try {
+    const response = await fetch(`/api/agentstudio/canvas/store-nodes/${nodeId}?studio_id=${canvas.studioId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        base_dir: baseDir,
+        agent_node_id: agentNodeId,
+        format: format,
+        write_mode: writeMode,
+        auto_create_dir: autoCreateDir,
+        auto_store: autoStore
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to update store node');
+    }
+
+    // Update local state
+    storeNode.name = name;
+    storeNode.base_dir = baseDir;
+    storeNode.agent_node_id = agentNodeId;
+    storeNode.format = format;
+    storeNode.write_mode = writeMode;
+    storeNode.auto_create_dir = autoCreateDir;
+    storeNode.auto_store = autoStore;
+
+    // Redraw canvas
+    canvas.draw();
+
+    // Show success
+    if (canvas.notifications?.showNotification) {
+      canvas.notifications.showNotification('Store node updated', 'success');
+    }
+  } catch (err) {
+    console.error('Failed to save store details:', err);
+    alert('Failed to save: ' + err.message);
+  }
 }
 
 // Make functions globally available
@@ -1183,6 +1754,7 @@ window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
 window.showSchedulerDetails = showSchedulerDetails;
+window.showStoreDetails = showStoreDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
 window.editAttachment = editAttachment;
@@ -2917,6 +3489,101 @@ function parseCronExpression(cronExpr) {
   return desc;
 }
 
+// =============================================================================
+// Store Node Functions
+// =============================================================================
+
+/**
+ * Show the add store node modal
+ */
+async function showAddStoreNodeModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addStoreNodeModal'));
+
+  // Reset form
+  document.getElementById('storeNodeForm').reset();
+  document.getElementById('store-auto-create-dir').checked = true;
+
+  modal.show();
+}
+
+/**
+ * Submit the store node form
+ */
+async function submitStoreNode() {
+  const name = document.getElementById('store-name').value.trim();
+  const baseDir = document.getElementById('store-base-dir').value.trim();
+  const format = document.getElementById('store-format').value;
+  const writeMode = document.getElementById('store-write-mode').value;
+  const autoCreateDir = document.getElementById('store-auto-create-dir').checked;
+
+  if (!name || !baseDir) {
+    alert('Please fill in all required fields');
+    return;
+  }
+
+  const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+
+  if (!studioId) {
+    alert('Error: Workspace ID not found. Please refresh the page.');
+    console.error('Cannot create store node: studioId is missing');
+    return;
+  }
+
+  console.log('Using studioId:', studioId);
+
+  try {
+    // Calculate center of visible viewport
+    let x = 400, y = 400;
+    if (window.agentCanvas) {
+      const canvas = window.agentCanvas;
+      const scale = canvas.state?.scale || canvas.scale || 1;
+      const offsetX = canvas.state?.offsetX || canvas.offsetX || 0;
+      const offsetY = canvas.state?.offsetY || canvas.offsetY || 0;
+      const width = canvas.width || 800;
+      const height = canvas.height || 600;
+      x = (width / 2 - offsetX) / scale + (Math.random() - 0.5) * 100;
+      y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
+    }
+
+    const response = await fetch(`/api/studios/${studioId}/canvas/store-nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        base_dir: baseDir,
+        format: format,
+        write_mode: writeMode,
+        auto_create_dir: autoCreateDir,
+        x: x,
+        y: y
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create store node: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('Store node created:', result);
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
+    modal.hide();
+
+    // Refresh canvas to show the new store node
+    if (window.agentCanvas && window.agentCanvas.init) {
+      await window.agentCanvas.init();
+    }
+
+    // Show success message
+    console.log('Store node created successfully!');
+  } catch (error) {
+    console.error('Error creating store node:', error);
+    alert(`Error creating store node: ${error.message}`);
+  }
+}
+
 // Export functions to window
 window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
 window.updateScheduleInputs = updateScheduleInputs;
@@ -2926,3 +3593,5 @@ window.setCronPreset = setCronPreset;
 window.toggleCronBuilder = toggleCronBuilder;
 window.buildCronFromFields = buildCronFromFields;
 window.updateCronDescription = updateCronDescription;
+window.showAddStoreNodeModal = showAddStoreNodeModal;
+window.submitStoreNode = submitStoreNode;

@@ -267,12 +267,14 @@ type ScheduledTask struct {
 type StoreNode struct {
 	ID            string    `json:"id"`
 	CanvasNodeID  string    `json:"canvas_node_id"`
+	AgentNodeID   string    `json:"agent_node_id"` // Agent instance this store is connected to
 	WorkspaceID   string    `json:"workspace_id"`
 	Name          string    `json:"name"`
 	BaseDir       string    `json:"base_dir"`   // Base directory (e.g., "reports/")
 	Format        string    `json:"format"`     // "json", "text", "markdown", "binary"
 	WriteMode     string    `json:"write_mode"` // "overwrite", "append"
 	AutoCreateDir bool      `json:"auto_create_dir"`
+	AutoStore     bool      `json:"auto_store"` // Automatically store task results on completion
 	LastWriteTime time.Time `json:"last_write_time"`
 	WriteCount    int       `json:"write_count"`
 	LastError     string    `json:"last_error"`

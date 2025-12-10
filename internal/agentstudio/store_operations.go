@@ -17,8 +17,10 @@ const (
 	MaxFileSize = 10 * 1024 * 1024
 )
 
-// ValidateBaseDir validates that a base directory is in allowed zones and prevents directory traversal
-func ValidateBaseDir(baseDir string, allowedDirs []string) error {
+// ValidateBaseDir validates that a base directory is safe (prevents directory traversal)
+// Users can specify any absolute path they choose (e.g., Documents, project folders)
+// For relative paths, they must start with allowed prefixes
+func ValidateBaseDir(baseDir string, allowedRelativeDirs []string) error {
 	if baseDir == "" {
 		return fmt.Errorf("base directory cannot be empty")
 	}
@@ -26,40 +28,27 @@ func ValidateBaseDir(baseDir string, allowedDirs []string) error {
 	// Clean the path to normalize it
 	cleanPath := filepath.Clean(baseDir)
 
-	// Reject absolute paths outside allowed zones
-	if filepath.IsAbs(cleanPath) {
-		// Check if it's in any allowed absolute path
-		allowed := false
-		for _, allowedDir := range allowedDirs {
-			allowedClean := filepath.Clean(allowedDir)
-			if filepath.IsAbs(allowedClean) && strings.HasPrefix(cleanPath, allowedClean) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return fmt.Errorf("absolute path %s is not in allowed directories", cleanPath)
-		}
-	}
-
 	// Check for directory traversal patterns
 	if strings.Contains(cleanPath, "..") {
 		return fmt.Errorf("base directory contains invalid path traversal sequence: %s", baseDir)
 	}
 
+	// Absolute paths are allowed - user's choice where to store files
+	if filepath.IsAbs(cleanPath) {
+		return nil
+	}
+
 	// For relative paths, ensure they start with allowed prefixes
-	if !filepath.IsAbs(cleanPath) {
-		allowed := false
-		for _, allowedDir := range allowedDirs {
-			allowedClean := filepath.Clean(allowedDir)
-			if !filepath.IsAbs(allowedClean) && strings.HasPrefix(cleanPath, allowedClean) {
-				allowed = true
-				break
-			}
+	allowed := false
+	for _, allowedDir := range allowedRelativeDirs {
+		allowedClean := filepath.Clean(allowedDir)
+		if !filepath.IsAbs(allowedClean) && strings.HasPrefix(cleanPath, allowedClean) {
+			allowed = true
+			break
 		}
-		if !allowed {
-			return fmt.Errorf("base directory %s is not in allowed directories", cleanPath)
-		}
+	}
+	if !allowed {
+		return fmt.Errorf("relative path %s must start with one of: %v", cleanPath, allowedRelativeDirs)
 	}
 
 	return nil

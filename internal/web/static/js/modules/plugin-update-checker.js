@@ -179,6 +179,8 @@ async function updatePlugin(pluginName, downloadURL) {
     // Refresh plugin list after update
     if (typeof loadPlugins === 'function') {
       setTimeout(loadPlugins, 1000);
+    } else if (typeof loadPluginsForSidebar === 'function') {
+      setTimeout(loadPluginsForSidebar, 1000);
     }
 
     // Refresh updates list

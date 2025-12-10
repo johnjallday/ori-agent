@@ -94,45 +94,38 @@ async function updateStatistics() {
         if (!response.ok) {
             // Fallback to client-side calculation
             const stats = calculateStatistics(dashboardAllAgents);
-            displayStatistics(stats.total, stats.messages, stats.cost);
+            displayStatistics(stats.total, stats.cost);
             return;
         }
 
         const stats = await response.json();
-        displayStatistics(
-            stats.total_agents,
-            stats.total_messages,
-            stats.total_cost
-        );
+        displayStatistics(stats.total_agents, stats.total_cost);
     } catch (error) {
         console.error('Error loading statistics:', error);
         // Fallback to client-side calculation
         const stats = calculateStatistics(dashboardAllAgents);
-        displayStatistics(stats.total, stats.messages, stats.cost);
+        displayStatistics(stats.total, stats.cost);
     }
 }
 
 // Display statistics in the UI
-function displayStatistics(total, messages, cost) {
+function displayStatistics(total, cost) {
     document.getElementById('totalAgents').textContent = total;
-    document.getElementById('totalMessages').textContent = formatNumber(messages);
     document.getElementById('totalCost').textContent = '$' + cost.toFixed(2);
 }
 
 // Calculate statistics from agents (fallback)
 function calculateStatistics(agents) {
     let total = agents.length;
-    let messages = 0;
     let cost = 0;
 
     agents.forEach(agent => {
         if (agent.statistics) {
-            messages += agent.statistics.message_count || 0;
             cost += agent.statistics.total_cost || 0;
         }
     });
 
-    return { total, messages, cost };
+    return { total, cost };
 }
 
 // Render agents in current view
@@ -174,10 +167,10 @@ function renderTableView() {
                 </div>
             </td>
             <td>${capitalize(agent.type || 'tool-calling')}</td>
-            <td>${formatNumber(agent.statistics?.message_count || 0)}</td>
             <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
             <td>
                 <div class="actions-cell" onclick="event.stopPropagation()">
+                    <button class="action-btn" onclick="loadAgentForChat('${escapeHtml(agent.name)}')">Load</button>
                     <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
                     <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
                 </div>
@@ -216,10 +209,6 @@ function renderCardView() {
             </div>
             <div class="agent-card-stats">
                 <div class="card-stat">
-                    <div class="card-stat-value">${formatNumber(agent.statistics?.message_count || 0)}</div>
-                    <div class="card-stat-label">Messages</div>
-                </div>
-                <div class="card-stat">
                     <div class="card-stat-value">${formatNumber(agent.statistics?.token_usage || 0)}</div>
                     <div class="card-stat-label">Tokens</div>
                 </div>
@@ -229,6 +218,7 @@ function renderCardView() {
                 </div>
             </div>
             <div class="agent-card-actions" onclick="event.stopPropagation()">
+                <button class="action-btn" onclick="loadAgentForChat('${escapeHtml(agent.name)}')">Load</button>
                 <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
                 <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
             </div>
@@ -317,6 +307,17 @@ function createAgent() {
 // View agent details
 function viewAgent(name) {
     window.location.href = `/agents-detail.html?name=${encodeURIComponent(name)}`;
+}
+
+// Load agent for chat (sets current agent then redirects to chat view)
+async function loadAgentForChat(name) {
+    try {
+        await switchToAgent(name);
+        window.location.href = '/';
+    } catch (error) {
+        console.error('Failed to load agent for chat:', error);
+        showError('Failed to load agent for chat');
+    }
 }
 
 // Delete agent with confirmation

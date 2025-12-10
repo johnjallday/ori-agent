@@ -17,7 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
 // Event Listeners
 function initializeEventListeners() {
     // Header actions
-    document.getElementById('uploadBtn').addEventListener('click', showUploadModal);
+    document.getElementById('uploadBtn').addEventListener('click', () => {
+        if (typeof showPluginUploadModal === 'function') {
+            showPluginUploadModal();
+        }
+    });
     document.getElementById('notificationBadge').addEventListener('click', toggleNotificationDrawer);
     document.getElementById('closeDrawer').addEventListener('click', toggleNotificationDrawer);
 
@@ -336,29 +340,6 @@ function createRollbackModal(pluginName, versionHistory) {
     return modal;
 }
 
-function showUploadModal() {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Upload Plugin</h2>
-                <button class="modal-close" onclick="closeModal(this)">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select a plugin binary to upload:</p>
-                <input type="file" id="pluginFile" style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); color: var(--text-primary);">
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modern btn-secondary" onclick="closeModal(this)">Cancel</button>
-                <button class="btn-modern btn-primary" onclick="executeUpload()">Upload</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-    showModal(modal);
-}
-
 // Modal actions
 async function executeTest(pluginName) {
     const argsInput = document.getElementById('testArgs');
@@ -414,36 +395,6 @@ async function executeRollback(pluginName) {
     } catch (error) {
         console.error('Rollback failed:', error);
         showToast('Rollback execution failed', 'error');
-    }
-}
-
-async function executeUpload() {
-    const fileInput = document.getElementById('pluginFile');
-    if (!fileInput.files.length) {
-        showToast('Please select a file', 'warning');
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('plugin', fileInput.files[0]);
-
-    try {
-        const response = await fetch('/api/plugins/upload', {
-            method: 'POST',
-            body: formData
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            showToast('Plugin uploaded successfully', 'success');
-            closeModal(document.querySelector('.modal-overlay.active .modal-close'));
-            await loadPlugins();
-        } else {
-            showToast(data.message || 'Upload failed', 'error');
-        }
-    } catch (error) {
-        console.error('Upload failed:', error);
-        showToast('Upload failed', 'error');
     }
 }
 

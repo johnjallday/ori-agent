@@ -1,5 +1,5 @@
 import { AgentCanvasForms } from './agent-canvas-forms.js';
-import { apiGet, apiPost, apiPut, apiDelete } from './agent-canvas-api.js';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from './agent-canvas-api.js';
 import { connectProgressStream } from './agent-canvas-events.js';
 import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
@@ -399,6 +399,9 @@ class AgentCanvas {
 
     // Draw store nodes
     this.renderer.drawStoreNodes();
+
+    // Draw agent-to-store connections
+    this.renderer.drawAgentToStoreConnections();
 
     // Draw task input connections (task-to-task and task-to-merge)
     this.renderer.drawResultConnections();
@@ -925,7 +928,7 @@ class AgentCanvas {
       return;
     }
     try {
-      await apiDelete(`/api/studios/${this.studioId}/store-nodes/${nodeId}`);
+      await apiDelete(`/api/studios/${this.studioId}/canvas/store-nodes/${nodeId}`);
       this.state.removeStoreNode(storeNode.id);
       this.saveLayout();
       this.draw();
@@ -933,6 +936,59 @@ class AgentCanvas {
     } catch (err) {
       console.error('Failed to delete store node', err);
       alert('Failed to delete store node: ' + (err?.message || err));
+    }
+  }
+
+  /**
+   * Toggle store node assignment mode
+   */
+  toggleStoreAssignmentMode(storeNode) {
+    if (this.state.storeAssignmentMode &&
+        this.state.storeAssignmentSource?.canvas_node_id === storeNode.canvas_node_id) {
+      // Cancel if clicking same store node
+      this.state.storeAssignmentMode = false;
+      this.state.storeAssignmentSource = null;
+      this.state.storeAssignmentMouseX = 0;
+      this.state.storeAssignmentMouseY = 0;
+      this.canvas.style.cursor = 'grab';
+      console.log('Store assignment mode cancelled');
+    } else {
+      // Enter assignment mode
+      this.state.storeAssignmentMode = true;
+      this.state.storeAssignmentSource = storeNode;
+      this.canvas.style.cursor = 'crosshair';
+      console.log('Store assignment mode activated for:', storeNode.name);
+    }
+    this.draw();
+  }
+
+  /**
+   * Assign agent to store node
+   */
+  async assignAgentToStore(agent) {
+    const storeNode = this.state.storeAssignmentSource;
+    if (!storeNode || !agent) return;
+
+    try {
+      // Update the store node's agent_node_id
+      await apiPatch(`/api/studios/${this.studioId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
+        agent_node_id: agent.nodeId || agent.id
+      });
+
+      // Update local state
+      storeNode.agent_node_id = agent.nodeId || agent.id;
+
+      // Exit assignment mode
+      this.state.storeAssignmentMode = false;
+      this.state.storeAssignmentSource = null;
+      this.canvas.style.cursor = 'grab';
+
+      this.saveLayout();
+      this.draw();
+      this.notifications?.showNotification?.(`Agent "${agent.name}" assigned to store "${storeNode.name}"`, 'success');
+    } catch (err) {
+      console.error('Failed to assign agent to store', err);
+      alert('Failed to assign agent: ' + (err?.message || err));
     }
   }
 
@@ -966,6 +1022,37 @@ class AgentCanvas {
       setTimeout(() => {
         this._triggering = null;
       }, 1000);
+    }
+  }
+
+  /**
+   * Toggle scheduler enabled/paused state
+   */
+  async toggleSchedulerEnabled(schedulerNode) {
+    const nodeId = schedulerNode?.canvas_node_id;
+    if (!schedulerNode || !nodeId || !this.studioId) {
+      alert('Cannot toggle scheduler: missing ID or workspace');
+      return;
+    }
+
+    const newEnabled = schedulerNode.enabled === false ? true : false;
+    const action = newEnabled ? 'resume' : 'pause';
+
+    console.log(`⏯️ ${action} scheduler node:`, nodeId);
+
+    try {
+      await apiPatch(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}?studio_id=${this.studioId}`, {
+        enabled: newEnabled
+      });
+
+      // Update local state
+      schedulerNode.enabled = newEnabled;
+
+      this.notifications?.showNotification?.(`Scheduler ${newEnabled ? 'resumed' : 'paused'}`, 'success');
+      this.draw();
+    } catch (err) {
+      console.error('Failed to toggle scheduler enabled state', err);
+      alert('Failed to toggle scheduler: ' + (err?.message || err));
     }
   }
 

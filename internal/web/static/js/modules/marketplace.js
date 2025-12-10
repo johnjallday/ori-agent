@@ -10,7 +10,7 @@ class PluginMarketplace {
         this.searchTerm = '';
         this.currentPlatform = '';
         this.currentPlatformDisplay = '';
-        this.showIncompatible = false; // Track compatibility filter state
+        this.showIncompatible = true; // Track compatibility filter state (default to showing all)
         this.viewMode = localStorage.getItem('marketplaceViewMode') || 'grid';
     }
 
@@ -21,7 +21,9 @@ class PluginMarketplace {
 
         // Restore compatibility filter state from localStorage
         const savedState = localStorage.getItem('showIncompatiblePlugins');
-        this.showIncompatible = savedState === 'true';
+        if (savedState !== null) {
+            this.showIncompatible = savedState === 'true';
+        }
 
         // Load marketplace data
         await this.loadMarketplaceData();
@@ -42,8 +44,9 @@ class PluginMarketplace {
 
     async loadMarketplaceData() {
         try {
-            // Load all plugins from registry (includes GitHub plugins + local plugins)
-            const registryResp = await fetch('/api/plugin-registry');
+            // Load plugins from online registry only (exclude local uploads)
+            // Request online registry only and include incompatible platforms so the list is never empty
+            const registryResp = await fetch('/api/plugin-registry?online_only=true&filter_compatible=false');
             const registryData = await registryResp.json();
             this.plugins = this.normalizePluginList(registryData.plugins || []);
 

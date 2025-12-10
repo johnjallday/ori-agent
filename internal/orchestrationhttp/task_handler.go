@@ -736,6 +736,9 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			task.Status = agentstudio.TaskStatusCompleted
 			task.Result = result
 
+			// Automatically store result if agent is connected to a store node
+			agentstudio.AutoStoreResult(ws, task, result, th.workspaceStore)
+
 			// Publish task completed event
 			if th.eventBus != nil {
 				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
@@ -1872,7 +1875,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	switch r.Method {
 	case http.MethodGet:
 		th.handleGetSchedulerNode(w, r, nodeID)
-	case http.MethodPut:
+	case http.MethodPut, http.MethodPatch:
 		th.handleUpdateSchedulerNode(w, r, nodeID)
 	case http.MethodDelete:
 		th.handleDeleteSchedulerNode(w, r, nodeID)

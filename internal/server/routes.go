@@ -166,9 +166,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.rollbackHandler.HandleRollbackPlugin(w, r)
 			return
 		}
-		// Check if this is a config update endpoint
+		// Check if this is a config endpoint
 		if strings.HasSuffix(r.URL.Path, "/config") {
-			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			if r.Method == http.MethodPut {
+				// PUT - update config
+				s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+			} else {
+				// GET - fetch config info (delegated to init handler)
+				s.pluginInitHandler.PluginInitHandler(w, r)
+			}
 			return
 		}
 		// Check if this is a test endpoint
@@ -462,6 +468,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
+		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
+			// Handle canvas store node operations (must be before /store-nodes check)
+			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodeStatus(w, r)
+			} else if r.Method == http.MethodPost {
+				s.studioHandler.CreateStoreNode(w, r)
+			} else if r.Method == http.MethodGet {
+				s.studioHandler.GetStoreNodes(w, r)
+			} else if r.Method == http.MethodPatch {
+				s.studioHandler.UpdateStoreNode(w, r)
+			} else if r.Method == http.MethodDelete {
+				s.studioHandler.DeleteStoreNode(w, r)
+			} else {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		} else if strings.Contains(r.URL.Path, "/store-nodes") {
 			// Handle store node operations
 			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
@@ -470,7 +491,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				s.studioHandler.CreateStoreNode(w, r)
 			} else if r.Method == http.MethodGet {
 				s.studioHandler.GetStoreNodes(w, r)
-			} else if r.Method == http.MethodPut {
+			} else if r.Method == http.MethodPut || r.Method == http.MethodPatch {
 				s.studioHandler.UpdateStoreNode(w, r)
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)

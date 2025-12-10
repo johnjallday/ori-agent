@@ -468,25 +468,33 @@ func (m *Manager) RefreshLocalRegistry() error {
 }
 
 // Merge combines online and local plugin registries
+// Online plugins are preserved even if a local version exists, so the marketplace
+// can still show them (marked as installed). Local-only plugins are also included.
 func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry {
 	merged := types.PluginRegistry{}
 
-	// Create a map to track plugin names and avoid duplicates
-	pluginMap := make(map[string]types.PluginRegistryEntry)
+	// Create maps to track plugins
+	onlineMap := make(map[string]types.PluginRegistryEntry)
+	localMap := make(map[string]types.PluginRegistryEntry)
 
-	// Add online plugins first
+	// Index online plugins
 	for _, plugin := range online.Plugins {
-		pluginMap[plugin.Name] = plugin
+		onlineMap[plugin.Name] = plugin
 	}
 
-	// Add local plugins (they override online plugins with same name)
+	// Index local plugins
 	for _, plugin := range local.Plugins {
-		pluginMap[plugin.Name] = plugin
+		localMap[plugin.Name] = plugin
 	}
 
-	// Convert map back to slice
-	for _, plugin := range pluginMap {
-		merged.Plugins = append(merged.Plugins, plugin)
+	// Add all online plugins (these are from the marketplace)
+	merged.Plugins = append(merged.Plugins, online.Plugins...)
+
+	// Add local-only plugins (user uploads that aren't in the online registry)
+	for name, plugin := range localMap {
+		if _, existsOnline := onlineMap[name]; !existsOnline {
+			merged.Plugins = append(merged.Plugins, plugin)
+		}
 	}
 
 	return merged

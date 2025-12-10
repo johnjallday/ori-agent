@@ -4,10 +4,12 @@ import "github.com/johnjallday/ori-agent/internal/agent"
 
 // CreateAgentConfig holds optional configuration for creating a new agent
 type CreateAgentConfig struct {
-	Type         string  // Agent type: "tool-calling", "general", "research"
-	Model        string  // Model to use
-	Temperature  float64 // Temperature (0.0-2.0)
-	SystemPrompt string  // Custom system prompt
+	Type            string  // Agent type: "tool-calling", "general", "research"
+	Model           string  // Model to use
+	Temperature     float64 // Temperature (0.0-2.0)
+	SystemPrompt    string  // Custom system prompt
+	LLMProvider     string  // Provider backing the model (openai, anthropic, ollama, etc.)
+	MaxOutputTokens int     // Optional max tokens for responses
 }
 
 type Store interface {

@@ -325,6 +325,11 @@ export class RendererConnections {
         return; // Skip - use purple dotted line instead
       }
 
+      // Skip attachment connections (already shown as green arrows in drawConnections)
+      if (fromNode?.type === 'attachment') {
+        return;
+      }
+
       const fromPos = this.parent.getPortPosition(conn.from, conn.fromPort);
       const toPos = this.parent.getPortPosition(conn.to, conn.toPort);
 
@@ -571,5 +576,61 @@ export class RendererConnections {
       x: from.x + Math.cos(angle) * radius,
       y: from.y + Math.sin(angle) * radius
     };
+  }
+
+  /**
+   * Draw connections from agents to store nodes
+   */
+  drawAgentToStoreConnections() {
+    if (!this.state.storeNodes || this.state.storeNodes.length === 0) return;
+
+    // Draw connection for each store node that has an assigned agent
+    this.state.storeNodes.forEach(storeNode => {
+      if (!storeNode.agent_node_id) return;
+
+      // Find the agent
+      const agent = this.state.agents.find(a =>
+        a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id
+      );
+      if (!agent || !storeNode.inPort) return;
+
+      // Agent position (center of agent node)
+      const fromX = agent.x;
+      const fromY = agent.y;
+
+      // Store node input port
+      const toX = storeNode.inPort.x;
+      const toY = storeNode.inPort.y;
+
+      // Draw curved line
+      this.ctx.strokeStyle = '#14b8a6'; // Teal color matching store nodes
+      this.ctx.lineWidth = 2.5;
+      this.ctx.setLineDash([]);
+
+      this.ctx.beginPath();
+      const controlPointX = (fromX + toX) / 2;
+      const controlPointY = fromY;
+      this.ctx.moveTo(fromX, fromY);
+      this.ctx.quadraticCurveTo(controlPointX, controlPointY, toX, toY);
+      this.ctx.stroke();
+
+      // Draw arrowhead at store node input
+      const arrowSize = 8;
+      const angle = Math.atan2(toY - controlPointY, toX - controlPointX);
+
+      this.ctx.fillStyle = '#14b8a6';
+      this.ctx.beginPath();
+      this.ctx.moveTo(toX, toY);
+      this.ctx.lineTo(
+        toX - arrowSize * Math.cos(angle - Math.PI / 6),
+        toY - arrowSize * Math.sin(angle - Math.PI / 6)
+      );
+      this.ctx.lineTo(
+        toX - arrowSize * Math.cos(angle + Math.PI / 6),
+        toY - arrowSize * Math.sin(angle + Math.PI / 6)
+      );
+      this.ctx.closePath();
+      this.ctx.fill();
+    });
   }
 }
