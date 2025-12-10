@@ -348,11 +348,11 @@ git log --oneline -10
 
 ### Run CI Tests
 ```bash
-# Push to develop branch first
-git push origin develop
+# Push to dev branch first
+git push origin dev
 
 # Check CI status
-gh run list --branch develop
+gh run list --branch dev
 
 # Wait for all checks to pass
 gh run watch
@@ -421,7 +421,7 @@ Git:
 [ ] Commit messages descriptive
 
 CI/CD:
-[ ] Pushed to develop, all checks pass
+[ ] Pushed to dev, all checks pass
 [ ] Smoke tests pass on all platforms
 [ ] No failing workflows
 
@@ -459,53 +459,43 @@ Once all checks pass, you have two options for creating a release:
 
 ### Option A: Automated Script (Recommended)
 
-Use the automated release script that handles everything:
-
 ```bash
-# Run the automated release script
+# Default: create release branch from dev for stabilization
 ./scripts/create-release.sh v0.0.12
 
-# The script will:
-# 1. Validate version format (vX.Y.Z)
-# 2. Check for uncommitted changes
-# 3. Verify you're on main branch
-# 4. Pull latest changes
-# 5. Run all tests
-# 6. Update VERSION file (removes 'v' prefix: v0.0.12 → 0.0.12)
-# 7. Create commit: "chore: bump version to v0.0.12"
-# 8. Create and push git tag
-# 9. Create GitHub release (if gh CLI installed)
+# Immediate publish (after prepare-release.sh, on main):
+./scripts/create-release.sh v0.0.12 --immediate
 ```
 
-**Note**: The VERSION file should contain the version WITHOUT the 'v' prefix (e.g., `0.0.12`, not `v0.0.12`). The script handles this conversion automatically.
+What the script does now:
+- Validates version and clean working tree
+- Default (no flag): ensures you are on dev, creates `release/v0.0.12`, writes `VERSION` with `v0.0.12`, commits, and pushes branch (CI + scheduled release entry point)
+- `--immediate`: ensures main is up to date (or merges dev → main), writes `VERSION` with `v0.0.12`, tags, pushes tag, and runs the release workflow; then syncs back to dev
+
+**Note**: `VERSION` is stored with the `v` prefix (e.g., `v0.0.12`) in both flows.
 
 ### Option B: Manual Process
 
 If you prefer manual control:
 
 ```bash
-# 1. Update VERSION file (no 'v' prefix)
-echo "0.0.12" > VERSION
+# Immediate publish path (main):
+# 1. Ensure main has the dev merge (./scripts/prepare-release.sh)
+git switch main && git pull
+
+# 2. Bump VERSION with v-prefix
+echo "v0.0.12" > VERSION
 git add VERSION
 git commit -m "chore: bump version to v0.0.12"
 git push origin main
 
-# 2. Tag the release
+# 3. Tag and push
 git tag v0.0.12
 git push origin v0.0.12
 
-# 3. Monitor GitHub Actions
+# 4. Monitor GitHub Actions and verify release artifacts
 gh run watch
-
-# 4. Wait for release workflow to complete
-# - Builds all installers
-# - Runs smoke tests
-# - Uploads to GitHub Releases
-
-# 5. Verify release
 gh release view v0.0.12
-
-# 6. Download and test installers
 gh release download v0.0.12
 ```
 
@@ -573,13 +563,14 @@ make test-unit
 make build-all
 
 # Smoke tests (10 min)
-./scripts/test-all-installers.sh
+./scripts/pre-release-check.sh --full
 
 # Complete check (20 min)
 ./scripts/pre-release-check.sh v0.0.12
 
 # Release (1 min)
-git tag v0.0.12 && git push origin v0.0.12
+# Default (release branch): ./scripts/create-release.sh v0.0.12
+# Immediate publish: ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.0.12 --immediate
 ```
 
 ---
