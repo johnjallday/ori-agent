@@ -90,18 +90,13 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Return API key status including environment variables
-		cfg := h.configManager.Get()
+		// Return API key status (masked only - never expose raw keys)
 		response := struct {
-			OpenAIKey       string `json:"openai_api_key"`
-			AnthropicKey    string `json:"anthropic_api_key"`
 			OpenAIMasked    string `json:"openai_masked"`
 			AnthropicMasked string `json:"anthropic_masked"`
 			HasOpenAI       bool   `json:"has_openai"`
 			HasAnthropic    bool   `json:"has_anthropic"`
 		}{
-			OpenAIKey:       cfg.OpenAIAPIKey,
-			AnthropicKey:    cfg.AnthropicAPIKey,
 			OpenAIMasked:    h.configManager.MaskAPIKey(),
 			AnthropicMasked: maskAnthropicAPIKey(h.configManager.GetAnthropicAPIKey()),
 			HasOpenAI:       h.configManager.GetAPIKey() != "",
