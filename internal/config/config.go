@@ -76,7 +76,8 @@ func (m *Manager) Save() error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(m.filePath, data, 0644); err != nil {
+	// SECURITY: Use 0600 permissions (owner read/write only) since file contains API keys
+	if err := os.WriteFile(m.filePath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file %s: %w", m.filePath, err)
 	}
 
