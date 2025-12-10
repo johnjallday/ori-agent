@@ -301,11 +301,10 @@
               <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Schedule Type</label>
               <select class="form-select" id="scheduler-type" onchange="updateScheduleInputs()">
                 <option value="once">One-time (specific date/time)</option>
-                <option value="interval">Simple Interval</option>
+                <option value="interval">Interval</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="cron">Cron Expression</option>
-                <option value="relative_delay">Relative Delay</option>
               </select>
             </div>
 
@@ -325,6 +324,12 @@
                 <div class="mb-3">
                   <label class="form-label" style="color: var(--text-primary);">Interval (minutes)</label>
                   <input type="number" class="form-control" id="interval-minutes" min="1" value="60">
+                </div>
+                <div class="form-check mb-3">
+                  <input class="form-check-input" type="checkbox" id="interval-run-once">
+                  <label class="form-check-label" for="interval-run-once">
+                    Run once only (don't repeat)
+                  </label>
                 </div>
               </div>
 
@@ -435,19 +440,6 @@
                 </div>
               </div>
 
-              <!-- Relative Delay -->
-              <div id="relative-delay-config" class="schedule-type-config" style="display: none;">
-                <div class="mb-3">
-                  <label class="form-label" style="color: var(--text-primary);">Delay (minutes)</label>
-                  <input type="number" class="form-control" id="delay-minutes" min="1" value="5">
-                </div>
-                <div class="form-check mb-3">
-                  <input class="form-check-input" type="checkbox" id="delay-trigger-once">
-                  <label class="form-check-label" for="delay-trigger-once">
-                    Trigger only once (don't repeat)
-                  </label>
-                </div>
-              </div>
             </div>
 
             <!-- Optional: End Date -->
