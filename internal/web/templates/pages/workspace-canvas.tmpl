@@ -300,6 +300,7 @@
             <div class="mb-3">
               <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Schedule Type</label>
               <select class="form-select" id="scheduler-type" onchange="updateScheduleInputs()">
+                <option value="once">One-time (specific date/time)</option>
                 <option value="interval">Simple Interval</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -310,8 +311,17 @@
 
             <!-- Schedule Configuration (Dynamic based on type) -->
             <div id="schedule-config">
+              <!-- Once (specific date/time) -->
+              <div id="once-config" class="schedule-type-config">
+                <div class="mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Execute At</label>
+                  <input type="datetime-local" class="form-control" id="execute-at">
+                  <small class="text-muted">Select the exact date and time for this task to run</small>
+                </div>
+              </div>
+
               <!-- Interval -->
-              <div id="interval-config" class="schedule-type-config">
+              <div id="interval-config" class="schedule-type-config" style="display: none;">
                 <div class="mb-3">
                   <label class="form-label" style="color: var(--text-primary);">Interval (minutes)</label>
                   <input type="number" class="form-control" id="interval-minutes" min="1" value="60">
