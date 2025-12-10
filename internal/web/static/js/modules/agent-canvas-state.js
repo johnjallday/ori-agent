@@ -129,6 +129,10 @@ export const EVENT_TYPES = {
   // Data updates
   DATA_LOADED: 'data.loaded',
   STATE_RESET: 'state.reset',
+
+  // Multi-selection events
+  SELECTION_CHANGED: 'selection.changed',
+  SELECTION_CLEARED: 'selection.cleared',
 };
 
 /**
@@ -286,6 +290,14 @@ export class AgentCanvasState {
 
     // Keyboard State
     this.ctrlPressed = false;
+    this.shiftPressed = false;
+
+    // Multi-Selection State
+    this.selectedNodes = new Map();  // Map<id, {type: string, node: object}>
+    this.multiSelectContextMenu = false;
+    this.multiSelectMenuX = 0;
+    this.multiSelectMenuY = 0;
+    this.multiSelectMenuItems = [];  // For click detection
 
     // Callbacks (set by parent)
     this.onAgentClick = null;
@@ -809,6 +821,142 @@ export class AgentCanvasState {
    */
   emit(event, data) {
     this.eventBus.emit(event, data);
+  }
+
+  // ==================== MULTI-SELECTION ====================
+
+  /**
+   * Select a node (add to selection)
+   * @param {string} id - Node ID
+   * @param {string} type - Node type ('agent'|'task'|'scheduler'|'store'|'attachment')
+   * @param {object} node - Node object reference
+   */
+  selectNode(id, type, node) {
+    if (!this.selectedNodes.has(id)) {
+      this.selectedNodes.set(id, { id, type, node });
+      this.eventBus.emit(EVENT_TYPES.SELECTION_CHANGED, {
+        action: 'add',
+        node: { id, type, node },
+        count: this.selectedNodes.size
+      });
+    }
+  }
+
+  /**
+   * Deselect a node (remove from selection)
+   * @param {string} id - Node ID
+   */
+  deselectNode(id) {
+    if (this.selectedNodes.has(id)) {
+      const removed = this.selectedNodes.get(id);
+      this.selectedNodes.delete(id);
+      this.eventBus.emit(EVENT_TYPES.SELECTION_CHANGED, {
+        action: 'remove',
+        node: removed,
+        count: this.selectedNodes.size
+      });
+    }
+  }
+
+  /**
+   * Toggle node selection (for Shift+Click)
+   * @param {string} id - Node ID
+   * @param {string} type - Node type
+   * @param {object} node - Node object reference
+   */
+  toggleNodeSelection(id, type, node) {
+    if (this.selectedNodes.has(id)) {
+      this.deselectNode(id);
+    } else {
+      this.selectNode(id, type, node);
+    }
+  }
+
+  /**
+   * Clear all selections
+   */
+  clearSelection() {
+    if (this.selectedNodes.size > 0) {
+      this.selectedNodes.clear();
+      this.multiSelectContextMenu = false;
+      this.eventBus.emit(EVENT_TYPES.SELECTION_CLEARED);
+    }
+  }
+
+  /**
+   * Check if a node is selected
+   * @param {string} id - Node ID
+   * @returns {boolean}
+   */
+  isNodeSelected(id) {
+    return this.selectedNodes.has(id);
+  }
+
+  /**
+   * Get all selected nodes as array
+   * @returns {Array<{type: string, node: object}>}
+   */
+  getSelectedNodes() {
+    return Array.from(this.selectedNodes.values());
+  }
+
+  /**
+   * Get selected nodes by type
+   * @param {string} [type] - Optional node type to filter by. If omitted, returns all nodes grouped by type.
+   * @returns {Array<{id: string, type: string, node: object}>|Object} Array if type specified, object with type keys otherwise
+   */
+  getSelectedNodesByType(type) {
+    const nodes = this.getSelectedNodes();
+
+    if (type) {
+      // Filter by specific type
+      return nodes.filter(n => n.type === type);
+    }
+
+    // Group all nodes by type
+    const grouped = {};
+    for (const { id, type: nodeType, node } of nodes) {
+      if (!grouped[nodeType]) {
+        grouped[nodeType] = [];
+      }
+      grouped[nodeType].push({ id, node });
+    }
+    return grouped;
+  }
+
+  /**
+   * Check if multiple nodes are selected
+   * @returns {boolean}
+   */
+  hasMultipleSelected() {
+    return this.selectedNodes.size > 1;
+  }
+
+  /**
+   * Get selection count
+   * @returns {number}
+   */
+  getSelectionCount() {
+    return this.selectedNodes.size;
+  }
+
+  /**
+   * Show multi-select context menu
+   * @param {number} x - Screen X position
+   * @param {number} y - Screen Y position
+   */
+  showMultiSelectContextMenu(x, y) {
+    this.multiSelectContextMenu = true;
+    this.multiSelectMenuX = x;
+    this.multiSelectMenuY = y;
+  }
+
+  /**
+   * Hide multi-select context menu
+   */
+  hideMultiSelectContextMenu() {
+    this.multiSelectContextMenu = false;
+    this.multiSelectMenuItems = [];
   }
 
   // ==================== CLEANUP ====================

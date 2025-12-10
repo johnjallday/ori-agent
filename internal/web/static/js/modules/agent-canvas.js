@@ -183,6 +183,12 @@ class AgentCanvas {
   get ctrlPressed() { return this.state.ctrlPressed; }
   set ctrlPressed(value) { this.state.ctrlPressed = value; }
 
+  // Selection
+  get selectedNodes() { return this.state.getSelectedNodes(); }
+  get selectionCount() { return this.state.getSelectionCount(); }
+  get hasMultipleSelected() { return this.state.hasMultipleSelected(); }
+  clearSelection() { this.state.clearSelection(); this.draw(); }
+
   // Context menu
   get contextMenuVisible() { return this.state.contextMenuVisible; }
   set contextMenuVisible(value) { this.state.contextMenuVisible = value; }
@@ -482,6 +488,11 @@ class AgentCanvas {
       this.renderer.drawContextMenu();
     }
 
+    // Draw multi-select context menu (if visible)
+    if (this.state.multiSelectContextMenu) {
+      this.renderer.drawMultiSelectContextMenu();
+    }
+
     // Draw help overlay (if visible)
     if (this.helpOverlayVisible) {
       this.renderer.drawHelpOverlay();
@@ -601,6 +612,7 @@ class AgentCanvas {
   // Context menu methods delegated to context menu module
   toggleAssignmentMode(task) { return this.contextMenu.toggleAssignmentMode(task); }
   handleContextMenuAction(action, agent) { return this.contextMenu.handleContextMenuAction(action, agent); }
+  handleMultiSelectAction(action) { return this.contextMenu.handleMultiSelectAction(action); }
 
   // Event handler methods delegated to event handler module
   connectEventStream() { return this.eventHandler.connectEventStream(); }

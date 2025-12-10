@@ -23,6 +23,37 @@ export class RendererNodes {
     this.primitives = primitives;
   }
 
+  /**
+   * Draw selection highlight around a node
+   * @param {number} x - X position of node
+   * @param {number} y - Y position of node
+   * @param {number} width - Width of node
+   * @param {number} height - Height of node
+   * @param {number} radius - Corner radius (default 8)
+   */
+  drawSelectionHighlight(x, y, width, height, radius = 8) {
+    const padding = 4;
+    const borderWidth = 3;
+
+    this.ctx.save();
+    this.ctx.strokeStyle = '#4f46e5'; // Indigo-600
+    this.ctx.lineWidth = borderWidth;
+    this.ctx.shadowColor = 'rgba(79, 70, 229, 0.4)';
+    this.ctx.shadowBlur = 8;
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 0;
+
+    this.primitives.roundRect(
+      x - padding,
+      y - padding,
+      width + padding * 2,
+      height + padding * 2,
+      radius + 2
+    );
+    this.ctx.stroke();
+    this.ctx.restore();
+  }
+
   drawTaskFlows() {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
@@ -136,6 +167,11 @@ export class RendererNodes {
       task.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
       // Also keep 'bounds' for backward compatibility
       task.bounds = task.cardBounds;
+
+      // Draw selection highlight if this task is selected
+      if (this.state.isNodeSelected(task.id)) {
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 6);
+      }
 
       // Card background
       this.ctx.save();
@@ -483,6 +519,18 @@ export class RendererNodes {
         this.ctx.restore();
       }
 
+      // Draw selection highlight if this agent is selected
+      const agentId = agent.nodeId || agent.name;
+      if (this.state.isNodeSelected(agentId)) {
+        this.drawSelectionHighlight(
+          agent.x - halfWidth,
+          agent.y - halfHeight,
+          halfWidth * 2,
+          halfHeight * 2,
+          12
+        );
+      }
+
       // Draw agent rectangle
       this.ctx.fillStyle = agent.color;
       this.ctx.shadowColor = 'rgba(0,0,0,0.12)';
@@ -663,6 +711,11 @@ export class RendererNodes {
       // Store bounds for hit testing/ports
       attachment.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
 
+      // Draw selection highlight if this attachment is selected
+      if (this.state.isNodeSelected(attachment.id)) {
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+      }
+
       const baseColor = attachment.color || '#e2e8f0';
       const icon = attachment.type === 'image' ? '🖼️' : attachment.type === 'doc' ? '📄' : '📎';
 
@@ -774,6 +827,11 @@ export class RendererNodes {
 
       // Store bounds for hit testing
       schedulerNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Draw selection highlight if this scheduler node is selected
+      if (this.state.isNodeSelected(schedulerNode.id)) {
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+      }
 
       // Determine node status color
       const enabled = schedulerNode.enabled !== false;
@@ -1050,6 +1108,11 @@ export class RendererNodes {
 
       // Store bounds for hit testing
       storeNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Draw selection highlight if this store node is selected
+      if (this.state.isNodeSelected(storeNode.id)) {
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+      }
 
       // Base color (teal/cyan for storage)
       const baseColor = '#14b8a6';
