@@ -822,16 +822,26 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
-    // Otherwise, start canvas panning (clicked on empty space)
-    // Clear selection when clicking empty canvas (unless Shift is held to preserve selection)
-    if (!e.shiftKey && this.state.selectedNodes.size > 0) {
-      this.state.clearSelection();
-      this.parent.draw();
+    // Otherwise, start canvas panning or marquee selection (clicked on empty space)
+    if (e.shiftKey) {
+      // Shift+Drag on empty space: start marquee selection
+      this.state.isMarqueeSelecting = true;
+      this.state.marqueeStartX = x;
+      this.state.marqueeStartY = y;
+      this.state.marqueeEndX = x;
+      this.state.marqueeEndY = y;
+      this.canvas.style.cursor = 'crosshair';
+    } else {
+      // Regular drag: pan canvas and clear selection
+      if (this.state.selectedNodes.size > 0) {
+        this.state.clearSelection();
+        this.parent.draw();
+      }
+      this.state.isDragging = true;
+      this.state.dragStartX = e.clientX - rect.left - this.state.offsetX;
+      this.state.dragStartY = e.clientY - rect.top - this.state.offsetY;
+      this.canvas.style.cursor = 'grabbing';
     }
-    this.state.isDragging = true;
-    this.state.dragStartX = e.clientX - rect.left - this.state.offsetX;
-    this.state.dragStartY = e.clientY - rect.top - this.state.offsetY;
-    this.canvas.style.cursor = 'grabbing';
   }
 
   /**
@@ -850,6 +860,16 @@ export class AgentCanvasInteractionHandler {
     // If context menu is visible, redraw to update hover effects
     if (this.state.contextMenuVisible) {
       this.parent.draw();
+    }
+
+    // Handle marquee selection dragging
+    if (this.state.isMarqueeSelecting) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.marqueeEndX = x;
+      this.state.marqueeEndY = y;
+      this.parent.draw();
+      return;
     }
 
     // Handle connection dragging
@@ -982,6 +1002,15 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
     const wasAssigning = this.state.assignmentMode && this.state.assignmentSourceTask;
+
+    // Handle marquee selection completion
+    if (this.state.isMarqueeSelecting) {
+      this.completeMarqueeSelection();
+      this.state.isMarqueeSelecting = false;
+      this.canvas.style.cursor = 'grab';
+      this.parent.draw();
+      return;
+    }
 
     // Handle result connection drop from agent to task
     if (this.state.resultConnectionMode && this.state.resultSourceAgent) {
@@ -1842,6 +1871,120 @@ export class AgentCanvasInteractionHandler {
     }
     if (window.hideAttachmentDetails) {
       window.hideAttachmentDetails();
+    }
+  }
+
+  /**
+   * Complete marquee selection by selecting all nodes within the rectangle
+   */
+  completeMarqueeSelection() {
+    // Calculate normalized bounds (handle any drag direction)
+    const x1 = Math.min(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y1 = Math.min(this.state.marqueeStartY, this.state.marqueeEndY);
+    const x2 = Math.max(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y2 = Math.max(this.state.marqueeStartY, this.state.marqueeEndY);
+
+    // Skip if marquee is too small (likely just a click)
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (width < 10 && height < 10) {
+      return;
+    }
+
+    // Clear existing selection before adding new ones
+    this.state.clearSelection();
+
+    // Helper function to check if a rectangle intersects with marquee
+    const intersects = (nodeX, nodeY, nodeWidth, nodeHeight) => {
+      const nodeX1 = nodeX;
+      const nodeY1 = nodeY;
+      const nodeX2 = nodeX + nodeWidth;
+      const nodeY2 = nodeY + nodeHeight;
+
+      return !(nodeX2 < x1 || nodeX1 > x2 || nodeY2 < y1 || nodeY1 > y2);
+    };
+
+    // Check tasks
+    if (this.state.tasks && this.state.tasks.length > 0) {
+      for (const task of this.state.tasks) {
+        if (task && task.x != null && task.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 60;
+          const cardX = task.x - cardWidth / 2;
+          const cardY = task.y - cardHeight / 2;
+
+          if (intersects(cardX, cardY, cardWidth, cardHeight)) {
+            this.state.selectNode(task.id, 'task', task);
+          }
+        }
+      }
+    }
+
+    // Check scheduler nodes
+    if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+      for (const schedulerNode of this.state.schedulerNodes) {
+        if (schedulerNode && schedulerNode.x != null && schedulerNode.y != null) {
+          const cardBounds = schedulerNode.cardBounds || {
+            x: schedulerNode.x - 90,
+            y: schedulerNode.y - 45,
+            width: 180,
+            height: 90
+          };
+
+          if (intersects(cardBounds.x, cardBounds.y, cardBounds.width, cardBounds.height)) {
+            this.state.selectNode(schedulerNode.id, 'scheduler', schedulerNode);
+          }
+        }
+      }
+    }
+
+    // Check store nodes
+    if (this.state.storeNodes && this.state.storeNodes.length > 0) {
+      for (const storeNode of this.state.storeNodes) {
+        if (storeNode && storeNode.cardBounds) {
+          const cardBounds = storeNode.cardBounds;
+
+          if (intersects(cardBounds.x, cardBounds.y, cardBounds.width, cardBounds.height)) {
+            this.state.selectNode(storeNode.id, 'store', storeNode);
+          }
+        }
+      }
+    }
+
+    // Check attachments
+    if (this.state.attachments && this.state.attachments.length > 0) {
+      for (const attachment of this.state.attachments) {
+        if (attachment && attachment.x != null && attachment.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 70;
+          const cardX = attachment.x - cardWidth / 2;
+          const cardY = attachment.y - cardHeight / 2;
+
+          if (intersects(cardX, cardY, cardWidth, cardHeight)) {
+            this.state.selectNode(attachment.id, 'attachment', attachment);
+          }
+        }
+      }
+    }
+
+    // Check agents
+    for (const agent of this.state.agents) {
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      const agentX = agent.x - halfWidth;
+      const agentY = agent.y - halfHeight;
+      const agentWidth = agent.width || 120;
+      const agentHeight = agent.height || 70;
+
+      if (intersects(agentX, agentY, agentWidth, agentHeight)) {
+        this.state.selectNode(agent.nodeId || agent.name, 'agent', agent);
+      }
+    }
+
+    // Show notification if nodes were selected
+    const selectedCount = this.state.getSelectionCount();
+    if (selectedCount > 0) {
+      this.parent.showNotification(`Selected ${selectedCount} node${selectedCount > 1 ? 's' : ''}`, 'info');
     }
   }
 

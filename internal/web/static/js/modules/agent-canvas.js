@@ -431,6 +431,9 @@ class AgentCanvas {
 
     this.ctx.restore();
 
+    // Draw marquee selection rectangle (if selecting)
+    this.renderer.drawMarqueeSelection();
+
     // Draw mission OUTSIDE the transform context (so it stays fixed at top)
     this.renderer.drawMission();
 

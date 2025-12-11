@@ -184,4 +184,8 @@ export class AgentCanvasRenderer {
   drawHelpOverlay() {
     return this.ui.drawHelpOverlay();
   }
+
+  drawMarqueeSelection() {
+    return this.ui.drawMarqueeSelection();
+  }
 }

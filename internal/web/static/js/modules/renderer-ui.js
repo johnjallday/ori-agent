@@ -648,6 +648,43 @@ export class RendererUI {
     this.ctx.restore();
   }
 
+  drawMarqueeSelection() {
+    if (!this.state.isMarqueeSelecting) return;
+
+    // Calculate normalized bounds (handle any drag direction)
+    const x1 = Math.min(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y1 = Math.min(this.state.marqueeStartY, this.state.marqueeEndY);
+    const x2 = Math.max(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y2 = Math.max(this.state.marqueeStartY, this.state.marqueeEndY);
+
+    const width = x2 - x1;
+    const height = y2 - y1;
+
+    // Skip if too small
+    if (width < 2 && height < 2) return;
+
+    this.ctx.save();
+
+    // Transform to world coordinates (marquee is in world space)
+    this.ctx.translate(this.state.offsetX, this.state.offsetY);
+    this.ctx.scale(this.state.scale, this.state.scale);
+
+    // Draw semi-transparent fill
+    this.ctx.fillStyle = 'rgba(79, 70, 229, 0.1)'; // Light indigo fill
+    this.ctx.fillRect(x1, y1, width, height);
+
+    // Draw dashed border
+    this.ctx.strokeStyle = '#4f46e5'; // Indigo border
+    this.ctx.lineWidth = 2 / this.state.scale; // Adjust for scale to keep consistent thickness
+    this.ctx.setLineDash([6 / this.state.scale, 4 / this.state.scale]); // Dashed line
+    this.ctx.strokeRect(x1, y1, width, height);
+
+    // Reset line dash
+    this.ctx.setLineDash([]);
+
+    this.ctx.restore();
+  }
+
   drawHelpOverlay() {
     const overlayWidth = 400;
     const overlayHeight = 450;

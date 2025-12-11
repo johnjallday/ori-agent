@@ -30,16 +30,18 @@ export class RendererNodes {
    * @param {number} width - Width of node
    * @param {number} height - Height of node
    * @param {number} radius - Corner radius (default 8)
+   * @param {boolean} isPrimary - Whether this is the first/primary selected node
    */
-  drawSelectionHighlight(x, y, width, height, radius = 8) {
+  drawSelectionHighlight(x, y, width, height, radius = 8, isPrimary = false) {
     const padding = 4;
-    const borderWidth = 3;
+    const borderWidth = isPrimary ? 4 : 3;
 
     this.ctx.save();
-    this.ctx.strokeStyle = '#4f46e5'; // Indigo-600
+    // Primary selection: bright cyan/teal, Secondary: indigo
+    this.ctx.strokeStyle = isPrimary ? '#06b6d4' : '#4f46e5'; // Cyan-500 vs Indigo-600
     this.ctx.lineWidth = borderWidth;
-    this.ctx.shadowColor = 'rgba(79, 70, 229, 0.4)';
-    this.ctx.shadowBlur = 8;
+    this.ctx.shadowColor = isPrimary ? 'rgba(6, 182, 212, 0.5)' : 'rgba(79, 70, 229, 0.4)';
+    this.ctx.shadowBlur = isPrimary ? 12 : 8;
     this.ctx.shadowOffsetX = 0;
     this.ctx.shadowOffsetY = 0;
 
@@ -170,7 +172,8 @@ export class RendererNodes {
 
       // Draw selection highlight if this task is selected
       if (this.state.isNodeSelected(task.id)) {
-        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 6);
+        const isPrimary = this.state.isFirstSelected(task.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 6, isPrimary);
       }
 
       // Card background
@@ -522,12 +525,14 @@ export class RendererNodes {
       // Draw selection highlight if this agent is selected
       const agentId = agent.nodeId || agent.name;
       if (this.state.isNodeSelected(agentId)) {
+        const isPrimary = this.state.isFirstSelected(agentId);
         this.drawSelectionHighlight(
           agent.x - halfWidth,
           agent.y - halfHeight,
           halfWidth * 2,
           halfHeight * 2,
-          12
+          12,
+          isPrimary
         );
       }
 
@@ -713,7 +718,8 @@ export class RendererNodes {
 
       // Draw selection highlight if this attachment is selected
       if (this.state.isNodeSelected(attachment.id)) {
-        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+        const isPrimary = this.state.isFirstSelected(attachment.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
       }
 
       const baseColor = attachment.color || '#e2e8f0';
@@ -830,7 +836,8 @@ export class RendererNodes {
 
       // Draw selection highlight if this scheduler node is selected
       if (this.state.isNodeSelected(schedulerNode.id)) {
-        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+        const isPrimary = this.state.isFirstSelected(schedulerNode.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
       }
 
       // Determine node status color
@@ -1111,7 +1118,8 @@ export class RendererNodes {
 
       // Draw selection highlight if this store node is selected
       if (this.state.isNodeSelected(storeNode.id)) {
-        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8);
+        const isPrimary = this.state.isFirstSelected(storeNode.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
       }
 
       // Base color (teal/cyan for storage)

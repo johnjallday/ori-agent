@@ -293,11 +293,19 @@ export class AgentCanvasState {
     this.shiftPressed = false;
 
     // Multi-Selection State
-    this.selectedNodes = new Map();  // Map<id, {type: string, node: object}>
+    this.selectedNodes = new Map();  // Map<id, {id: string, type: string, node: object}>
+    this.firstSelectedId = null;     // Track the first selected node
     this.multiSelectContextMenu = false;
     this.multiSelectMenuX = 0;
     this.multiSelectMenuY = 0;
     this.multiSelectMenuItems = [];  // For click detection
+
+    // Marquee Selection State (Shift+Drag)
+    this.isMarqueeSelecting = false;
+    this.marqueeStartX = 0;          // World coordinates
+    this.marqueeStartY = 0;
+    this.marqueeEndX = 0;
+    this.marqueeEndY = 0;
 
     // Callbacks (set by parent)
     this.onAgentClick = null;
@@ -833,6 +841,10 @@ export class AgentCanvasState {
    */
   selectNode(id, type, node) {
     if (!this.selectedNodes.has(id)) {
+      // Track first selected node
+      if (this.selectedNodes.size === 0) {
+        this.firstSelectedId = id;
+      }
       this.selectedNodes.set(id, { id, type, node });
       this.eventBus.emit(EVENT_TYPES.SELECTION_CHANGED, {
         action: 'add',
@@ -850,6 +862,13 @@ export class AgentCanvasState {
     if (this.selectedNodes.has(id)) {
       const removed = this.selectedNodes.get(id);
       this.selectedNodes.delete(id);
+
+      // If we removed the first selected node, update to the next one
+      if (this.firstSelectedId === id) {
+        const remaining = this.selectedNodes.keys().next();
+        this.firstSelectedId = remaining.done ? null : remaining.value;
+      }
+
       this.eventBus.emit(EVENT_TYPES.SELECTION_CHANGED, {
         action: 'remove',
         node: removed,
@@ -878,6 +897,7 @@ export class AgentCanvasState {
   clearSelection() {
     if (this.selectedNodes.size > 0) {
       this.selectedNodes.clear();
+      this.firstSelectedId = null;
       this.multiSelectContextMenu = false;
       this.eventBus.emit(EVENT_TYPES.SELECTION_CLEARED);
     }
@@ -890,6 +910,15 @@ export class AgentCanvasState {
    */
   isNodeSelected(id) {
     return this.selectedNodes.has(id);
+  }
+
+  /**
+   * Check if a node is the first (primary) selected node
+   * @param {string} id - Node ID
+   * @returns {boolean}
+   */
+  isFirstSelected(id) {
+    return this.firstSelectedId === id;
   }
 
   /**
