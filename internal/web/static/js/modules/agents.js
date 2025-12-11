@@ -515,7 +515,7 @@ async function switchToAgent(agentName) {
     }
     
     // Refresh the agent list to update current agent
-    await loadAgents();
+    await loadAgentsForSidebar();
     
     // Reload plugins for the new agent
     if (typeof loadPlugins === 'function') {
@@ -555,7 +555,7 @@ async function deleteAgent(agentName) {
     }
     
     // Refresh the agent list
-    await loadAgents();
+    await loadAgentsForSidebar();
     
     console.log('Deleted agent:', agentName);
     
@@ -567,7 +567,7 @@ async function deleteAgent(agentName) {
 
 // Refresh agent list
 async function refreshAgentList() {
-  await loadAgents();
+  await loadAgentsForSidebar();
 }
 
 // Setup agent management event listeners
@@ -602,7 +602,7 @@ function setupAgentManagement() {
   if (loadMoreAgentsBtn) {
     loadMoreAgentsBtn.addEventListener('click', () => {
       console.log('Load more agents clicked');
-      loadAgents(); // Reload all agents (for now, until pagination is implemented)
+      loadAgentsForSidebar(); // Reload all agents (for now, until pagination is implemented)
     });
   }
 
@@ -691,7 +691,7 @@ async function updateAgentSettings(agentName, accordionId) {
 
       // If name changed, reload agents list to reflect the change
       if (newAgentName !== agentName) {
-        await loadAgents();
+        await loadAgentsForSidebar();
         // If this was the current agent, switch to the new name
         if (currentAgentName === agentName) {
           switchToAgent(newAgentName);

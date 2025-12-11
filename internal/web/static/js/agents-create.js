@@ -2,34 +2,39 @@
 
 let availablePlugins = [];
 let selectedTags = [];
-
-// Model options by provider
-const modelsByProvider = {
-    openai: [
-        { value: 'gpt-4o', label: 'GPT-4o (Recommended)' },
-        { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-        { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-        { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (if available)' }
-    ],
-    claude: [
-        { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
-        { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
-        { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet' },
-        { value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku' }
-    ],
-    ollama: [
-        { value: 'llama3.2', label: 'Llama 3.2' },
-        { value: 'llama3.1', label: 'Llama 3.1' },
-        { value: 'mistral', label: 'Mistral' },
-        { value: 'codellama', label: 'Code Llama' }
-    ]
-};
+let availableProviders = []; // Cache for available providers and models from API
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
     loadPlugins();
     setupTagsInput();
+    loadAvailableProviders();
 });
+
+// Fetch available providers and models from API
+async function loadAvailableProviders() {
+    try {
+        const response = await fetch('/api/providers');
+        if (!response.ok) {
+            throw new Error('Failed to load providers');
+        }
+        const data = await response.json();
+        availableProviders = data.providers || [];
+
+        // Populate the model select with data from API
+        updateModelOptions();
+
+        return availableProviders;
+    } catch (error) {
+        console.error('Failed to load providers:', error);
+        // Fall back to showing an error in the model select
+        const modelSelect = document.getElementById('llmModel');
+        if (modelSelect) {
+            modelSelect.innerHTML = '<option value="">Failed to load models</option>';
+        }
+        return [];
+    }
+}
 
 // Load available plugins
 async function loadPlugins() {
@@ -125,19 +130,72 @@ function renderTags() {
     });
 }
 
-// Update model options based on provider
+// Update model options based on provider and agent type
 function updateModelOptions() {
-    const provider = document.getElementById('llmProvider').value;
+    const providerSelect = document.getElementById('llmProvider');
     const modelSelect = document.getElementById('llmModel');
-    const models = modelsByProvider[provider] || [];
+    const agentTypeSelect = document.getElementById('agentType');
 
+    if (!modelSelect || availableProviders.length === 0) {
+        return;
+    }
+
+    const selectedProvider = providerSelect ? providerSelect.value : null;
+    const selectedAgentType = agentTypeSelect ? agentTypeSelect.value : 'tool-calling';
+
+    // Clear existing options
     modelSelect.innerHTML = '';
-    models.forEach(model => {
-        const option = document.createElement('option');
-        option.value = model.value;
-        option.textContent = model.label;
-        modelSelect.appendChild(option);
+
+    // Find models from the API data
+    availableProviders.forEach(provider => {
+        // Map provider display names to our provider select values
+        const providerNameMap = {
+            'OpenAI': 'openai',
+            'Anthropic': 'claude',
+            'Ollama': 'ollama'
+        };
+        const providerKey = providerNameMap[provider.display_name] || provider.name;
+
+        // If a specific provider is selected, only show models from that provider
+        if (selectedProvider && providerKey !== selectedProvider) {
+            return;
+        }
+
+        // Create optgroup for this provider
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+        let hasMatchingModels = false;
+
+        provider.models.forEach(model => {
+            // Filter by agent type if the model has a type specified
+            if (model.type && model.type !== selectedAgentType) {
+                return;
+            }
+
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-provider', providerKey);
+            if (model.type) {
+                option.setAttribute('data-type', model.type);
+            }
+            providerGroup.appendChild(option);
+            hasMatchingModels = true;
+        });
+
+        // Only add the provider group if it has matching models
+        if (hasMatchingModels) {
+            modelSelect.appendChild(providerGroup);
+        }
     });
+
+    // If no models found, show a message
+    if (modelSelect.options.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No models available for this configuration';
+        modelSelect.appendChild(option);
+    }
 }
 
 // Create agent
@@ -151,13 +209,17 @@ async function createAgent() {
 
     const type = document.getElementById('agentType').value;
     const role = document.getElementById('agentRole').value;
-    const provider = document.getElementById('llmProvider').value;
-    const model = document.getElementById('llmModel').value;
+    const modelSelect = document.getElementById('llmModel');
+    const model = modelSelect.value;
 
-    if (!type || !role || !provider || !model) {
+    if (!type || !role || !model) {
         showError('Please fill in all required fields');
         return;
     }
+
+    // Get provider from the selected model's data attribute
+    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+    const provider = selectedOption ? selectedOption.getAttribute('data-provider') : null;
 
     // Gather optional fields
     const description = document.getElementById('agentDescription').value.trim();
@@ -174,10 +236,14 @@ async function createAgent() {
         name: name,
         type: type,
         role: role,
-        llm_provider: provider,
         model: model,
         temperature: temperature
     };
+
+    // Add provider if we could determine it
+    if (provider) {
+        requestData.llm_provider = provider;
+    }
 
     // Add optional fields
     if (description) requestData.description = description;
@@ -204,8 +270,8 @@ async function createAgent() {
             throw new Error(error.error || 'Failed to create agent');
         }
 
-        // Success - redirect to dashboard
-        window.location.href = '/agents-dashboard';
+        // Success - redirect to agents page
+        window.location.href = '/agents';
 
     } catch (error) {
         console.error('Error creating agent:', error);
