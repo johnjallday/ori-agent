@@ -99,4 +99,205 @@ export class AgentCanvasContextMenu {
         console.warn(`Unknown context menu action: ${action}`);
     }
   }
+
+  /**
+   * Handle multi-select context menu actions
+   */
+  handleMultiSelectAction(action) {
+    console.log(`🎯 Multi-select action: ${action}`);
+
+    switch (action) {
+      case 'workflow':
+        this.createWorkflowFromSelection();
+        break;
+
+      case 'delete':
+        this.bulkDeleteNodes();
+        break;
+
+      case 'group':
+        this.groupNodes();
+        break;
+
+      default:
+        console.warn(`Unknown multi-select action: ${action}`);
+    }
+
+    // Hide multi-select context menu after action
+    this.state.hideMultiSelectContextMenu();
+    this.parent.draw();
+  }
+
+  /**
+   * Create a workflow from selected nodes
+   * Placeholder for future workflow creation functionality
+   */
+  createWorkflowFromSelection() {
+    const selectedNodes = this.state.getSelectedNodes();
+    const count = selectedNodes.length;
+
+    // For now, show a notification about the planned feature
+    this.parent.notifications.showNotification(
+      `Workflow creation from ${count} nodes - Coming soon!`,
+      'info'
+    );
+
+    console.log('📋 Nodes selected for workflow:', selectedNodes);
+  }
+
+  /**
+   * Delete all selected nodes after confirmation
+   */
+  async bulkDeleteNodes() {
+    const selectedNodes = this.state.getSelectedNodes();
+    const count = selectedNodes.length;
+
+    if (count === 0) return;
+
+    // Show confirmation dialog
+    const confirmed = confirm(`Delete ${count} selected node${count > 1 ? 's' : ''}?\n\nThis action cannot be undone.`);
+    if (!confirmed) return;
+
+    let deletedCount = 0;
+    let errorCount = 0;
+
+    // Group nodes by type for batch processing
+    const nodesByType = this.state.getSelectedNodesByType();
+
+    // Delete agents
+    if (nodesByType.agent && nodesByType.agent.length > 0) {
+      for (const { id, node } of nodesByType.agent) {
+        try {
+          const agentId = node.instanceNumber ? `${node.name}:${node.instanceNumber}` : node.name;
+          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/agents/${encodeURIComponent(agentId)}`);
+
+          // Remove from local state
+          const filteredAgents = this.state.agents.filter(a => a.nodeId !== node.nodeId);
+          this.state.setAgents(filteredAgents);
+
+          // Unassign tasks targeting this agent
+          const updatedTasks = this.state.tasks.map(t => {
+            if (t.assigned_node_id === node.nodeId) {
+              return { ...t, to: 'unassigned', assigned_node_id: '' };
+            }
+            return t;
+          });
+          this.state.setTasks(updatedTasks);
+
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete agent ${node.name}:`, err);
+          errorCount++;
+        }
+      }
+    }
+
+    // Delete tasks
+    if (nodesByType.task && nodesByType.task.length > 0) {
+      for (const { id, node } of nodesByType.task) {
+        try {
+          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/tasks/${encodeURIComponent(id)}`);
+
+          // Remove from local state
+          const filteredTasks = this.state.tasks.filter(t => t.id !== id);
+          this.state.setTasks(filteredTasks);
+
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete task ${id}:`, err);
+          errorCount++;
+        }
+      }
+    }
+
+    // Delete scheduler nodes
+    if (nodesByType.scheduler && nodesByType.scheduler.length > 0) {
+      for (const { id, node } of nodesByType.scheduler) {
+        try {
+          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/schedulers/${encodeURIComponent(id)}`);
+
+          // Remove from local state
+          const filteredSchedulers = this.state.schedulerNodes.filter(s => s.id !== id);
+          this.state.setSchedulerNodes(filteredSchedulers);
+
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete scheduler ${id}:`, err);
+          errorCount++;
+        }
+      }
+    }
+
+    // Delete store nodes
+    if (nodesByType.store && nodesByType.store.length > 0) {
+      for (const { id, node } of nodesByType.store) {
+        try {
+          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/stores/${encodeURIComponent(id)}`);
+
+          // Remove from local state
+          const filteredStores = this.state.storeNodes.filter(s => s.id !== id);
+          this.state.setStoreNodes(filteredStores);
+
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete store ${id}:`, err);
+          errorCount++;
+        }
+      }
+    }
+
+    // Delete attachments
+    if (nodesByType.attachment && nodesByType.attachment.length > 0) {
+      for (const { id, node } of nodesByType.attachment) {
+        try {
+          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/attachments/${encodeURIComponent(id)}`);
+
+          // Remove from local state
+          const filteredAttachments = this.state.attachments.filter(a => a.id !== id);
+          this.state.setAttachments(filteredAttachments);
+
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete attachment ${id}:`, err);
+          errorCount++;
+        }
+      }
+    }
+
+    // Clear selection after deletion
+    this.state.clearSelection();
+
+    // Show result notification
+    if (errorCount > 0) {
+      this.parent.notifications.showNotification(
+        `Deleted ${deletedCount} node${deletedCount !== 1 ? 's' : ''}, ${errorCount} failed`,
+        'warning'
+      );
+    } else {
+      this.parent.notifications.showNotification(
+        `Deleted ${deletedCount} node${deletedCount !== 1 ? 's' : ''}`,
+        'success'
+      );
+    }
+
+    // Save layout
+    this.parent.layout.saveLayout();
+  }
+
+  /**
+   * Group selected nodes together
+   * Placeholder for future grouping functionality
+   */
+  groupNodes() {
+    const selectedNodes = this.state.getSelectedNodes();
+    const count = selectedNodes.length;
+
+    // For now, show a notification about the planned feature
+    this.parent.notifications.showNotification(
+      `Grouping ${count} nodes - Coming soon!`,
+      'info'
+    );
+
+    console.log('📁 Nodes selected for grouping:', selectedNodes);
+  }
 }

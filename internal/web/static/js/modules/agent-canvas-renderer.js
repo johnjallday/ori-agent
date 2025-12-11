@@ -177,7 +177,15 @@ export class AgentCanvasRenderer {
     return this.ui.drawContextMenu();
   }
 
+  drawMultiSelectContextMenu() {
+    return this.ui.drawMultiSelectContextMenu();
+  }
+
   drawHelpOverlay() {
     return this.ui.drawHelpOverlay();
+  }
+
+  drawMarqueeSelection() {
+    return this.ui.drawMarqueeSelection();
   }
 }
