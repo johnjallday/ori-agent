@@ -40,7 +40,7 @@ jobs:
         run: brew install goreleaser
 
       - name: Build binaries
-        run: goreleaser release --snapshot --clean --skip=publish
+        run: goreleaser release --snapshot --clean --skip publish
 
       - name: Create DMG
         run: |
@@ -137,8 +137,7 @@ jobs:
       - name: Build packages
         run: |
           # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
-          goreleaser build --id=server --snapshot --clean
-          goreleaser release --snapshot --skip=publish --skip=before --skip=build
+          goreleaser release --snapshot --clean --skip publish
 
       - name: Install package
         run: |
@@ -208,15 +207,14 @@ jobs:
 
       - name: Install GoReleaser
         run: |
-          dnf install -y 'dnf-command(config-manager)'
+          dnf install -y 'dnf-command(config-manager)' curl
           dnf config-manager --add-repo https://repo.goreleaser.com/yum/
-          dnf install -y goreleaser
+          dnf install -y goreleaser --nogpgcheck
 
       - name: Build packages
         run: |
           # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
-          goreleaser build --id=server --snapshot --clean
-          goreleaser release --snapshot --skip=publish --skip=before --skip=build
+          goreleaser release --snapshot --clean --skip publish
 
       - name: Install package
         run: |
@@ -289,11 +287,10 @@ jobs:
         run: choco install goreleaser -y
 
       - name: Build binaries
-        shell: bash
+        shell: pwsh
         run: |
-          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Windows)
+          # Build server binary only (skip menubar - requires CGO on macOS)
           goreleaser build --id=server --snapshot --clean
-          goreleaser release --snapshot --skip=publish --skip=before --skip=build
 
       - name: Create MSI
         shell: pwsh
