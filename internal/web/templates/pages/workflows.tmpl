@@ -88,6 +88,35 @@
     </div>
   </div>
 
+  <!-- Workflow Details Modal -->
+  <div class="modal fade" id="workflowDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+            </svg>
+            <span id="details-workflow-name">Workflow Details</span>
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="workflow-details-content"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="button" id="detailsAddToStudioBtn" class="modern-btn modern-btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add to Studio
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Confirmation Modal -->
   <div class="modal fade" id="deleteWorkflowModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -213,12 +242,15 @@
 
       return `
         <div class="col-md-6 col-lg-4">
-          <div class="modern-card p-4 h-100 d-flex flex-column workflow-card">
+          <div class="modern-card p-4 h-100 d-flex flex-column workflow-card" style="cursor: pointer; transition: all 0.15s ease;"
+               onclick="openWorkflowDetails('${workflow.id}')"
+               onmouseenter="this.style.borderColor='var(--primary-color)'"
+               onmouseleave="this.style.borderColor='transparent'">
             <div class="d-flex justify-content-between align-items-start mb-2">
               <h5 class="mb-0" style="color: var(--text-primary);">
                 ${escapeHtml(workflow.name)}
               </h5>
-              <button class="btn btn-link btn-sm p-1" onclick="openDeleteModal('${workflow.id}')" title="Delete workflow" style="color: var(--danger-color);">
+              <button class="btn btn-link btn-sm p-1" onclick="event.stopPropagation(); openDeleteModal('${workflow.id}')" title="Delete workflow" style="color: var(--danger-color);">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                 </svg>
@@ -233,7 +265,7 @@
             </div>
 
             <div class="mt-auto">
-              <button class="modern-btn modern-btn-primary w-100" onclick="openStudioSelector('${workflow.id}')">
+              <button class="modern-btn modern-btn-primary w-100" onclick="event.stopPropagation(); openStudioSelector('${workflow.id}')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                 </svg>
@@ -244,6 +276,112 @@
         </div>
       `;
     }
+
+    // Workflow details
+    let detailsWorkflow = null;
+
+    function openWorkflowDetails(workflowId) {
+      detailsWorkflow = allWorkflows.find(w => w.id === workflowId);
+      if (!detailsWorkflow) {
+        showError('Workflow not found');
+        return;
+      }
+
+      document.getElementById('details-workflow-name').textContent = detailsWorkflow.name;
+      document.getElementById('workflow-details-content').innerHTML = renderWorkflowDetails(detailsWorkflow);
+
+      const modal = new bootstrap.Modal(document.getElementById('workflowDetailsModal'));
+      modal.show();
+    }
+
+    function renderWorkflowDetails(workflow) {
+      const nodeCount = workflow.nodes ? workflow.nodes.length : 0;
+      const createdAt = workflow.created_at ? new Date(workflow.created_at).toLocaleString() : 'Unknown';
+
+      let html = `
+        <div class="mb-4">
+          <p style="color: var(--text-secondary);">${escapeHtml(workflow.description || 'No description')}</p>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            ${workflow.category ? `<span class="modern-badge badge-primary">${escapeHtml(workflow.category)}</span>` : ''}
+            <span class="modern-badge badge-secondary">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</span>
+          </div>
+          <small style="color: var(--text-muted);">Created: ${escapeHtml(createdAt)}</small>
+        </div>
+      `;
+
+      // Nodes section
+      if (workflow.nodes && workflow.nodes.length > 0) {
+        html += `
+          <h6 style="color: var(--text-primary);" class="mb-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
+            </svg>
+            Nodes
+          </h6>
+          <div class="row g-2">
+        `;
+
+        workflow.nodes.forEach(node => {
+          const nodeIcon = getNodeIcon(node.type);
+          const nodeColor = getNodeColor(node.type);
+          html += `
+            <div class="col-md-6">
+              <div class="p-3" style="background: var(--bg-secondary); border-radius: 8px; border-left: 3px solid ${nodeColor};">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                  ${nodeIcon}
+                  <strong style="color: var(--text-primary);">${escapeHtml(node.config?.name || node.type)}</strong>
+                </div>
+                <small style="color: var(--text-muted);">${escapeHtml(node.type)}</small>
+                ${node.config?.agent_id ? `<br><small style="color: var(--text-secondary);">Agent: ${escapeHtml(node.config.agent_id)}</small>` : ''}
+              </div>
+            </div>
+          `;
+        });
+
+        html += '</div>';
+      }
+
+      // Layout info
+      if (workflow.layout) {
+        html += `
+          <div class="mt-4">
+            <small style="color: var(--text-muted);">
+              Layout: ${workflow.layout.width || 0}px x ${workflow.layout.height || 0}px
+            </small>
+          </div>
+        `;
+      }
+
+      return html;
+    }
+
+    function getNodeIcon(type) {
+      const icons = {
+        'task': '<svg width="16" height="16" viewBox="0 0 24 24" fill="#6366f1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>',
+        'agent': '<svg width="16" height="16" viewBox="0 0 24 24" fill="#8b5cf6"><path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2Z"/></svg>',
+        'scheduler': '<svg width="16" height="16" viewBox="0 0 24 24" fill="#f59e0b"><path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/></svg>',
+        'store': '<svg width="16" height="16" viewBox="0 0 24 24" fill="#10b981"><path d="M12,3C7.58,3 4,4.79 4,7C4,9.21 7.58,11 12,11C16.42,11 20,9.21 20,7C20,4.79 16.42,3 12,3M4,9V12C4,14.21 7.58,16 12,16C16.42,16 20,14.21 20,12V9C20,11.21 16.42,13 12,13C7.58,13 4,11.21 4,9M4,14V17C4,19.21 7.58,21 12,21C16.42,21 20,19.21 20,17V14C20,16.21 16.42,18 12,18C7.58,18 4,16.21 4,14Z"/></svg>',
+        'attachment': '<svg width="16" height="16" viewBox="0 0 24 24" fill="#ec4899"><path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/></svg>'
+      };
+      return icons[type] || '<svg width="16" height="16" viewBox="0 0 24 24" fill="#6b7280"><circle cx="12" cy="12" r="10"/></svg>';
+    }
+
+    function getNodeColor(type) {
+      const colors = {
+        'task': '#6366f1',
+        'agent': '#8b5cf6',
+        'scheduler': '#f59e0b',
+        'store': '#10b981',
+        'attachment': '#ec4899'
+      };
+      return colors[type] || '#6b7280';
+    }
+
+    document.getElementById('detailsAddToStudioBtn').addEventListener('click', function() {
+      if (!detailsWorkflow) return;
+      bootstrap.Modal.getInstance(document.getElementById('workflowDetailsModal')).hide();
+      openStudioSelector(detailsWorkflow.id);
+    });
 
     // Studio selector
     async function openStudioSelector(workflowId) {
