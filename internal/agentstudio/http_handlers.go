@@ -563,11 +563,11 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Parse request body
 	var req struct {
-		Description    string   `json:"description"`
-		To             string   `json:"to"`
-		From           string   `json:"from"`
-		InputTaskIDs   []string `json:"input_task_ids"`
-		AssignedNodeID string   `json:"assigned_node_id"`
+		Description    *string   `json:"description,omitempty"`
+		To             *string   `json:"to,omitempty"`
+		From           *string   `json:"from,omitempty"`
+		InputTaskIDs   *[]string `json:"input_task_ids,omitempty"`
+		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
@@ -585,17 +585,21 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	found := false
 	for i, task := range studio.Tasks {
 		if task.ID == taskID {
-			// Update only provided fields
-			if req.Description != "" {
-				studio.Tasks[i].Description = req.Description
+			// Update only provided fields (allowing explicit empty values)
+			if req.Description != nil {
+				studio.Tasks[i].Description = *req.Description
 			}
-			// Allow updating to/from even if empty (for unassigning)
-			studio.Tasks[i].To = req.To
-			studio.Tasks[i].From = req.From
-			studio.Tasks[i].AssignedNodeID = req.AssignedNodeID
-			// Update input task IDs if provided
+			if req.To != nil {
+				studio.Tasks[i].To = *req.To
+			}
+			if req.From != nil {
+				studio.Tasks[i].From = *req.From
+			}
+			if req.AssignedNodeID != nil {
+				studio.Tasks[i].AssignedNodeID = *req.AssignedNodeID
+			}
 			if req.InputTaskIDs != nil {
-				studio.Tasks[i].InputTaskIDs = req.InputTaskIDs
+				studio.Tasks[i].InputTaskIDs = *req.InputTaskIDs
 			}
 			found = true
 			break

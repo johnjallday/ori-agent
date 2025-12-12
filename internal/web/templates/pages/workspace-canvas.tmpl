@@ -658,6 +658,9 @@
       // Check for add_workflow URL parameter (redirect from Workflows page)
       const urlParams = new URLSearchParams(window.location.search);
       const addWorkflowId = urlParams.get('add_workflow');
+      const saveWorkflowAll = urlParams.get('save_workflow') === 'all';
+      const saveWorkflowTaskId = urlParams.get('save_workflow_task');
+
       if (addWorkflowId) {
         console.log('📋 Auto-adding workflow from URL:', addWorkflowId);
         // Remove the parameter from URL to prevent re-adding on refresh
@@ -668,7 +671,118 @@
           window.workflowPanel.instantiateWorkflow(addWorkflowId);
         }, 500);
       }
+
+      // If requested, select all nodes and open the "Save as Workflow" modal
+      if (saveWorkflowAll) {
+        setTimeout(() => {
+          try {
+            autoSaveAllNodesAsWorkflow();
+          } catch (err) {
+            console.error('Failed to auto-open Save Workflow:', err);
+          }
+        }, 600);
+      }
+
+      if (saveWorkflowTaskId) {
+        setTimeout(() => {
+          try {
+            autoSaveTaskAsWorkflow(saveWorkflowTaskId);
+          } catch (err) {
+            console.error('Failed to auto-open Save Workflow for task:', err);
+          }
+        }, 600);
+      }
     });
+
+    // Select every node on the canvas and open the Save Workflow modal (used when coming from dashboard)
+    function autoSaveAllNodesAsWorkflow() {
+      if (!window.agentCanvas || !window.agentCanvas.state || typeof window.agentCanvas.state.selectNode !== 'function') {
+        console.warn('Canvas not ready for workflow export');
+        return;
+      }
+
+      const state = window.agentCanvas.state;
+      state.clearSelection();
+
+      const selectSafe = (id, type, node) => {
+        if (!id || !type) return;
+        state.selectNode(id, type, node);
+      };
+
+      (state.tasks || []).forEach(task => selectSafe(task.id, 'task', task));
+      (state.agents || []).forEach(agent => selectSafe(agent.nodeId || agent.id || agent.name, 'agent', agent));
+      (state.schedulerNodes || []).forEach(scheduler => selectSafe(scheduler.canvas_node_id || scheduler.id, 'scheduler', scheduler));
+      (state.storeNodes || []).forEach(store => selectSafe(store.canvas_node_id || store.id, 'store', store));
+      (state.attachments || []).forEach(att => selectSafe(att.id, 'attachment', att));
+
+      const selection = collectWorkflowSelectionData();
+      if (!selection) {
+        alert('Could not collect nodes for workflow. Please try again from the canvas.');
+        return;
+      }
+
+      showSaveWorkflowModal(selection);
+    }
+
+    // Select a task and its connected nodes, then open the Save Workflow modal
+    function autoSaveTaskAsWorkflow(taskId) {
+      if (!taskId) return;
+      if (!window.agentCanvas || !window.agentCanvas.state || typeof window.agentCanvas.state.selectNode !== 'function') {
+        console.warn('Canvas not ready for workflow export');
+        return;
+      }
+
+      const state = window.agentCanvas.state;
+      state.clearSelection();
+
+      const selectSafe = (id, type, node) => {
+        if (!id || !type) return;
+        state.selectNode(id, type, node);
+      };
+
+      const task = (state.tasks || []).find(t => t.id === taskId);
+      if (!task) {
+        alert(`Task not found on canvas: ${taskId}`);
+        return;
+      }
+
+      // Always include the selected task
+      selectSafe(task.id, 'task', task);
+
+      // Include upstream dependency tasks if present
+      (task.input_task_ids || []).forEach(depId => {
+        const depTask = (state.tasks || []).find(t => t.id === depId);
+        if (depTask) selectSafe(depTask.id, 'task', depTask);
+      });
+
+      // Include the assigned agent (instance) when available
+      if (task.assigned_node_id) {
+        const agent = (state.agents || []).find(a => a.nodeId === task.assigned_node_id);
+        if (agent) {
+          selectSafe(agent.nodeId || agent.id || agent.name, 'agent', agent);
+        }
+
+        // Include any store node attached to that agent instance
+        const store = (state.storeNodes || []).find(s => s.agent_node_id === task.assigned_node_id);
+        if (store) {
+          selectSafe(store.canvas_node_id || store.id, 'store', store);
+        }
+      }
+
+      // Include any scheduler that targets this task
+      const scheduler = (state.schedulerNodes || []).find(s => s.target_task_id === task.id);
+      if (scheduler) {
+        selectSafe(scheduler.canvas_node_id || scheduler.id, 'scheduler', scheduler);
+      }
+
+      const selection = collectWorkflowSelectionData();
+      if (!selection) {
+        alert('Could not collect nodes for workflow. Please try again from the canvas.');
+        return;
+      }
+
+      showSaveWorkflowModal(selection);
+    }
 
     // Show add agent modal with available agents
     async function showAddAgentModal() {
