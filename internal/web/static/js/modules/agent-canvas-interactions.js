@@ -26,6 +26,118 @@ export class AgentCanvasInteractionHandler {
   }
 
   /**
+   * Find a node at the given canvas coordinates
+   * Returns { id, type, node } or null if no node found
+   * Checks in order: tasks, schedulers, stores, attachments, agents (top to bottom visual order)
+   * @param {number} x - Canvas X coordinate
+   * @param {number} y - Canvas Y coordinate
+   * @returns {{id: string, type: string, node: object}|null}
+   */
+  getNodeAtPosition(x, y) {
+    // Check tasks first (drawn on top)
+    if (this.state.tasks && this.state.tasks.length > 0) {
+      for (let i = this.state.tasks.length - 1; i >= 0; i--) {
+        const task = this.state.tasks[i];
+        if (task && task.x != null && task.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 60;
+          const cardX = task.x - cardWidth / 2;
+          const cardY = task.y - cardHeight / 2;
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            return { id: task.id, type: 'task', node: task };
+          }
+        }
+      }
+    }
+
+    // Check scheduler nodes
+    if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+      for (let i = this.state.schedulerNodes.length - 1; i >= 0; i--) {
+        const schedulerNode = this.state.schedulerNodes[i];
+        if (schedulerNode && schedulerNode.x != null && schedulerNode.y != null) {
+          const cardBounds = schedulerNode.cardBounds || {
+            x: schedulerNode.x - 90,
+            y: schedulerNode.y - 45,
+            width: 180,
+            height: 90
+          };
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            return { id: schedulerNode.id, type: 'scheduler', node: schedulerNode };
+          }
+        }
+      }
+    }
+
+    // Check store nodes
+    if (this.state.storeNodes && this.state.storeNodes.length > 0) {
+      for (let i = this.state.storeNodes.length - 1; i >= 0; i--) {
+        const storeNode = this.state.storeNodes[i];
+        if (storeNode && storeNode.cardBounds) {
+          const cardBounds = storeNode.cardBounds;
+          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
+              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            return { id: storeNode.id, type: 'store', node: storeNode };
+          }
+        }
+      }
+    }
+
+    // Check attachments
+    if (this.state.attachments && this.state.attachments.length > 0) {
+      for (let i = this.state.attachments.length - 1; i >= 0; i--) {
+        const attachment = this.state.attachments[i];
+        if (attachment && attachment.x != null && attachment.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 70;
+          const cardX = attachment.x - cardWidth / 2;
+          const cardY = attachment.y - cardHeight / 2;
+          if (x >= cardX && x <= cardX + cardWidth &&
+              y >= cardY && y <= cardY + cardHeight) {
+            return { id: attachment.id, type: 'attachment', node: attachment };
+          }
+        }
+      }
+    }
+
+    // Check agents
+    for (const agent of this.state.agents) {
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
+          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+        return { id: agent.nodeId || agent.name, type: 'agent', node: agent };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Handle Shift+Click selection for a node
+   * @param {string} id - Node ID
+   * @param {string} type - Node type
+   * @param {object} node - Node object
+   */
+  handleShiftClickSelection(id, type, node) {
+    this.state.toggleNodeSelection(id, type, node);
+    this.parent.draw();
+  }
+
+  /**
+   * Handle regular click selection (clear and select one)
+   * @param {string} id - Node ID
+   * @param {string} type - Node type
+   * @param {object} node - Node object
+   */
+  handleClickSelection(id, type, node) {
+    this.state.clearSelection();
+    this.state.selectNode(id, type, node);
+    this.parent.draw();
+  }
+
+  /**
    * Handle keyboard key down events
    * Manages keyboard shortcuts and text input for forms
    *
@@ -41,6 +153,9 @@ export class AgentCanvasInteractionHandler {
     }
     if (e.ctrlKey || e.metaKey) {
       this.state.ctrlPressed = true;
+    }
+    if (e.shiftKey) {
+      this.state.shiftPressed = true;
     }
 
     // H key - Toggle help overlay
@@ -110,6 +225,18 @@ export class AgentCanvasInteractionHandler {
         this.state.contextMenuVisible = false;
         this.state.contextMenuAgent = null;
         this.state.contextMenuItems = [];
+        this.parent.draw();
+        return;
+      } else if (this.state.multiSelectContextMenu) {
+        // Close multi-select context menu
+        e.preventDefault();
+        this.state.hideMultiSelectContextMenu();
+        this.parent.draw();
+        return;
+      } else if (this.state.selectedNodes.size > 0) {
+        // Clear multi-selection
+        e.preventDefault();
+        this.state.clearSelection();
         this.parent.draw();
         return;
       } else if (this.state.forms.addAgentFormVisible) {
@@ -206,6 +333,24 @@ export class AgentCanvasInteractionHandler {
       this.state.contextMenuVisible = false;
       this.state.contextMenuAgent = null;
       this.state.contextMenuItems = [];
+      this.parent.draw();
+      return;
+    }
+
+    // Handle multi-select context menu clicks (screen coordinates)
+    if (this.state.multiSelectContextMenu && this.state.multiSelectMenuItems) {
+      for (const item of this.state.multiSelectMenuItems) {
+        if (screenX >= item.x && screenX <= item.x + item.width &&
+            screenY >= item.y && screenY <= item.y + item.height) {
+          // Handle menu item click
+          this.parent.handleMultiSelectAction(item.action);
+          this.state.hideMultiSelectContextMenu();
+          this.parent.draw();
+          return;
+        }
+      }
+      // Clicked outside menu - close it
+      this.state.hideMultiSelectContextMenu();
       this.parent.draw();
       return;
     }
@@ -358,6 +503,14 @@ export class AgentCanvasInteractionHandler {
 
           if (x >= cardX && x <= cardX + cardWidth &&
               y >= cardY && y <= cardY + cardHeight) {
+            // Handle Shift+Click for multi-selection
+            if (e.shiftKey) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.handleShiftClickSelection(task.id, 'task', task);
+              return;
+            }
+
             // If assigning scheduler to a task, link immediately
             if (this.state.schedulerAssignmentMode && this.state.schedulerAssignmentSource) {
               e.stopPropagation();
@@ -451,6 +604,13 @@ export class AgentCanvasInteractionHandler {
           // Check if clicking inside the card (for dragging or selecting)
           if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
               y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            // Handle Shift+Click for multi-selection
+            if (e.shiftKey) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.handleShiftClickSelection(schedulerNode.id, 'scheduler', schedulerNode);
+              return;
+            }
             e.stopPropagation();
             e.preventDefault();
             this.state.isDraggingSchedulerNode = true;
@@ -501,6 +661,13 @@ export class AgentCanvasInteractionHandler {
           // Check if clicking inside the card (for dragging or selecting)
           if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
               y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+            // Handle Shift+Click for multi-selection
+            if (e.shiftKey) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.handleShiftClickSelection(storeNode.id, 'store', storeNode);
+              return;
+            }
             e.stopPropagation();
             e.preventDefault();
             this.state.isDraggingStoreNode = true;
@@ -561,6 +728,13 @@ export class AgentCanvasInteractionHandler {
 
           if (x >= cardX && x <= cardX + cardWidth &&
               y >= cardY && y <= cardY + cardHeight) {
+            // Handle Shift+Click for multi-selection
+            if (e.shiftKey) {
+              e.stopPropagation();
+              e.preventDefault();
+              this.handleShiftClickSelection(attachment.id, 'attachment', attachment);
+              return;
+            }
             e.stopPropagation();
             e.preventDefault();
             this.state.isDraggingAttachment = true;
@@ -594,6 +768,14 @@ export class AgentCanvasInteractionHandler {
 
       if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
           y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+        // Handle Shift+Click for multi-selection
+        if (e.shiftKey) {
+          e.stopPropagation();
+          e.preventDefault();
+          this.handleShiftClickSelection(agent.nodeId || agent.name, 'agent', agent);
+          return;
+        }
+
         // If we're assigning a task, clicking an agent should assign immediately
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();
@@ -640,11 +822,26 @@ export class AgentCanvasInteractionHandler {
       }
     }
 
-    // Otherwise, start canvas panning
-    this.state.isDragging = true;
-    this.state.dragStartX = e.clientX - rect.left - this.state.offsetX;
-    this.state.dragStartY = e.clientY - rect.top - this.state.offsetY;
-    this.canvas.style.cursor = 'grabbing';
+    // Otherwise, start canvas panning or marquee selection (clicked on empty space)
+    if (e.shiftKey) {
+      // Shift+Drag on empty space: start marquee selection
+      this.state.isMarqueeSelecting = true;
+      this.state.marqueeStartX = x;
+      this.state.marqueeStartY = y;
+      this.state.marqueeEndX = x;
+      this.state.marqueeEndY = y;
+      this.canvas.style.cursor = 'crosshair';
+    } else {
+      // Regular drag: pan canvas and clear selection
+      if (this.state.selectedNodes.size > 0) {
+        this.state.clearSelection();
+        this.parent.draw();
+      }
+      this.state.isDragging = true;
+      this.state.dragStartX = e.clientX - rect.left - this.state.offsetX;
+      this.state.dragStartY = e.clientY - rect.top - this.state.offsetY;
+      this.canvas.style.cursor = 'grabbing';
+    }
   }
 
   /**
@@ -663,6 +860,16 @@ export class AgentCanvasInteractionHandler {
     // If context menu is visible, redraw to update hover effects
     if (this.state.contextMenuVisible) {
       this.parent.draw();
+    }
+
+    // Handle marquee selection dragging
+    if (this.state.isMarqueeSelecting) {
+      const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
+      const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
+      this.state.marqueeEndX = x;
+      this.state.marqueeEndY = y;
+      this.parent.draw();
+      return;
     }
 
     // Handle connection dragging
@@ -795,6 +1002,15 @@ export class AgentCanvasInteractionHandler {
     const wasDraggingConnection = this.state.isDraggingConnection;
     const wasDraggingCombiner = this.state.isDraggingCombiner;
     const wasAssigning = this.state.assignmentMode && this.state.assignmentSourceTask;
+
+    // Handle marquee selection completion
+    if (this.state.isMarqueeSelecting) {
+      this.completeMarqueeSelection();
+      this.state.isMarqueeSelecting = false;
+      this.canvas.style.cursor = 'grab';
+      this.parent.draw();
+      return;
+    }
 
     // Handle result connection drop from agent to task
     if (this.state.resultConnectionMode && this.state.resultSourceAgent) {
@@ -1659,6 +1875,120 @@ export class AgentCanvasInteractionHandler {
   }
 
   /**
+   * Complete marquee selection by selecting all nodes within the rectangle
+   */
+  completeMarqueeSelection() {
+    // Calculate normalized bounds (handle any drag direction)
+    const x1 = Math.min(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y1 = Math.min(this.state.marqueeStartY, this.state.marqueeEndY);
+    const x2 = Math.max(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y2 = Math.max(this.state.marqueeStartY, this.state.marqueeEndY);
+
+    // Skip if marquee is too small (likely just a click)
+    const width = x2 - x1;
+    const height = y2 - y1;
+    if (width < 10 && height < 10) {
+      return;
+    }
+
+    // Clear existing selection before adding new ones
+    this.state.clearSelection();
+
+    // Helper function to check if a rectangle intersects with marquee
+    const intersects = (nodeX, nodeY, nodeWidth, nodeHeight) => {
+      const nodeX1 = nodeX;
+      const nodeY1 = nodeY;
+      const nodeX2 = nodeX + nodeWidth;
+      const nodeY2 = nodeY + nodeHeight;
+
+      return !(nodeX2 < x1 || nodeX1 > x2 || nodeY2 < y1 || nodeY1 > y2);
+    };
+
+    // Check tasks
+    if (this.state.tasks && this.state.tasks.length > 0) {
+      for (const task of this.state.tasks) {
+        if (task && task.x != null && task.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 60;
+          const cardX = task.x - cardWidth / 2;
+          const cardY = task.y - cardHeight / 2;
+
+          if (intersects(cardX, cardY, cardWidth, cardHeight)) {
+            this.state.selectNode(task.id, 'task', task);
+          }
+        }
+      }
+    }
+
+    // Check scheduler nodes
+    if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+      for (const schedulerNode of this.state.schedulerNodes) {
+        if (schedulerNode && schedulerNode.x != null && schedulerNode.y != null) {
+          const cardBounds = schedulerNode.cardBounds || {
+            x: schedulerNode.x - 90,
+            y: schedulerNode.y - 45,
+            width: 180,
+            height: 90
+          };
+
+          if (intersects(cardBounds.x, cardBounds.y, cardBounds.width, cardBounds.height)) {
+            this.state.selectNode(schedulerNode.id, 'scheduler', schedulerNode);
+          }
+        }
+      }
+    }
+
+    // Check store nodes
+    if (this.state.storeNodes && this.state.storeNodes.length > 0) {
+      for (const storeNode of this.state.storeNodes) {
+        if (storeNode && storeNode.cardBounds) {
+          const cardBounds = storeNode.cardBounds;
+
+          if (intersects(cardBounds.x, cardBounds.y, cardBounds.width, cardBounds.height)) {
+            this.state.selectNode(storeNode.id, 'store', storeNode);
+          }
+        }
+      }
+    }
+
+    // Check attachments
+    if (this.state.attachments && this.state.attachments.length > 0) {
+      for (const attachment of this.state.attachments) {
+        if (attachment && attachment.x != null && attachment.y != null) {
+          const cardWidth = 160;
+          const cardHeight = 70;
+          const cardX = attachment.x - cardWidth / 2;
+          const cardY = attachment.y - cardHeight / 2;
+
+          if (intersects(cardX, cardY, cardWidth, cardHeight)) {
+            this.state.selectNode(attachment.id, 'attachment', attachment);
+          }
+        }
+      }
+    }
+
+    // Check agents
+    for (const agent of this.state.agents) {
+      const halfWidth = (agent.width || 120) / 2;
+      const halfHeight = (agent.height || 70) / 2;
+      const agentX = agent.x - halfWidth;
+      const agentY = agent.y - halfHeight;
+      const agentWidth = agent.width || 120;
+      const agentHeight = agent.height || 70;
+
+      if (intersects(agentX, agentY, agentWidth, agentHeight)) {
+        this.state.selectNode(agent.nodeId || agent.name, 'agent', agent);
+      }
+    }
+
+    // Show notification if nodes were selected
+    const selectedCount = this.state.getSelectionCount();
+    if (selectedCount > 0) {
+      this.parent.showNotification(`Selected ${selectedCount} node${selectedCount > 1 ? 's' : ''}`, 'info');
+    }
+  }
+
+  /**
    * Handle keyboard key up events
    * Releases modifier keys (space, ctrl/cmd)
    *
@@ -1673,6 +2003,9 @@ export class AgentCanvasInteractionHandler {
     }
     if (!e.ctrlKey && !e.metaKey) {
       this.state.ctrlPressed = false;
+    }
+    if (!e.shiftKey) {
+      this.state.shiftPressed = false;
     }
   }
 
@@ -1704,7 +2037,30 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
-    // Check if clicking on an agent
+    // Check if right-clicking on any node for multi-select context menu
+    const clickedNode = this.getNodeAtPosition(canvasX, canvasY);
+    if (clickedNode) {
+      // If multiple nodes are selected and the clicked node is one of them,
+      // show multi-select context menu
+      if (this.state.hasMultipleSelected() && this.state.isNodeSelected(clickedNode.id)) {
+        this.state.showMultiSelectContextMenu(screenX, screenY);
+        this.parent.draw();
+        return;
+      }
+
+      // If clicking on an unselected node with existing selection, add it to selection first
+      if (this.state.selectedNodes.size > 0 && !this.state.isNodeSelected(clickedNode.id)) {
+        this.state.selectNode(clickedNode.id, clickedNode.type, clickedNode.node);
+        // If now we have multiple selected, show multi-select menu
+        if (this.state.hasMultipleSelected()) {
+          this.state.showMultiSelectContextMenu(screenX, screenY);
+          this.parent.draw();
+          return;
+        }
+      }
+    }
+
+    // Check if clicking on an agent (single agent context menu)
     const clickedAgent = this.state.agents.find(agent => {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;

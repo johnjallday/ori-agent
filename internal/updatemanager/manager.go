@@ -1,6 +1,8 @@
 package updatemanager
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -364,19 +366,72 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
+	// Read file content into memory for checksum verification
+	fileContent, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read download: %w", err)
+	}
+
+	// SECURITY: Attempt to fetch and verify checksum
+	// Try common checksum file naming conventions
+	checksumVerified := false
+	checksumURLs := []string{
+		url + ".sha256",
+		url + ".sha256sum",
+		strings.TrimSuffix(url, filepath.Ext(url)) + ".sha256",
+	}
+
+	actualChecksum := sha256.Sum256(fileContent)
+	actualChecksumHex := hex.EncodeToString(actualChecksum[:])
+
+	for _, checksumURL := range checksumURLs {
+		expectedChecksum, err := m.fetchChecksum(checksumURL)
+		if err != nil {
+			continue // Try next URL
+		}
+
+		// Checksum files may contain "checksum  filename" format, extract just the checksum
+		checksumParts := strings.Fields(expectedChecksum)
+		if len(checksumParts) > 0 {
+			expectedChecksum = checksumParts[0]
+		}
+		expectedChecksum = strings.TrimSpace(strings.ToLower(expectedChecksum))
+
+		if actualChecksumHex == expectedChecksum {
+			checksumVerified = true
+			logger.Debug("Checksum verified successfully", logger.Fields{
+				"url":      checksumURL,
+				"checksum": actualChecksumHex,
+			})
+			break
+		} else {
+			logger.Warn("Checksum mismatch", logger.Fields{
+				"expected": expectedChecksum,
+				"actual":   actualChecksumHex,
+			})
+		}
+	}
+
+	// Log warning if checksum couldn't be verified (but don't block - some releases may not have checksums)
+	if !checksumVerified {
+		logger.Warn("Could not verify checksum for downloaded file - no valid checksum file found", logger.Fields{
+			"url":      url,
+			"checksum": actualChecksumHex,
+		})
+	}
+
+	// Write file to disk
 	file, err := os.Create(tempFilePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create download file: %w", err)
 	}
-	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
+	_, err = file.Write(fileContent)
 	if err != nil {
-		os.Remove(tempFilePath) // Clean up partial download
+		file.Close()
+		os.Remove(tempFilePath)
 		return "", fmt.Errorf("failed to save download: %w", err)
 	}
-
-	// Close the file before renaming
 	file.Close()
 
 	// Determine the final filename - use "ori-agent" or "ori-agent.exe"
@@ -411,6 +466,40 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 	}
 
 	return finalPath, nil
+}
+
+// fetchChecksum fetches a checksum file from the given URL
+func (m *Manager) fetchChecksum(url string) (string, error) {
+	client := m.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	if m.githubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+m.githubToken)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksum file not found: %d", resp.StatusCode)
+	}
+
+	content, err := io.ReadAll(io.LimitReader(resp.Body, 1024)) // Limit to 1KB for safety
+	if err != nil {
+		return "", err
+	}
+
+	return string(content), nil
 }
 
 // RestartApplication restarts the current application

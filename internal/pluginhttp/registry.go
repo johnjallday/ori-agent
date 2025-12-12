@@ -186,7 +186,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		// load plugin using unified loader (supports both .so and RPC executables)
 		tool, err := pluginloader.LoadPluginUnified(entryPath)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("load plugin %s: %v", entryPath, err), http.StatusInternalServerError)
+			// SECURITY: Log full path internally but don't expose to client
+			logger.Error("Failed to load plugin", logger.Fields{"path": entryPath, "error": err})
+			http.Error(w, fmt.Sprintf("failed to load plugin %s", req.Name), http.StatusInternalServerError)
 			return
 		}
 		def := tool.Definition()

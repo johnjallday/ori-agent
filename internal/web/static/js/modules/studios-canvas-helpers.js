@@ -1178,13 +1178,22 @@ function showSchedulerDetails(schedulerNode) {
 
   // Extract current schedule values
   const sched = schedulerNode.schedule || {};
-  const schedType = sched.type || 'interval';
-  const intervalMins = schedType === 'interval' ? Math.floor((sched.interval || 0) / (60 * 1e9)) : 60;
+  let schedType = sched.type || 'interval';
+  // Map relative_delay to interval for UI display (merged types)
+  const isRelativeDelay = schedType === 'relative_delay';
+  if (isRelativeDelay) {
+    schedType = 'interval';
+  }
+  // Get interval minutes from either interval or delay_duration field
+  const intervalMins = isRelativeDelay
+    ? Math.floor((sched.delay_duration || 0) / (60 * 1e9))
+    : (schedType === 'interval' ? Math.floor((sched.interval || 0) / (60 * 1e9)) : 60);
+  const runOnce = isRelativeDelay && sched.trigger_once;
   const timeOfDay = sched.time_of_day || '09:00';
   const dayOfWeek = sched.day_of_week || 0;
   const cronExpr = sched.cron_expr || '0 9 * * *';
-  const delayMins = schedType === 'relative_delay' ? Math.floor((sched.delay_duration || 0) / (60 * 1e9)) : 5;
-  const triggerOnce = sched.trigger_once || false;
+  // For 'once' type, format the execute_at datetime for the input
+  const executeAt = sched.execute_at ? new Date(sched.execute_at).toISOString().slice(0, 16) : '';
 
   // Build task options for dropdown
   let taskOptions = '<option value="">-- Not linked --</option>';
@@ -1242,20 +1251,40 @@ function showSchedulerDetails(schedulerNode) {
       <select id="scheduler-type" class="form-select form-select-sm"
               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
               onchange="updateSchedulerTypeFields()">
+        <option value="once" ${schedType === 'once' ? 'selected' : ''}>One-time (specific date/time)</option>
         <option value="interval" ${schedType === 'interval' ? 'selected' : ''}>Interval</option>
         <option value="daily" ${schedType === 'daily' ? 'selected' : ''}>Daily</option>
         <option value="weekly" ${schedType === 'weekly' ? 'selected' : ''}>Weekly</option>
         <option value="cron" ${schedType === 'cron' ? 'selected' : ''}>Cron Expression</option>
-        <option value="relative_delay" ${schedType === 'relative_delay' ? 'selected' : ''}>Relative Delay</option>
       </select>
     </div>
 
-    <!-- Interval fields -->
-    <div id="scheduler-interval-fields" class="mb-3" style="display: ${schedType === 'interval' ? 'block' : 'none'};">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Interval (minutes)</label>
-      <input type="number" id="scheduler-interval" class="form-control form-control-sm"
-             value="${intervalMins}" min="1"
+    <!-- Once (specific date/time) fields -->
+    <div id="scheduler-once-fields" class="mb-3" style="display: ${schedType === 'once' ? 'block' : 'none'};">
+      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Execute At</label>
+      <input type="datetime-local" id="scheduler-execute-at" class="form-control form-control-sm"
+             value="${executeAt}"
              style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      <small style="color: var(--text-muted);">Select the exact date and time for execution</small>
+    </div>
+
+    <!-- Interval fields -->
+    <div id="scheduler-interval-fields" style="display: ${schedType === 'interval' ? 'block' : 'none'};">
+      <div class="mb-3">
+        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Interval (minutes)</label>
+        <input type="number" id="scheduler-interval" class="form-control form-control-sm"
+               value="${intervalMins}" min="1"
+               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
+      </div>
+      <div class="mb-3">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="scheduler-run-once"
+                 ${runOnce ? 'checked' : ''}>
+          <label class="form-check-label" for="scheduler-run-once" style="color: var(--text-secondary);">
+            Run once only (don't repeat)
+          </label>
+        </div>
+      </div>
     </div>
 
     <!-- Daily fields -->
@@ -1292,24 +1321,6 @@ function showSchedulerDetails(schedulerNode) {
       <small style="color: var(--text-muted);">Format: minute hour day month weekday</small>
     </div>
 
-    <!-- Relative Delay fields -->
-    <div id="scheduler-delay-fields" style="display: ${schedType === 'relative_delay' ? 'block' : 'none'};">
-      <div class="mb-3">
-        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Delay (minutes)</label>
-        <input type="number" id="scheduler-delay" class="form-control form-control-sm"
-               value="${delayMins}" min="1"
-               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-      </div>
-      <div class="mb-3">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" id="scheduler-trigger-once"
-                 ${triggerOnce ? 'checked' : ''}>
-          <label class="form-check-label" for="scheduler-trigger-once" style="color: var(--text-secondary);">
-            Trigger once only
-          </label>
-        </div>
-      </div>
-    </div>
 
     <!-- Prompt -->
     <div class="mb-3">
@@ -1369,7 +1380,7 @@ function updateSchedulerTypeFields() {
   const schedType = document.getElementById('scheduler-type')?.value || 'interval';
 
   // Hide all type-specific fields
-  const fieldGroups = ['interval', 'daily', 'weekly', 'cron', 'delay'];
+  const fieldGroups = ['once', 'interval', 'daily', 'weekly', 'cron'];
   fieldGroups.forEach(group => {
     const el = document.getElementById(`scheduler-${group}-fields`);
     if (el) el.style.display = 'none';
@@ -1377,6 +1388,9 @@ function updateSchedulerTypeFields() {
 
   // Show relevant fields
   switch (schedType) {
+    case 'once':
+      document.getElementById('scheduler-once-fields').style.display = 'block';
+      break;
     case 'interval':
       document.getElementById('scheduler-interval-fields').style.display = 'block';
       break;
@@ -1388,9 +1402,6 @@ function updateSchedulerTypeFields() {
       break;
     case 'cron':
       document.getElementById('scheduler-cron-fields').style.display = 'block';
-      break;
-    case 'relative_delay':
-      document.getElementById('scheduler-delay-fields').style.display = 'block';
       break;
   }
 }
@@ -1422,9 +1433,23 @@ async function saveSchedulerDetails(schedulerNode) {
   const schedule = { type: schedType };
 
   switch (schedType) {
+    case 'once':
+      const executeAtStr = document.getElementById('scheduler-execute-at')?.value;
+      if (executeAtStr) {
+        schedule.execute_at = new Date(executeAtStr).toISOString();
+      }
+      break;
     case 'interval':
       const intervalMins = parseInt(document.getElementById('scheduler-interval')?.value) || 60;
-      schedule.interval = intervalMins * 60 * 1e9; // Convert to nanoseconds
+      const runOnce = document.getElementById('scheduler-run-once')?.checked || false;
+      if (runOnce) {
+        // Use relative_delay type with trigger_once=true for one-shot execution
+        schedule.type = 'relative_delay';
+        schedule.delay_duration = intervalMins * 60 * 1e9; // Convert to nanoseconds
+        schedule.trigger_once = true;
+      } else {
+        schedule.interval = intervalMins * 60 * 1e9; // Convert to nanoseconds
+      }
       break;
     case 'daily':
       schedule.time_of_day = document.getElementById('scheduler-time-daily')?.value || '09:00';
@@ -1435,11 +1460,6 @@ async function saveSchedulerDetails(schedulerNode) {
       break;
     case 'cron':
       schedule.cron_expr = document.getElementById('scheduler-cron')?.value || '0 9 * * *';
-      break;
-    case 'relative_delay':
-      const delayMins = parseInt(document.getElementById('scheduler-delay')?.value) || 5;
-      schedule.delay_duration = delayMins * 60 * 1e9; // Convert to nanoseconds
-      schedule.trigger_once = document.getElementById('scheduler-trigger-once')?.checked || false;
       break;
   }
 
@@ -3101,11 +3121,11 @@ function updateScheduleInputs() {
 
   // Show relevant config section
   const configMap = {
+    'once': 'once-config',
     'interval': 'interval-config',
     'daily': 'daily-config',
     'weekly': 'weekly-config',
-    'cron': 'cron-config',
-    'relative_delay': 'relative-delay-config'
+    'cron': 'cron-config'
   };
 
   const configId = configMap[scheduleType];
@@ -3133,13 +3153,34 @@ function buildScheduleConfig() {
   };
 
   switch (scheduleType) {
+    case 'once':
+      // One-time execution at a specific date/time
+      const executeAtStr = document.getElementById('execute-at').value;
+      if (!executeAtStr) {
+        throw new Error('Please select a date and time for the one-time execution');
+      }
+      const executeAt = new Date(executeAtStr);
+      if (executeAt <= new Date()) {
+        throw new Error('Execution time must be in the future');
+      }
+      config.execute_at = executeAt.toISOString();
+      break;
+
     case 'interval':
       // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
       let intervalMinutes = parseInt(document.getElementById('interval-minutes').value, 10);
       if (isNaN(intervalMinutes) || intervalMinutes <= 0) {
         intervalMinutes = 60; // sensible default
       }
-      config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
+      const runOnce = document.getElementById('interval-run-once')?.checked || false;
+      if (runOnce) {
+        // Use relative_delay type with trigger_once=true for one-shot execution
+        config.type = 'relative_delay';
+        config.delay_duration = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
+        config.trigger_once = true;
+      } else {
+        config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
+      }
       break;
 
     case 'daily':
@@ -3158,16 +3199,6 @@ function buildScheduleConfig() {
       if (!config.cron_expr) {
         throw new Error('Cron expression is required');
       }
-      break;
-
-    case 'relative_delay':
-      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
-      let delayMinutes = parseInt(document.getElementById('delay-minutes').value, 10);
-      if (isNaN(delayMinutes) || delayMinutes <= 0) {
-        delayMinutes = 5; // small default
-      }
-      config.delay_duration = delayMinutes * 60 * 1000000000;  // minutes to nanoseconds
-      config.trigger_once = document.getElementById('delay-trigger-once').checked;
       break;
   }
 

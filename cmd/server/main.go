@@ -21,6 +21,7 @@ func main() {
 	port := flag.Int("port", 8765, "Port to run server on")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser on startup")
+	allowNetwork := flag.Bool("allow-network", false, "Allow connections from network (default: localhost only)")
 	flag.Parse()
 
 	// Set verbose mode globally
@@ -45,7 +46,14 @@ func main() {
 	}
 
 	// Start HTTP server with configured port
-	addr := fmt.Sprintf(":%d", *port)
+	// SECURITY: Bind to localhost only by default to prevent network exposure
+	var addr string
+	if *allowNetwork {
+		addr = fmt.Sprintf(":%d", *port) // 0.0.0.0 - accessible from network
+		logger.Warn("Server bound to all interfaces - accessible from network", logger.Fields{"port": *port})
+	} else {
+		addr = fmt.Sprintf("127.0.0.1:%d", *port) // localhost only
+	}
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	logger.Debug("Listening on", logger.Fields{"url": url})
 

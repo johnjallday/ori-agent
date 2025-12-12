@@ -543,6 +543,148 @@ export class RendererUI {
     this.ctx.restore();
   }
 
+  drawMultiSelectContextMenu() {
+    if (!this.state.multiSelectContextMenu) return;
+
+    const selectedCount = this.state.getSelectionCount();
+    if (selectedCount < 2) return;
+
+    const menuWidth = 220;
+    const menuHeight = 170;
+    const padding = 10;
+    const itemHeight = 35;
+
+    // Position menu (ensure it stays within canvas bounds)
+    let x = this.state.multiSelectMenuX;
+    let y = this.state.multiSelectMenuY;
+    if (x + menuWidth > this.state.width) x = this.state.width - menuWidth - 10;
+    if (y + menuHeight > this.state.height) y = this.state.height - menuHeight - 10;
+
+    // Draw menu background (glassmorphism effect)
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    this.ctx.strokeStyle = 'rgba(79, 70, 229, 0.3)'; // Indigo border to match selection
+    this.ctx.lineWidth = 2;
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 20;
+    this.ctx.shadowOffsetX = 0;
+    this.ctx.shadowOffsetY = 4;
+
+    // Rounded rectangle for menu
+    this.ctx.beginPath();
+    const radius = 8;
+    this.ctx.moveTo(x + radius, y);
+    this.ctx.lineTo(x + menuWidth - radius, y);
+    this.ctx.arcTo(x + menuWidth, y, x + menuWidth, y + radius, radius);
+    this.ctx.lineTo(x + menuWidth, y + menuHeight - radius);
+    this.ctx.arcTo(x + menuWidth, y + menuHeight, x + menuWidth - radius, y + menuHeight, radius);
+    this.ctx.lineTo(x + radius, y + menuHeight);
+    this.ctx.arcTo(x, y + menuHeight, x, y + menuHeight - radius, radius);
+    this.ctx.lineTo(x, y + radius);
+    this.ctx.arcTo(x, y, x + radius, y, radius);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Menu header - showing selection count
+    this.ctx.save();
+    this.ctx.fillStyle = '#4f46e5'; // Indigo
+    this.ctx.font = 'bold 13px Inter, sans-serif';
+    this.ctx.fillText(`${selectedCount} items selected`, x + padding, y + padding + 12);
+    this.ctx.restore();
+
+    // Draw separator line
+    this.ctx.save();
+    this.ctx.strokeStyle = 'rgba(79, 70, 229, 0.2)';
+    this.ctx.lineWidth = 1;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x + padding, y + padding + 22);
+    this.ctx.lineTo(x + menuWidth - padding, y + padding + 22);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Menu items
+    const items = [
+      { icon: '📋', label: 'Add to Workflow', action: 'workflow' },
+      { icon: '🗑️', label: `Delete Selected (${selectedCount})`, action: 'delete' },
+      { icon: '📁', label: 'Group', action: 'group' }
+    ];
+
+    // Clear and rebuild menu items array
+    this.state.multiSelectMenuItems = [];
+
+    this.ctx.save();
+    this.ctx.font = '13px Inter, sans-serif';
+    items.forEach((item, i) => {
+      const itemY = y + padding + 32 + (i * itemHeight);
+
+      // Check if mouse is hovering over this item
+      const mouseX = this.state.lastMouseX || 0;
+      const mouseY = this.state.lastMouseY || 0;
+      const isHovered = mouseX >= x && mouseX <= x + menuWidth &&
+                       mouseY >= itemY && mouseY <= itemY + itemHeight;
+
+      // Draw hover background
+      if (isHovered) {
+        this.ctx.fillStyle = 'rgba(79, 70, 229, 0.1)'; // Indigo hover
+        this.ctx.fillRect(x + 5, itemY, menuWidth - 10, itemHeight);
+      }
+
+      // Draw icon
+      this.ctx.fillStyle = '#475569';
+      this.ctx.fillText(item.icon, x + padding + 5, itemY + 22);
+
+      // Draw label (red for delete action)
+      this.ctx.fillStyle = item.action === 'delete' ? '#dc2626' : '#1e293b';
+      this.ctx.fillText(item.label, x + padding + 30, itemY + 22);
+
+      // Store item bounds for click detection
+      this.state.multiSelectMenuItems.push({
+        x, y: itemY, width: menuWidth, height: itemHeight,
+        action: item.action
+      });
+    });
+    this.ctx.restore();
+  }
+
+  drawMarqueeSelection() {
+    if (!this.state.isMarqueeSelecting) return;
+
+    // Calculate normalized bounds (handle any drag direction)
+    const x1 = Math.min(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y1 = Math.min(this.state.marqueeStartY, this.state.marqueeEndY);
+    const x2 = Math.max(this.state.marqueeStartX, this.state.marqueeEndX);
+    const y2 = Math.max(this.state.marqueeStartY, this.state.marqueeEndY);
+
+    const width = x2 - x1;
+    const height = y2 - y1;
+
+    // Skip if too small
+    if (width < 2 && height < 2) return;
+
+    this.ctx.save();
+
+    // Transform to world coordinates (marquee is in world space)
+    this.ctx.translate(this.state.offsetX, this.state.offsetY);
+    this.ctx.scale(this.state.scale, this.state.scale);
+
+    // Draw semi-transparent fill
+    this.ctx.fillStyle = 'rgba(79, 70, 229, 0.1)'; // Light indigo fill
+    this.ctx.fillRect(x1, y1, width, height);
+
+    // Draw dashed border
+    this.ctx.strokeStyle = '#4f46e5'; // Indigo border
+    this.ctx.lineWidth = 2 / this.state.scale; // Adjust for scale to keep consistent thickness
+    this.ctx.setLineDash([6 / this.state.scale, 4 / this.state.scale]); // Dashed line
+    this.ctx.strokeRect(x1, y1, width, height);
+
+    // Reset line dash
+    this.ctx.setLineDash([]);
+
+    this.ctx.restore();
+  }
+
   drawHelpOverlay() {
     const overlayWidth = 400;
     const overlayHeight = 450;

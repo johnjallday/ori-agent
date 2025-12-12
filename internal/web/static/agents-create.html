@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Agent - Ori Agent</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
         // Apply theme immediately to prevent flash
         (function() {
@@ -16,51 +17,12 @@
     </script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/css/common.css">
+    <link rel="stylesheet" href="/styles.css">
     <style>
         body {
             margin: 0;
             padding: 0;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
             min-height: 100vh;
-        }
-
-        .simple-navbar {
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-color);
-            padding: 16px 20px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .navbar-brand {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 16px;
-            margin-left: auto;
-        }
-
-        .nav-link {
-            padding: 8px 16px;
-            text-decoration: none;
-            color: var(--text-primary);
-            border-radius: 6px;
-            transition: background 0.2s;
-        }
-
-        .nav-link:hover {
-            background: var(--bg-tertiary);
-        }
-
-        .nav-link.active {
-            background: var(--primary-color);
-            color: white;
         }
 
         .create-container {
@@ -81,24 +43,6 @@
         .page-header p {
             color: var(--text-muted);
             font-size: 14px;
-        }
-
-        .back-button {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            text-decoration: none;
-            color: var(--text-primary);
-            margin-bottom: 20px;
-            transition: all 0.2s;
-        }
-
-        .back-button:hover {
-            background: var(--bg-tertiary);
         }
 
         .form-card {
@@ -357,24 +301,54 @@
         }
     </style>
 </head>
-<body>
+<body class="bg-light">
     <!-- Navigation -->
-    <nav class="simple-navbar">
-        <div class="navbar-brand">Ori Agent</div>
-        <div class="nav-links">
-            <a href="/" class="nav-link">Chat</a>
-            <a href="/agents-dashboard" class="nav-link active">Agents</a>
-            <a href="/studios" class="nav-link">Workspaces</a>
-            <a href="/settings" class="nav-link">Settings</a>
+    <nav class="navbar modern-card glassmorphism" style="border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center w-100">
+                <!-- Back button -->
+                <a href="/agents" class="modern-btn modern-btn-secondary me-3" title="Back to Agents">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
+                    </svg>
+                </a>
+
+                <!-- Brand -->
+                <a class="navbar-brand fw-bold text-decoration-none align-items-center" href="/" style="color: #d1d5db; font-size: 1.25rem; cursor: pointer;">
+                    <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
+                        <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
+                             L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
+                             L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
+                             L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
+                             L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
+                          fill="currentColor"/>
+                    </svg>
+                    Ori Agent
+                </a>
+
+                <!-- Center: Navigation Links -->
+                <div class="d-flex align-items-center gap-2 ms-4">
+                    <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; background: var(--bg-tertiary);">Agents</a>
+                    <span style="color: var(--text-muted);">|</span>
+                    <a href="/plugins" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
+                    <span style="color: var(--text-muted);">|</span>
+                    <a href="/studios" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Studio</a>
+                </div>
+
+                <!-- Right: Theme Toggle -->
+                <div class="d-flex align-items-center gap-3 ms-auto">
+                    <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
+                        </svg>
+                        <span id="darkModeText">Dark</span>
+                    </button>
+                </div>
+            </div>
         </div>
     </nav>
 
     <div class="create-container">
-        <!-- Back Button -->
-        <a href="/agents-dashboard" class="back-button">
-            <span>←</span> Back to Dashboard
-        </a>
-
         <!-- Page Header -->
         <div class="page-header">
             <h1>Create New Agent</h1>
@@ -403,12 +377,13 @@
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label required" for="agentType">Agent Type</label>
-                    <select id="agentType" class="form-select" required>
+                    <select id="agentType" class="form-select" required onchange="updateModelOptions()">
                         <option value="tool-calling">Tool Calling</option>
-                        <option value="conversational">Conversational</option>
-                        <option value="task-oriented">Task Oriented</option>
+                        <option value="general">General Purpose</option>
+                        <option value="research">Research</option>
+                        <option value="orchestration">Orchestration</option>
                     </select>
-                    <div class="form-help">Defines the agent's interaction style</div>
+                    <div class="form-help">Defines the agent's interaction style and available models</div>
                 </div>
 
                 <div class="form-group">
@@ -431,21 +406,20 @@
 
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label required" for="llmProvider">Provider</label>
-                    <select id="llmProvider" class="form-select" required onchange="updateModelOptions()">
+                    <label class="form-label" for="llmProvider">Provider Filter</label>
+                    <select id="llmProvider" class="form-select" onchange="updateModelOptions()">
+                        <option value="">All Providers</option>
                         <option value="openai">OpenAI</option>
                         <option value="claude">Anthropic Claude</option>
                         <option value="ollama">Ollama (Local)</option>
                     </select>
+                    <div class="form-help">Filter models by provider (optional)</div>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label required" for="llmModel">Model</label>
                     <select id="llmModel" class="form-select" required>
-                        <option value="gpt-4o">GPT-4o</option>
-                        <option value="gpt-4o-mini">GPT-4o Mini</option>
-                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                        <option value="">Loading models...</option>
                     </select>
                 </div>
             </div>
@@ -500,7 +474,7 @@
         <!-- Actions -->
         <div class="form-card">
             <div class="form-actions">
-                <button type="button" class="btn btn-secondary" onclick="window.location.href='/agents-dashboard'">Cancel</button>
+                <button type="button" class="btn btn-secondary" onclick="window.location.href='/agents'">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
             </div>
         </div>
@@ -513,6 +487,14 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/modules/themeManager.js"></script>
     <script src="/js/agents-create.js"></script>
+    <script>
+        // Initialize theme on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            themeManager.initialize();
+        });
+    </script>
 </body>
 </html>

@@ -36,12 +36,12 @@ else
     VERSION=""
 fi
 
-# Extract Go version from go.mod
-if [ -f "go.mod" ]; then
-    GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
+# Get installed Go version (e.g., 1.25.5)
+if command -v go &> /dev/null; then
+    GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
     echo -e "${BLUE}[INFO]${NC} Found Go version: $GO_VERSION"
 else
-    echo -e "${YELLOW}⚠️  go.mod not found, skipping Go version update${NC}"
+    echo -e "${YELLOW}⚠️  Go not installed, skipping Go version update${NC}"
     GO_VERSION=""
 fi
 
