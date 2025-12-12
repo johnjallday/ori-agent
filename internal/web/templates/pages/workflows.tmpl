@@ -14,13 +14,48 @@
     <div class="main-content">
       <div class="container-fluid py-4">
         <div class="modern-card p-4 mb-4">
-          <h2 class="mb-3" style="color: var(--text-primary);">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-              <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
+                </svg>
+                Workflow Templates
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">Pre-built and custom workflow templates for multi-agent collaboration.</p>
+            </div>
+            <div class="d-flex gap-2">
+              <select id="category-filter" class="form-select form-select-sm" style="width: auto;" onchange="filterWorkflows()">
+                <option value="">All Categories</option>
+              </select>
+              <input type="text" id="search-input" class="form-control form-control-sm" placeholder="Search workflows..." style="width: 200px;" oninput="filterWorkflows()">
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom Workflows Section -->
+        <div id="custom-workflows-section" style="display: none;">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0" style="color: var(--text-primary);">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+              </svg>
+              My Workflows
+              <span id="custom-count" class="badge bg-primary ms-2" style="font-size: 0.7rem;">0</span>
+            </h5>
+          </div>
+          <div id="custom-workflows-grid" class="row g-4 mb-4"></div>
+        </div>
+
+        <!-- Built-in Templates Section -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="mb-0" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+              <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75M12,15C13.5,15 16.5,15.75 16.5,17.25V18H7.5V17.25C7.5,15.75 10.5,15 12,15Z"/>
             </svg>
-            Workflow Templates
-          </h2>
-          <p style="color: var(--text-secondary);">Pre-built workflow templates for common multi-agent collaboration patterns.</p>
+            Built-in Templates
+            <span id="builtin-count" class="badge bg-secondary ms-2" style="font-size: 0.7rem;">0</span>
+          </h5>
         </div>
 
         <!-- Templates Grid -->
@@ -66,6 +101,82 @@
     </div>
   </div>
 
+  <!-- Studio Selector Modal -->
+  <div class="modal fade" id="studioSelectorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add Workflow to Studio
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary);">Select a studio to add this workflow to:</p>
+          <div id="studio-list" style="max-height: 300px; overflow-y: auto;">
+            <div class="text-center py-3">
+              <div class="spinner-border spinner-border-sm text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+          <div id="missing-agents-warning" class="alert alert-warning mt-3" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16"/>
+            </svg>
+            <span id="missing-agents-text"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="addToStudioBtn" class="modern-btn modern-btn-primary" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add to Studio
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal fade" id="deleteWorkflowModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--danger-color);">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            Delete Workflow
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary);">Are you sure you want to delete this workflow?</p>
+          <div class="modern-card p-3" style="background: var(--bg-secondary);">
+            <strong id="delete-workflow-name" style="color: var(--text-primary);"></strong>
+            <p id="delete-workflow-desc" class="mb-0 mt-1 small" style="color: var(--text-muted);"></p>
+          </div>
+          <p class="mt-3 mb-0 text-danger small">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="confirmDeleteBtn" class="modern-btn" style="background: var(--danger-color); color: white;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Execution Status Modal -->
   <div class="modal fade" id="executionStatusModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-xl">
@@ -99,31 +210,103 @@
   <script>
     let currentTemplate = null;
     let executionEventSource = null;
+    let allWorkflows = [];
+    let allTemplates = [];
+    let selectedStudioId = null;
+    let selectedWorkflow = null;
+    let workflowToDelete = null;
 
     // Load templates on page load
     document.addEventListener('DOMContentLoaded', function() {
-      loadTemplates();
+      loadAllWorkflows();
     });
 
-    async function loadTemplates() {
+    async function loadAllWorkflows() {
       try {
-        const response = await fetch('/api/orchestration/templates');
-        const data = await response.json();
+        // Load both custom workflows and builtin templates in parallel
+        const [workflowsResponse, templatesResponse] = await Promise.all([
+          fetch('/api/workflows'),
+          fetch('/api/orchestration/templates')
+        ]);
 
-        if (data.error) {
-          showError('Failed to load templates: ' + data.error);
-          return;
-        }
+        const workflowsData = await workflowsResponse.json();
+        const templatesData = await templatesResponse.json();
 
-        renderTemplates(data.templates || []);
+        // Separate custom workflows from the workflows API
+        allWorkflows = (workflowsData.workflows || []).filter(w => w.source === 'custom');
+        allTemplates = templatesData.templates || [];
+
+        // Update category filter
+        updateCategoryFilter();
+
+        // Render both sections
+        renderCustomWorkflows(allWorkflows);
+        renderTemplates(allTemplates);
+
       } catch (error) {
-        console.error('Error loading templates:', error);
-        showError('Failed to load templates');
+        console.error('Error loading workflows:', error);
+        showError('Failed to load workflows');
       }
+    }
+
+    function updateCategoryFilter() {
+      const categories = new Set();
+      allWorkflows.forEach(w => w.category && categories.add(w.category));
+      allTemplates.forEach(t => t.category && categories.add(t.category));
+
+      const select = document.getElementById('category-filter');
+      const currentValue = select.value;
+      select.innerHTML = '<option value="">All Categories</option>' +
+        Array.from(categories).sort().map(cat =>
+          `<option value="${escapeHtml(cat)}" ${cat === currentValue ? 'selected' : ''}>${escapeHtml(cat)}</option>`
+        ).join('');
+    }
+
+    function filterWorkflows() {
+      const searchQuery = document.getElementById('search-input').value.toLowerCase();
+      const categoryFilter = document.getElementById('category-filter').value;
+
+      const filteredWorkflows = allWorkflows.filter(w => {
+        const matchesSearch = !searchQuery ||
+          w.name.toLowerCase().includes(searchQuery) ||
+          (w.description && w.description.toLowerCase().includes(searchQuery));
+        const matchesCategory = !categoryFilter || w.category === categoryFilter;
+        return matchesSearch && matchesCategory;
+      });
+
+      const filteredTemplates = allTemplates.filter(t => {
+        const matchesSearch = !searchQuery ||
+          t.name.toLowerCase().includes(searchQuery) ||
+          (t.description && t.description.toLowerCase().includes(searchQuery));
+        const matchesCategory = !categoryFilter || t.category === categoryFilter;
+        return matchesSearch && matchesCategory;
+      });
+
+      renderCustomWorkflows(filteredWorkflows);
+      renderTemplates(filteredTemplates);
+    }
+
+    function renderCustomWorkflows(workflows) {
+      const section = document.getElementById('custom-workflows-section');
+      const grid = document.getElementById('custom-workflows-grid');
+      const countBadge = document.getElementById('custom-count');
+
+      countBadge.textContent = workflows.length;
+
+      if (workflows.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = 'block';
+      grid.innerHTML = workflows.map(workflow => renderWorkflowCard(workflow, true)).join('');
     }
 
     function renderTemplates(templates) {
       const grid = document.getElementById('templates-grid');
+      const countBadge = document.getElementById('builtin-count');
+
+      countBadge.textContent = templates.length;
 
       if (templates.length === 0) {
         grid.innerHTML = `
@@ -134,37 +317,240 @@
         return;
       }
 
-      grid.innerHTML = templates.map(template => `
-        <div class="col-md-6 col-lg-4">
-          <div class="modern-card p-4 h-100 d-flex flex-column">
-            <h5 style="color: var(--text-primary);">${escapeHtml(template.name)}</h5>
-            <p class="text-muted small mb-3">${escapeHtml(template.description)}</p>
+      grid.innerHTML = templates.map(template => renderWorkflowCard(template, false)).join('');
+    }
 
-            <div class="mb-3">
-              <span class="modern-badge badge-primary">${escapeHtml(template.category || 'General')}</span>
+    function renderWorkflowCard(item, isCustom) {
+      const nodeCount = item.nodes ? item.nodes.length : 0;
+      const hasAgentWarning = item.missingAgents && item.missingAgents.length > 0;
+
+      return `
+        <div class="col-md-6 col-lg-4">
+          <div class="modern-card p-4 h-100 d-flex flex-column workflow-card">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h5 class="mb-0" style="color: var(--text-primary);">
+                ${hasAgentWarning ? `
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="#f59e0b" class="me-1" title="Some agents may be missing">
+                    <path d="M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16"/>
+                  </svg>
+                ` : ''}
+                ${escapeHtml(item.name)}
+              </h5>
+              ${isCustom ? `
+                <button class="btn btn-link btn-sm p-1" onclick="openDeleteModal('${item.id}')" title="Delete workflow" style="color: var(--danger-color);">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                  </svg>
+                </button>
+              ` : ''}
             </div>
 
-            ${template.required_roles && template.required_roles.length > 0 ? `
+            <p class="text-muted small mb-3">${escapeHtml(item.description || 'No description')}</p>
+
+            <div class="mb-3 d-flex flex-wrap gap-1">
+              ${isCustom ? `<span class="modern-badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">Custom</span>` : ''}
+              ${item.category ? `<span class="modern-badge badge-primary">${escapeHtml(item.category)}</span>` : ''}
+              ${nodeCount > 0 ? `<span class="modern-badge badge-secondary">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</span>` : ''}
+            </div>
+
+            ${item.required_roles && item.required_roles.length > 0 ? `
               <div class="mb-3">
                 <small style="color: var(--text-secondary);">Required roles:</small><br>
-                ${template.required_roles.map(role =>
+                ${item.required_roles.map(role =>
                   `<span class="modern-badge badge-secondary me-1">${escapeHtml(role)}</span>`
                 ).join('')}
               </div>
             ` : ''}
 
-            <div class="mt-auto">
-              <button class="modern-btn modern-btn-primary w-100" onclick="openExecuteModal('${template.id}')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
-                </svg>
-                Execute
-              </button>
+            <div class="mt-auto d-flex gap-2">
+              ${isCustom ? `
+                <button class="modern-btn modern-btn-primary flex-fill" onclick="openStudioSelector('${item.id}', 'custom')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  Add to Studio
+                </button>
+              ` : `
+                <button class="modern-btn modern-btn-primary flex-fill" onclick="openExecuteModal('${item.id}')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                  </svg>
+                  Execute
+                </button>
+              `}
             </div>
           </div>
         </div>
-      `).join('');
+      `;
     }
+
+    // Studio selector for custom workflows
+    async function openStudioSelector(workflowId, type) {
+      selectedWorkflow = type === 'custom'
+        ? allWorkflows.find(w => w.id === workflowId)
+        : allTemplates.find(t => t.id === workflowId);
+
+      if (!selectedWorkflow) {
+        showError('Workflow not found');
+        return;
+      }
+
+      const modal = new bootstrap.Modal(document.getElementById('studioSelectorModal'));
+      const studioList = document.getElementById('studio-list');
+      const addBtn = document.getElementById('addToStudioBtn');
+
+      addBtn.disabled = true;
+      selectedStudioId = null;
+
+      // Show loading
+      studioList.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      `;
+
+      modal.show();
+
+      // Load studios
+      try {
+        const response = await fetch('/api/studios');
+        const data = await response.json();
+        const studios = data.studios || [];
+
+        if (studios.length === 0) {
+          studioList.innerHTML = `
+            <div class="text-center py-3">
+              <p style="color: var(--text-muted);">No studios available.</p>
+              <a href="/studios" class="modern-btn modern-btn-primary mt-2">Create Studio</a>
+            </div>
+          `;
+          return;
+        }
+
+        studioList.innerHTML = studios.map(studio => `
+          <div class="studio-option p-3 mb-2" style="background: var(--bg-secondary); border-radius: 6px; border: 2px solid transparent; cursor: pointer;"
+               onclick="selectStudio('${studio.id}', this)"
+               data-studio-id="${studio.id}">
+            <div class="d-flex align-items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color);">
+                <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+              </svg>
+              <div>
+                <strong style="color: var(--text-primary);">${escapeHtml(studio.name)}</strong>
+                <div class="small" style="color: var(--text-muted);">${studio.agents?.length || 0} agents</div>
+              </div>
+            </div>
+          </div>
+        `).join('');
+
+      } catch (error) {
+        console.error('Error loading studios:', error);
+        studioList.innerHTML = `<div class="alert alert-danger">Failed to load studios</div>`;
+      }
+    }
+
+    function selectStudio(studioId, element) {
+      // Remove selection from all
+      document.querySelectorAll('.studio-option').forEach(el => {
+        el.style.borderColor = 'transparent';
+      });
+
+      // Select this one
+      element.style.borderColor = 'var(--primary-color)';
+      selectedStudioId = studioId;
+
+      // Enable add button
+      document.getElementById('addToStudioBtn').disabled = false;
+
+      // Check for missing agents
+      checkMissingAgents(studioId);
+    }
+
+    async function checkMissingAgents(studioId) {
+      if (!selectedWorkflow || !selectedWorkflow.id) return;
+
+      const warningEl = document.getElementById('missing-agents-warning');
+      const textEl = document.getElementById('missing-agents-text');
+
+      try {
+        const response = await fetch(`/api/workflows/${selectedWorkflow.id}/check-agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studio_id: studioId })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.missing_agents && result.missing_agents.length > 0) {
+            textEl.textContent = `Missing agents: ${result.missing_agents.join(', ')}`;
+            warningEl.style.display = 'block';
+          } else {
+            warningEl.style.display = 'none';
+          }
+        }
+      } catch (error) {
+        console.error('Error checking agents:', error);
+      }
+    }
+
+    document.getElementById('addToStudioBtn').addEventListener('click', async function() {
+      if (!selectedStudioId || !selectedWorkflow) return;
+
+      this.disabled = true;
+      this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Adding...';
+
+      try {
+        // Redirect to the studio canvas page where the workflow panel can instantiate it
+        window.location.href = `/studios/${selectedStudioId}/canvas?add_workflow=${selectedWorkflow.id}`;
+      } catch (error) {
+        console.error('Error:', error);
+        showError('Failed to add workflow');
+        this.disabled = false;
+        this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg> Add to Studio';
+      }
+    });
+
+    // Delete workflow
+    function openDeleteModal(workflowId) {
+      workflowToDelete = allWorkflows.find(w => w.id === workflowId);
+      if (!workflowToDelete) return;
+
+      document.getElementById('delete-workflow-name').textContent = workflowToDelete.name;
+      document.getElementById('delete-workflow-desc').textContent = workflowToDelete.description || 'No description';
+
+      const modal = new bootstrap.Modal(document.getElementById('deleteWorkflowModal'));
+      modal.show();
+    }
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+      if (!workflowToDelete) return;
+
+      this.disabled = true;
+      this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Deleting...';
+
+      try {
+        const response = await fetch(`/api/workflows/${workflowToDelete.id}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+
+        // Close modal and reload
+        bootstrap.Modal.getInstance(document.getElementById('deleteWorkflowModal')).hide();
+        loadAllWorkflows();
+
+      } catch (error) {
+        console.error('Error deleting workflow:', error);
+        showError('Failed to delete workflow: ' + error.message);
+      } finally {
+        this.disabled = false;
+        this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg> Delete';
+      }
+    });
 
     async function openExecuteModal(templateId) {
       try {

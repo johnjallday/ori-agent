@@ -130,19 +130,142 @@ export class AgentCanvasContextMenu {
 
   /**
    * Create a workflow from selected nodes
-   * Placeholder for future workflow creation functionality
+   * Opens the save workflow modal with selection data
    */
   createWorkflowFromSelection() {
     const selectedNodes = this.state.getSelectedNodes();
-    const count = selectedNodes.length;
 
-    // For now, show a notification about the planned feature
-    this.parent.notifications.showNotification(
-      `Workflow creation from ${count} nodes - Coming soon!`,
-      'info'
-    );
+    if (!selectedNodes || selectedNodes.length === 0) {
+      this.parent.notifications.showNotification(
+        'No nodes selected. Please select at least one node.',
+        'warning'
+      );
+      return;
+    }
 
-    console.log('📋 Nodes selected for workflow:', selectedNodes);
+    // Collect selection data using the helper function
+    const selectionData = window.collectWorkflowSelectionData
+      ? window.collectWorkflowSelectionData()
+      : this.collectSelectionData(selectedNodes);
+
+    if (!selectionData) {
+      this.parent.notifications.showNotification(
+        'Failed to collect node data. Please try again.',
+        'error'
+      );
+      return;
+    }
+
+    console.log('📋 Creating workflow from nodes:', selectionData);
+
+    // Show the save workflow modal
+    if (window.showSaveWorkflowModal) {
+      window.showSaveWorkflowModal(selectionData);
+    } else {
+      // Fallback if modal function not available
+      this.parent.notifications.showNotification(
+        'Workflow modal not available. Please refresh the page.',
+        'error'
+      );
+    }
+  }
+
+  /**
+   * Collect selection data for workflow creation (fallback if global function unavailable)
+   */
+  collectSelectionData(selectedNodes) {
+    // Calculate center of selection for relative positioning
+    let sumX = 0, sumY = 0;
+    selectedNodes.forEach(sel => {
+      const node = sel.node;
+      sumX += node.x || 0;
+      sumY += node.y || 0;
+    });
+    const centerX = sumX / selectedNodes.length;
+    const centerY = sumY / selectedNodes.length;
+
+    // Process each selected node
+    const nodes = selectedNodes.map(sel => {
+      const node = sel.node;
+      return {
+        id: sel.id,
+        type: sel.type,
+        config: this.extractNodeConfig(node, sel.type),
+        relative_x: (node.x || 0) - centerX,
+        relative_y: (node.y || 0) - centerY
+      };
+    });
+
+    // Calculate layout dimensions
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(n => {
+      minX = Math.min(minX, n.relative_x);
+      maxX = Math.max(maxX, n.relative_x);
+      minY = Math.min(minY, n.relative_y);
+      maxY = Math.max(maxY, n.relative_y);
+    });
+
+    const layout = {
+      width: maxX - minX + 200,
+      height: maxY - minY + 200,
+      node_positions: {}
+    };
+
+    nodes.forEach(n => {
+      layout.node_positions[n.id] = { x: n.relative_x, y: n.relative_y };
+    });
+
+    return {
+      nodes,
+      internal_connections: [],
+      input_ports: [],
+      output_ports: [],
+      layout
+    };
+  }
+
+  /**
+   * Extract configuration from a node based on its type
+   */
+  extractNodeConfig(node, type) {
+    switch (type) {
+      case 'task':
+        return {
+          description: node.description || '',
+          to: node.to || 'unassigned',
+          from: node.from || 'user',
+          priority: node.priority || 0,
+          status: node.status || 'pending'
+        };
+      case 'agent':
+        return {
+          name: node.name || node.nodeId || '',
+          type: node.type || 'tool-calling',
+          model: node.model || ''
+        };
+      case 'scheduler':
+        return {
+          name: node.name || '',
+          schedule_type: node.schedule_type || 'cron',
+          cron_expression: node.cron_expression || '',
+          enabled: node.enabled !== false
+        };
+      case 'store':
+        return {
+          name: node.name || '',
+          store_type: node.store_type || 'file',
+          file_path: node.file_path || ''
+        };
+      case 'attachment':
+        return {
+          title: node.title || '',
+          type: node.type || 'note',
+          body: node.body || '',
+          link_url: node.link_url || ''
+        };
+      default:
+        return { ...node };
+    }
   }
 
   /**

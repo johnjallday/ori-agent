@@ -42,6 +42,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/version"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -837,6 +838,20 @@ func (b *ServerBuilder) initializeTemplateManager() error {
 	}
 
 	b.server.orchestrationHandler.SetTemplateManager(templateManager)
+
+	// Initialize custom workflow manager
+	customWorkflowsDir := filepath.Join(templatesDir, "custom")
+	customWorkflowManager := templates.NewCustomWorkflowManager(customWorkflowsDir)
+	if err := customWorkflowManager.LoadWorkflows(); err != nil {
+		if verbose {
+			logger.Error("Warning: failed to load custom workflows", logger.Fields{"err": err})
+		}
+	} else if verbose {
+		logger.Info("Loaded custom workflows", logger.Fields{"count": len(customWorkflowManager.ListWorkflows())})
+	}
+
+	// Initialize workflow HTTP handler
+	b.server.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.server.workspaceStore)
 
 	return nil
 }

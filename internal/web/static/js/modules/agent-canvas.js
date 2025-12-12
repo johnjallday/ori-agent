@@ -1405,6 +1405,227 @@ class AgentCanvas {
    */
 
   /**
+   * Instantiate a workflow from the workflow panel
+   * Creates all nodes from the workflow template on the canvas
+   */
+  async instantiateWorkflow(workflow) {
+    if (!workflow || !workflow.nodes || workflow.nodes.length === 0) {
+      this.notifications?.showNotification?.('Workflow has no nodes', 'warning');
+      return;
+    }
+
+    console.log('📋 Instantiating workflow:', workflow.name);
+
+    // Calculate viewport center for positioning
+    const canvasRect = this.canvas.getBoundingClientRect();
+    const viewportCenterX = (canvasRect.width / 2 - this.offsetX) / this.scale;
+    const viewportCenterY = (canvasRect.height / 2 - this.offsetY) / this.scale;
+
+    const createdNodes = [];
+    const nodeIdMap = {}; // Map old node IDs to new node IDs
+
+    // Create nodes
+    for (const node of workflow.nodes) {
+      try {
+        const x = viewportCenterX + (node.relative_x || 0);
+        const y = viewportCenterY + (node.relative_y || 0);
+
+        let createdNode = null;
+
+        switch (node.type) {
+          case 'task':
+            createdNode = await this.createWorkflowTaskNode(node, x, y);
+            break;
+          case 'agent':
+            createdNode = await this.createWorkflowAgentNode(node, x, y);
+            break;
+          case 'scheduler':
+            createdNode = await this.createWorkflowSchedulerNode(node, x, y);
+            break;
+          case 'store':
+            createdNode = await this.createWorkflowStoreNode(node, x, y);
+            break;
+          case 'attachment':
+            createdNode = await this.createWorkflowAttachmentNode(node, x, y);
+            break;
+          default:
+            console.warn(`Unknown node type: ${node.type}`);
+        }
+
+        if (createdNode) {
+          nodeIdMap[node.id] = createdNode.id;
+          createdNodes.push({ original: node, created: createdNode });
+        }
+      } catch (error) {
+        console.error(`Error creating ${node.type} node:`, error);
+      }
+    }
+
+    // Create connections between newly created nodes
+    if (workflow.internal_connections && workflow.internal_connections.length > 0) {
+      for (const conn of workflow.internal_connections) {
+        const newFromId = nodeIdMap[conn.from_node];
+        const newToId = nodeIdMap[conn.to_node];
+
+        if (newFromId && newToId) {
+          this.createConnection(newFromId, conn.from_port || 'out', newToId, conn.to_port || 'in');
+        }
+      }
+    }
+
+    // Reload workspace to ensure state consistency
+    await this.initModule.init();
+
+    // Highlight newly created nodes temporarily
+    this.highlightNewNodes(createdNodes.map(n => n.created.id));
+
+    this.notifications?.showNotification?.(
+      `Added ${createdNodes.length} node${createdNodes.length !== 1 ? 's' : ''} from "${workflow.name}"`,
+      'success'
+    );
+
+    return createdNodes;
+  }
+
+  /**
+   * Create a task node from workflow template
+   */
+  async createWorkflowTaskNode(node, x, y) {
+    const config = node.config || {};
+    const response = await apiPost(`/api/studios/${this.studioId}/tasks`, {
+      description: config.description || 'New Task',
+      to: config.to || 'unassigned',
+      from: config.from || 'user',
+      priority: config.priority || 0
+    });
+
+    if (response && response.task) {
+      const task = response.task;
+      task.x = x;
+      task.y = y;
+
+      // Add to state
+      const tasks = [...this.state.tasks, task];
+      this.state.setTasks(tasks);
+
+      return task;
+    }
+
+    throw new Error('Failed to create task');
+  }
+
+  /**
+   * Create an agent node from workflow template
+   */
+  async createWorkflowAgentNode(node, x, y) {
+    const config = node.config || {};
+    const agentName = config.name || node.id;
+
+    const response = await apiPost('/api/orchestration/workspace/agents', {
+      studio_id: this.studioId,
+      agent_name: agentName
+    });
+
+    if (response) {
+      // The response contains the agent info; we need to add position
+      return {
+        id: response.agent_id || agentName,
+        name: agentName,
+        x: x,
+        y: y
+      };
+    }
+
+    throw new Error('Failed to add agent');
+  }
+
+  /**
+   * Create a scheduler node from workflow template
+   */
+  async createWorkflowSchedulerNode(node, x, y) {
+    const config = node.config || {};
+
+    const response = await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes`, {
+      name: config.name || 'New Scheduler',
+      schedule_type: config.schedule_type || 'cron',
+      cron_expression: config.cron_expression || '0 * * * *',
+      enabled: config.enabled !== false,
+      x: x,
+      y: y
+    });
+
+    if (response && response.scheduler_node) {
+      return response.scheduler_node;
+    }
+
+    throw new Error('Failed to create scheduler');
+  }
+
+  /**
+   * Create a store node from workflow template
+   */
+  async createWorkflowStoreNode(node, x, y) {
+    const config = node.config || {};
+
+    const response = await apiPost(`/api/studios/${this.studioId}/canvas/store-nodes`, {
+      name: config.name || 'New Store',
+      base_dir: config.base_dir || config.file_path || '',
+      format: config.format || 'json',
+      write_mode: config.write_mode || 'overwrite',
+      auto_create_dir: config.auto_create_dir !== false,
+      x: x,
+      y: y
+    });
+
+    if (response) {
+      return response;
+    }
+
+    throw new Error('Failed to create store');
+  }
+
+  /**
+   * Create an attachment node from workflow template
+   */
+  async createWorkflowAttachmentNode(node, x, y) {
+    const config = node.config || {};
+
+    const response = await apiPost(`/api/studios/${this.studioId}/attachments`, {
+      title: config.title || 'New Attachment',
+      type: config.type || 'note',
+      body: config.body || '',
+      link_url: config.link_url || ''
+    });
+
+    if (response && response.attachment) {
+      const attachment = response.attachment;
+      attachment.x = x;
+      attachment.y = y;
+      return attachment;
+    }
+
+    throw new Error('Failed to create attachment');
+  }
+
+  /**
+   * Temporarily highlight newly created nodes
+   */
+  highlightNewNodes(nodeIds) {
+    if (!nodeIds || nodeIds.length === 0) return;
+
+    // Store highlight state
+    this.state.highlightedNewNodes = new Set(nodeIds);
+
+    // Clear highlight after 3 seconds
+    setTimeout(() => {
+      this.state.highlightedNewNodes = null;
+      this.draw();
+    }, 3000);
+
+    this.draw();
+  }
+
+  /**
    * Export canvas as PNG image
    */
   exportCanvas() {
