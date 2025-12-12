@@ -380,6 +380,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/templates", s.orchestrationHandler.TemplatesHandler)
 	mux.HandleFunc("/api/orchestration/templates/instantiate", s.orchestrationHandler.InstantiateTemplateHandler)
 
+	// =============================================================================
+	// Custom Workflow API Endpoints
+	// =============================================================================
+	// List workflows or create new workflow
+	mux.HandleFunc("/api/workflows", s.workflowHandler.WorkflowsHandler)
+	// Get, delete specific workflow, or check agents
+	mux.HandleFunc("/api/workflows/", s.workflowHandler.WorkflowHandler)
+
 	// Notification endpoints
 	mux.HandleFunc("/api/orchestration/notifications", s.orchestrationHandler.NotificationsHandler)
 	mux.HandleFunc("/api/orchestration/notifications/stream", s.orchestrationHandler.NotificationStreamHandler)
