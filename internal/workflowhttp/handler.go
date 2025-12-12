@@ -107,37 +107,9 @@ func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 
 	workflows := h.workflowManager.ListWorkflows()
 
-	// Build response with workflow summaries
-	type WorkflowSummary struct {
-		ID          string                   `json:"id"`
-		Name        string                   `json:"name"`
-		Description string                   `json:"description,omitempty"`
-		Category    string                   `json:"category,omitempty"`
-		Source      templates.WorkflowSource `json:"source"`
-		NodeCount   int                      `json:"node_count"`
-		AgentNames  []string                 `json:"agent_names"`
-		CreatedAt   string                   `json:"created_at"`
-		UpdatedAt   string                   `json:"updated_at"`
-	}
-
-	summaries := make([]WorkflowSummary, 0, len(workflows))
-	for _, wf := range workflows {
-		summaries = append(summaries, WorkflowSummary{
-			ID:          wf.ID,
-			Name:        wf.Name,
-			Description: wf.Description,
-			Category:    wf.Category,
-			Source:      wf.Source,
-			NodeCount:   len(wf.Nodes),
-			AgentNames:  wf.GetAgentNames(),
-			CreatedAt:   wf.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt:   wf.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-		})
-	}
-
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"workflows": summaries,
-		"count":     len(summaries),
+		"workflows": workflows,
+		"count":     len(workflows),
 	}); err != nil {
 		logger.Error("Failed to encode workflows response", logger.Fields{"err": err})
 	}
