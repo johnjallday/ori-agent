@@ -796,11 +796,12 @@ class AgentCanvas {
         const agents = this.state.agents.filter(a => a.nodeId !== nodeId);
         this.state.setAgents(agents);
 
-        // Unassign any tasks that were targeting this agent or nodeId
+        // Unassign only tasks that were specifically assigned to this agent instance (by nodeId)
+        // Do NOT match by agent name alone - that would unassign tasks from other instances with the same name
         const affectedTasks = [];
         const updatedTasks = this.state.tasks.map(t => {
           if (!t) return t;
-          const targetMatches = t.assigned_node_id === nodeId || t.to === agentName;
+          const targetMatches = t.assigned_node_id === nodeId;
           if (targetMatches) {
             affectedTasks.push(t.id);
             return {

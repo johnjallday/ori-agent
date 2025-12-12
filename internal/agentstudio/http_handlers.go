@@ -350,31 +350,45 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		agentName = agentIdentifier
-		instanceNumber = 0 // Legacy: remove first occurrence
+		instanceNumber = 0
 	}
 
 	// Find the specific agent instance to remove
 	var targetInstanceID string
-	if instanceNumber > 0 {
-		// NEW: Find by name and instance number using stable AgentInstances
-		for _, inst := range studio.AgentInstances {
-			if inst.Name == agentName && inst.InstanceNumber == instanceNumber {
-				targetInstanceID = inst.ID
-				break
+
+	// If we have AgentInstances, always use them (even if no instance number provided)
+	if len(studio.AgentInstances) > 0 {
+		if instanceNumber > 0 {
+			// Find by name and instance number
+			for _, inst := range studio.AgentInstances {
+				if inst.Name == agentName && inst.InstanceNumber == instanceNumber {
+					targetInstanceID = inst.ID
+					break
+				}
+			}
+		} else {
+			// No instance number provided - find first matching agent by name
+			for _, inst := range studio.AgentInstances {
+				if inst.Name == agentName {
+					targetInstanceID = inst.ID
+					instanceNumber = inst.InstanceNumber // For logging
+					break
+				}
 			}
 		}
+
 		if targetInstanceID == "" {
-			http.Error(w, fmt.Sprintf("Agent instance %s #%d not found", agentName, instanceNumber), http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("Agent instance %s not found", agentName), http.StatusNotFound)
 			return
 		}
 
-		// Remove using new method (maintains stable node IDs)
+		// Remove using new method (maintains stable node IDs, only unassigns tasks for THIS instance)
 		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to remove agent instance: %v", err), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		// LEGACY: Remove by name (removes first occurrence)
+		// LEGACY: No AgentInstances exist - use old method (removes first occurrence by name)
 		if err := studio.RemoveAgent(agentName); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to remove agent: %v", err), http.StatusNotFound)
 			return

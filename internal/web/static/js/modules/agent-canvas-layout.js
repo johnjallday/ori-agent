@@ -150,12 +150,19 @@ export class AgentCanvasLayoutManager {
   }
 
   /**
-   * Zoom and pan to fit all tasks and agents in view
+   * Zoom and pan to fit all content in view
    */
   zoomToFitContent() {
-    if ((!this.state.tasks || this.state.tasks.length === 0) &&
-        (!this.state.agents || this.state.agents.length === 0) &&
-        (!this.state.attachments || this.state.attachments.length === 0)) {
+    // Check if there's any content to fit
+    const hasContent =
+      (this.state.tasks && this.state.tasks.length > 0) ||
+      (this.state.agents && this.state.agents.length > 0) ||
+      (this.state.attachments && this.state.attachments.length > 0) ||
+      (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) ||
+      (this.state.storeNodes && this.state.storeNodes.length > 0) ||
+      (this.state.combinerNodes && this.state.combinerNodes.length > 0);
+
+    if (!hasContent) {
       return;
     }
 
@@ -165,6 +172,7 @@ export class AgentCanvasLayoutManager {
 
     // Include tasks
     this.state.tasks.forEach(task => {
+      if (task.x == null || task.y == null) return;
       const taskWidth = 180;
       const taskHeight = 100;
       minX = Math.min(minX, task.x - taskWidth / 2);
@@ -175,6 +183,7 @@ export class AgentCanvasLayoutManager {
 
     // Include agents
     this.state.agents.forEach(agent => {
+      if (agent.x == null || agent.y == null) return;
       const halfW = (agent.width || 120) / 2;
       const halfH = (agent.height || 70) / 2;
       minX = Math.min(minX, agent.x - halfW);
@@ -187,12 +196,50 @@ export class AgentCanvasLayoutManager {
     this.state.attachments.forEach(att => {
       if (att.x == null || att.y == null) return;
       const cardWidth = 160;
-      const cardHeight = 70;
+      const cardHeight = 100;
       minX = Math.min(minX, att.x - cardWidth / 2);
       maxX = Math.max(maxX, att.x + cardWidth / 2);
       minY = Math.min(minY, att.y - cardHeight / 2);
       maxY = Math.max(maxY, att.y + cardHeight / 2);
     });
+
+    // Include scheduler nodes
+    this.state.schedulerNodes.forEach(s => {
+      if (s.x == null || s.y == null) return;
+      const nodeWidth = 180;
+      const nodeHeight = 120;
+      minX = Math.min(minX, s.x - nodeWidth / 2);
+      maxX = Math.max(maxX, s.x + nodeWidth / 2);
+      minY = Math.min(minY, s.y - nodeHeight / 2);
+      maxY = Math.max(maxY, s.y + nodeHeight / 2);
+    });
+
+    // Include store nodes
+    this.state.storeNodes.forEach(s => {
+      if (s.x == null || s.y == null) return;
+      const nodeWidth = 160;
+      const nodeHeight = 100;
+      minX = Math.min(minX, s.x - nodeWidth / 2);
+      maxX = Math.max(maxX, s.x + nodeWidth / 2);
+      minY = Math.min(minY, s.y - nodeHeight / 2);
+      maxY = Math.max(maxY, s.y + nodeHeight / 2);
+    });
+
+    // Include combiner nodes
+    this.state.combinerNodes.forEach(c => {
+      if (c.x == null || c.y == null) return;
+      const nodeWidth = c.width || 120;
+      const nodeHeight = c.height || 80;
+      minX = Math.min(minX, c.x - nodeWidth / 2);
+      maxX = Math.max(maxX, c.x + nodeWidth / 2);
+      minY = Math.min(minY, c.y - nodeHeight / 2);
+      maxY = Math.max(maxY, c.y + nodeHeight / 2);
+    });
+
+    // If no valid positions found, return early
+    if (minX === Infinity || maxX === -Infinity) {
+      return;
+    }
 
     // Calculate content dimensions
     const contentWidth = maxX - minX;

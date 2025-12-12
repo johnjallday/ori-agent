@@ -79,9 +79,10 @@ export class AgentCanvasContextMenu {
               });
               this.state.setTasks(updatedTasks);
 
-              // Remove any workflow connections involving this agent
+              // Remove only workflow connections involving this specific agent instance (by nodeId)
+              // Don't remove connections for other instances with the same name
               this.parent.connections = this.parent.connections.filter(c =>
-                c.from !== agent.name && c.to !== agent.name
+                c.from !== agent.nodeId && c.to !== agent.nodeId
               );
 
               this.parent.notifications.showNotification('Agent removed', 'success');
