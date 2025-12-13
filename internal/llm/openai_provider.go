@@ -164,6 +164,10 @@ func (p *OpenAIProvider) getFallbackModels() []string {
 
 // Chat sends a chat completion request to OpenAI
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if p.apiKey == "" {
+		return nil, fmt.Errorf("OpenAI API key is required (set OPENAI_API_KEY or configure it in settings)")
+	}
+
 	// Convert messages to OpenAI format
 	messages := p.convertMessages(req.Messages, req.SystemPrompt)
 

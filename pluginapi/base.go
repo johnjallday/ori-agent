@@ -6,19 +6,19 @@ import (
 )
 
 // BasePlugin provides default implementations for common plugin interfaces.
-// Plugins can embed this struct to avoid implementing boilerplate getter methods.
+// Plugins embed this struct and use ServePlugin() which handles initialization automatically.
 //
 // Example usage:
 //
+//	//go:embed plugin.yaml
+//	var configYAML string
+//
 //	type myTool struct {
 //	    pluginapi.BasePlugin
-//	    // your plugin fields
 //	}
 //
-//	func NewMyTool() *myTool {
-//	    return &myTool{
-//	        BasePlugin: pluginapi.NewBasePlugin("my-tool", "1.0.0", "0.0.6", "", "v1"),
-//	    }
+//	func main() {
+//	    pluginapi.ServePlugin(&myTool{}, configYAML)
 //	}
 type BasePlugin struct {
 	version         string
@@ -33,7 +33,8 @@ type BasePlugin struct {
 	settingsMu      sync.Mutex      // Mutex for settings initialization
 }
 
-// NewBasePlugin creates a new base plugin with version and compatibility info.
+// newBasePlugin creates a new base plugin with version and compatibility info.
+// This is an internal function used by ServePlugin.
 //
 // Parameters:
 //   - name: Plugin name (e.g., "weather", "math")
@@ -41,7 +42,7 @@ type BasePlugin struct {
 //   - minAgentVersion: Minimum ori-agent version required (e.g., "0.0.6"), empty string for no minimum
 //   - maxAgentVersion: Maximum ori-agent version supported (e.g., "1.0.0"), empty string for no maximum
 //   - apiVersion: API version implemented (e.g., "v1")
-func NewBasePlugin(name, version, minAgentVersion, maxAgentVersion, apiVersion string) BasePlugin {
+func newBasePlugin(name, version, minAgentVersion, maxAgentVersion, apiVersion string) BasePlugin {
 	return BasePlugin{
 		version:     version,
 		minAgentVer: minAgentVersion,

@@ -39,6 +39,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -106,6 +107,7 @@ type Server struct {
 	permissionsHandler    *pluginhttp.PermissionsHandler
 	backupHandler         *pluginhttp.BackupHandler
 	notificationsHandler  *pluginhttp.NotificationsHandler
+	workflowHandler       *workflowhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

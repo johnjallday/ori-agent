@@ -3626,3 +3626,321 @@ window.buildCronFromFields = buildCronFromFields;
 window.updateCronDescription = updateCronDescription;
 window.showAddStoreNodeModal = showAddStoreNodeModal;
 window.submitStoreNode = submitStoreNode;
+
+// ========== SAVE WORKFLOW MODAL ==========
+
+// State for workflow saving
+let pendingWorkflowData = null;
+
+/**
+ * Maximum number of nodes allowed in a workflow
+ */
+const MAX_WORKFLOW_NODES = 20;
+
+/**
+ * Show the save workflow modal with selected nodes data
+ * @param {Object} selectionData - Data about selected nodes from the canvas
+ */
+function showSaveWorkflowModal(selectionData) {
+  // Validate selection
+  if (!selectionData || !selectionData.nodes || selectionData.nodes.length === 0) {
+    alert('No nodes selected. Please select at least one node to create a workflow.');
+    return;
+  }
+
+  if (selectionData.nodes.length > MAX_WORKFLOW_NODES) {
+    alert(`Too many nodes selected. Maximum ${MAX_WORKFLOW_NODES} nodes allowed per workflow. You have ${selectionData.nodes.length} selected.`);
+    return;
+  }
+
+  // Store the selection data for later
+  pendingWorkflowData = selectionData;
+
+  // Reset form
+  const form = document.getElementById('save-workflow-form');
+  if (form) {
+    form.reset();
+  }
+
+  // Hide previous errors
+  const errorDiv = document.getElementById('workflow-save-error');
+  if (errorDiv) {
+    errorDiv.style.display = 'none';
+  }
+
+  // Remove any previous validation styling
+  const nameInput = document.getElementById('workflow-name');
+  if (nameInput) {
+    nameInput.classList.remove('is-invalid');
+  }
+
+  // Update selection info
+  const selectionInfo = document.getElementById('workflow-selection-info');
+  const nodeCountSpan = document.getElementById('workflow-node-count');
+  const agentInfoSpan = document.getElementById('workflow-agent-info');
+
+  if (selectionInfo && nodeCountSpan) {
+    selectionInfo.style.display = 'block';
+    nodeCountSpan.textContent = selectionData.nodes.length;
+
+    // Count node types
+    const typeCounts = {};
+    selectionData.nodes.forEach(node => {
+      typeCounts[node.type] = (typeCounts[node.type] || 0) + 1;
+    });
+
+    const typeInfo = Object.entries(typeCounts)
+      .map(([type, count]) => `${count} ${type}${count > 1 ? 's' : ''}`)
+      .join(', ');
+
+    agentInfoSpan.textContent = `(${typeInfo})`;
+  }
+
+  // Show modal
+  const modal = new bootstrap.Modal(document.getElementById('saveWorkflowModal'));
+  modal.show();
+
+  // Focus on name input after modal is shown
+  document.getElementById('saveWorkflowModal').addEventListener('shown.bs.modal', function() {
+    document.getElementById('workflow-name').focus();
+  }, { once: true });
+}
+
+/**
+ * Collect selected nodes data from the canvas for workflow creation
+ * @returns {Object} Selection data including nodes, connections, and layout
+ */
+function collectWorkflowSelectionData() {
+  if (!window.agentCanvas || !window.agentCanvas.state) {
+    console.error('Canvas not available');
+    return null;
+  }
+
+  const state = window.agentCanvas.state;
+  const selectedNodes = state.getSelectedNodes();
+
+  if (!selectedNodes || selectedNodes.length === 0) {
+    return null;
+  }
+
+  // Convert selected nodes to workflow format
+  const nodes = [];
+  const selectedIds = new Set(selectedNodes.map(n => n.id));
+
+  // Calculate center of selection for relative positioning
+  let sumX = 0, sumY = 0;
+  selectedNodes.forEach(sel => {
+    const node = sel.node;
+    sumX += node.x || 0;
+    sumY += node.y || 0;
+  });
+  const centerX = sumX / selectedNodes.length;
+  const centerY = sumY / selectedNodes.length;
+
+  // Process each selected node
+  selectedNodes.forEach(sel => {
+    const node = sel.node;
+    const workflowNode = {
+      id: sel.id,
+      type: sel.type,
+      config: extractNodeConfig(node, sel.type),
+      relative_x: (node.x || 0) - centerX,
+      relative_y: (node.y || 0) - centerY
+    };
+    nodes.push(workflowNode);
+  });
+
+  // Find connections between selected nodes
+  const internalConnections = [];
+  // TODO: Collect actual connections when connection data is available
+  // For now, connections would need to be inferred from task assignments
+
+  // Calculate layout dimensions
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  nodes.forEach(n => {
+    minX = Math.min(minX, n.relative_x);
+    maxX = Math.max(maxX, n.relative_x);
+    minY = Math.min(minY, n.relative_y);
+    maxY = Math.max(maxY, n.relative_y);
+  });
+
+  const layout = {
+    width: maxX - minX + 200, // Add padding
+    height: maxY - minY + 200,
+    node_positions: {}
+  };
+
+  nodes.forEach(n => {
+    layout.node_positions[n.id] = { x: n.relative_x, y: n.relative_y };
+  });
+
+  return {
+    nodes,
+    internal_connections: internalConnections,
+    input_ports: [],
+    output_ports: [],
+    layout
+  };
+}
+
+/**
+ * Extract configuration from a node based on its type
+ * @param {Object} node - The node object
+ * @param {string} type - The node type
+ * @returns {Object} Configuration object
+ */
+function extractNodeConfig(node, type) {
+  switch (type) {
+    case 'task':
+      return {
+        description: node.description || '',
+        to: node.to || 'unassigned',
+        from: node.from || 'user',
+        priority: node.priority || 0,
+        status: node.status || 'pending'
+      };
+    case 'agent':
+      return {
+        name: node.name || node.nodeId || '',
+        type: node.type || 'tool-calling',
+        model: node.model || ''
+      };
+    case 'scheduler':
+      return {
+        name: node.name || '',
+        schedule_type: node.schedule_type || 'cron',
+        cron_expression: node.cron_expression || '',
+        enabled: node.enabled !== false
+      };
+    case 'store':
+      return {
+        name: node.name || '',
+        store_type: node.store_type || 'file',
+        file_path: node.file_path || ''
+      };
+    case 'attachment':
+      return {
+        title: node.title || '',
+        type: node.type || 'note',
+        body: node.body || '',
+        link_url: node.link_url || ''
+      };
+    default:
+      return { ...node };
+  }
+}
+
+/**
+ * Submit the save workflow form
+ */
+async function submitSaveWorkflow() {
+  const nameInput = document.getElementById('workflow-name');
+  const descriptionInput = document.getElementById('workflow-description');
+  const categorySelect = document.getElementById('workflow-category');
+  const errorDiv = document.getElementById('workflow-save-error');
+  const saveBtn = document.getElementById('save-workflow-btn');
+
+  // Clear previous errors
+  errorDiv.style.display = 'none';
+  nameInput.classList.remove('is-invalid');
+
+  // Validate name
+  const name = nameInput.value.trim();
+  if (!name) {
+    nameInput.classList.add('is-invalid');
+    nameInput.focus();
+    return;
+  }
+
+  // Ensure we have workflow data
+  if (!pendingWorkflowData || !pendingWorkflowData.nodes || pendingWorkflowData.nodes.length === 0) {
+    showWorkflowError('No nodes data available. Please try again.');
+    return;
+  }
+
+  // Disable button and show loading state
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = `
+    <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+    Saving...
+  `;
+
+  try {
+    const requestBody = {
+      name: name,
+      description: descriptionInput.value.trim(),
+      category: categorySelect.value,
+      nodes: pendingWorkflowData.nodes,
+      internal_connections: pendingWorkflowData.internal_connections || [],
+      input_ports: pendingWorkflowData.input_ports || [],
+      output_ports: pendingWorkflowData.output_ports || [],
+      layout: pendingWorkflowData.layout || { width: 800, height: 600, node_positions: {} }
+    };
+
+    console.log('Saving workflow:', requestBody);
+
+    const response = await fetch('/api/workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save workflow');
+    }
+
+    const result = await response.json();
+    console.log('Workflow saved:', result);
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('saveWorkflowModal'));
+    modal.hide();
+
+    // Clear pending data
+    pendingWorkflowData = null;
+
+    // Clear selection on canvas
+    if (window.agentCanvas && window.agentCanvas.state) {
+      window.agentCanvas.state.clearSelection();
+      window.agentCanvas.draw();
+    }
+
+    // Show success notification
+    if (window.agentCanvas && window.agentCanvas.showNotification) {
+      window.agentCanvas.showNotification(`Workflow "${name}" saved successfully!`, 'success');
+    } else {
+      alert(`Workflow "${name}" saved successfully!`);
+    }
+
+  } catch (error) {
+    console.error('Error saving workflow:', error);
+    showWorkflowError(error.message);
+  } finally {
+    // Re-enable button
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+        <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+      </svg>
+      Save Workflow
+    `;
+  }
+}
+
+/**
+ * Show error message in the workflow modal
+ * @param {string} message - Error message to display
+ */
+function showWorkflowError(message) {
+  const errorDiv = document.getElementById('workflow-save-error');
+  if (errorDiv) {
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+  }
+}
+
+// Export workflow functions to window
+window.showSaveWorkflowModal = showSaveWorkflowModal;
+window.submitSaveWorkflow = submitSaveWorkflow;
+window.collectWorkflowSelectionData = collectWorkflowSelectionData;

@@ -15,6 +15,90 @@ export class AgentCanvasLayoutManager {
   }
 
   /**
+   * Calculate the content bounds from all positioned nodes
+   * Returns { minX, maxX, minY, maxY, centerX, centerY } or null if no positioned content
+   */
+  getContentBounds() {
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let hasContent = false;
+
+    // Include agents
+    this.state.agents.forEach(agent => {
+      if (agent.x != null && agent.y != null) {
+        minX = Math.min(minX, agent.x);
+        maxX = Math.max(maxX, agent.x);
+        minY = Math.min(minY, agent.y);
+        maxY = Math.max(maxY, agent.y);
+        hasContent = true;
+      }
+    });
+
+    // Include tasks
+    this.state.tasks.forEach(task => {
+      if (task.x != null && task.y != null) {
+        minX = Math.min(minX, task.x);
+        maxX = Math.max(maxX, task.x);
+        minY = Math.min(minY, task.y);
+        maxY = Math.max(maxY, task.y);
+        hasContent = true;
+      }
+    });
+
+    // Include attachments
+    this.state.attachments.forEach(att => {
+      if (att.x != null && att.y != null) {
+        minX = Math.min(minX, att.x);
+        maxX = Math.max(maxX, att.x);
+        minY = Math.min(minY, att.y);
+        maxY = Math.max(maxY, att.y);
+        hasContent = true;
+      }
+    });
+
+    // Include scheduler nodes
+    this.state.schedulerNodes.forEach(s => {
+      if (s.x != null && s.y != null) {
+        minX = Math.min(minX, s.x);
+        maxX = Math.max(maxX, s.x);
+        minY = Math.min(minY, s.y);
+        maxY = Math.max(maxY, s.y);
+        hasContent = true;
+      }
+    });
+
+    // Include store nodes
+    this.state.storeNodes.forEach(s => {
+      if (s.x != null && s.y != null) {
+        minX = Math.min(minX, s.x);
+        maxX = Math.max(maxX, s.x);
+        minY = Math.min(minY, s.y);
+        maxY = Math.max(maxY, s.y);
+        hasContent = true;
+      }
+    });
+
+    // Include combiner nodes
+    this.state.combinerNodes.forEach(c => {
+      if (c.x != null && c.y != null) {
+        minX = Math.min(minX, c.x);
+        maxX = Math.max(maxX, c.x);
+        minY = Math.min(minY, c.y);
+        maxY = Math.max(maxY, c.y);
+        hasContent = true;
+      }
+    });
+
+    if (!hasContent) return null;
+
+    return {
+      minX, maxX, minY, maxY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2
+    };
+  }
+
+  /**
    * Auto-layout tasks in a hierarchical flow (top to bottom)
    */
   autoLayoutTasks() {
@@ -66,12 +150,19 @@ export class AgentCanvasLayoutManager {
   }
 
   /**
-   * Zoom and pan to fit all tasks and agents in view
+   * Zoom and pan to fit all content in view
    */
   zoomToFitContent() {
-    if ((!this.state.tasks || this.state.tasks.length === 0) &&
-        (!this.state.agents || this.state.agents.length === 0) &&
-        (!this.state.attachments || this.state.attachments.length === 0)) {
+    // Check if there's any content to fit
+    const hasContent =
+      (this.state.tasks && this.state.tasks.length > 0) ||
+      (this.state.agents && this.state.agents.length > 0) ||
+      (this.state.attachments && this.state.attachments.length > 0) ||
+      (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) ||
+      (this.state.storeNodes && this.state.storeNodes.length > 0) ||
+      (this.state.combinerNodes && this.state.combinerNodes.length > 0);
+
+    if (!hasContent) {
       return;
     }
 
@@ -81,6 +172,7 @@ export class AgentCanvasLayoutManager {
 
     // Include tasks
     this.state.tasks.forEach(task => {
+      if (task.x == null || task.y == null) return;
       const taskWidth = 180;
       const taskHeight = 100;
       minX = Math.min(minX, task.x - taskWidth / 2);
@@ -91,6 +183,7 @@ export class AgentCanvasLayoutManager {
 
     // Include agents
     this.state.agents.forEach(agent => {
+      if (agent.x == null || agent.y == null) return;
       const halfW = (agent.width || 120) / 2;
       const halfH = (agent.height || 70) / 2;
       minX = Math.min(minX, agent.x - halfW);
@@ -103,12 +196,50 @@ export class AgentCanvasLayoutManager {
     this.state.attachments.forEach(att => {
       if (att.x == null || att.y == null) return;
       const cardWidth = 160;
-      const cardHeight = 70;
+      const cardHeight = 100;
       minX = Math.min(minX, att.x - cardWidth / 2);
       maxX = Math.max(maxX, att.x + cardWidth / 2);
       minY = Math.min(minY, att.y - cardHeight / 2);
       maxY = Math.max(maxY, att.y + cardHeight / 2);
     });
+
+    // Include scheduler nodes
+    this.state.schedulerNodes.forEach(s => {
+      if (s.x == null || s.y == null) return;
+      const nodeWidth = 180;
+      const nodeHeight = 120;
+      minX = Math.min(minX, s.x - nodeWidth / 2);
+      maxX = Math.max(maxX, s.x + nodeWidth / 2);
+      minY = Math.min(minY, s.y - nodeHeight / 2);
+      maxY = Math.max(maxY, s.y + nodeHeight / 2);
+    });
+
+    // Include store nodes
+    this.state.storeNodes.forEach(s => {
+      if (s.x == null || s.y == null) return;
+      const nodeWidth = 160;
+      const nodeHeight = 100;
+      minX = Math.min(minX, s.x - nodeWidth / 2);
+      maxX = Math.max(maxX, s.x + nodeWidth / 2);
+      minY = Math.min(minY, s.y - nodeHeight / 2);
+      maxY = Math.max(maxY, s.y + nodeHeight / 2);
+    });
+
+    // Include combiner nodes
+    this.state.combinerNodes.forEach(c => {
+      if (c.x == null || c.y == null) return;
+      const nodeWidth = c.width || 120;
+      const nodeHeight = c.height || 80;
+      minX = Math.min(minX, c.x - nodeWidth / 2);
+      maxX = Math.max(maxX, c.x + nodeWidth / 2);
+      minY = Math.min(minY, c.y - nodeHeight / 2);
+      maxY = Math.max(maxY, c.y + nodeHeight / 2);
+    });
+
+    // If no valid positions found, return early
+    if (minX === Infinity || maxX === -Infinity) {
+      return;
+    }
 
     // Calculate content dimensions
     const contentWidth = maxX - minX;
@@ -307,6 +438,9 @@ export class AgentCanvasLayoutManager {
 
     // Restore task positions
     if (layout.task_positions) {
+      const tasksWithPositions = [];
+      const tasksWithoutPositions = [];
+
       this.state.tasks.forEach(task => {
         const savedPos = layout.task_positions[task.id];
         if (savedPos) {
@@ -314,12 +448,53 @@ export class AgentCanvasLayoutManager {
           task.x = savedPos.x;
           task.y = savedPos.y;
           tasksRestored++;
+          tasksWithPositions.push(task);
+        } else {
+          tasksWithoutPositions.push(task);
         }
       });
+
+      // Position new tasks (without saved positions) near existing content
+      if (tasksWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 200;
+
+        if (tasksWithPositions.length > 0) {
+          // Position near existing tasks
+          let maxX = -Infinity;
+          let totalY = 0;
+          tasksWithPositions.forEach(task => {
+            maxX = Math.max(maxX, task.x);
+            totalY += task.y;
+          });
+          baseX = maxX;
+          baseY = totalY / tasksWithPositions.length;
+        } else {
+          // Fallback: position near general content cluster
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            // No content at all, use center of canvas
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        tasksWithoutPositions.forEach((task, index) => {
+          task.x = baseX + spacing * (index + 1);
+          task.y = baseY;
+          console.log(`  Positioning new task ${task.id} at (${task.x}, ${task.y})`);
+        });
+      }
     }
 
     // Restore agent positions
     if (layout.agent_positions) {
+      const agentsWithPositions = [];
+      const agentsWithoutPositions = [];
+
       this.state.agents.forEach(agent => {
         const key = agent.nodeId || agent.name;
         const savedPos = layout.agent_positions[key] || layout.agent_positions[agent.name];
@@ -328,19 +503,98 @@ export class AgentCanvasLayoutManager {
           agent.x = savedPos.x;
           agent.y = savedPos.y;
           agentsRestored++;
+          agentsWithPositions.push(agent);
+        } else {
+          agentsWithoutPositions.push(agent);
         }
       });
+
+      // Position new agents (without saved positions) near existing content
+      if (agentsWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 150;
+
+        if (agentsWithPositions.length > 0) {
+          // Position near existing agents
+          let maxX = -Infinity;
+          let totalY = 0;
+          agentsWithPositions.forEach(agent => {
+            maxX = Math.max(maxX, agent.x);
+            totalY += agent.y;
+          });
+          baseX = maxX;
+          baseY = totalY / agentsWithPositions.length;
+        } else {
+          // Fallback: position near general content cluster
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            // No content at all, use center of canvas
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        agentsWithoutPositions.forEach((agent, index) => {
+          agent.x = baseX + spacing * (index + 1);
+          agent.y = baseY;
+          console.log(`  Positioning new agent ${agent.nodeId || agent.name} at (${agent.x}, ${agent.y})`);
+        });
+      }
     }
 
     // Restore attachment positions
     if (layout.attachment_positions) {
+      const attachmentsWithPositions = [];
+      const attachmentsWithoutPositions = [];
+
       this.state.attachments.forEach(att => {
         const savedPos = layout.attachment_positions[att.id];
         if (savedPos) {
           att.x = savedPos.x;
           att.y = savedPos.y;
+          attachmentsWithPositions.push(att);
+        } else {
+          attachmentsWithoutPositions.push(att);
         }
       });
+
+      // Position new attachments near existing content
+      if (attachmentsWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 180;
+
+        if (attachmentsWithPositions.length > 0) {
+          // Position near existing attachments
+          let maxX = -Infinity;
+          let totalY = 0;
+          attachmentsWithPositions.forEach(att => {
+            maxX = Math.max(maxX, att.x);
+            totalY += att.y;
+          });
+          baseX = maxX;
+          baseY = totalY / attachmentsWithPositions.length;
+        } else {
+          // Fallback: position near general content cluster
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            // No content at all, use center of canvas
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        attachmentsWithoutPositions.forEach((att, index) => {
+          att.x = baseX + spacing * (index + 1);
+          att.y = baseY;
+          console.log(`  Positioning new attachment ${att.id} at (${att.x}, ${att.y})`);
+        });
+      }
     }
 
     // Restore combiner nodes
@@ -375,14 +629,108 @@ export class AgentCanvasLayoutManager {
 
     // Restore scheduler positions
     if (layout.scheduler_positions) {
+      const schedulersWithPositions = [];
+      const schedulersWithoutPositions = [];
+
       this.state.schedulerNodes.forEach(s => {
         const key = s.canvas_node_id || s.id;
         const savedPos = layout.scheduler_positions[key];
         if (savedPos) {
           s.x = savedPos.x;
           s.y = savedPos.y;
+          schedulersWithPositions.push(s);
+        } else {
+          schedulersWithoutPositions.push(s);
         }
       });
+
+      // Position new scheduler nodes near existing content
+      if (schedulersWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 180;
+
+        if (schedulersWithPositions.length > 0) {
+          // Position near existing schedulers
+          let maxX = -Infinity;
+          let totalY = 0;
+          schedulersWithPositions.forEach(s => {
+            maxX = Math.max(maxX, s.x);
+            totalY += s.y;
+          });
+          baseX = maxX;
+          baseY = totalY / schedulersWithPositions.length;
+        } else {
+          // Fallback: position near general content cluster
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            // No content at all, use center of canvas
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        schedulersWithoutPositions.forEach((s, index) => {
+          s.x = baseX + spacing * (index + 1);
+          s.y = baseY;
+          console.log(`  Positioning new scheduler ${s.canvas_node_id || s.id} at (${s.x}, ${s.y})`);
+        });
+      }
+    }
+
+    // Restore store node positions
+    if (layout.store_positions) {
+      const storesWithPositions = [];
+      const storesWithoutPositions = [];
+
+      this.state.storeNodes.forEach(s => {
+        const key = s.canvas_node_id || s.id;
+        const savedPos = layout.store_positions[key];
+        if (savedPos) {
+          s.x = savedPos.x;
+          s.y = savedPos.y;
+          storesWithPositions.push(s);
+        } else {
+          storesWithoutPositions.push(s);
+        }
+      });
+
+      // Position new store nodes near existing content
+      if (storesWithoutPositions.length > 0) {
+        let baseX, baseY;
+        const spacing = 180;
+
+        if (storesWithPositions.length > 0) {
+          // Position near existing stores
+          let maxX = -Infinity;
+          let totalY = 0;
+          storesWithPositions.forEach(s => {
+            maxX = Math.max(maxX, s.x);
+            totalY += s.y;
+          });
+          baseX = maxX;
+          baseY = totalY / storesWithPositions.length;
+        } else {
+          // Fallback: position near general content cluster
+          const bounds = this.getContentBounds();
+          if (bounds) {
+            baseX = bounds.maxX;
+            baseY = bounds.centerY;
+          } else {
+            // No content at all, use center of canvas
+            baseX = this.parent.width / 2;
+            baseY = this.parent.height / 2;
+          }
+        }
+
+        storesWithoutPositions.forEach((s, index) => {
+          s.x = baseX + spacing * (index + 1);
+          s.y = baseY;
+          console.log(`  Positioning new store ${s.canvas_node_id || s.id} at (${s.x}, ${s.y})`);
+        });
+      }
     }
 
     // Skip restoring zoom and pan - will be set by zoomToFit() in init

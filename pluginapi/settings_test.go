@@ -340,7 +340,7 @@ func TestBasePlugin_Settings(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Create a base plugin with metadata
-	bp := NewBasePlugin("test-tool", "1.0.0", "", "", "v1")
+	bp := newBasePlugin("test-tool", "1.0.0", "", "", "v1")
 	bp.SetMetadata(&PluginMetadata{
 		Name: "test-tool",
 	})

@@ -378,3 +378,45 @@
 .color-palette-item.selected::after {
     opacity: 1;
 }
+
+/* Workflow Panel Styles */
+#workflow-panel {
+    transition: all 0.2s ease;
+}
+
+#workflow-panel:hover {
+    border-color: var(--primary-color);
+}
+
+#workflow-panel-content {
+    transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.workflow-item {
+    transition: all 0.15s ease;
+}
+
+.workflow-item:hover {
+    border-color: var(--primary-color) !important;
+    transform: translateX(2px);
+}
+
+.workflow-item .btn-primary {
+    opacity: 0.85;
+    transition: all 0.15s ease;
+}
+
+.workflow-item:hover .btn-primary {
+    opacity: 1;
+}
+
+/* Dark mode support for workflow panel */
+[data-theme="dark"] .workflow-item {
+    background: #2d2d2d !important;
+    border-color: #404040 !important;
+}
+
+[data-theme="dark"] .workflow-item:hover {
+    background: #353535 !important;
+    border-color: var(--primary-color) !important;
+}

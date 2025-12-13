@@ -143,12 +143,14 @@
                   </svg>
                   Tasks
                 </h4>
-                <button class="modern-btn modern-btn-secondary btn-sm" onclick="refreshTasks()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                    <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                  </svg>
-                  Refresh
-                </button>
+                <div class="d-flex gap-2">
+                  <button class="modern-btn modern-btn-secondary btn-sm" onclick="refreshTasks()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                    Refresh
+                  </button>
+                </div>
               </div>
               <div id="tasks-list">
                 <div class="text-center py-3">
@@ -274,6 +276,254 @@
     </div>
   </div>
 
+  <!-- Edit Task Modal -->
+  <div class="modal fade" id="editTaskModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+            </svg>
+            Edit Task
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-task-id-hidden" />
+
+          <div class="mb-3">
+            <div class="detail-row" style="margin-bottom: 0;">
+              <span class="detail-label">Task ID</span>
+              <code id="edit-task-id" class="detail-value"></code>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Assignment</label>
+            <select class="form-select" id="edit-task-assignment"></select>
+            <div class="form-text">Choose an agent instance, or unassign.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">From</label>
+            <input type="text" class="form-control" id="edit-task-from" placeholder="user" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Description</label>
+            <textarea class="form-control" id="edit-task-description" rows="4" placeholder="Task description..."></textarea>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-task-save-btn" onclick="submitEditTask()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Schedule Modal -->
+  <div class="modal fade" id="editScheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z"/>
+            </svg>
+            Edit Schedule
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-schedule-node-id" />
+          <input type="hidden" id="edit-schedule-task-id" />
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Enabled</label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="edit-schedule-enabled" checked>
+              <label class="form-check-label" for="edit-schedule-enabled">Scheduler is enabled</label>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Type</label>
+            <select class="form-select" id="edit-schedule-type" onchange="updateEditScheduleInputs()">
+              <option value="interval">Interval</option>
+              <option value="once">Once</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="cron">Cron</option>
+            </select>
+          </div>
+
+          <div id="edit-schedule-interval-fields" class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Every (minutes)</label>
+            <input type="number" min="1" class="form-control" id="edit-schedule-interval-minutes" value="60">
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="edit-schedule-interval-run-once">
+              <label class="form-check-label" for="edit-schedule-interval-run-once">Run once after delay</label>
+            </div>
+          </div>
+
+          <div id="edit-schedule-once-fields" class="mb-3" style="display:none;">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Run at</label>
+            <input type="datetime-local" class="form-control" id="edit-schedule-execute-at">
+          </div>
+
+          <div id="edit-schedule-daily-fields" class="mb-3" style="display:none;">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Time of day</label>
+            <input type="time" class="form-control" id="edit-schedule-daily-time" value="09:00">
+          </div>
+
+          <div id="edit-schedule-weekly-fields" class="mb-3" style="display:none;">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Day of week</label>
+            <select class="form-select" id="edit-schedule-weekly-day">
+              <option value="0">Sunday</option>
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select>
+            <label class="form-label mt-2" style="color: var(--text-primary); font-weight: 500;">Time</label>
+            <input type="time" class="form-control" id="edit-schedule-weekly-time" value="09:00">
+          </div>
+
+          <div id="edit-schedule-cron-fields" class="mb-3" style="display:none;">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Cron expression</label>
+            <input type="text" class="form-control" id="edit-schedule-cron-expr" placeholder="0 * * * *">
+          </div>
+
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="edit-schedule-has-end-date" onchange="toggleEditScheduleEndDate()">
+              <label class="form-check-label" for="edit-schedule-has-end-date">End at</label>
+            </div>
+            <input type="datetime-local" class="form-control mt-2" id="edit-schedule-end-date" style="display:none;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-schedule-save-btn" onclick="submitEditSchedule()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Storage Modal -->
+  <div class="modal fade" id="editStorageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M6,4V8H18V4H6M6,10V14H18V10H6M6,16V20H18V16H6Z"/>
+            </svg>
+            Edit Storage
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-storage-node-id" />
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Name</label>
+            <input type="text" class="form-control" id="edit-storage-name">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Directory</label>
+            <input type="text" class="form-control" id="edit-storage-base-dir" placeholder="outputs/my-run">
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Format</label>
+              <select class="form-select" id="edit-storage-format">
+                <option value="json">json</option>
+                <option value="text">text</option>
+                <option value="markdown">markdown</option>
+                <option value="binary">binary</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Write mode</label>
+              <select class="form-select" id="edit-storage-write-mode">
+                <option value="overwrite">overwrite</option>
+                <option value="append">append</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" id="edit-storage-auto-create-dir" checked>
+            <label class="form-check-label" for="edit-storage-auto-create-dir">Auto-create directories</label>
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="edit-storage-auto-store" checked>
+            <label class="form-check-label" for="edit-storage-auto-store">Auto-store task results</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-storage-save-btn" onclick="submitEditStorage()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Attachment Modal -->
+  <div class="modal fade" id="editAttachmentModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M16.5,6V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V5A3.5,3.5 0 0,1 11,1.5A3.5,3.5 0 0,1 14.5,5V15.5A2.5,2.5 0 0,1 12,18A2.5,2.5 0 0,1 9.5,15.5V6H11V15.5A1,1 0 0,0 12,16.5A1,1 0 0,0 13,15.5V5A2,2 0 0,0 11,3A2,2 0 0,0 9,5V17.5A3,3 0 0,0 12,20.5A3,3 0 0,0 15,17.5V6H16.5Z"/>
+            </svg>
+            Edit Attachment
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-attachment-id" />
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Title</label>
+            <input type="text" class="form-control" id="edit-attachment-title">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Type</label>
+            <select class="form-select" id="edit-attachment-type">
+              <option value="doc">doc</option>
+              <option value="image">image</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Link URL</label>
+            <input type="text" class="form-control" id="edit-attachment-link-url" placeholder="https://...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Body</label>
+            <textarea class="form-control" id="edit-attachment-body" rows="5"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">File</label>
+            <input type="text" class="form-control" id="edit-attachment-file-url" readonly>
+            <div class="form-text">File edits are managed on the canvas; this is read-only here.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-attachment-save-btn" onclick="submitEditAttachment()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -292,9 +542,15 @@
 
   <script>
     const workspaceId = '{{.Extra.WorkspaceID}}';
+    let currentWorkspace = null; // Cache workspace payload for exporting workflows
     let workspaceLayout = null; // Store layout data for agent instance lookup
     let scheduledTasks = []; // Store scheduled tasks for lookup
+    let schedulerNodes = []; // Store scheduler node wrappers for editing
     let storeNodes = []; // Store nodes for lookup
+    let workspaceConnections = []; // Store workflow connections for attachment lookup
+    let workspaceAttachments = []; // Store attachments for attachment lookup
+    let workspaceAttachmentsById = new Map(); // id -> attachment
+    let tasksById = new Map(); // id -> task for edit modal
 
     // Load workspace data on page load
     async function loadWorkspaceData() {
@@ -303,13 +559,18 @@
         if (!response.ok) throw new Error('Failed to load workspace');
 
         const workspace = await response.json();
+        currentWorkspace = workspace;
 
         // Store layout for agent instance lookup
         workspaceLayout = workspace.layout;
 
-        // Store scheduled tasks and store nodes for task detail lookup
-        scheduledTasks = workspace.layout?.scheduler_nodes || [];
-        storeNodes = workspace.layout?.store_nodes || [];
+        // Load scheduler nodes (ensures canvas_node_id exists) for schedule lookup/editing
+        schedulerNodes = await loadSchedulerNodes(workspaceId);
+        scheduledTasks = normalizeScheduledTasks(schedulerNodes, workspace.scheduled_tasks || []);
+        storeNodes = workspace.store_nodes || workspace.layout?.store_nodes || [];
+        workspaceConnections = workspace.layout?.workflow_connections || [];
+        workspaceAttachments = workspace.attachments || [];
+        workspaceAttachmentsById = new Map((workspaceAttachments || []).map(a => [a.id, a]));
 
         // Update workspace details
         document.getElementById('workspace-name').textContent = workspace.name || 'Unnamed Workspace';
@@ -355,6 +616,7 @@
         const data = await response.json();
         const tasks = data.tasks || [];
         const stats = data.stats || {};
+        tasksById = new Map(tasks.map(t => [t.id, t]));
 
         // Update stats using API stats if available, otherwise calculate
         document.getElementById('tasks-completed').textContent = stats.completed || 0;
@@ -377,11 +639,28 @@
             // Find store node for the assigned agent
             const store = assignedNodeId ? storeNodes.find(s => s.agent_node_id === assignedNodeId) : null;
 
+            // Find attachments connected to this task (via workflow_connections)
+            const attachments = getTaskAttachments(task.id);
+
             return `
               <div class="task-item">
                 <div class="task-header">
                   <div class="task-title">${escapeHtml(task.name || task.id)}</div>
-                  <span class="task-status ${task.status || 'pending'}">${task.status || 'pending'}</span>
+                  <div class="d-flex align-items-center gap-2">
+                    <button class="modern-btn modern-btn-secondary btn-sm" onclick="saveTaskAsWorkflow('${escapeHtml(task.id)}')" title="Save this task as a workflow">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+                      </svg>
+                      Save
+                    </button>
+                    <button class="modern-btn modern-btn-secondary btn-sm" onclick="openEditTaskModal('${escapeHtml(task.id)}')" title="Edit task">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+                      </svg>
+                      Edit
+                    </button>
+                    <span class="task-status ${task.status || 'pending'}">${task.status || 'pending'}</span>
+                  </div>
                 </div>
                 ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
                 <div class="task-meta">
@@ -409,6 +688,7 @@
                     <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
                     </svg>
+                    <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); openEditScheduleModal('${escapeHtml(task.id)}')" title="Edit schedule">Edit</button>
                   </div>
                   <div class="task-collapsible-content" id="${taskId}-schedule">
                     <div class="task-detail-row">
@@ -453,6 +733,7 @@
                     <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
                     </svg>
+                    <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); openEditStorageModal('${escapeHtml(task.id)}')" title="Edit storage">Edit</button>
                   </div>
                   <div class="task-collapsible-content" id="${taskId}-store">
                     <div class="task-detail-row">
@@ -472,6 +753,36 @@
                   </div>
                 </div>
                 ` : ''}
+
+                ${attachments.length > 0 ? `
+                <div class="task-collapsible">
+                  <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-attachments')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M16.5,6V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V5A3.5,3.5 0 0,1 11,1.5A3.5,3.5 0 0,1 14.5,5V15.5A2.5,2.5 0 0,1 12,18A2.5,2.5 0 0,1 9.5,15.5V6H11V15.5A1,1 0 0,0 12,16.5A1,1 0 0,0 13,15.5V5A2,2 0 0,0 11,3A2,2 0 0,0 9,5V17.5A3,3 0 0,0 12,20.5A3,3 0 0,0 15,17.5V6H16.5Z"/>
+                    </svg>
+                    <span>Attachments</span>
+                    <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                    </svg>
+                  </div>
+                  <div class="task-collapsible-content" id="${taskId}-attachments">
+                    ${attachments.map(att => `
+                      <div class="task-detail-row" style="align-items: flex-start;">
+                        <span class="task-detail-label">${escapeHtml(att.title || 'Attachment')}:</span>
+                        <span class="task-detail-value">
+                          <div style="margin-bottom: 6px;">
+                            <button class="modern-btn modern-btn-secondary btn-sm" onclick="openEditAttachmentModal('${escapeHtml(att.id)}')" title="Edit attachment">Edit</button>
+                          </div>
+                          ${att.type ? `<span class="badge rounded-pill" style="background: rgba(52, 152, 219, 0.15); color: var(--text-primary);">${escapeHtml(att.type)}</span>` : ''}
+                          ${att.link_url ? `<div><a href="${escapeHtml(att.link_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(att.link_url)}</a></div>` : ''}
+                          ${att.file_meta?.url ? `<div><code style="font-size: 0.75rem;">${escapeHtml(att.file_meta.url)}</code></div>` : ''}
+                          ${att.body ? `<div style="margin-top: 6px; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(att.body)}</div>` : ''}
+                        </span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+                ` : ''}
               </div>
             `;
           }).join('');
@@ -488,6 +799,448 @@
       loadTasks();
     }
 
+    // Jump to canvas and open "Save as Workflow" for a specific task
+    function saveTaskAsWorkflow(taskId) {
+      if (!taskId) return;
+      window.location.href = `/studios/${workspaceId}/canvas?save_workflow_task=${encodeURIComponent(taskId)}`;
+    }
+
+    // ========== TASK EDIT MODAL ==========
+
+    function deriveToFromAssignedNodeID(assignedNodeId) {
+      if (!assignedNodeId) return 'unassigned';
+
+      const instances = currentWorkspace?.agent_instances || [];
+      if (Array.isArray(instances)) {
+        const inst = instances.find(i => i.node_id === assignedNodeId);
+        if (inst && inst.name) return inst.name;
+      }
+
+      if (assignedNodeId.includes('-node-')) {
+        return assignedNodeId.replace(/-node-\d+$/, '');
+      }
+
+      return '';
+    }
+
+    function buildAssignmentSelectOptions(selectEl, task) {
+      if (!selectEl) return;
+
+      const currentAssignedNode = task?.assigned_node_id || '';
+
+      const options = [];
+      options.push({ label: 'Unassigned', value: 'unassigned' });
+
+      const instances = currentWorkspace?.agent_instances || [];
+      if (Array.isArray(instances) && instances.length > 0) {
+        instances.forEach(inst => {
+          options.push({
+            label: `${inst.name} #${inst.instance_number}`,
+            value: `node:${inst.node_id}`
+          });
+        });
+      } else {
+        const agents = currentWorkspace?.agents || [];
+        const counters = {};
+        agents.forEach(name => {
+          counters[name] = (counters[name] || 0) + 1;
+          const n = counters[name];
+          const nodeId = `${name}-node-${n}`;
+          options.push({ label: `${name} #${n}`, value: `node:${nodeId}` });
+        });
+      }
+
+      selectEl.innerHTML = options
+        .map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+        .join('');
+
+      if (currentAssignedNode) {
+        selectEl.value = `node:${currentAssignedNode}`;
+      } else {
+        selectEl.value = 'unassigned';
+      }
+    }
+
+    function openEditTaskModal(taskId) {
+      const task = tasksById.get(taskId);
+      if (!task) {
+        alert('Task not found');
+        return;
+      }
+
+      document.getElementById('edit-task-id').textContent = task.id;
+      document.getElementById('edit-task-id-hidden').value = task.id;
+      document.getElementById('edit-task-from').value = task.from || 'user';
+      document.getElementById('edit-task-description').value = task.description || '';
+
+      buildAssignmentSelectOptions(document.getElementById('edit-task-assignment'), task);
+
+      const modal = new bootstrap.Modal(document.getElementById('editTaskModal'));
+      modal.show();
+    }
+
+    async function submitEditTask() {
+      const taskId = document.getElementById('edit-task-id-hidden').value;
+      const description = document.getElementById('edit-task-description').value;
+      const from = document.getElementById('edit-task-from').value;
+      const assignment = document.getElementById('edit-task-assignment').value;
+
+      let to = 'unassigned';
+      let assignedNodeId = '';
+      if (assignment && assignment.startsWith('node:')) {
+        assignedNodeId = assignment.slice('node:'.length);
+        to = deriveToFromAssignedNodeID(assignedNodeId);
+      }
+
+      const saveBtn = document.getElementById('edit-task-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/tasks/${encodeURIComponent(taskId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: description,
+            to: to,
+            from: from,
+            assigned_node_id: assignedNodeId
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update task');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editTaskModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update task: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== SCHEDULE EDIT MODAL ==========
+
+    function updateEditScheduleInputs() {
+      const type = document.getElementById('edit-schedule-type').value;
+      document.getElementById('edit-schedule-interval-fields').style.display = (type === 'interval') ? '' : 'none';
+      document.getElementById('edit-schedule-once-fields').style.display = (type === 'once') ? '' : 'none';
+      document.getElementById('edit-schedule-daily-fields').style.display = (type === 'daily') ? '' : 'none';
+      document.getElementById('edit-schedule-weekly-fields').style.display = (type === 'weekly') ? '' : 'none';
+      document.getElementById('edit-schedule-cron-fields').style.display = (type === 'cron') ? '' : 'none';
+    }
+
+    function toggleEditScheduleEndDate() {
+      const hasEnd = document.getElementById('edit-schedule-has-end-date').checked;
+      document.getElementById('edit-schedule-end-date').style.display = hasEnd ? '' : 'none';
+    }
+
+    function isoToLocalDatetimeValue(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch {
+        return '';
+      }
+    }
+
+    function nsToMinutes(ns) {
+      if (typeof ns !== 'number') return null;
+      return Math.round(ns / 60000000000);
+    }
+
+    function buildEditScheduleConfig() {
+      const scheduleType = document.getElementById('edit-schedule-type').value || 'interval';
+      const config = { type: scheduleType };
+
+      switch (scheduleType) {
+        case 'once': {
+          const executeAtStr = document.getElementById('edit-schedule-execute-at').value;
+          if (!executeAtStr) throw new Error('Please select a date and time');
+          const executeAt = new Date(executeAtStr);
+          config.execute_at = executeAt.toISOString();
+          break;
+        }
+        case 'interval': {
+          let minutes = parseInt(document.getElementById('edit-schedule-interval-minutes').value, 10);
+          if (isNaN(minutes) || minutes <= 0) minutes = 60;
+          const runOnce = document.getElementById('edit-schedule-interval-run-once').checked;
+          if (runOnce) {
+            config.type = 'relative_delay';
+            config.delay_duration = minutes * 60 * 1000000000;
+            config.trigger_once = true;
+          } else {
+            config.interval = minutes * 60 * 1000000000;
+          }
+          break;
+        }
+        case 'daily':
+          config.time_of_day = document.getElementById('edit-schedule-daily-time').value;
+          break;
+        case 'weekly':
+          config.time_of_day = document.getElementById('edit-schedule-weekly-time').value;
+          config.day_of_week = parseInt(document.getElementById('edit-schedule-weekly-day').value, 10);
+          break;
+        case 'cron': {
+          const expr = document.getElementById('edit-schedule-cron-expr').value.trim();
+          if (!expr) throw new Error('Cron expression is required');
+          config.cron_expr = expr;
+          break;
+        }
+      }
+
+      if (document.getElementById('edit-schedule-has-end-date').checked) {
+        const endDateStr = document.getElementById('edit-schedule-end-date').value;
+        if (endDateStr) {
+          config.end_date = new Date(endDateStr).toISOString();
+        }
+      }
+
+      return config;
+    }
+
+    function openEditScheduleModal(taskId) {
+      const sched = scheduledTasks.find(s => s.target_task_id === taskId);
+      if (!sched || !sched.canvas_node_id) {
+        alert('No scheduler found for this task');
+        return;
+      }
+
+      const nodeWrapper = (schedulerNodes || []).find(n => (n.node_id === sched.canvas_node_id) || (n.scheduled_task && n.scheduled_task.canvas_node_id === sched.canvas_node_id));
+      const scheduledTask = nodeWrapper?.scheduled_task || null;
+      const schedule = scheduledTask?.schedule || {};
+
+      document.getElementById('edit-schedule-node-id').value = sched.canvas_node_id;
+      document.getElementById('edit-schedule-task-id').value = taskId;
+      document.getElementById('edit-schedule-enabled').checked = scheduledTask ? (scheduledTask.enabled !== false) : (sched.enabled !== false);
+
+      let type = schedule.type || sched.schedule_type || 'interval';
+      let runOnce = false;
+      let intervalMinutes = null;
+
+      if (type === 'relative_delay' && schedule.trigger_once) {
+        runOnce = true;
+        intervalMinutes = nsToMinutes(schedule.delay_duration);
+        type = 'interval';
+      } else if (type === 'interval') {
+        intervalMinutes = nsToMinutes(schedule.interval);
+      }
+
+      document.getElementById('edit-schedule-type').value = type;
+      updateEditScheduleInputs();
+
+      document.getElementById('edit-schedule-interval-minutes').value = intervalMinutes || sched.interval_minutes || 60;
+      document.getElementById('edit-schedule-interval-run-once').checked = runOnce;
+      document.getElementById('edit-schedule-execute-at').value = isoToLocalDatetimeValue(schedule.execute_at);
+      document.getElementById('edit-schedule-daily-time').value = schedule.time_of_day || '09:00';
+      document.getElementById('edit-schedule-weekly-day').value = (schedule.day_of_week ?? 1);
+      document.getElementById('edit-schedule-weekly-time').value = schedule.time_of_day || '09:00';
+      document.getElementById('edit-schedule-cron-expr').value = schedule.cron_expr || sched.cron_expression || '';
+
+      const hasEnd = !!schedule.end_date;
+      document.getElementById('edit-schedule-has-end-date').checked = hasEnd;
+      revealEditScheduleEndDate(hasEnd);
+      document.getElementById('edit-schedule-end-date').value = isoToLocalDatetimeValue(schedule.end_date);
+
+      const modal = new bootstrap.Modal(document.getElementById('editScheduleModal'));
+      modal.show();
+    }
+
+    function revealEditScheduleEndDate(hasEnd) {
+      document.getElementById('edit-schedule-end-date').style.display = hasEnd ? '' : 'none';
+    }
+
+    async function submitEditSchedule() {
+      const nodeId = document.getElementById('edit-schedule-node-id').value;
+      const enabled = document.getElementById('edit-schedule-enabled').checked;
+
+      const saveBtn = document.getElementById('edit-schedule-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const schedule = buildEditScheduleConfig();
+        const resp = await fetch(`/api/orchestration/workspaces/${encodeURIComponent(workspaceId)}/scheduler-nodes/${encodeURIComponent(nodeId)}?studio_id=${encodeURIComponent(workspaceId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studio_id: workspaceId,
+            schedule: schedule,
+            enabled: enabled
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update schedule');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editScheduleModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update schedule: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== STORAGE EDIT MODAL ==========
+
+    function openEditStorageModal(taskId) {
+      const task = tasksById.get(taskId);
+      if (!task || !task.assigned_node_id) {
+        alert('Task is not assigned to an agent instance');
+        return;
+      }
+      const store = (storeNodes || []).find(s => s.agent_node_id === task.assigned_node_id);
+      if (!store) {
+        alert('No store node found for this task/agent');
+        return;
+      }
+
+      document.getElementById('edit-storage-node-id').value = store.canvas_node_id || store.id;
+      document.getElementById('edit-storage-name').value = store.name || '';
+      document.getElementById('edit-storage-base-dir').value = store.base_dir || '';
+      document.getElementById('edit-storage-format').value = store.format || 'json';
+      document.getElementById('edit-storage-write-mode').value = store.write_mode || 'overwrite';
+      document.getElementById('edit-storage-auto-create-dir').checked = store.auto_create_dir !== false;
+      document.getElementById('edit-storage-auto-store').checked = store.auto_store !== false;
+
+      const modal = new bootstrap.Modal(document.getElementById('editStorageModal'));
+      modal.show();
+    }
+
+    async function submitEditStorage() {
+      const nodeId = document.getElementById('edit-storage-node-id').value;
+      const name = document.getElementById('edit-storage-name').value;
+      const baseDir = document.getElementById('edit-storage-base-dir').value;
+      const format = document.getElementById('edit-storage-format').value;
+      const writeMode = document.getElementById('edit-storage-write-mode').value;
+      const autoCreateDir = document.getElementById('edit-storage-auto-create-dir').checked;
+      const autoStore = document.getElementById('edit-storage-auto-store').checked;
+
+      const saveBtn = document.getElementById('edit-storage-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/store-nodes/${encodeURIComponent(nodeId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name,
+            base_dir: baseDir,
+            format: format,
+            write_mode: writeMode,
+            auto_create_dir: autoCreateDir,
+            auto_store: autoStore
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update storage');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editStorageModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update storage: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== ATTACHMENT EDIT MODAL ==========
+
+    function openEditAttachmentModal(attachmentId) {
+      const att = workspaceAttachmentsById.get(attachmentId);
+      if (!att) {
+        alert('Attachment not found');
+        return;
+      }
+
+      document.getElementById('edit-attachment-id').value = att.id;
+      document.getElementById('edit-attachment-title').value = att.title || '';
+      document.getElementById('edit-attachment-type').value = att.type || 'other';
+      document.getElementById('edit-attachment-link-url').value = att.link_url || '';
+      document.getElementById('edit-attachment-body').value = att.body || '';
+      document.getElementById('edit-attachment-file-url').value = att.file_meta?.url || '';
+
+      const modal = new bootstrap.Modal(document.getElementById('editAttachmentModal'));
+      modal.show();
+    }
+
+    async function submitEditAttachment() {
+      const attachmentId = document.getElementById('edit-attachment-id').value;
+      const title = document.getElementById('edit-attachment-title').value;
+      const type = document.getElementById('edit-attachment-type').value;
+      const linkURL = document.getElementById('edit-attachment-link-url').value;
+      const body = document.getElementById('edit-attachment-body').value;
+
+      const existing = workspaceAttachmentsById.get(attachmentId);
+      const fileMeta = existing?.file_meta || null;
+
+      const saveBtn = document.getElementById('edit-attachment-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(attachmentId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title,
+            type: type,
+            link_url: linkURL,
+            body: body,
+            file_meta: fileMeta
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update attachment');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editAttachmentModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update attachment: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
     // View canvas
     function viewCanvas() {
       // Navigate to workspace-specific canvas page
@@ -500,6 +1253,28 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Get attachments connected to a task via layout workflow_connections
+    function getTaskAttachments(taskId) {
+      if (!taskId) return [];
+      if (!Array.isArray(workspaceConnections) || workspaceConnections.length === 0) return [];
+      if (!workspaceAttachmentsById || workspaceAttachmentsById.size === 0) return [];
+
+      const attachmentIds = new Set();
+      for (const conn of workspaceConnections) {
+        if (!conn) continue;
+        if (conn.to === taskId && workspaceAttachmentsById.has(conn.from)) {
+          attachmentIds.add(conn.from);
+        }
+        if (conn.from === taskId && workspaceAttachmentsById.has(conn.to)) {
+          attachmentIds.add(conn.to);
+        }
+      }
+
+      return Array.from(attachmentIds)
+        .map(id => workspaceAttachmentsById.get(id))
+        .filter(Boolean);
     }
 
     // Get formatted agent assignment with instance number (e.g., "default #1")
@@ -545,6 +1320,98 @@
 
       // Fallback to task.to
       return task.to;
+    }
+
+    // Normalize scheduled tasks from API to the shape expected by the dashboard UI
+    function normalizeScheduledTasks(nodeWrappers, fallbackScheduledTasks) {
+      const rows = [];
+
+      if (Array.isArray(nodeWrappers) && nodeWrappers.length > 0) {
+        nodeWrappers.forEach(item => {
+          const task = item && item.scheduled_task ? item.scheduled_task : null;
+          if (!task) return;
+          const schedule = task.schedule || {};
+          const scheduleType = schedule.type || task.schedule_type || 'cron';
+          const cron = schedule.cron_expr || task.cron_expression || '';
+          const intervalMinutes = parseIntervalToMinutes(schedule.interval || schedule.delay_duration);
+          const runAt = schedule.execute_at || null;
+          rows.push({
+            id: task.id,
+            canvas_node_id: task.canvas_node_id || item.node_id,
+            target_task_id: task.target_task_id || null,
+            schedule_type: scheduleType,
+            cron_expression: cron,
+            interval_minutes: intervalMinutes,
+            run_at: runAt,
+            enabled: task.enabled !== false
+          });
+        });
+        return rows;
+      }
+
+      if (Array.isArray(fallbackScheduledTasks)) {
+        fallbackScheduledTasks.forEach(task => {
+          const schedule = task.schedule || {};
+          const scheduleType = schedule.type || task.schedule_type || 'cron';
+          const cron = schedule.cron_expr || task.cron_expression || '';
+          const intervalMinutes = parseIntervalToMinutes(schedule.interval || schedule.delay_duration);
+          const runAt = schedule.execute_at || null;
+          rows.push({
+            id: task.id,
+            canvas_node_id: task.canvas_node_id || null,
+            target_task_id: task.target_task_id || null,
+            schedule_type: scheduleType,
+            cron_expression: cron,
+            interval_minutes: intervalMinutes,
+            run_at: runAt,
+            enabled: task.enabled !== false
+          });
+        });
+      }
+
+      return rows;
+    }
+
+    // Convert Go time.Duration (ns or string) into minutes for display
+    function parseIntervalToMinutes(value) {
+      if (value === undefined || value === null) return null;
+
+      if (typeof value === 'number') {
+        return Math.round(value / 60000000000); // ns -> minutes
+      }
+
+      if (typeof value === 'string') {
+        // Supports formats like "10m0s", "1h30m", "45s"
+        let minutes = 0;
+        const hoursMatch = value.match(/([\d.]+)h/);
+        const minsMatch = value.match(/([\d.]+)m/);
+        const secsMatch = value.match(/([\d.]+)s/);
+
+        if (hoursMatch) minutes += parseFloat(hoursMatch[1]) * 60;
+        if (minsMatch) minutes += parseFloat(minsMatch[1]);
+        if (!hoursMatch && !minsMatch && secsMatch) {
+          minutes += parseFloat(secsMatch[1]) / 60;
+        }
+
+        if (minutes > 0) {
+          return Math.round(minutes);
+        }
+      }
+
+      return null;
+    }
+
+    async function loadSchedulerNodes(studioId) {
+      try {
+        const resp = await fetch(`/api/orchestration/workspaces/${encodeURIComponent(studioId)}/scheduler-nodes?studio_id=${encodeURIComponent(studioId)}`);
+        if (!resp.ok) {
+          return [];
+        }
+        const data = await resp.json();
+        return data.scheduler_nodes || [];
+      } catch {
+        return [];
+      }
     }
 
     // Toggle task collapsible section

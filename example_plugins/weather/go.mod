@@ -1,6 +1,6 @@
 module github.com/johnjallday/ori-agent/plugins/weather
 
-go 1.25.3
+go 1.25.5
 
 require github.com/johnjallday/ori-agent v0.0.0
 

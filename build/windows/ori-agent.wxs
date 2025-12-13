@@ -100,11 +100,8 @@
                   WorkingDirectory="BinFolder"
                   Icon="OriAgentIcon.exe" />
 
-        <!-- README shortcut -->
-        <Shortcut Id="ReadmeStartMenuShortcut"
-                  Name="Ori Agent Documentation"
-                  Description="Visit Ori Agent Documentation"
-                  Target="https://github.com/johnjallday/ori-agent" />
+        <!-- Documentation link removed - URL shortcuts not supported by WiX ICE03 -->
+        <!-- Users can access docs at: https://github.com/johnjallday/ori-agent -->
 
         <!-- Uninstall shortcut -->
         <Shortcut Id="UninstallProduct"
@@ -157,15 +154,9 @@
 
       <ComponentRef Id="OriAgentExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
-
-      <!-- Desktop shortcut as optional feature -->
-      <Feature Id="DesktopShortcutFeature"
-               Title="Desktop Shortcut"
-               Description="Create a desktop shortcut for Ori Agent"
-               Level="1"
-               AllowAdvertise="no">
-        <ComponentRef Id="DesktopShortcut" />
-      </Feature>
+      <!-- Desktop shortcut included in main feature to satisfy WiX ICE69 -->
+      <!-- (shortcut must be in same feature as target file) -->
+      <ComponentRef Id="DesktopShortcut" />
 
     </Feature>
 

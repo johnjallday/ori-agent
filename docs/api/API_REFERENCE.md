@@ -21,6 +21,7 @@ http://localhost:8765/api
 - [Chat API](#chat-api)
 - [Updates API](#updates-api)
 - [Scheduler Nodes API](#scheduler-nodes-api)
+- [Custom Workflows API](#custom-workflows-api)
 - [Examples](#examples)
 
 ## Authentication
@@ -1359,6 +1360,234 @@ Scheduler nodes emit Server-Sent Events (SSE) for real-time updates:
     },
     "task_id": "task-xyz789",
     "timestamp": "2025-12-04T09:00:00Z"
+  }
+}
+```
+
+## Custom Workflows API
+
+Custom workflows allow users to save selections of canvas nodes as reusable templates. These workflows can then be instantiated in any studio to recreate the node configuration.
+
+### List Workflows
+
+Get all custom workflows.
+
+**Endpoint:** `GET /api/workflows`
+
+**Response:**
+```json
+{
+  "workflows": [
+    {
+      "id": "wf-abc123",
+      "name": "My Data Pipeline",
+      "description": "A workflow for processing data",
+      "category": "Data Processing",
+      "source": "custom",
+      "node_count": 5,
+      "agent_names": ["data-agent", "processor-agent"],
+      "created_at": "2025-12-04T22:00:00Z",
+      "updated_at": "2025-12-04T22:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+### Create Workflow
+
+Create a new custom workflow from selected nodes.
+
+**Endpoint:** `POST /api/workflows`
+
+**Request Body:**
+```json
+{
+  "name": "My Data Pipeline",
+  "description": "A workflow for processing data",
+  "category": "Data Processing",
+  "nodes": [
+    {
+      "id": "node-1",
+      "type": "task",
+      "config": {
+        "description": "Process incoming data",
+        "to": "data-agent",
+        "from": "user"
+      },
+      "relative_x": -100,
+      "relative_y": 0
+    },
+    {
+      "id": "node-2",
+      "type": "agent",
+      "config": {
+        "name": "data-agent"
+      },
+      "relative_x": 100,
+      "relative_y": 0
+    }
+  ],
+  "internal_connections": [
+    {
+      "id": "conn-1",
+      "from_node": "node-1",
+      "from_port": "out",
+      "to_node": "node-2",
+      "to_port": "in"
+    }
+  ],
+  "layout": {
+    "width": 400,
+    "height": 300,
+    "node_positions": {
+      "node-1": {"x": -100, "y": 0},
+      "node-2": {"x": 100, "y": 0}
+    }
+  }
+}
+```
+
+**Parameters:**
+- `name` (required): Display name for the workflow
+- `description` (optional): Description of the workflow
+- `category` (optional): Category for organization
+- `nodes` (required): Array of workflow nodes (max 20)
+  - `id`: Unique node identifier
+  - `type`: Node type - `"task"`, `"agent"`, `"scheduler"`, `"store"`, `"attachment"`
+  - `config`: Type-specific configuration object
+  - `relative_x`, `relative_y`: Position relative to workflow center
+- `internal_connections` (optional): Array of connections between nodes
+- `input_ports`, `output_ports` (optional): External connection points
+- `layout` (optional): Layout dimensions and positions
+
+**Response:**
+```json
+{
+  "id": "wf-abc123",
+  "name": "My Data Pipeline",
+  "message": "Workflow created successfully"
+}
+```
+
+### Get Workflow
+
+Get a specific workflow by ID.
+
+**Endpoint:** `GET /api/workflows/:id`
+
+**Response:**
+```json
+{
+  "id": "wf-abc123",
+  "name": "My Data Pipeline",
+  "description": "A workflow for processing data",
+  "category": "Data Processing",
+  "source": "custom",
+  "nodes": [...],
+  "internal_connections": [...],
+  "layout": {...},
+  "created_at": "2025-12-04T22:00:00Z",
+  "updated_at": "2025-12-04T22:00:00Z"
+}
+```
+
+### Delete Workflow
+
+Delete a custom workflow. Only custom workflows can be deleted.
+
+**Endpoint:** `DELETE /api/workflows/:id`
+
+**Response:** `204 No Content`
+
+**Error Responses:**
+- `403 Forbidden` - Cannot delete built-in workflows
+- `404 Not Found` - Workflow not found
+
+### Check Agent Availability
+
+Check if all agents required by a workflow are available in a specific studio.
+
+**Endpoint:** `POST /api/workflows/:id/check-agents`
+
+**Request Body:**
+```json
+{
+  "studio_id": "studio-xyz789"
+}
+```
+
+**Response:**
+```json
+{
+  "available": false,
+  "missing_agents": ["processor-agent"],
+  "required_agents": ["data-agent", "processor-agent"]
+}
+```
+
+### Node Types and Configuration
+
+#### Task Node
+```json
+{
+  "type": "task",
+  "config": {
+    "description": "Task description",
+    "to": "agent-name",
+    "from": "user",
+    "priority": 0,
+    "status": "pending"
+  }
+}
+```
+
+#### Agent Node
+```json
+{
+  "type": "agent",
+  "config": {
+    "name": "agent-name",
+    "type": "tool-calling",
+    "model": "gpt-4o"
+  }
+}
+```
+
+#### Scheduler Node
+```json
+{
+  "type": "scheduler",
+  "config": {
+    "name": "Daily Sync",
+    "schedule_type": "cron",
+    "cron_expression": "0 9 * * *",
+    "enabled": true
+  }
+}
+```
+
+#### Store Node
+```json
+{
+  "type": "store",
+  "config": {
+    "name": "Data Store",
+    "store_type": "file",
+    "file_path": "/path/to/data"
+  }
+}
+```
+
+#### Attachment Node
+```json
+{
+  "type": "attachment",
+  "config": {
+    "title": "Reference Doc",
+    "type": "note",
+    "body": "Content here",
+    "link_url": ""
   }
 }
 ```

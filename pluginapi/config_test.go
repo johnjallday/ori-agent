@@ -41,7 +41,7 @@ config:
       default_value: "{{OS}}_{{ARCH}}"
 `
 
-	config := ReadPluginConfig(yaml)
+	config := readPluginConfig(yaml)
 	vars := config.ToConfigVariables()
 
 	if len(vars) != 2 {
