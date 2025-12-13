@@ -40,7 +40,9 @@ jobs:
         run: brew install goreleaser
 
       - name: Build binaries
-        run: goreleaser release --snapshot --clean --skip publish
+        run: |
+          # macOS can run all builds including CGO menubar
+          goreleaser release --snapshot --clean --skip=publish
 
       - name: Create DMG
         run: |
@@ -136,8 +138,9 @@ jobs:
 
       - name: Build packages
         run: |
-          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
-          goreleaser release --snapshot --clean --skip publish
+          # Skip before hooks (bash scripts may fail) and menubar (CGO, darwin-only)
+          # Build server + Linux packages only
+          goreleaser release --snapshot --clean --skip=publish,before
 
       - name: Install package
         run: |
@@ -207,14 +210,15 @@ jobs:
 
       - name: Install GoReleaser
         run: |
-          dnf install -y 'dnf-command(config-manager)' curl
+          dnf install -y 'dnf-command(config-manager)' curl git
           dnf config-manager --add-repo https://repo.goreleaser.com/yum/
           dnf install -y goreleaser --nogpgcheck
 
       - name: Build packages
         run: |
-          # Skip menubar build (requires CGO on macOS, cannot cross-compile from Linux)
-          goreleaser release --snapshot --clean --skip publish
+          # Skip before hooks (bash scripts may fail) and menubar (CGO, darwin-only)
+          # Build server + Linux packages only
+          goreleaser release --snapshot --clean --skip=publish,before
 
       - name: Install package
         run: |
@@ -289,8 +293,8 @@ jobs:
       - name: Build binaries
         shell: pwsh
         run: |
-          # Build server binary only (skip menubar - requires CGO on macOS)
-          goreleaser build --id=server --snapshot --clean
+          # Build server binary only, skip before hooks (bash scripts don't work on Windows)
+          goreleaser build --id=server --snapshot --clean --skip=before
 
       - name: Create MSI
         shell: pwsh
