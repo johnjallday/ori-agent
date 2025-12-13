@@ -57,7 +57,7 @@ func TestPluginOptimizationAPIs_Integration(t *testing.T) {
 	}
 
 	// Step 2: Create a BasePlugin instance
-	bp := NewBasePlugin("test-tool", "1.0.0", "0.0.1", "", "v1")
+	bp := newBasePlugin("test-tool", "1.0.0", "0.0.1", "", "v1")
 	bp.SetPluginConfig(pluginConfig)
 	bp.SetMetadata(&PluginMetadata{
 		Name:        "integration-test-plugin",
@@ -298,7 +298,7 @@ func TestRealWorldScenario_MusicPlugin(t *testing.T) {
 	}
 
 	// Initialize plugin
-	bp := NewBasePlugin("music-manager", "0.0.8", "0.0.1", "", "v1")
+	bp := newBasePlugin("music-manager", "0.0.8", "0.0.1", "", "v1")
 	bp.SetPluginConfig(config)
 	bp.SetAgentContext(AgentContext{
 		Name:     "music-agent",
@@ -355,7 +355,7 @@ func TestConcurrentAPIUsage(t *testing.T) {
 		},
 	}
 
-	bp := NewBasePlugin("concurrent-tool", "1.0.0", "", "", "v1")
+	bp := newBasePlugin("concurrent-tool", "1.0.0", "", "", "v1")
 	bp.SetPluginConfig(config)
 	bp.SetAgentContext(AgentContext{
 		Name:     "test-agent",

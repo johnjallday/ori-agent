@@ -34,7 +34,7 @@ import (
 // - configYAML must be a valid plugin.yaml string
 func ServePlugin(tool PluginTool, configYAML string) {
 	// Parse plugin config from embedded YAML
-	config := ReadPluginConfig(configYAML)
+	config := readPluginConfig(configYAML)
 
 	// Get API version from config, default to "v1"
 	apiVersion := config.Requirements.ApiVersion
@@ -43,7 +43,7 @@ func ServePlugin(tool PluginTool, configYAML string) {
 	}
 
 	// Create base plugin with all metadata from config
-	base := NewBasePlugin(
+	base := newBasePlugin(
 		config.Name,
 		config.Version,
 		config.Requirements.MinOriVersion,

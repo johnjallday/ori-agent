@@ -2,17 +2,70 @@
 
 This checklist ensures code quality, functionality, and installer integrity before every release.
 
-## Quick Reference
+---
+
+## Quick Reference (TL;DR)
+
+**Golden Rule:** Test on `dev` → Merge to `main` → Release → Back to `dev`
+
+### Release in 3 Commands
 
 ```bash
-# Complete pre-release script (runs everything)
-./scripts/pre-release-check.sh
+# 1. Test on dev (while on dev branch)
+git switch dev
+./scripts/pre-release-check.sh v0.X.Y
 
-# Or run manually:
-make pre-release
+# 2. Merge to main
+./scripts/prepare-release.sh
+
+# 3. Release
+./scripts/create-release.sh v0.X.Y              # Release branch (default)
+./scripts/create-release.sh v0.X.Y --immediate  # Immediate publish
 ```
 
+### One-Liner (Immediate Publish)
+
+```bash
+./scripts/pre-release-check.sh v0.X.Y && ./scripts/prepare-release.sh && ./scripts/create-release.sh v0.X.Y --immediate
+```
+
+### Visual Flow
+
+```
+┌──────────────────────────────────┐
+│  DEV BRANCH (your home)          │
+│  ● Features, bug fixes, testing  │
+└──────────────────────────────────┘
+              ↓
+┌──────────────────────────────────┐
+│  1. Test on dev                  │
+│     pre-release-check.sh         │
+│     ✅ All pass                  │
+└──────────────────────────────────┘
+              ↓
+┌──────────────────────────────────┐
+│  2. Merge dev → main             │
+│     prepare-release.sh           │
+└──────────────────────────────────┘
+              ↓
+┌──────────────────────────────────┐
+│  3. Release                      │
+│     create-release.sh            │
+└──────────────────────────────────┘
+              ↓
+        Back on dev!
+```
+
+### Branch Purpose
+
+| Branch | Purpose | When |
+|--------|---------|------|
+| `dev` | Daily work, features, testing | Always (95%) |
+| `main` | Releases only | Release day (5%) |
+
 ---
+
+## Full Checklist
 
 ## 1. Code Quality Checks (5 minutes)
 

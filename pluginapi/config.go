@@ -92,9 +92,10 @@ type PluginConfig struct {
 	Tool         *YAMLToolDefinition `yaml:"tool_definition,omitempty"` // Optional tool definition
 }
 
-// ReadPluginConfig parses and validates plugin configuration from embedded YAML
-// It panics if the configuration is invalid to fail fast during plugin initialization
-func ReadPluginConfig(embeddedYAML string) PluginConfig {
+// readPluginConfig parses and validates plugin configuration from embedded YAML.
+// This is an internal function used by ServePlugin.
+// It panics if the configuration is invalid to fail fast during plugin initialization.
+func readPluginConfig(embeddedYAML string) PluginConfig {
 	var config PluginConfig
 
 	// Parse YAML
