@@ -970,6 +970,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// OpenAI models require an API key; return a clear error if none is configured.
+	if h.clientFactory != nil && !h.clientFactory.HasKeyForAgent(ag) {
+		writeJSONResponse(w, map[string]any{
+			"response": "❌ **Error**: OpenAI API key is not configured. Set `OPENAI_API_KEY` for the server process, or add an API key in the app Settings.",
+		})
+		return
+	}
+
 	// Convert llm.Tool to OpenAI format
 	var openaiTools []openai.ChatCompletionToolUnionParam
 	for _, tool := range tools {

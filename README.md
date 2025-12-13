@@ -1,7 +1,7 @@
 # <img src="assets/logo.svg" alt="Ori Agent logo" width="28" /> Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.21-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.22-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25.5-00add8)

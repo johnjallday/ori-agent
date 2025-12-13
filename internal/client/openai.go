@@ -13,6 +13,7 @@ import (
 // Factory provides methods for creating OpenAI clients
 type Factory struct {
 	defaultClient openai.Client
+	hasDefaultKey bool
 	httpClient    *http.Client
 }
 
@@ -29,10 +30,17 @@ func NewFactory(apiKey string) *Factory {
 			option.WithAPIKey(apiKey),
 			option.WithHTTPClient(httpClient),
 		)
+	} else {
+		// Keep the client initialized so we don't surface confusing SDK errors like
+		// "requestconfig: base url is not set" when the real issue is a missing API key.
+		defaultClient = openai.NewClient(
+			option.WithHTTPClient(httpClient),
+		)
 	}
 
 	return &Factory{
 		defaultClient: defaultClient,
+		hasDefaultKey: apiKey != "",
 		httpClient:    httpClient,
 	}
 }
@@ -54,6 +62,11 @@ func (f *Factory) GetForAgent(ag *agent.Agent) openai.Client {
 	return f.defaultClient
 }
 
+// HasKeyForAgent returns true if an API key is available for this agent request.
+func (f *Factory) HasKeyForAgent(ag *agent.Agent) bool {
+	return ag.Settings.APIKey != "" || f.hasDefaultKey
+}
+
 // GetForAPIKey creates a new client with the specified API key
 func (f *Factory) GetForAPIKey(apiKey string) openai.Client {
 	return openai.NewClient(
@@ -69,5 +82,9 @@ func (f *Factory) UpdateDefaultClient(apiKey string) {
 			option.WithAPIKey(apiKey),
 			option.WithHTTPClient(f.httpClient),
 		)
+		f.hasDefaultKey = true
+		return
 	}
+	f.defaultClient = openai.NewClient(option.WithHTTPClient(f.httpClient))
+	f.hasDefaultKey = false
 }
