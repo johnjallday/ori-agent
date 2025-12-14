@@ -61,6 +61,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Favicon endpoint
 	mux.HandleFunc("/favicon.svg", s.serveFavicon)
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+	})
 
 	// =============================================================================
 	// Agent API Endpoints
