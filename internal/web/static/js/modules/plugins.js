@@ -67,9 +67,9 @@ async function loadPluginsForSidebar() {
         .map(p => p.name)
     );
 
-    // Filter to only show local plugins in sidebar (those without github_repo)
+    // Filter to only show installed plugins in sidebar (those with a local path in uploaded_plugins)
     const localPlugins = registry.plugins
-      .filter(plugin => !plugin.github_repo)
+      .filter(plugin => plugin.path && plugin.path.includes('uploaded_plugins'))
       .map(plugin => ({
         ...plugin,
         displayName: plugin.metadata?.name || stripVersionSuffix(plugin.name || '')
