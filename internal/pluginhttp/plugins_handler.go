@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -215,11 +216,14 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 		agent.Plugins = make(map[string]types.LoadedPlugin)
 	}
 
+	supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
 	agent.Plugins[pluginName] = types.LoadedPlugin{
-		Tool:       tool,
-		Definition: tool.Definition(),
-		Path:       plugin.Path,
-		Version:    plugin.Version,
+		Tool:              tool,
+		Definition:        tool.Definition(),
+		Path:              plugin.Path,
+		Version:           plugin.Version,
+		SupportsFiles:     supportsFiles,
+		AcceptedFileTypes: acceptedFileTypes,
 	}
 
 	// Save agent

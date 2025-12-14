@@ -738,6 +738,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleExit(w, r)
 		return
 	}
+	if q == "/version" {
+		h.commandHandler.HandleVersion(w, r)
+		return
+	}
 	if strings.HasPrefix(q, "/switch") {
 		// Parse the agent name from the command
 		parts := strings.Fields(q)

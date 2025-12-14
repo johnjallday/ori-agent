@@ -439,6 +439,70 @@ func (t *myPluginTool) ServeWebPage(path string, query map[string]string) (strin
 
 **URL**: `http://localhost:8765/api/plugins/my-plugin/pages/dashboard`
 
+### FileAttachmentHandler
+Handle file attachments uploaded through the chat interface:
+```go
+// AcceptsFiles returns the list of file types this plugin accepts
+func (t *myPluginTool) AcceptsFiles() []string {
+	return []string{
+		// File extensions
+		pluginapi.ExtWAV, pluginapi.ExtMP3, pluginapi.ExtAIFF,
+		pluginapi.ExtMID, pluginapi.ExtMIDI,
+		pluginapi.ExtZIP,
+		// MIME types
+		pluginapi.MIMETypeWAV, pluginapi.MIMETypeMP3,
+		pluginapi.MIMETypeMIDI, pluginapi.MIMETypeZIP,
+	}
+}
+
+// CallWithFiles executes the tool with arguments and file attachments
+func (t *myPluginTool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+	// Parse arguments
+	params, err := parseMyPluginParams(args)
+	if err != nil {
+		return "", err
+	}
+
+	// Process files
+	for _, file := range files {
+		log.Printf("Received file: %s (%s, %d bytes)", file.Name, file.Type, file.Size)
+		// file.Content contains the raw bytes
+	}
+
+	return "Processed files successfully", nil
+}
+```
+
+**FileAttachment struct:**
+```go
+type FileAttachment struct {
+	Name    string // Original filename (e.g., "song.wav")
+	Type    string // MIME type (e.g., "audio/wav")
+	Size    int64  // File size in bytes
+	Content []byte // File content
+}
+```
+
+**Available constants:**
+- Extensions: `ExtWAV`, `ExtMP3`, `ExtAIFF`, `ExtFLAC`, `ExtOGG`, `ExtMID`, `ExtMIDI`, `ExtZIP`
+- MIME types: `MIMETypeWAV`, `MIMETypeMP3`, `MIMETypeAIFF`, `MIMETypeFLAC`, `MIMETypeOGG`, `MIMETypeMIDI`, `MIMETypeZIP`
+
+**Helper functions:**
+```go
+// Check if a file type is accepted
+if pluginapi.IsFileTypeAccepted(acceptedTypes, filename, mimeType) {
+    // Process file
+}
+
+// Filter files to only accepted types
+filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
+```
+
+**Compile-time interface check (recommended):**
+```go
+var _ pluginapi.FileAttachmentHandler = (*myPluginTool)(nil)
+```
+
 ### MetadataProvider
 Provide rich metadata:
 ```go

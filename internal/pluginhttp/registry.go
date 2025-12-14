@@ -215,7 +215,15 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			ag.Plugins = map[string]types.LoadedPlugin{}
 		}
 		version := pluginloader.GetPluginVersion(tool)
-		ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: entryPath, Version: version}
+		supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
+		ag.Plugins[def.Name] = types.LoadedPlugin{
+			Tool:              tool,
+			Definition:        def,
+			Path:              entryPath,
+			Version:           version,
+			SupportsFiles:     supportsFiles,
+			AcceptedFileTypes: acceptedFileTypes,
+		}
 		if err := h.store.SetAgent(current, ag); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -43,3 +43,19 @@ func GetPluginMetadata(tool pluginapi.PluginTool) (*pluginapi.PluginMetadata, er
 	}
 	return nil, nil // Plugin doesn't implement MetadataProvider
 }
+
+// GetPluginFileSupport checks if a plugin implements FileAttachmentHandler
+// and returns the accepted file types. Returns (false, nil) if not supported.
+func GetPluginFileSupport(tool pluginapi.PluginTool) (supportsFiles bool, acceptedTypes []string) {
+	if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok {
+		acceptedTypes = fileHandler.AcceptsFiles()
+		return true, acceptedTypes
+	}
+	return false, nil
+}
+
+// PluginSupportsFiles returns true if the plugin implements FileAttachmentHandler
+func PluginSupportsFiles(tool pluginapi.PluginTool) bool {
+	_, ok := tool.(pluginapi.FileAttachmentHandler)
+	return ok
+}

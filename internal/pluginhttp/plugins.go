@@ -368,11 +368,14 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 
 	logger.Verbosef("💾 Adding plugin '%s' to agent '%s' (current plugins: %d)", name, current, len(ag.Plugins))
 
+	supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
 	ag.Plugins[name] = types.LoadedPlugin{
-		Tool:       tool,
-		Definition: def,
-		Path:       path,
-		Version:    version,
+		Tool:              tool,
+		Definition:        def,
+		Path:              path,
+		Version:           version,
+		SupportsFiles:     supportsFiles,
+		AcceptedFileTypes: acceptedFileTypes,
 	}
 
 	logger.Verbosef("💾 Agent now has %d plugins", len(ag.Plugins))

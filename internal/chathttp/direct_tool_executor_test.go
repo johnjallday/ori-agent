@@ -352,6 +352,245 @@ func TestFormatDirectToolResponse(t *testing.T) {
 	}
 }
 
+// mockFileAttachmentTool implements both PluginTool and FileAttachmentHandler
+type mockFileAttachmentTool struct {
+	mockTool
+	acceptedTypes []string
+	callWithFiles func(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error)
+}
+
+func (m *mockFileAttachmentTool) AcceptsFiles() []string {
+	return m.acceptedTypes
+}
+
+func (m *mockFileAttachmentTool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+	if m.callWithFiles != nil {
+		return m.callWithFiles(ctx, args, files)
+	}
+	return fmt.Sprintf("received %d files", len(files)), nil
+}
+
+// TestConvertUploadedFilesToAttachments tests the file conversion function
+func TestConvertUploadedFilesToAttachments(t *testing.T) {
+	tests := []struct {
+		name  string
+		files []UploadedFile
+		want  int
+	}{
+		{
+			name:  "empty file list",
+			files: []UploadedFile{},
+			want:  0,
+		},
+		{
+			name: "single text file",
+			files: []UploadedFile{
+				{
+					Name:    "test.txt",
+					Type:    "text/plain",
+					Size:    11,
+					Content: "Hello World",
+				},
+			},
+			want: 1,
+		},
+		{
+			name: "single base64 file",
+			files: []UploadedFile{
+				{
+					Name:    "audio.wav",
+					Type:    "audio/wav",
+					Size:    4,
+					Content: "dGVzdA==", // base64 for "test"
+				},
+			},
+			want: 1,
+		},
+		{
+			name: "multiple files",
+			files: []UploadedFile{
+				{Name: "a.wav", Type: "audio/wav", Size: 4, Content: "dGVzdA=="},
+				{Name: "b.mid", Type: "audio/midi", Size: 4, Content: "dGVzdA=="},
+				{Name: "c.txt", Type: "text/plain", Size: 5, Content: "hello"},
+			},
+			want: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attachments := ConvertUploadedFilesToAttachments(tt.files)
+
+			if len(attachments) != tt.want {
+				t.Errorf("ConvertUploadedFilesToAttachments() returned %d files, want %d", len(attachments), tt.want)
+			}
+
+			// Verify file metadata is preserved
+			for i, att := range attachments {
+				if att.Name != tt.files[i].Name {
+					t.Errorf("ConvertUploadedFilesToAttachments() file[%d].Name = %s, want %s", i, att.Name, tt.files[i].Name)
+				}
+				if att.Type != tt.files[i].Type {
+					t.Errorf("ConvertUploadedFilesToAttachments() file[%d].Type = %s, want %s", i, att.Type, tt.files[i].Type)
+				}
+				if att.Size != tt.files[i].Size {
+					t.Errorf("ConvertUploadedFilesToAttachments() file[%d].Size = %d, want %d", i, att.Size, tt.files[i].Size)
+				}
+			}
+		})
+	}
+}
+
+// TestConvertUploadedFilesToAttachmentsBase64 tests base64 decoding
+func TestConvertUploadedFilesToAttachmentsBase64(t *testing.T) {
+	// Base64 encoded "test data"
+	base64Content := "dGVzdCBkYXRh"
+
+	files := []UploadedFile{
+		{
+			Name:    "binary.wav",
+			Type:    "audio/wav",
+			Size:    9,
+			Content: base64Content,
+		},
+	}
+
+	attachments := ConvertUploadedFilesToAttachments(files)
+
+	if len(attachments) != 1 {
+		t.Fatalf("Expected 1 attachment, got %d", len(attachments))
+	}
+
+	// Verify content was decoded from base64
+	expectedContent := "test data"
+	if string(attachments[0].Content) != expectedContent {
+		t.Errorf("Content = %q, want %q", string(attachments[0].Content), expectedContent)
+	}
+}
+
+// TestExecuteDirectToolWithFiles tests tool execution with file attachments
+func TestExecuteDirectToolWithFiles(t *testing.T) {
+	tests := []struct {
+		name               string
+		files              []pluginapi.FileAttachment
+		acceptedTypes      []string
+		wantFilesReceived  int
+		wantSuccess        bool
+		wantResultContains string
+	}{
+		{
+			name: "tool receives audio files",
+			files: []pluginapi.FileAttachment{
+				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
+			},
+			acceptedTypes:      []string{".wav", "audio/wav"},
+			wantFilesReceived:  1,
+			wantSuccess:        true,
+			wantResultContains: "1 files",
+		},
+		{
+			name: "tool filters non-accepted files",
+			files: []pluginapi.FileAttachment{
+				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
+				{Name: "doc.pdf", Type: "application/pdf", Size: 10, Content: []byte("pdf")},
+			},
+			acceptedTypes:      []string{".wav", "audio/wav"},
+			wantFilesReceived:  1,
+			wantSuccess:        true,
+			wantResultContains: "1 files",
+		},
+		{
+			name: "tool receives multiple accepted files",
+			files: []pluginapi.FileAttachment{
+				{Name: "song.wav", Type: "audio/wav", Size: 10, Content: []byte("audio")},
+				{Name: "melody.mid", Type: "audio/midi", Size: 10, Content: []byte("midi")},
+			},
+			acceptedTypes:      []string{".wav", "audio/wav", ".mid", "audio/midi"},
+			wantFilesReceived:  2,
+			wantSuccess:        true,
+			wantResultContains: "2 files",
+		},
+		{
+			name: "no matching files falls back to regular call",
+			files: []pluginapi.FileAttachment{
+				{Name: "doc.pdf", Type: "application/pdf", Size: 10, Content: []byte("pdf")},
+			},
+			acceptedTypes:      []string{".wav", "audio/wav"},
+			wantFilesReceived:  0,
+			wantSuccess:        true,
+			wantResultContains: "mock result",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filesReceived := 0
+
+			// Create mock file attachment tool
+			mock := &mockFileAttachmentTool{
+				mockTool: mockTool{
+					name:        "file-tool",
+					description: "Tool that accepts files",
+				},
+				acceptedTypes: tt.acceptedTypes,
+				callWithFiles: func(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+					filesReceived = len(files)
+					return fmt.Sprintf("received %d files", len(files)), nil
+				},
+			}
+
+			// Create test agent with mock tool
+			ag := &agent.Agent{
+				Plugins: map[string]types.LoadedPlugin{
+					"file-tool": {
+						Tool: mock,
+						Definition: pluginapi.Tool{
+							Name:        "file-tool",
+							Description: "Tool that accepts files",
+							Parameters: map[string]interface{}{
+								"type":       "object",
+								"properties": map[string]interface{}{},
+							},
+						},
+						SupportsFiles:     true,
+						AcceptedFileTypes: tt.acceptedTypes,
+					},
+				},
+			}
+
+			// Create handler
+			h := &Handler{}
+
+			// Create command with files
+			cmd := &DirectToolCommand{
+				ToolName: "file-tool",
+				Args:     `{"operation": "test"}`,
+				Files:    tt.files,
+			}
+
+			// Execute
+			result := h.executeDirectTool(context.Background(), ag, cmd)
+
+			// Verify success
+			if result.Success != tt.wantSuccess {
+				t.Errorf("executeDirectTool() success = %v, want %v", result.Success, tt.wantSuccess)
+			}
+
+			// Verify files received
+			if tt.wantFilesReceived > 0 && filesReceived != tt.wantFilesReceived {
+				t.Errorf("Tool received %d files, want %d", filesReceived, tt.wantFilesReceived)
+			}
+
+			// Verify result contains expected string
+			if tt.wantResultContains != "" {
+				if !containsSubstring(result.Result, tt.wantResultContains) {
+					t.Errorf("Result = %q, want to contain %q", result.Result, tt.wantResultContains)
+				}
+			}
+		})
+	}
+}
+
 // Helper function to check if a string contains a substring
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
