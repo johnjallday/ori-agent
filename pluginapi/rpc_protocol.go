@@ -391,6 +391,105 @@ func (c *grpcClient) ServeWebPage(path string, query map[string]string) (string,
 	return resp.Content, resp.ContentType, nil
 }
 
+// =============================================================================
+// File Attachment Support - Server Side
+// =============================================================================
+
+func (s *grpcServer) AcceptsFiles(ctx context.Context, _ *Empty) (*AcceptsFilesResponse, error) {
+	// Check if plugin implements FileAttachmentHandler
+	if fileHandler, ok := s.Impl.(FileAttachmentHandler); ok {
+		acceptedTypes := fileHandler.AcceptsFiles()
+		return &AcceptsFilesResponse{
+			AcceptedTypes: acceptedTypes,
+			SupportsFiles: true,
+		}, nil
+	}
+	// Plugin doesn't implement FileAttachmentHandler
+	return &AcceptsFilesResponse{
+		AcceptedTypes: nil,
+		SupportsFiles: false,
+	}, nil
+}
+
+func (s *grpcServer) CallWithFiles(ctx context.Context, req *CallWithFilesRequest) (*CallResponse, error) {
+	// Check if plugin implements FileAttachmentHandler
+	if fileHandler, ok := s.Impl.(FileAttachmentHandler); ok {
+		// Convert proto ProtoFileAttachment to pluginapi FileAttachment
+		files := make([]FileAttachment, len(req.Files))
+		for i, pf := range req.Files {
+			files[i] = FileAttachment{
+				Name:    pf.Name,
+				Type:    pf.Type,
+				Size:    pf.Size,
+				Content: pf.Content,
+			}
+		}
+
+		result, err := fileHandler.CallWithFiles(ctx, req.ArgsJson, files)
+		if err != nil {
+			return &CallResponse{Error: err.Error()}, nil
+		}
+		return &CallResponse{ResultJson: result}, nil
+	}
+
+	// Fallback to regular Call if plugin doesn't support files
+	result, err := s.Impl.Call(ctx, req.ArgsJson)
+	if err != nil {
+		return &CallResponse{Error: err.Error()}, nil
+	}
+	return &CallResponse{ResultJson: result}, nil
+}
+
+// =============================================================================
+// File Attachment Support - Client Side
+// =============================================================================
+
+// AcceptsFiles returns the list of file types this plugin accepts.
+// Returns nil and false if the plugin doesn't implement FileAttachmentHandler.
+func (c *grpcClient) AcceptsFiles() []string {
+	resp, err := c.client.AcceptsFiles(context.Background(), &Empty{})
+	if err != nil || resp == nil || !resp.SupportsFiles {
+		return nil
+	}
+	return resp.AcceptedTypes
+}
+
+// SupportsFiles returns true if the plugin implements FileAttachmentHandler.
+func (c *grpcClient) SupportsFiles() bool {
+	resp, err := c.client.AcceptsFiles(context.Background(), &Empty{})
+	if err != nil || resp == nil {
+		return false
+	}
+	return resp.SupportsFiles
+}
+
+// CallWithFiles executes the tool with arguments and file attachments.
+// If the plugin doesn't support files, it falls back to regular Call.
+func (c *grpcClient) CallWithFiles(ctx context.Context, args string, files []FileAttachment) (string, error) {
+	// Convert pluginapi FileAttachment to proto ProtoFileAttachment
+	protoFiles := make([]*ProtoFileAttachment, len(files))
+	for i, f := range files {
+		protoFiles[i] = &ProtoFileAttachment{
+			Name:    f.Name,
+			Type:    f.Type,
+			Size:    f.Size,
+			Content: f.Content,
+		}
+	}
+
+	resp, err := c.client.CallWithFiles(ctx, &CallWithFilesRequest{
+		ArgsJson: args,
+		Files:    protoFiles,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Error != "" {
+		return "", fmt.Errorf("%s", resp.Error)
+	}
+	return resp.ResultJson, nil
+}
+
 // Compile-time interface checks
 var (
 	_ PluginTool              = (*grpcClient)(nil)
@@ -401,4 +500,5 @@ var (
 	_ AgentAwareTool          = (*grpcClient)(nil)
 	_ InitializationProvider  = (*grpcClient)(nil)
 	_ WebPageProvider         = (*grpcClient)(nil)
+	_ FileAttachmentHandler   = (*grpcClient)(nil)
 )

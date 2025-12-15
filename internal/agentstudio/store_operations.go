@@ -211,7 +211,7 @@ func WriteToStore(node *StoreNode, filePath, data string) error {
 		if err != nil {
 			return fmt.Errorf("failed to open file for append: %w", err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		// Add newline separator before appending
 		if _, err := f.Write([]byte("\n")); err != nil {
@@ -227,7 +227,7 @@ func WriteToStore(node *StoreNode, filePath, data string) error {
 			return fmt.Errorf("failed to write temp file: %w", err)
 		}
 		if err := os.Rename(tempPath, finalPath); err != nil {
-			os.Remove(tempPath) // Clean up temp file on error
+			_ = os.Remove(tempPath) // Clean up temp file on error
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
 	}

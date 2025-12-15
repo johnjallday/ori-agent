@@ -43,6 +43,13 @@ service ToolService {
 
     // ServeWebPage handles a web page request and returns HTML/JSON content
     rpc ServeWebPage(WebPageRequest) returns (WebPageResponse);
+
+    // File attachment support
+    // AcceptsFiles returns the list of file types this plugin accepts
+    rpc AcceptsFiles(Empty) returns (AcceptsFilesResponse);
+
+    // CallWithFiles executes the tool with arguments and file attachments
+    rpc CallWithFiles(CallWithFilesRequest) returns (CallResponse);
 }
 
 // Empty message for RPCs that don't need parameters
@@ -184,4 +191,29 @@ message WebPageResponse {
     string content = 1;  // HTML or JSON content
     string content_type = 2;  // MIME type (e.g., "text/html", "application/json")
     string error = 3;  // Error message on failure (empty on success)
+}
+
+// =============================================================================
+// File Attachment Support
+// =============================================================================
+
+// ProtoFileAttachment represents a file attached to a plugin call (proto version)
+// Note: Named ProtoFileAttachment to avoid conflict with pluginapi.FileAttachment
+message ProtoFileAttachment {
+    string name = 1;     // Original filename (e.g., "drums.wav")
+    string type = 2;     // MIME type (e.g., "audio/wav", "application/zip")
+    int64 size = 3;      // File size in bytes
+    bytes content = 4;   // Raw file content
+}
+
+// AcceptsFilesResponse contains the list of accepted file types
+message AcceptsFilesResponse {
+    repeated string accepted_types = 1;  // MIME types or extensions (e.g., ".wav", "audio/wav")
+    bool supports_files = 2;             // True if plugin implements FileAttachmentHandler
+}
+
+// CallWithFilesRequest contains arguments and file attachments for a tool call
+message CallWithFilesRequest {
+    string args_json = 1;                       // JSON-encoded tool arguments
+    repeated ProtoFileAttachment files = 2;     // File attachments
 }

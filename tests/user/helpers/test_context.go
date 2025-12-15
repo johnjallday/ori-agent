@@ -67,7 +67,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		if serverCmd.Process != nil {
 			_ = serverCmd.Process.Kill()
 		}
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func (tc *TestContext) CreateAgent(name, model string) *Agent {
 	if err != nil {
 		tc.T.Fatalf("Failed to create agent: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -157,7 +157,7 @@ func (tc *TestContext) LoadPlugin(pluginName string) *Plugin {
 	if err != nil {
 		tc.T.Fatalf("Failed to list plugins: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -230,7 +230,7 @@ func (tc *TestContext) EnablePlugin(agent *Agent, pluginName string) {
 	if err != nil {
 		tc.T.Fatalf("Failed to switch agent: %v", err)
 	}
-	defer switchResp.Body.Close()
+	defer func() { _ = switchResp.Body.Close() }()
 	if switchResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(switchResp.Body)
 		tc.T.Fatalf("Failed to switch agent (status %d): %s", switchResp.StatusCode, body)
@@ -249,7 +249,7 @@ func (tc *TestContext) EnablePlugin(agent *Agent, pluginName string) {
 	if err != nil {
 		tc.T.Fatalf("Failed to enable plugin: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -280,7 +280,7 @@ func (tc *TestContext) SendChat(agent *Agent, message string) *ChatResponse {
 	if err != nil {
 		tc.T.Fatalf("Failed to send chat: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -433,7 +433,7 @@ func (tc *TestContext) cleanupAll() {
 	}
 
 	// Remove temp directory
-	os.RemoveAll(tc.TempDir)
+	_ = os.RemoveAll(tc.TempDir)
 
 	if tc.Verbose {
 		duration := time.Since(tc.TestStartTime)
@@ -504,11 +504,11 @@ func waitForServer(url string, timeout time.Duration) error {
 		case <-ticker.C:
 			resp, err := http.Get(url + "/health")
 			if err == nil && resp.StatusCode == http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return nil
 			}
 			if resp != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 	}

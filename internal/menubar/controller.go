@@ -117,9 +117,10 @@ func (c *Controller) StartServer(ctx context.Context) error {
 			status := c.status
 			c.statusMu.RUnlock()
 
-			if status == StatusRunning {
+			switch status {
+			case StatusRunning:
 				return nil
-			} else if status == StatusError {
+			case StatusError:
 				c.statusMu.RLock()
 				errMsg := c.errorMsg
 				c.statusMu.RUnlock()
@@ -223,7 +224,7 @@ func (c *Controller) isPortAvailable() bool {
 	if err != nil {
 		return false
 	}
-	listener.Close()
+	_ = listener.Close()
 	return true
 }
 

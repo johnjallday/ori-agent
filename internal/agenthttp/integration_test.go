@@ -53,7 +53,7 @@ func setupTestServer(t *testing.T) *TestServer {
 
 	// Create cleanup function
 	cleanup := func() {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return &TestServer{

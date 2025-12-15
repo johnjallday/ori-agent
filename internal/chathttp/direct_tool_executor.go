@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -13,10 +14,38 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
+// ConvertUploadedFilesToAttachments converts UploadedFile slice to FileAttachment slice.
+// It handles both text content and base64-encoded binary content.
+func ConvertUploadedFilesToAttachments(files []UploadedFile) []pluginapi.FileAttachment {
+	attachments := make([]pluginapi.FileAttachment, 0, len(files))
+
+	for _, f := range files {
+		var content []byte
+
+		// Try to decode as base64 first (for binary files)
+		if decoded, err := base64.StdEncoding.DecodeString(f.Content); err == nil {
+			content = decoded
+		} else {
+			// If not base64, treat as text content
+			content = []byte(f.Content)
+		}
+
+		attachments = append(attachments, pluginapi.FileAttachment{
+			Name:    f.Name,
+			Type:    f.Type,
+			Size:    f.Size,
+			Content: content,
+		})
+	}
+
+	return attachments
+}
+
 // DirectToolCommand represents a parsed direct tool invocation command
 type DirectToolCommand struct {
 	ToolName string
 	Args     string
+	Files    []pluginapi.FileAttachment // Optional file attachments
 }
 
 // parseDirectToolCommand parses a direct tool command in the format:
@@ -107,7 +136,29 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 
 	logger.Debug("Direct tool execution: with args", logger.Fields{"tool": cmd.ToolName, "args": cmd.Args})
 
-	toolResult, err := tool.Call(toolCtx, cmd.Args)
+	var toolResult string
+	var err error
+
+	// Check if the plugin supports file attachments and files are provided
+	if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(cmd.Files) > 0 {
+		// Filter files to only those accepted by the plugin
+		acceptedTypes := fileHandler.AcceptsFiles()
+		filteredFiles := pluginapi.FilterFilesByAcceptedTypes(cmd.Files, acceptedTypes)
+
+		if len(filteredFiles) > 0 {
+			logger.Debug("Direct tool execution with files", logger.Fields{
+				"tool":       cmd.ToolName,
+				"file_count": len(filteredFiles),
+			})
+			toolResult, err = fileHandler.CallWithFiles(toolCtx, cmd.Args, filteredFiles)
+		} else {
+			// No matching files, fall back to regular call
+			toolResult, err = tool.Call(toolCtx, cmd.Args)
+		}
+	} else {
+		// Regular call without files
+		toolResult, err = tool.Call(toolCtx, cmd.Args)
+	}
 	duration := time.Since(startTime)
 
 	// Record call stats in health manager

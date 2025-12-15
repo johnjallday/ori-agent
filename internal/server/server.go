@@ -671,10 +671,19 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
-	// Read the favicon SVG from assets
-	content, err := os.ReadFile("assets/favicon.svg")
+	content, err := web.Static.ReadFile("static/favicon.svg")
 	if err != nil {
-		logger.Error("Failed to read favicon", logger.Fields{"err": err})
+		// Fallback to filesystem for local dev scenarios where embedded assets
+		// might not include the favicon.
+		content, err = os.ReadFile("assets/favicon.svg")
+		if err != nil {
+			logger.Error("Failed to read favicon", logger.Fields{"err": err})
+			http.NotFound(w, r)
+			return
+		}
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.NotFound(w, r)
 		return
 	}

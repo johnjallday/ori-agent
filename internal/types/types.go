@@ -52,10 +52,12 @@ type AppState struct {
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use
 type LoadedPlugin struct {
-	Tool       pluginapi.PluginTool `json:"-"`
-	Definition pluginapi.Tool       `json:"Definition"`
-	Path       string               `json:"Path"`
-	Version    string               `json:"Version,omitempty"`
+	Tool              pluginapi.PluginTool `json:"-"`
+	Definition        pluginapi.Tool       `json:"Definition"`
+	Path              string               `json:"Path"`
+	Version           string               `json:"Version,omitempty"`
+	SupportsFiles     bool                 `json:"SupportsFiles,omitempty"`     // Whether plugin implements FileAttachmentHandler
+	AcceptedFileTypes []string             `json:"AcceptedFileTypes,omitempty"` // List of accepted MIME types or extensions
 }
 
 // Maintainer represents a single plugin maintainer/contributor

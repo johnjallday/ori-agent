@@ -230,7 +230,7 @@ func TestCustomWorkflowManager_SaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	manager := NewCustomWorkflowManager(tmpDir)
 
@@ -285,7 +285,7 @@ func TestCustomWorkflowManager_Delete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	manager := NewCustomWorkflowManager(tmpDir)
 
@@ -363,7 +363,7 @@ func TestCustomWorkflowManager_ListWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	manager := NewCustomWorkflowManager(tmpDir)
 

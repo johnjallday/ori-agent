@@ -145,10 +145,10 @@ func (m *Manager) detectLocation() (string, DetectionMethod) {
 			// Determine detection method
 			var method DetectionMethod
 			detectorName := detector.Name()
-			switch {
-			case detectorName == "manual":
+			switch detectorName {
+			case "manual":
 				method = DetectionMethodManual
-			case detectorName == "wifi-darwin" || detectorName == "wifi-linux" || detectorName == "wifi-windows" || detectorName == "mock-wifi":
+			case "wifi-darwin", "wifi-linux", "wifi-windows", "mock-wifi":
 				method = DetectionMethodWiFi
 			default:
 				method = DetectionMethodManual

@@ -86,7 +86,7 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	if err != nil {
 		return reg, fmt.Errorf("failed to fetch from GitHub: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return reg, fmt.Errorf("GitHub returned status %d", resp.StatusCode)
@@ -470,6 +470,8 @@ func (m *Manager) RefreshLocalRegistry() error {
 // Merge combines online and local plugin registries
 // Online plugins are preserved even if a local version exists, so the marketplace
 // can still show them (marked as installed). Local-only plugins are also included.
+// When a plugin exists in both registries, the local path is preserved so installed
+// plugins appear in the sidebar.
 func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry {
 	merged := types.PluginRegistry{}
 
@@ -487,8 +489,14 @@ func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry
 		localMap[plugin.Name] = plugin
 	}
 
-	// Add all online plugins (these are from the marketplace)
-	merged.Plugins = append(merged.Plugins, online.Plugins...)
+	// Add online plugins, merging with local path if installed
+	for _, plugin := range online.Plugins {
+		if localPlugin, existsLocal := localMap[plugin.Name]; existsLocal {
+			// Plugin exists locally - copy the path so it shows as installed
+			plugin.Path = localPlugin.Path
+		}
+		merged.Plugins = append(merged.Plugins, plugin)
+	}
 
 	// Add local-only plugins (user uploads that aren't in the online registry)
 	for name, plugin := range localMap {

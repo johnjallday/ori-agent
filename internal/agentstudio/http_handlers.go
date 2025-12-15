@@ -238,7 +238,7 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case event := <-events:
 			data, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			w.(http.Flusher).Flush()
 
 		case <-r.Context().Done():

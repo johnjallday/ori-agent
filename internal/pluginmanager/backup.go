@@ -226,10 +226,10 @@ func (bm *BackupManager) CreateBackupArchive(includeDescription string) (string,
 	if err != nil {
 		return "", fmt.Errorf("failed to create archive: %w", err)
 	}
-	defer zipFile.Close()
+	defer func() { _ = zipFile.Close() }()
 
 	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+	defer func() { _ = zipWriter.Close() }()
 
 	// Create manifest
 	manifest := BackupArchiveManifest{
@@ -276,7 +276,7 @@ func (bm *BackupManager) ExtractBackupArchive(archivePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open archive: %w", err)
 	}
-	defer zipReader.Close()
+	defer func() { _ = zipReader.Close() }()
 
 	// Find and read plugin_configs.json
 	var configsData []byte
@@ -286,7 +286,7 @@ func (bm *BackupManager) ExtractBackupArchive(archivePath string) error {
 			if err != nil {
 				return fmt.Errorf("failed to open configs file in archive: %w", err)
 			}
-			defer fileReader.Close()
+			defer func() { _ = fileReader.Close() }()
 
 			configsData, err = io.ReadAll(fileReader)
 			if err != nil {

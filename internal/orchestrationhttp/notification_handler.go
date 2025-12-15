@@ -159,7 +159,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 			"notifications": unread,
 			"count":         len(unread),
 		})
-		_, _ = w.Write([]byte(fmt.Sprintf("event: initial\ndata: %s\n\n", data)))
+		_, _ = fmt.Fprintf(w, "event: initial\ndata: %s\n\n", data)
 		flusher.Flush()
 	}
 
@@ -185,7 +185,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 				continue
 			}
 
-			_, err = w.Write([]byte(fmt.Sprintf("event: notification\ndata: %s\n\n", data)))
+			_, err = fmt.Fprintf(w, "event: notification\ndata: %s\n\n", data)
 			if err != nil {
 				logger.Error("Failed to write notification", logger.Fields{"err": err})
 				return

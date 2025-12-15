@@ -159,7 +159,8 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If server is in error state or stopped, try to start/restart it
-	if status == mcp.StatusError || status == mcp.StatusStopped {
+	switch status {
+	case mcp.StatusError, mcp.StatusStopped:
 		// Stop first if in error state to clean up
 		if status == mcp.StatusError {
 			_ = h.registry.StopServer(serverName) // Ignore error, might already be stopped
@@ -171,10 +172,10 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Failed to start server: %v", err), http.StatusInternalServerError)
 			return
 		}
-	} else if status == mcp.StatusRunning {
+	case mcp.StatusRunning:
 		// Already running, this is fine
 		logger.Debug("MCP server is already running", logger.Fields{"server": serverName})
-	} else {
+	default:
 		// Status is starting or restarting, wait a bit or just continue
 		logger.Debug("MCP server is in state", logger.Fields{"server": serverName, "status": status})
 	}
@@ -401,7 +402,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No file uploaded", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Read file content
 	var config struct {

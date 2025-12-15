@@ -245,7 +245,7 @@ func (sm *settingsManager) saveUnlocked() error {
 
 	// Atomically rename temp file to actual file
 	if err := os.Rename(tempPath, sm.filePath); err != nil {
-		os.Remove(tempPath) // Clean up temp file on error
+		_ = os.Remove(tempPath) // Clean up temp file on error
 		return fmt.Errorf("failed to rename settings file: %w", err)
 	}
 

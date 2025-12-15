@@ -191,3 +191,147 @@ type PermissionProvider interface {
 	// GetRequiredPermissions returns the permissions this plugin requires
 	GetRequiredPermissions() PluginPermissions
 }
+
+// =============================================================================
+// File Attachment Support
+// =============================================================================
+
+// Common MIME types for file attachments
+const (
+	// Audio MIME types
+	MIMETypeWAV  = "audio/wav"
+	MIMETypeMP3  = "audio/mpeg"
+	MIMETypeAIFF = "audio/aiff"
+	MIMETypeFLAC = "audio/flac"
+	MIMETypeOGG  = "audio/ogg"
+
+	// MIDI MIME types
+	MIMETypeMIDI = "audio/midi"
+
+	// Archive MIME types
+	MIMETypeZIP = "application/zip"
+
+	// Document MIME types
+	MIMETypePDF = "application/pdf"
+)
+
+// Common file extensions for file attachments
+const (
+	ExtWAV  = ".wav"
+	ExtMP3  = ".mp3"
+	ExtAIFF = ".aiff"
+	ExtAIF  = ".aif"
+	ExtFLAC = ".flac"
+	ExtOGG  = ".ogg"
+	ExtMID  = ".mid"
+	ExtMIDI = ".midi"
+	ExtZIP  = ".zip"
+	ExtPDF  = ".pdf"
+)
+
+// FileAttachment represents a file attached to a plugin call.
+// This struct holds metadata and content for files uploaded through the chat interface.
+type FileAttachment struct {
+	// Name is the original filename (e.g., "drums.wav")
+	Name string
+	// Type is the MIME type (e.g., "audio/wav", "application/zip")
+	Type string
+	// Size is the file size in bytes
+	Size int64
+	// Content is the raw file content
+	Content []byte
+}
+
+// FileAttachmentHandler is an optional interface that plugins can implement
+// to receive file attachments from the chat interface.
+// Plugins that don't implement this interface will continue to work as before,
+// with files converted to text and prepended to the message.
+type FileAttachmentHandler interface {
+	// AcceptsFiles returns a list of accepted file types.
+	// Can include MIME types (e.g., "audio/wav") or extensions (e.g., ".wav", ".mp3")
+	// Return an empty slice to explicitly reject all files.
+	AcceptsFiles() []string
+
+	// CallWithFiles executes the tool with the given arguments and file attachments.
+	// This method is called instead of Call() when the plugin implements this interface
+	// and files are present in the request.
+	// args: JSON string of tool parameters
+	// files: slice of file attachments filtered to only those matching AcceptsFiles()
+	CallWithFiles(ctx context.Context, args string, files []FileAttachment) (string, error)
+}
+
+// IsFileTypeAccepted checks if a file matches any of the accepted types.
+// acceptedTypes can contain MIME types (e.g., "audio/wav") or extensions (e.g., ".wav")
+// filename is the original filename used for extension matching
+// mimeType is the file's MIME type used for MIME type matching
+// Returns true if either the extension or MIME type matches any accepted type.
+func IsFileTypeAccepted(acceptedTypes []string, filename string, mimeType string) bool {
+	if len(acceptedTypes) == 0 {
+		return false
+	}
+
+	// Normalize filename extension (lowercase, ensure leading dot)
+	ext := ""
+	if idx := lastIndex(filename, '.'); idx >= 0 {
+		ext = toLower(filename[idx:])
+	}
+
+	// Normalize MIME type (lowercase)
+	mimeType = toLower(mimeType)
+
+	for _, accepted := range acceptedTypes {
+		accepted = toLower(accepted)
+
+		// Check if it's an extension (starts with .)
+		if len(accepted) > 0 && accepted[0] == '.' {
+			if ext == accepted {
+				return true
+			}
+		} else {
+			// It's a MIME type
+			if mimeType == accepted {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// FilterFilesByAcceptedTypes filters a slice of FileAttachments to only include
+// files that match the accepted types.
+func FilterFilesByAcceptedTypes(files []FileAttachment, acceptedTypes []string) []FileAttachment {
+	if len(acceptedTypes) == 0 {
+		return nil
+	}
+
+	var filtered []FileAttachment
+	for _, f := range files {
+		if IsFileTypeAccepted(acceptedTypes, f.Name, f.Type) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered
+}
+
+// Helper functions to avoid importing strings package
+func toLower(s string) string {
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+func lastIndex(s string, c byte) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}

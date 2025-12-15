@@ -208,8 +208,11 @@ func (m *Manager) validateAPIKey(apiKey string) error {
 
 	// Check that it only contains valid characters (alphanumeric, dash, underscore)
 	for _, char := range apiKey {
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '-' || char == '_') {
+		isLower := char >= 'a' && char <= 'z'
+		isUpper := char >= 'A' && char <= 'Z'
+		isDigit := char >= '0' && char <= '9'
+		isAllowed := char == '-' || char == '_'
+		if !isLower && !isUpper && !isDigit && !isAllowed {
 			return fmt.Errorf("invalid API key: contains invalid characters (only alphanumeric, dash, and underscore allowed)")
 		}
 	}

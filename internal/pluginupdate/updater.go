@@ -74,7 +74,7 @@ func (u *Updater) UpdatePlugin(pluginName, currentPath string, registryEntry typ
 		result.Error = fmt.Sprintf("Failed to download plugin: %v", err)
 		return result
 	}
-	defer os.Remove(tempPath) // Clean up temp file
+	defer func() { _ = os.Remove(tempPath) }() // Clean up temp file
 	logger.Info("Downloaded v", logger.Fields{"pluginName": pluginName, "version": registryEntry.Version})
 
 	// Step 3: Verify checksum if available
@@ -152,7 +152,7 @@ func (u *Updater) downloadPlugin(registryEntry types.PluginRegistryEntry, destPa
 	if err != nil {
 		return fmt.Errorf("failed to download from %s: %w", downloadURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
@@ -163,7 +163,7 @@ func (u *Updater) downloadPlugin(registryEntry types.PluginRegistryEntry, destPa
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	// Copy data
 	if _, err := io.Copy(out, resp.Body); err != nil {
@@ -179,7 +179,7 @@ func (u *Updater) verifyChecksum(filePath, expectedChecksum string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -205,13 +205,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
+	defer func() { _ = sourceFile.Close() }()
 
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() { _ = destFile.Close() }()
 
 	if _, err := io.Copy(destFile, sourceFile); err != nil {
 		return err

@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/version"
 )
 
 // CommandHandler handles special chat commands
@@ -380,6 +381,7 @@ func (ch *CommandHandler) HandleHelp(w http.ResponseWriter, r *http.Request) {
 
 **System Commands:**
 - **/help** - Show this help message
+- **/version** - Show application version and build info
 - **/agent** - Display agent status dashboard
 - **/agents** - List all available agents
 - **/switch <agent-name>** - Switch to a different agent
@@ -647,4 +649,30 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 			os.Exit(0)
 		}
 	}()
+}
+
+// HandleVersion handles the /version command to show app version and build info
+func (ch *CommandHandler) HandleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	info := version.GetBuildInfo()
+
+	var versionResponse strings.Builder
+	versionResponse.WriteString("## 📦 Ori Agent Version\n\n")
+	versionResponse.WriteString(fmt.Sprintf("**Version:** %s\n", info["version"]))
+	versionResponse.WriteString(fmt.Sprintf("**API Version:** %s\n", info["api_version"]))
+
+	if info["git_commit"] != "unknown" {
+		versionResponse.WriteString(fmt.Sprintf("**Git Commit:** %s\n", info["git_commit"]))
+	}
+	if info["build_date"] != "unknown" {
+		versionResponse.WriteString(fmt.Sprintf("**Build Date:** %s\n", info["build_date"]))
+	}
+
+	response := map[string]any{
+		"response": versionResponse.String(),
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
 }

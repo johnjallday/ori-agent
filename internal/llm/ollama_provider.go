@@ -70,10 +70,10 @@ func (p *OllamaProvider) ValidateConfig(config ProviderConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Ollama at %s: %w", config.BaseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("Ollama server returned error status: %d", resp.StatusCode)
+		return fmt.Errorf("ollama server returned error status: %d", resp.StatusCode)
 	}
 
 	return nil
@@ -128,10 +128,10 @@ func (p *OllamaProvider) fetchAvailableModels() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch models from Ollama: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Ollama API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
 	}
 
 	var tagsResp ollamaTagsResponse
@@ -314,7 +314,7 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -496,7 +496,7 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
 	}
 

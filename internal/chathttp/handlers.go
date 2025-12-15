@@ -183,7 +183,7 @@ func (h *Handler) getClientForAgent(ag *agent.Agent) openai.Client {
 }
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
@@ -272,7 +272,45 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 				// Track tool call stats
 				startTime := time.Now()
-				result, err = tool.Call(toolCtx, args)
+
+				logger.Info("Claude tool execution starting", logger.Fields{
+					"tool":            name,
+					"files_available": len(files),
+				})
+
+				// Check if the plugin supports file attachments and files are provided
+				if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
+					// Filter files to only those accepted by the plugin
+					acceptedTypes := fileHandler.AcceptsFiles()
+					filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
+
+					logger.Info("Tool supports file attachments", logger.Fields{
+						"tool":           name,
+						"accepted_types": len(acceptedTypes),
+						"filtered_files": len(filteredFiles),
+					})
+
+					if len(filteredFiles) > 0 {
+						logger.Info("Calling tool with files", logger.Fields{
+							"tool":       name,
+							"file_count": len(filteredFiles),
+						})
+						result, err = fileHandler.CallWithFiles(toolCtx, args, filteredFiles)
+					} else {
+						// No matching files, fall back to regular call
+						logger.Info("No matching files, using regular call", logger.Fields{"tool": name})
+						result, err = tool.Call(toolCtx, args)
+					}
+				} else {
+					// Regular call without files
+					_, isFileHandler := tool.(pluginapi.FileAttachmentHandler)
+					logger.Info("Tool call (no file support or no files)", logger.Fields{
+						"tool":            name,
+						"is_file_handler": isFileHandler,
+						"files_available": len(files),
+					})
+					result, err = tool.Call(toolCtx, args)
+				}
 				duration := time.Since(startTime)
 
 				// Record call stats in health manager
@@ -291,7 +329,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 					result = errorMsg
 					logger.Error("Tool execution failed", logger.Fields{"tool": name, "error": err})
 				} else {
-					logger.Debug("Tool execution completed", logger.Fields{"tool": name, "result": result})
+					logger.Info("Tool execution completed", logger.Fields{"tool": name})
 				}
 			}
 
@@ -415,7 +453,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 }
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context) {
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
@@ -493,7 +531,27 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 				defer toolCancel()
 
 				startTime := time.Now()
-				result, err = tool.Call(toolCtx, tc.Arguments)
+
+				// Check if the plugin supports file attachments and files are provided
+				if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
+					// Filter files to only those accepted by the plugin
+					acceptedTypes := fileHandler.AcceptsFiles()
+					filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
+
+					if len(filteredFiles) > 0 {
+						logger.Debug("Tool execution with files", logger.Fields{
+							"tool":       tc.Name,
+							"file_count": len(filteredFiles),
+						})
+						result, err = fileHandler.CallWithFiles(toolCtx, tc.Arguments, filteredFiles)
+					} else {
+						// No matching files, fall back to regular call
+						result, err = tool.Call(toolCtx, tc.Arguments)
+					}
+				} else {
+					// Regular call without files
+					result, err = tool.Call(toolCtx, tc.Arguments)
+				}
 				duration := time.Since(startTime)
 
 				if h.healthManager != nil {
@@ -700,6 +758,20 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Debug: Log received files
+	logger.Info("Chat request received", logger.Fields{
+		"question":   q[:min(50, len(q))],
+		"file_count": len(req.Files),
+	})
+	for i, f := range req.Files {
+		logger.Info("Received file", logger.Fields{
+			"index": i,
+			"name":  f.Name,
+			"type":  f.Type,
+			"size":  f.Size,
+		})
+	}
+
 	// If files are attached, prepend their content to the question
 	if len(req.Files) > 0 {
 		var filesContext strings.Builder
@@ -738,6 +810,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleExit(w, r)
 		return
 	}
+	if q == "/version" {
+		h.commandHandler.HandleVersion(w, r)
+		return
+	}
 	if strings.HasPrefix(q, "/switch") {
 		// Parse the agent name from the command
 		parts := strings.Fields(q)
@@ -765,6 +841,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				"success":          false,
 			})
 			return
+		}
+
+		// Attach files to the command if present
+		if len(req.Files) > 0 {
+			cmd.Files = ConvertUploadedFilesToAttachments(req.Files)
 		}
 
 		// Load agent
@@ -950,10 +1031,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Prepare and call the model
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 
+	// Convert uploaded files to FileAttachments for tool execution
+	fileAttachments := ConvertUploadedFilesToAttachments(req.Files)
+	logger.Info("Converted files for tool execution", logger.Fields{
+		"original_count":  len(req.Files),
+		"converted_count": len(fileAttachments),
+	})
+
 	// Check if this is a Claude model - if so, use provider system
 	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments)
 		return
 	}
 
@@ -963,7 +1051,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments)
 					return
 				}
 			}
@@ -1088,7 +1176,48 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Track tool call stats
 			startTime := time.Now()
-			result, err := tool.Call(toolCtx, args)
+
+			var result string
+			var err error
+
+			logger.Info("OpenAI tool execution starting", logger.Fields{
+				"tool":            name,
+				"files_available": len(fileAttachments),
+			})
+
+			// Check if the plugin supports file attachments and files are provided
+			if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(fileAttachments) > 0 {
+				// Filter files to only those accepted by the plugin
+				acceptedTypes := fileHandler.AcceptsFiles()
+				filteredFiles := pluginapi.FilterFilesByAcceptedTypes(fileAttachments, acceptedTypes)
+
+				logger.Info("Tool supports file attachments", logger.Fields{
+					"tool":           name,
+					"accepted_types": len(acceptedTypes),
+					"filtered_files": len(filteredFiles),
+				})
+
+				if len(filteredFiles) > 0 {
+					logger.Info("Calling tool with files", logger.Fields{
+						"tool":       name,
+						"file_count": len(filteredFiles),
+					})
+					result, err = fileHandler.CallWithFiles(toolCtx, args, filteredFiles)
+				} else {
+					// No matching files, fall back to regular call
+					logger.Info("No matching files, using regular call", logger.Fields{"tool": name})
+					result, err = tool.Call(toolCtx, args)
+				}
+			} else {
+				// Regular call without files
+				_, isFileHandler := tool.(pluginapi.FileAttachmentHandler)
+				logger.Info("Tool call (no file support or no files)", logger.Fields{
+					"tool":            name,
+					"is_file_handler": isFileHandler,
+					"files_available": len(fileAttachments),
+				})
+				result, err = tool.Call(toolCtx, args)
+			}
 			duration := time.Since(startTime)
 
 			// Record call stats in health manager
@@ -1106,6 +1235,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
 				result = errorMsg
 				logger.Error("Tool failed", logger.Fields{"tool": name, "error": err})
+			} else {
+				logger.Info("Tool execution completed", logger.Fields{"tool": name})
 			}
 
 			// Add tool message response for this specific tool call ID

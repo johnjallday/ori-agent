@@ -39,7 +39,7 @@ func NewTestServer(t *testing.T, handler http.Handler) *TestServer {
 		t:       t,
 		Cleanup: func() {
 			ts.Close()
-			os.RemoveAll(tempDir)
+			_ = os.RemoveAll(tempDir)
 		},
 	}
 }
@@ -103,11 +103,11 @@ func WaitForServer(url string, timeout time.Duration) error {
 		case <-ticker.C:
 			resp, err := http.Get(url + "/health")
 			if err == nil && resp.StatusCode == http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return nil
 			}
 			if resp != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 	}
@@ -158,7 +158,7 @@ func CreateTempFile(t *testing.T, dir, pattern, content string) string {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
@@ -248,7 +248,7 @@ func MakeRequest(t *testing.T, client *http.Client, baseURL string, req HTTPRequ
 // ReadJSONResponse reads and unmarshals a JSON response
 func ReadJSONResponse(t *testing.T, resp *http.Response, v interface{}) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

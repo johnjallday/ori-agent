@@ -150,8 +150,8 @@ func TestResolveAgentStorePath(t *testing.T) {
 	}
 
 	// Test with environment variable
-	os.Setenv("AGENT_STORE_PATH", "/custom/path/agents.json")
-	defer os.Unsetenv("AGENT_STORE_PATH")
+	_ = os.Setenv("AGENT_STORE_PATH", "/custom/path/agents.json")
+	defer func() { _ = os.Unsetenv("AGENT_STORE_PATH") }()
 
 	path, err = resolveAgentStorePath()
 	if err != nil {
@@ -188,8 +188,8 @@ func TestResolvePluginCacheDir(t *testing.T) {
 	}
 
 	// Test with environment variable
-	os.Setenv("PLUGIN_CACHE_DIR", "/custom/cache")
-	defer os.Unsetenv("PLUGIN_CACHE_DIR")
+	_ = os.Setenv("PLUGIN_CACHE_DIR", "/custom/cache")
+	defer func() { _ = os.Unsetenv("PLUGIN_CACHE_DIR") }()
 
 	dir = resolvePluginCacheDir()
 	if dir != "/custom/cache" {
@@ -213,8 +213,8 @@ func TestResolveWorkspaceDir(t *testing.T) {
 	}
 
 	// Test with environment variable
-	os.Setenv("WORKSPACE_DIR", "/custom/workspaces")
-	defer os.Unsetenv("WORKSPACE_DIR")
+	_ = os.Setenv("WORKSPACE_DIR", "/custom/workspaces")
+	defer func() { _ = os.Unsetenv("WORKSPACE_DIR") }()
 
 	dir = resolveWorkspaceDir()
 	if dir != "/custom/workspaces" {
@@ -268,8 +268,8 @@ func TestResolveWorkflowTemplatesDir(t *testing.T) {
 	}
 
 	// Test with environment variable
-	os.Setenv("WORKFLOW_TEMPLATES_DIR", "/custom/templates")
-	defer os.Unsetenv("WORKFLOW_TEMPLATES_DIR")
+	_ = os.Setenv("WORKFLOW_TEMPLATES_DIR", "/custom/templates")
+	defer func() { _ = os.Unsetenv("WORKFLOW_TEMPLATES_DIR") }()
 
 	dir = resolveWorkflowTemplatesDir()
 	if dir != "/custom/templates" {

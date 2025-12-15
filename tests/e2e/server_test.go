@@ -69,7 +69,7 @@ func TestHealthCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Health check failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
@@ -125,7 +125,7 @@ func TestAgentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create agent: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -145,7 +145,7 @@ func TestAgentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to list agents: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var response map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
@@ -179,7 +179,7 @@ func TestAgentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to delete agent: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
@@ -214,7 +214,7 @@ func TestPluginRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to list plugins: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -258,7 +258,7 @@ func TestSettingsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get settings: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -301,7 +301,7 @@ func TestConcurrentRequests(t *testing.T) {
 				done <- fmt.Errorf("request %d failed: %v", id, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusOK {
 				done <- fmt.Errorf("request %d got status %d", id, resp.StatusCode)
@@ -367,11 +367,11 @@ func waitForServer(url string, timeout time.Duration) error {
 		case <-ticker.C:
 			resp, err := http.Get(url + "/health")
 			if err == nil && resp.StatusCode == http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				return nil
 			}
 			if resp != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 	}

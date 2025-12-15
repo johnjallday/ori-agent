@@ -187,6 +187,25 @@ func (r *RPCPluginClient) ServeWebPage(path string, query map[string]string) (st
 	return "", "", nil // Plugin doesn't provide web pages
 }
 
+// AcceptsFiles returns the list of file types this plugin accepts.
+// Returns nil if the plugin doesn't implement FileAttachmentHandler.
+func (r *RPCPluginClient) AcceptsFiles() []string {
+	if fileHandler, ok := r.tool.(pluginapi.FileAttachmentHandler); ok {
+		return fileHandler.AcceptsFiles()
+	}
+	return nil
+}
+
+// CallWithFiles executes the tool with arguments and file attachments.
+// Falls back to regular Call if the plugin doesn't implement FileAttachmentHandler.
+func (r *RPCPluginClient) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+	if fileHandler, ok := r.tool.(pluginapi.FileAttachmentHandler); ok {
+		return fileHandler.CallWithFiles(ctx, args, files)
+	}
+	// Fall back to regular call if FileAttachmentHandler not supported
+	return r.tool.Call(ctx, args)
+}
+
 // Kill terminates the plugin process
 func (r *RPCPluginClient) Kill() {
 	if r.client != nil {

@@ -131,15 +131,15 @@ jobs:
           go-version: '1.25'
 
       - name: Install GoReleaser
-        run: |
-          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
-          sudo apt-get update
-          sudo apt-get install -y goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+          version: '~> v2.6'  # Use v2.6+ which supports 'ids' in archives
 
       - name: Build packages
         run: |
-          # Skip before hooks (bash scripts may fail) and menubar (CGO, darwin-only)
-          # Build server + Linux packages only
+          # Build server binaries and create Linux packages
+          # The menubar build is automatically skipped on Linux (skip template in .goreleaser.yaml)
           goreleaser release --snapshot --clean --skip=publish,before
 
       - name: Install package
@@ -210,14 +210,15 @@ jobs:
 
       - name: Install GoReleaser
         run: |
-          dnf install -y 'dnf-command(config-manager)' curl git
-          dnf config-manager --add-repo https://repo.goreleaser.com/yum/
-          dnf install -y goreleaser --nogpgcheck
+          dnf install -y curl git tar
+          # Install goreleaser v2.6+ directly (yum repo may have older version)
+          curl -Lo goreleaser.tar.gz https://github.com/goreleaser/goreleaser/releases/download/v2.6.1/goreleaser_Linux_x86_64.tar.gz
+          tar xzf goreleaser.tar.gz -C /usr/local/bin goreleaser
 
       - name: Build packages
         run: |
-          # Skip before hooks (bash scripts may fail) and menubar (CGO, darwin-only)
-          # Build server + Linux packages only
+          # Build server binaries and create Linux packages
+          # The menubar build is automatically skipped on Linux (skip template in .goreleaser.yaml)
           goreleaser release --snapshot --clean --skip=publish,before
 
       - name: Install package

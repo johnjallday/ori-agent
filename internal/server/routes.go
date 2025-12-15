@@ -61,6 +61,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Favicon endpoint
 	mux.HandleFunc("/favicon.svg", s.serveFavicon)
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+	})
 
 	// =============================================================================
 	// Agent API Endpoints
@@ -273,11 +276,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			s.onboardingHandler.GetTheme(w, r)
-		} else if r.Method == http.MethodPost {
+		case http.MethodPost:
 			s.onboardingHandler.SetTheme(w, r)
-		} else {
+		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
@@ -438,11 +442,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
+		switch r.Method {
+		case http.MethodPost:
 			s.studioHandler.CreateStudio(w, r)
-		} else if r.Method == http.MethodGet {
+		case http.MethodGet:
 			s.studioHandler.ListStudios(w, r)
-		} else {
+		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
@@ -467,13 +472,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			}
 		} else if strings.Contains(r.URL.Path, "/attachments") {
 			// Handle attachment operations
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				s.studioHandler.CreateAttachment(w, r)
-			} else if r.Method == http.MethodPatch {
+			case http.MethodPatch:
 				s.studioHandler.UpdateAttachment(w, r)
-			} else if r.Method == http.MethodDelete {
+			case http.MethodDelete:
 				s.studioHandler.DeleteAttachment(w, r)
-			} else {
+			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
@@ -508,11 +514,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			}
 		} else if strings.Contains(r.URL.Path, "/agents") {
 			// Handle agent add/remove operations
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				s.studioHandler.AddAgent(w, r)
-			} else if r.Method == http.MethodDelete {
+			case http.MethodDelete:
 				s.studioHandler.RemoveAgent(w, r)
-			} else {
+			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 		} else {

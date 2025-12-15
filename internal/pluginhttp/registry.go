@@ -215,7 +215,15 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			ag.Plugins = map[string]types.LoadedPlugin{}
 		}
 		version := pluginloader.GetPluginVersion(tool)
-		ag.Plugins[def.Name] = types.LoadedPlugin{Tool: tool, Definition: def, Path: entryPath, Version: version}
+		supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
+		ag.Plugins[def.Name] = types.LoadedPlugin{
+			Tool:              tool,
+			Definition:        def,
+			Path:              entryPath,
+			Version:           version,
+			SupportsFiles:     supportsFiles,
+			AcceptedFileTypes: acceptedFileTypes,
+		}
 		if err := h.store.SetAgent(current, ag); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -601,7 +609,7 @@ func copyFile(src, dst string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
@@ -613,7 +621,7 @@ func copyFile(src, dst string) (err error) {
 			err = cerr
 		}
 		if err != nil {
-			os.Remove(dst)
+			_ = os.Remove(dst)
 		}
 	}()
 

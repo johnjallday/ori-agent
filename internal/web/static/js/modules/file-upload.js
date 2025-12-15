@@ -29,14 +29,35 @@ async function handleFileSelect(event) {
     }
 
     try {
-      const content = await readFileContent(file);
+      const result = await readFileContent(file);
+
+      // Determine MIME type - use actual type or infer from extension
+      let mimeType = file.type;
+      if (!mimeType) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const mimeMap = {
+          'pdf': 'application/pdf',
+          'wav': 'audio/wav',
+          'mp3': 'audio/mpeg',
+          'aiff': 'audio/aiff',
+          'aif': 'audio/aiff',
+          'flac': 'audio/flac',
+          'ogg': 'audio/ogg',
+          'mid': 'audio/midi',
+          'midi': 'audio/midi',
+          'zip': 'application/zip'
+        };
+        mimeType = mimeMap[ext] || 'application/octet-stream';
+      }
 
       uploadedFiles.push({
         name: file.name,
-        type: file.type,
+        type: mimeType,
         size: file.size,
-        content: content
+        content: result.binaryContent || result.content  // Prefer binary content for files that have it
       });
+
+      console.log(`File added: ${file.name}, type: ${mimeType}, has binary: ${!!result.binaryContent}`);
     } catch (error) {
       console.error(`Error reading file ${file.name}:`, error);
       alert(`Failed to read file ${file.name}`);
@@ -49,13 +70,19 @@ async function handleFileSelect(event) {
   updateFilesList();
 }
 
-// Check if file is binary (PDF, DOCX, DOC)
+// Check if file is binary (PDF, DOCX, DOC, audio, etc.)
 function isBinaryFile(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  return ['pdf', 'docx', 'doc', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip'].includes(ext);
+}
+
+// Check if file should be parsed for text (for LLM consumption)
+function shouldParseForText(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   return ['pdf', 'docx', 'doc'].includes(ext);
 }
 
-// Read file content
+// Read file content - returns { content, binaryContent } for binary files
 async function readFileContent(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -63,38 +90,50 @@ async function readFileContent(file) {
     reader.onload = async (e) => {
       let content = e.target.result;
 
-      // If it's a binary file, parse it on the server
+      // If it's a binary file, we need to handle it specially
       if (isBinaryFile(file.name)) {
         try {
           // content is already base64 from readAsDataURL
           // Remove the data URL prefix to get just the base64
           const base64 = content.split(',')[1];
 
-          const response = await fetch('/api/files/parse', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              filename: file.name,
-              content: base64
-            })
-          });
+          // For files that can be parsed for text (PDF, DOC), do that
+          if (shouldParseForText(file.name)) {
+            const response = await fetch('/api/files/parse', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                filename: file.name,
+                content: base64
+              })
+            });
 
-          const result = await response.json();
+            const result = await response.json();
 
-          if (result.error) {
-            reject(new Error(result.error));
-            return;
+            if (result.error) {
+              // If parsing fails, still include the file with just binary content
+              console.warn(`Failed to parse ${file.name}: ${result.error}`);
+              resolve({ content: `[Binary file: ${file.name}]`, binaryContent: base64 });
+              return;
+            }
+
+            // Return both the parsed text (for LLM) and binary (for plugins)
+            resolve({ content: result.text, binaryContent: base64 });
+          } else {
+            // For other binary files (audio, MIDI, ZIP), just store binary
+            resolve({ content: `[Binary file: ${file.name}]`, binaryContent: base64 });
           }
-
-          resolve(result.text);
         } catch (error) {
-          reject(error);
+          // Even on error, try to preserve binary content
+          console.error(`Error processing ${file.name}:`, error);
+          const base64 = content.split(',')[1];
+          resolve({ content: `[Binary file: ${file.name}]`, binaryContent: base64 });
         }
       } else {
         // For text files, just return the content
-        resolve(content);
+        resolve({ content: content, binaryContent: null });
       }
     };
 

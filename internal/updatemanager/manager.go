@@ -230,7 +230,7 @@ func (m *Manager) fetchReleases() ([]GitHubRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -360,7 +360,7 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to download update: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
@@ -428,11 +428,11 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 
 	_, err = file.Write(fileContent)
 	if err != nil {
-		file.Close()
-		os.Remove(tempFilePath)
+		_ = file.Close()
+		_ = os.Remove(tempFilePath)
 		return "", fmt.Errorf("failed to save download: %w", err)
 	}
-	file.Close()
+	_ = file.Close()
 
 	// Determine the final filename - use "ori-agent" or "ori-agent.exe"
 	var finalName string
@@ -447,14 +447,14 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 	if _, err := os.Stat(finalPath); err == nil {
 		backupPath := finalPath + ".old"
 		if err := os.Rename(finalPath, backupPath); err != nil {
-			os.Remove(tempFilePath)
+			_ = os.Remove(tempFilePath)
 			return "", fmt.Errorf("failed to backup current binary: %w", err)
 		}
 	}
 
 	// Rename downloaded file to final name
 	if err := os.Rename(tempFilePath, finalPath); err != nil {
-		os.Remove(tempFilePath)
+		_ = os.Remove(tempFilePath)
 		return "", fmt.Errorf("failed to rename downloaded file: %w", err)
 	}
 
@@ -488,7 +488,7 @@ func (m *Manager) fetchChecksum(url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("checksum file not found: %d", resp.StatusCode)
