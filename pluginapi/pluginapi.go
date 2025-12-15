@@ -210,6 +210,9 @@ const (
 
 	// Archive MIME types
 	MIMETypeZIP = "application/zip"
+
+	// Document MIME types
+	MIMETypePDF = "application/pdf"
 )
 
 // Common file extensions for file attachments
@@ -223,6 +226,7 @@ const (
 	ExtMID  = ".mid"
 	ExtMIDI = ".midi"
 	ExtZIP  = ".zip"
+	ExtPDF  = ".pdf"
 )
 
 // FileAttachment represents a file attached to a plugin call.
