@@ -25,7 +25,7 @@ func main() {
 	flag.Parse()
 
 	// Set verbose mode globally
-	os.Setenv("ORI_VERBOSE", fmt.Sprintf("%t", *verbose))
+	_ = os.Setenv("ORI_VERBOSE", fmt.Sprintf("%t", *verbose))
 
 	// Check for PORT environment variable override
 	if envPort := os.Getenv("PORT"); envPort != "" {

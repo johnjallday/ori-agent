@@ -856,9 +856,10 @@ func (w *Workspace) getAgentStatsUnlocked() map[string]AgentStats {
 		case "pending":
 			agentStat.QueuedTasks = append(agentStat.QueuedTasks, task.ID)
 			// Set status to queued if not already active
-			if agentStat.Status == "idle" {
+			switch agentStat.Status {
+			case "idle":
 				agentStat.Status = "queued"
-			} else if agentStat.Status == "active" {
+			case "active":
 				agentStat.Status = "busy" // Active with queued tasks
 			}
 

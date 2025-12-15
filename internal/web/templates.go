@@ -142,12 +142,13 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	// For standalone pages that use {{define}}, we execute them by their defined name (without .tmpl extension)
 	// For agents (which doesn't use {{define}}), we execute the file name with .tmpl
 	templateName := name + ".tmpl"
-	if name == "index" {
+	switch name {
+	case "index":
 		templateName = "base.tmpl"
-	} else if name == "marketplace" || name == "settings" || name == "plugins" || name == "workflows" || name == "studios" || name == "workspace-dashboard" || name == "workspace-canvas" || name == "usage" || name == "mcp" || name == "models" || name == "agents-detail" || name == "agents-edit" {
+	case "marketplace", "settings", "plugins", "workflows", "studios", "workspace-dashboard", "workspace-canvas", "usage", "mcp", "models", "agents-detail", "agents-edit":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
-	} else if name == "agents" {
+	case "agents":
 		// agents.tmpl doesn't use {{define}}, so execute by file name
 		templateName = name + ".tmpl"
 	}

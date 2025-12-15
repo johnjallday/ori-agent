@@ -111,7 +111,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	if err != nil {
 		return "", false, fmt.Errorf("failed to download plugin from %s: %w", downloadURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("failed to download plugin: HTTP %d", resp.StatusCode)
@@ -122,7 +122,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer tempFile.Close()
+	defer func() { _ = tempFile.Close() }()
 
 	// Download to temp file and calculate checksum
 	hasher := sha256.New()
@@ -130,7 +130,7 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 
 	_, err = io.Copy(writer, resp.Body)
 	if err != nil {
-		os.Remove(tempFile.Name())
+		_ = os.Remove(tempFile.Name())
 		return "", false, fmt.Errorf("failed to download plugin: %w", err)
 	}
 
@@ -138,16 +138,16 @@ func (d *PluginDownloader) downloadAndCache(entry types.PluginRegistryEntry) (st
 	if entry.Checksum != "" {
 		calculatedChecksum := fmt.Sprintf("%x", hasher.Sum(nil))
 		if calculatedChecksum != entry.Checksum {
-			os.Remove(tempFile.Name())
+			_ = os.Remove(tempFile.Name())
 			return "", false, fmt.Errorf("checksum mismatch: expected %s, got %s", entry.Checksum, calculatedChecksum)
 		}
 	}
 
 	// Move temp file to final location
-	tempFile.Close()
+	_ = tempFile.Close()
 	err = os.Rename(tempFile.Name(), cachePath)
 	if err != nil {
-		os.Remove(tempFile.Name())
+		_ = os.Remove(tempFile.Name())
 		return "", false, fmt.Errorf("failed to move plugin to cache: %w", err)
 	}
 
@@ -175,7 +175,7 @@ func (d *PluginDownloader) isCacheValid(cachePath string, entry types.PluginRegi
 		if err != nil {
 			return false
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		hasher := sha256.New()
 		if _, err := io.Copy(hasher, file); err != nil {

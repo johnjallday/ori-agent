@@ -159,7 +159,7 @@ func (c *Client) receiveLoop() {
 		// Check if this is a response to a pending request
 		if resp.ID != nil {
 			// Convert float64 to int64 if needed (JSON unmarshals numbers as float64)
-			var normalizedID interface{} = resp.ID
+			var normalizedID = resp.ID
 			if f, ok := resp.ID.(float64); ok {
 				normalizedID = int64(f)
 			}

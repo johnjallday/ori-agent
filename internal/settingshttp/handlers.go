@@ -222,7 +222,8 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Get default models for unregistered providers
 			var defaultModels []string
-			if name == "claude" {
+			switch name {
+			case "claude":
 				// Hardcode Claude models since provider isn't registered
 				defaultModels = []string{
 					"claude-sonnet-4-5",
@@ -232,7 +233,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 					"claude-3-sonnet-20240229",
 					"claude-3-haiku-20240307",
 				}
-			} else if name == "openai" {
+			case "openai":
 				// Hardcode OpenAI models since provider isn't registered
 				defaultModels = []string{
 					"gpt-5-nano",
@@ -244,7 +245,7 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 					"o1-preview",
 					"o1-mini",
 				}
-			} else {
+			default:
 				// Skip other unregistered providers
 				continue
 			}

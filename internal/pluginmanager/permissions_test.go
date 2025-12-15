@@ -405,7 +405,7 @@ func TestPermissionManager_FileIO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	auditPath := filepath.Join(tmpDir, "permissions_audit.json")
 	pm := NewPermissionManager(auditPath)

@@ -37,7 +37,7 @@ func TestPluginLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to list plugins: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -139,7 +139,7 @@ func TestPluginHealthChecks(t *testing.T) {
 		t.Skip("Plugin health endpoint not available")
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		t.Skip("Plugin health endpoint not implemented yet")

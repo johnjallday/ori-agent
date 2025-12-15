@@ -71,7 +71,7 @@ func (m *LaunchAgentManager) Install() error {
 	// Load the LaunchAgent using launchctl
 	if err := m.load(); err != nil {
 		// Clean up the plist file if load fails
-		os.Remove(m.plistPath)
+		_ = os.Remove(m.plistPath)
 		return fmt.Errorf("failed to load LaunchAgent: %w", err)
 	}
 

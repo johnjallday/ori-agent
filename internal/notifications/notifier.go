@@ -270,7 +270,7 @@ func (c *WebhookChannel) Send(notification Notification) error {
 	if err != nil {
 		return fmt.Errorf("failed to post to webhook: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)

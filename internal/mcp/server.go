@@ -97,7 +97,7 @@ func (s *Server) Start() error {
 
 	_, err = s.client.Initialize(initCtx, clientInfo)
 	if err != nil {
-		s.client.Close()
+		_ = s.client.Close()
 		s.client = nil
 		s.setStatus(StatusError)
 		return fmt.Errorf("failed to initialize: %w", err)
@@ -105,7 +105,7 @@ func (s *Server) Start() error {
 
 	// Discover tools
 	if err := s.discoverTools(); err != nil {
-		s.client.Close()
+		_ = s.client.Close()
 		s.client = nil
 		s.setStatus(StatusError)
 		return fmt.Errorf("failed to discover tools: %w", err)

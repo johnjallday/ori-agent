@@ -320,7 +320,7 @@ func TestBackupManager_SaveExportToFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	bm := NewBackupManager(tmpDir)
 
@@ -352,7 +352,7 @@ func TestBackupManager_CreateBackupArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	bm := NewBackupManager(tmpDir)
 
@@ -376,7 +376,7 @@ func TestBackupManager_CreateBackupArchive(t *testing.T) {
 	if err != nil {
 		t.Errorf("Archive is not a valid zip file: %v", err)
 	}
-	defer zipReader.Close()
+	defer func() { _ = zipReader.Close() }()
 
 	// Verify expected files in archive
 	files := make(map[string]bool)
@@ -397,7 +397,7 @@ func TestBackupManager_ExtractBackupArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create backup manager and add configs
 	bm1 := NewBackupManager(tmpDir)
@@ -453,7 +453,7 @@ func TestBackupManager_ListBackups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	bm := NewBackupManager(tmpDir)
 
@@ -500,7 +500,7 @@ func TestBackupManager_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	bm := NewBackupManager(tmpDir)
 

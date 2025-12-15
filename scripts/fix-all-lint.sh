@@ -65,26 +65,11 @@ echo ""
 cat "$TEMP_ERRORS"
 echo ""
 
-# Step 4: Offer AI-powered fixing
+# Step 4: AI-powered fixing (automatic)
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}Step 3: AI-Powered Fix${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-
-read -p "Use Claude Code to fix remaining issues? [y/N]: " -n 1 -r
-echo ""
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo -e "${YELLOW}Manual review required.${NC}"
-  echo ""
-  echo "Remaining errors saved to: $TEMP_ERRORS"
-  echo "To fix manually, review the errors above and run:"
-  echo "  golangci-lint run ./... --fix"
-  echo ""
-  # Don't delete temp file if user wants to review
-  trap - EXIT
-  exit 1
-fi
 
 # Create prompt for Claude
 PROMPT_FILE=$(mktemp)
@@ -125,7 +110,7 @@ if ! command -v claude &> /dev/null; then
 fi
 
 # Launch Claude Code with the prompt
-if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits; then
+if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits --max-turns 15; then
   echo ""
   echo -e "${GREEN}✓ Claude Code finished${NC}"
   echo ""

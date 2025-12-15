@@ -79,7 +79,7 @@ func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
 // ValidateConfig validates the Claude configuration
 func (p *ClaudeProvider) ValidateConfig(config ProviderConfig) error {
 	if config.APIKey == "" {
-		return fmt.Errorf("Claude API key is required")
+		return fmt.Errorf("claude API key is required")
 	}
 	return nil
 }

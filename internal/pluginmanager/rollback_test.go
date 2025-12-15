@@ -26,7 +26,7 @@ func TestVersionManager_StoreVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -112,7 +112,7 @@ func TestVersionManager_GetVersionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -153,7 +153,7 @@ func TestVersionManager_RollbackToVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -243,7 +243,7 @@ func TestVersionManager_GetAvailableVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -277,7 +277,7 @@ func TestVersionManager_HasVersionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -307,7 +307,7 @@ func TestVersionManager_RemoveVersionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -344,7 +344,7 @@ func TestVersionManager_CleanupOldVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	vm := NewVersionManager(filepath.Join(tmpDir, "versions"))
 
@@ -386,7 +386,7 @@ func TestVersionManager_LoadVersionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	versionsDir := filepath.Join(tmpDir, "versions")
 	vm1 := NewVersionManager(versionsDir)
@@ -419,7 +419,7 @@ func TestCopyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	srcPath := filepath.Join(tmpDir, "source.txt")
 	dstPath := filepath.Join(tmpDir, "dest.txt")

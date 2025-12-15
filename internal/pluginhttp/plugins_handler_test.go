@@ -138,7 +138,7 @@ func setupTestHandler(t *testing.T) (*PluginsPageHandler, string, func()) {
 	)
 
 	cleanup := func() {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return handler, tmpDir, cleanup

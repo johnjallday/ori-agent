@@ -1976,7 +1976,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Find scheduled task by CanvasNodeID
-	var taskIndex int = -1
+	var taskIndex = -1
 	var st *agentstudio.ScheduledTask
 	for i := range ws.ScheduledTasks {
 		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {

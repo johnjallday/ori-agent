@@ -115,7 +115,7 @@ func (l *Logger) logJSON(level Level, message string, fields Fields) {
 		return
 	}
 
-	fmt.Fprintln(os.Stdout, string(data))
+	_, _ = fmt.Fprintln(os.Stdout, string(data))
 }
 
 // logText outputs a human-readable log entry

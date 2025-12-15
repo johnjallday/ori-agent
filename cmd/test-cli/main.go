@@ -380,7 +380,7 @@ func (r *TestRunner) cleanupTestData() {
 	}
 
 	// Delete logs
-	os.Remove("test-server.log")
+	_ = os.Remove("test-server.log")
 
 	fmt.Println(colorGreen + "✓ Cleanup complete" + colorReset)
 }

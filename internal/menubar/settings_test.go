@@ -10,7 +10,7 @@ import (
 func TestPortConfiguration(t *testing.T) {
 	// Create temp file for testing
 	tmpFile := "/tmp/test_app_state_port.json"
-	defer os.Remove(tmpFile)
+	defer func() { _ = os.Remove(tmpFile) }()
 
 	// Create managers
 	mgr := onboarding.NewManager(tmpFile)

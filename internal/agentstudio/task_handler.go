@@ -337,7 +337,7 @@ func (h *LLMTaskHandler) formatInputResults(prompt *strings.Builder, task Task, 
 	// Include input task results as context
 	prompt.WriteString("## Input from Previous Tasks\n\n")
 	for taskID, result := range resultsMap {
-		prompt.WriteString(fmt.Sprintf("**Task %s Result:**\n```\n%s\n```\n\n", taskID, result))
+		fmt.Fprintf(prompt, "**Task %s Result:**\n```\n%s\n```\n\n", taskID, result)
 	}
 }
 

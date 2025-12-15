@@ -239,7 +239,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// SECURITY: Sanitize filename to prevent path traversal attacks
 	cleanFilename := filepath.Base(header.Filename)
@@ -256,7 +256,11 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 
 	// SECURITY: Only allow alphanumeric characters, hyphens, underscores, and dots in filename
 	for _, c := range cleanFilename {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+		isLower := c >= 'a' && c <= 'z'
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isAllowed := c == '-' || c == '_' || c == '.'
+		if !isLower && !isUpper && !isDigit && !isAllowed {
 			http.Error(w, "Invalid characters in filename", http.StatusBadRequest)
 			return
 		}
@@ -276,25 +280,25 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := io.Copy(out, file); err != nil {
-		out.Close()
+		_ = out.Close()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out.Close()
+	_ = out.Close()
 
 	// Load plugin to get its definition and validate it BEFORE making it executable
 	// This prevents arbitrary code execution if validation is bypassed
 	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {
 		// Clean up the file if plugin is invalid
-		os.Remove(pluginFile)
+		_ = os.Remove(pluginFile)
 		http.Error(w, "Invalid plugin: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Only make the plugin executable AFTER successful validation
 	if err := os.Chmod(pluginFile, 0755); err != nil {
-		os.Remove(pluginFile)
+		_ = os.Remove(pluginFile)
 		http.Error(w, "Failed to set plugin permissions: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -306,7 +310,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Add to plugin registry
 	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
-		os.Remove(pluginFile)
+		_ = os.Remove(pluginFile)
 		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

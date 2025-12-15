@@ -152,7 +152,7 @@ func (r *Runner) loadScenarios() error {
 			return err
 		}
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	r.data = &ScenarioData{}
 	return json.NewDecoder(file).Decode(r.data)
@@ -371,7 +371,7 @@ func (r *Runner) exportReport() {
 		fmt.Printf("%s✗ Failed to create report: %v%s\n", colorRed, err, colorReset)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")

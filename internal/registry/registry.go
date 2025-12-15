@@ -86,7 +86,7 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	if err != nil {
 		return reg, fmt.Errorf("failed to fetch from GitHub: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return reg, fmt.Errorf("GitHub returned status %d", resp.StatusCode)

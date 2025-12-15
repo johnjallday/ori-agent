@@ -26,7 +26,7 @@ func TestHealthEndpoint(t *testing.T) {
 		Method: "GET",
 		Path:   "/health",
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Assert status
 	if resp.StatusCode != http.StatusOK {
@@ -57,7 +57,7 @@ func TestListAgentsEndpoint(t *testing.T) {
 		Method: "GET",
 		Path:   "/api/agents",
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Assert status
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
@@ -101,7 +101,7 @@ func TestCreateAgentEndpoint(t *testing.T) {
 			"Content-Type": "application/json",
 		},
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Assert status (may be 201 or 200 depending on implementation)
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
@@ -132,7 +132,7 @@ func TestListPluginsEndpoint(t *testing.T) {
 		Method: "GET",
 		Path:   "/api/plugins",
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Assert status
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
@@ -161,7 +161,7 @@ func TestSettingsEndpoint(t *testing.T) {
 		Method: "GET",
 		Path:   "/api/settings",
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Assert status
 	testutil.AssertStatusCode(t, http.StatusOK, resp.StatusCode)
@@ -185,14 +185,14 @@ func TestChatEndpointWithoutAPIKey(t *testing.T) {
 	// Temporarily unset API keys
 	oldOpenAI := os.Getenv("OPENAI_API_KEY")
 	oldAnthropic := os.Getenv("ANTHROPIC_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
-	os.Unsetenv("ANTHROPIC_API_KEY")
+	_ = os.Unsetenv("OPENAI_API_KEY")
+	_ = os.Unsetenv("ANTHROPIC_API_KEY")
 	defer func() {
 		if oldOpenAI != "" {
-			os.Setenv("OPENAI_API_KEY", oldOpenAI)
+			_ = os.Setenv("OPENAI_API_KEY", oldOpenAI)
 		}
 		if oldAnthropic != "" {
-			os.Setenv("ANTHROPIC_API_KEY", oldAnthropic)
+			_ = os.Setenv("ANTHROPIC_API_KEY", oldAnthropic)
 		}
 	}()
 
@@ -215,7 +215,7 @@ func TestChatEndpointWithoutAPIKey(t *testing.T) {
 			"Content-Type": "application/json",
 		},
 	})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Should fail with appropriate error
 	// (implementation may vary - either 400, 401, or 500)
@@ -243,10 +243,11 @@ func startTestServer(t *testing.T) *testutil.TestServer {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		case "/api/agents":
-			if r.Method == "GET" {
+			switch r.Method {
+			case "GET":
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
-			} else if r.Method == "POST" {
+			case "POST":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusCreated)
 				var agent map[string]interface{}

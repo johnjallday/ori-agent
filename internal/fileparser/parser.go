@@ -86,7 +86,7 @@ func ParseDOCX(data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to open document.xml: %w", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	// Parse XML
 	var doc WordDocument

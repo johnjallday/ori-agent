@@ -152,7 +152,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 			}
 
 			// Send with event type prefix
-			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
+			_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
 			if err != nil {
 				logger.Error("Failed to write SSE event", logger.Fields{"err": err})
 				return
@@ -187,7 +187,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err == nil {
 		data, _ := json.Marshal(status)
-		_, _ = w.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 	}
 
@@ -217,7 +217,7 @@ func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.
 				continue
 			}
 
-			_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", data)))
+			_, err = fmt.Fprintf(w, "data: %s\n\n", data)
 			if err != nil {
 				logger.Error("Failed to write SSE data", logger.Fields{"err": err})
 				return
@@ -262,7 +262,7 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 		return
 	}
 
-	_, err = w.Write([]byte(fmt.Sprintf("event: status\ndata: %s\n\n", data)))
+	_, err = fmt.Fprintf(w, "event: status\ndata: %s\n\n", data)
 	if err == nil {
 		flusher.Flush()
 	}
@@ -356,7 +356,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 			}
 
 			// Send with event type prefix
-			_, err = w.Write([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, data)))
+			_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
 			if err != nil {
 				logger.Debug("Failed to write progress SSE event (client likely disconnected)", logger.Fields{"err": err})
 				return
@@ -411,7 +411,7 @@ func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher h
 		return
 	}
 
-	_, _ = w.Write([]byte(fmt.Sprintf("event: initial\ndata: %s\n\n", jsonData)))
+	_, _ = fmt.Fprintf(w, "event: initial\ndata: %s\n\n", jsonData)
 	flusher.Flush()
 }
 
@@ -440,6 +440,6 @@ func (sh *StreamingHandler) sendWorkspaceProgressUpdate(w http.ResponseWriter, f
 		return
 	}
 
-	_, _ = w.Write([]byte(fmt.Sprintf("event: workspace.progress\ndata: %s\n\n", data)))
+	_, _ = fmt.Fprintf(w, "event: workspace.progress\ndata: %s\n\n", data)
 	flusher.Flush()
 }

@@ -62,7 +62,7 @@ func (al *ActivityLogger) LogActivity(agentName string, eventType types.Activity
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Write log entry (one per line - JSONL format)
 	if _, err := f.WriteString(string(data) + "\n"); err != nil {
@@ -89,7 +89,7 @@ func (al *ActivityLogger) GetActivityLog(agentName string, limit, offset int, ev
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var allLogs []types.ActivityLog
 	scanner := bufio.NewScanner(f)
@@ -191,7 +191,7 @@ func (al *ActivityLogger) GetRecentActivity(limit int) ([]types.ActivityLog, err
 			allLogs = append(allLogs, logEntry)
 		}
 
-		f.Close()
+		_ = f.Close()
 	}
 
 	// Sort by timestamp (newest first)
