@@ -49,11 +49,64 @@ print_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Help function
+show_help() {
+  echo ""
+  echo "╔════════════════════════════════════════════════════════════════╗"
+  echo "║              create-release.sh - Release Manager               ║"
+  echo "╚════════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo -e "${BLUE}USAGE:${NC}"
+  echo "  ./scripts/create-release.sh <version> [options]"
+  echo ""
+  echo -e "${BLUE}ARGUMENTS:${NC}"
+  echo "  <version>       Version to release (e.g., v1.3.0 or 1.3.0)"
+  echo "                  The 'v' prefix is added automatically if missing"
+  echo ""
+  echo -e "${BLUE}OPTIONS:${NC}"
+  echo "  --immediate     Skip release branch, release immediately"
+  echo "                  Merges dev to main, creates tag, triggers release"
+  echo "  --help, -h      Show this help message"
+  echo ""
+  echo -e "${BLUE}EXAMPLES:${NC}"
+  echo "  ./scripts/create-release.sh v1.3.0"
+  echo "      Create release branch release/v1.3.0 from dev (Git Flow)"
+  echo ""
+  echo "  ./scripts/create-release.sh v1.3.0 --immediate"
+  echo "      Skip release branch, merge dev to main and release now"
+  echo ""
+  echo "  ./scripts/create-release.sh 1.3.0"
+  echo "      Same as v1.3.0 (v prefix added automatically)"
+  echo ""
+  echo -e "${BLUE}GIT FLOW WORKFLOW (default):${NC}"
+  echo "  1. Creates release/vX.Y.Z branch from dev"
+  echo "  2. Push triggers CI validation"
+  echo "  3. Make bug fixes on release branch (no new features)"
+  echo "  4. Scheduled release (Tuesday 10:00 UTC) or manual trigger"
+  echo ""
+  echo -e "${BLUE}IMMEDIATE RELEASE WORKFLOW (--immediate):${NC}"
+  echo "  1. Merges dev to main (if needed)"
+  echo "  2. Runs quick tests"
+  echo "  3. Updates VERSION file"
+  echo "  4. Creates and pushes tag (triggers GitHub Actions release)"
+  echo "  5. Syncs release back to dev"
+  echo ""
+  echo -e "${BLUE}RELATED COMMANDS:${NC}"
+  echo "  ./scripts/pre-release-check.sh <version>   Full validation before release"
+  echo "  gh workflow run scheduled-release.yml      Manually trigger scheduled release"
+  echo "  gh run list --workflow=release.yml         View release workflow progress"
+  echo ""
+  exit 0
+}
+
 # Parse arguments
 IMMEDIATE=false
 VERSION=""
 for arg in "$@"; do
   case $arg in
+    --help|-h)
+      show_help
+      ;;
     --immediate)
       IMMEDIATE=true
       ;;
