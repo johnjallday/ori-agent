@@ -92,6 +92,7 @@ EXTERNAL_PLUGINS=(
   "../plugins/ori-mac-os-tools:ori-mac-os-tools"
   "../plugins/ori-meta-threads-manager:ori-meta-threads-manager"
   "../plugins/ori-agent-doc-builder:ori-agent-doc-builder"
+  "../plugins/ori-plugin-manager:ori-plugin-manager"
 )
 
 # Build each external plugin

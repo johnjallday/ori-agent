@@ -81,8 +81,10 @@ export class RendererNodes {
       // Handle unassigned tasks (to: "unassigned" or empty string)
       const isUnassigned = task.to === 'unassigned' || task.to === '' || !task.to;
 
-      // Skip if target agent not found AND not unassigned
-      if (!toAgent && !isUnassigned) return;
+      // If the task points to an agent that no longer exists on the canvas, treat it like unassigned
+      // so it remains visible and can be reassigned.
+      const isOrphaned = !toAgent && !isUnassigned;
+      const treatAsUnassigned = isUnassigned || isOrphaned;
 
       // Handle system/user-created tasks (no from agent or empty from field)
       const isSystemTask = !fromAgent || task.from === 'system' || task.from === 'user' || task.from === '' || !task.from;
@@ -93,7 +95,7 @@ export class RendererNodes {
         const viewCenterX = (this.parent.width / 2 - this.state.offsetX) / this.state.scale;
         const viewCenterY = (this.parent.height / 2 - this.state.offsetY) / this.state.scale;
 
-        if (isUnassigned) {
+        if (treatAsUnassigned) {
             // Position unassigned tasks near the current viewport center
           const offsetX = (index % 2 === 0 ? -80 : 80);
           const offsetY = (Math.floor(index / 2) % 3 - 1) * 60;
@@ -141,8 +143,8 @@ export class RendererNodes {
         this.ctx.setLineDash([]);
       }
 
-      // Draw connection line from task to receiver (skip for unassigned tasks)
-      if (toAgent && !isUnassigned) {
+      // Draw connection line from task to receiver (skip for unassigned/orphaned tasks)
+      if (toAgent && !treatAsUnassigned) {
         const color = toAgent.color + 'DD'; // More opaque (87% opacity)
         this.ctx.setLineDash([5, 5]);
         // Calculate shortened end point to avoid hiding arrowhead behind agent circle
@@ -224,7 +226,7 @@ export class RendererNodes {
       this.ctx.font = '9px system-ui';
 
       let statusText;
-      if (isUnassigned) {
+      if (treatAsUnassigned) {
         // Find output connection from this task (task is the source)
         const outputConn = this.state.connections.find(c => c.from === task.id);
 
@@ -236,10 +238,10 @@ export class RendererNodes {
             const nodeName = connectedNode.node.name || connectedNode.node.id || 'Unknown';
             statusText = `→ ${nodeName}`;
           } else {
-            statusText = '⚠️ UNASSIGNED';
+            statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
           }
         } else {
-          statusText = '⚠️ UNASSIGNED';
+          statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
         }
       } else {
         // Find the assigned agent node to show instance number
@@ -353,7 +355,7 @@ export class RendererNodes {
       const outputsToCombiner = outputConn ? this.parent.getNodeById(outputConn.to)?.type === 'combiner' : false;
 
       // Skip action controls when task is unassigned to avoid clutter
-      const showActions = !isUnassigned;
+      const showActions = !treatAsUnassigned;
 
       // Execute button for pending tasks (hide if outputs to combiner)
       if (showActions && task.status === 'pending' && !outputsToCombiner) {
@@ -402,7 +404,7 @@ export class RendererNodes {
       }
 
       // Assign button (show for unassigned tasks even if completed)
-      const isUnassignedTask = isUnassigned;
+      const isUnassignedTask = treatAsUnassigned;
       const showAssignButton = isUnassignedTask || task.status !== 'completed';
       if (showAssignButton) {
         const assignBtnWidth = 50;

@@ -171,6 +171,13 @@ func (r *RPCPluginClient) GetMetadata() (*pluginapi.PluginMetadata, error) {
 	return nil, nil // Plugin doesn't provide metadata
 }
 
+func (r *RPCPluginClient) GetTags() []string {
+	if metadataProvider, ok := r.tool.(pluginapi.MetadataProvider); ok {
+		return metadataProvider.GetTags()
+	}
+	return nil
+}
+
 // GetWebPages returns available web pages if the plugin implements WebPageProvider
 func (r *RPCPluginClient) GetWebPages() []string {
 	if webProvider, ok := r.tool.(pluginapi.WebPageProvider); ok {

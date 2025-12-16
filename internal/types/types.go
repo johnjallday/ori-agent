@@ -87,6 +87,7 @@ type PluginMetadata struct {
 	Name         string       `json:"name,omitempty"`        // Plugin name
 	Version      string       `json:"version,omitempty"`     // Plugin version (semver)
 	Description  string       `json:"description,omitempty"` // Short description of the plugin
+	Tags         []string     `json:"tags,omitempty"`        // Normalized tags (e.g., "dev-tools", "audio")
 	Maintainers  []Maintainer `json:"maintainers,omitempty"`
 	License      string       `json:"license,omitempty"`      // e.g., "MIT", "Apache-2.0", "GPL-3.0"
 	Repository   string       `json:"repository,omitempty"`   // Source code repository URL
@@ -98,6 +99,7 @@ type PluginMetadata struct {
 type PluginRegistryEntry struct {
 	Name          string          `json:"name"`
 	Description   string          `json:"description"`
+	Tags          []string        `json:"tags,omitempty"`           // Normalized tags (e.g., "dev-tools", "audio")
 	Path          string          `json:"path,omitempty"`           // Local path (for local plugins)
 	URL           string          `json:"url,omitempty"`            // External URL (for remote plugins)
 	Version       string          `json:"version,omitempty"`        // Plugin version

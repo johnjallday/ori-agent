@@ -416,7 +416,10 @@ function formatMaxTokens(value) {
 // Render plugins list
 function renderPlugins() {
     const container = document.getElementById('pluginsList');
-    const plugins = currentAgent.enabled_plugins || [];
+    if (!container) return;
+
+    const pluginsRaw = currentAgent?.enabled_plugins;
+    const plugins = Array.isArray(pluginsRaw) ? pluginsRaw : (pluginsRaw ? [pluginsRaw] : []);
 
     if (plugins.length === 0) {
         container.innerHTML = '<div class="empty-message">No plugins enabled</div>';
@@ -425,12 +428,15 @@ function renderPlugins() {
 
     container.innerHTML = '';
     plugins.forEach(plugin => {
+        const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+        const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
+
         const item = document.createElement('div');
         item.className = 'plugin-item';
         item.innerHTML = `
             <div>
-                <div class="plugin-name">${escapeHtml(plugin.name)}</div>
-                ${plugin.version ? `<div class="plugin-version">v${escapeHtml(plugin.version)}</div>` : ''}
+                <div class="plugin-name">${escapeHtml(name || '(unknown plugin)')}</div>
+                ${version ? `<div class="plugin-version">v${escapeHtml(version)}</div>` : ''}
             </div>
         `;
         container.appendChild(item);
@@ -704,7 +710,7 @@ function formatFullDate(dateString) {
 
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
 }
 

@@ -227,6 +227,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
 	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
 
+	// Tags endpoints for the plugins management UI
+	mux.HandleFunc("/api/plugins/tags", s.pluginsPageHandler.HandleListPluginTags)
+	mux.HandleFunc("/api/plugins/tags/", s.pluginsPageHandler.HandleListPluginsByTag)
+
 	// Main plugins list endpoint - route based on query parameters
 	mux.HandleFunc("/api/plugins", func(w http.ResponseWriter, r *http.Request) {
 		// If there's a 'management' query parameter, use the new handler
