@@ -415,7 +415,7 @@ function formatMaxTokens(value) {
 
 // Render plugins list
 function renderPlugins() {
-    const container = document.getElementById('pluginsList');
+    const container = document.getElementById('enabledPluginsList');
     if (!container) return;
 
     const pluginsRaw = currentAgent?.enabled_plugins;
