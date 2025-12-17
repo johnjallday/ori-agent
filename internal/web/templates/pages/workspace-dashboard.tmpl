@@ -678,6 +678,48 @@
                   </span>
                 </div>
 
+                ${task.status === 'completed' && task.result ? `
+                <div class="task-collapsible">
+                  <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-result')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M9,7H7V9H9V7M9,11H7V13H9V11M7,15H9V17H7V15M11,7H17V9H11V7M11,11H17V13H11V11M11,15H17V17H11V15M3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3H5A2,2 0 0,0 3,5Z"/>
+                    </svg>
+                    <span>Result</span>
+                    <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                    </svg>
+                  </div>
+                  <div class="task-collapsible-content task-result" id="${taskId}-result">
+                    <div class="d-flex justify-content-end mb-2">
+                      <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); copyTaskResult('${escapeHtml(task.id)}')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                          <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+                        </svg>
+                        Copy
+                      </button>
+                    </div>
+                    <pre class="task-result-pre">${escapeHtml(task.result)}</pre>
+                  </div>
+                </div>
+                ` : ''}
+
+                ${task.error ? `
+                <div class="task-collapsible">
+                  <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-error')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M11,15H13V17H11V15M11,7H13V13H11V7M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                    </svg>
+                    <span>Error</span>
+                    <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+                    </svg>
+                  </div>
+                  <div class="task-collapsible-content task-error" id="${taskId}-error">
+                    <pre class="task-result-pre task-error-pre">${escapeHtml(task.error)}</pre>
+                  </div>
+                </div>
+                ` : ''}
+
                 ${scheduler ? `
                 <div class="task-collapsible">
                   <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-schedule')">
@@ -797,6 +839,30 @@
     // Refresh tasks
     function refreshTasks() {
       loadTasks();
+    }
+
+    async function copyTaskResult(taskId) {
+      const task = tasksById.get(taskId);
+      const result = task?.result || '';
+      if (!result) {
+        alert('No task result to copy');
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(result);
+      } catch (err) {
+        console.warn('Clipboard API failed; falling back to legacy copy', err);
+        const el = document.createElement('textarea');
+        el.value = result;
+        el.setAttribute('readonly', '');
+        el.style.position = 'absolute';
+        el.style.left = '-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
     }
 
     // Jump to canvas and open "Save as Workflow" for a specific task

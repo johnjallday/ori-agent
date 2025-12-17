@@ -1,6 +1,7 @@
 name: math
 version: 1.0.0
 description: Perform basic math operations (add, subtract, multiply, divide)
+tags: ["utility", "math"]
 license: MIT
 repository: https://github.com/johnjallday/ori-agent
 

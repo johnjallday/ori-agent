@@ -659,7 +659,8 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
 
-	w.Header().Set("Content-Control", "no-cache, no-store, must-revalidate")
+	// Prevent browsers from caching embedded static assets during local dev.
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 

@@ -242,6 +242,28 @@
   padding: 0.5rem;
 }
 
+.task-collapsible-content.task-result.expanded,
+.task-collapsible-content.task-error.expanded {
+  max-height: 600px;
+}
+
+.task-result-pre {
+  white-space: pre-wrap;
+  margin-bottom: 0;
+  max-height: 520px;
+  overflow: auto;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.task-error-pre {
+  border-color: rgba(220, 53, 69, 0.35);
+}
+
 .task-detail-row {
   display: flex;
   justify-content: space-between;

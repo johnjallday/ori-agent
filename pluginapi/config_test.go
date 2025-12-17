@@ -155,3 +155,32 @@ func TestExpandTemplates(t *testing.T) {
 		})
 	}
 }
+
+func TestToMetadata_IncludesTags(t *testing.T) {
+	yaml := `
+name: test-plugin
+version: 1.0.0
+description: Test plugin
+tags: ["dev_tools", "DevTools", "audio"]
+license: MIT
+repository: https://github.com/test/test
+maintainers:
+  - name: Test
+    email: test@test.com
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+`
+
+	config := readPluginConfig(yaml)
+	meta, err := config.ToMetadata()
+	if err != nil {
+		t.Fatalf("ToMetadata error: %v", err)
+	}
+	if meta == nil {
+		t.Fatalf("ToMetadata returned nil metadata")
+	}
+	if len(meta.Tags) != 3 {
+		t.Fatalf("expected 3 tags, got %d (%v)", len(meta.Tags), meta.Tags)
+	}
+}

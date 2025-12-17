@@ -100,6 +100,18 @@ func (b *BasePlugin) GetMetadata() (*PluginMetadata, error) {
 	return b.metadata, nil
 }
 
+// GetTags returns plugin tags from metadata, if available.
+// Implements MetadataProvider interface.
+func (b *BasePlugin) GetTags() []string {
+	if b.pluginConfig != nil && len(b.pluginConfig.Tags) > 0 {
+		return b.pluginConfig.Tags
+	}
+	if b.metadata == nil {
+		return nil
+	}
+	return b.metadata.Tags
+}
+
 // SetDefaultSettings sets the default settings JSON string.
 // Call this in your plugin's constructor to enable GetDefaultSettings().
 func (b *BasePlugin) SetDefaultSettings(settings string) {

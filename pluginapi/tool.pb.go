@@ -885,6 +885,7 @@ type PluginMetadata struct {
 	Maintainers   []*Maintainer          `protobuf:"bytes,6,rep,name=maintainers,proto3" json:"maintainers,omitempty"`
 	Platforms     []*Platform            `protobuf:"bytes,7,rep,name=platforms,proto3" json:"platforms,omitempty"`       // Supported platforms
 	Requirements  *Requirements          `protobuf:"bytes,8,opt,name=requirements,proto3" json:"requirements,omitempty"` // Plugin requirements
+	Tags          []string               `protobuf:"bytes,9,rep,name=tags,proto3" json:"tags,omitempty"`                 // Plugin tags (normalized, e.g., "dev-tools", "audio")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -971,6 +972,13 @@ func (x *PluginMetadata) GetPlatforms() []*Platform {
 func (x *PluginMetadata) GetRequirements() *Requirements {
 	if x != nil {
 		return x.Requirements
+	}
+	return nil
+}
+
+func (x *PluginMetadata) GetTags() []string {
+	if x != nil {
+		return x.Tags
 	}
 	return nil
 }
@@ -1489,7 +1497,7 @@ const file_tool_proto_rawDesc = "" +
 	"\rarchitectures\x18\x02 \x03(\tR\rarchitectures\"Z\n" +
 	"\fRequirements\x12&\n" +
 	"\x0fmin_ori_version\x18\x01 \x01(\tR\rminOriVersion\x12\"\n" +
-	"\fdependencies\x18\x02 \x03(\tR\fdependencies\"\xc3\x02\n" +
+	"\fdependencies\x18\x02 \x03(\tR\fdependencies\"\xd7\x02\n" +
 	"\x0ePluginMetadata\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
@@ -1500,7 +1508,8 @@ const file_tool_proto_rawDesc = "" +
 	"repository\x127\n" +
 	"\vmaintainers\x18\x06 \x03(\v2\x15.pluginapi.MaintainerR\vmaintainers\x121\n" +
 	"\tplatforms\x18\a \x03(\v2\x13.pluginapi.PlatformR\tplatforms\x12;\n" +
-	"\frequirements\x18\b \x01(\v2\x17.pluginapi.RequirementsR\frequirements\"_\n" +
+	"\frequirements\x18\b \x01(\v2\x17.pluginapi.RequirementsR\frequirements\x12\x12\n" +
+	"\x04tags\x18\t \x03(\tR\x04tags\"_\n" +
 	"\x10MetadataResponse\x125\n" +
 	"\bmetadata\x18\x01 \x01(\v2\x19.pluginapi.PluginMetadataR\bmetadata\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x94\x01\n" +

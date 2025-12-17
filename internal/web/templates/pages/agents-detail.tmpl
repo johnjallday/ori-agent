@@ -4,6 +4,53 @@
 {{template "head.tmpl" .}}
 
 <body class="bg-light">
+  <style>
+    /* Toggle Switch Styles */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: var(--border-color, #ccc);
+      transition: 0.3s;
+      border-radius: 24px;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background-color: var(--primary-color, #7c3aed);
+    }
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+    }
+    .toggle-switch input:focus + .toggle-slider {
+      box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+    }
+  </style>
+
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -200,15 +247,31 @@
             <!-- Enabled Plugins Section -->
             <div class="col-12">
               <div class="section-card modern-card p-4">
-                <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary);">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                    <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
-                  </svg>
-                  Enabled Plugins
-                  <span id="pluginCount" class="modern-badge badge-secondary ms-2" style="font-size: 12px;">0</span>
-                </h3>
-                <div id="pluginsList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h3 class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                      <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+                    </svg>
+                    Enabled Plugins
+                    <span id="pluginCount" class="modern-badge badge-secondary ms-2" style="font-size: 12px;">0</span>
+                  </h3>
+                  <button class="modern-btn modern-btn-primary" onclick="togglePluginManager()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                    Manage Plugins
+                  </button>
+                </div>
+                <div id="enabledPluginsList" class="plugins-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
                   <div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>
+                </div>
+
+                <!-- Plugin Manager Panel (hidden by default) -->
+                <div id="pluginManagerPanel" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                  <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Available Plugins</h4>
+                  <div id="availablePluginsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+                    <div class="text-center py-3" style="color: var(--text-secondary);">Loading available plugins...</div>
+                  </div>
                 </div>
               </div>
             </div>

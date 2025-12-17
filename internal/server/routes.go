@@ -159,6 +159,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.healthHandler.HandlePluginHealth(w, r)
 			return
 		}
+		// Check if this is an enable endpoint
+		if strings.HasSuffix(r.URL.Path, "/enable") {
+			s.pluginsPageHandler.HandleEnablePlugin(w, r)
+			return
+		}
+		// Check if this is a disable endpoint
+		if strings.HasSuffix(r.URL.Path, "/disable") {
+			s.pluginsPageHandler.HandleDisablePlugin(w, r)
+			return
+		}
 		// Check if this is an update endpoint
 		if strings.HasSuffix(r.URL.Path, "/update") {
 			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)
@@ -226,6 +236,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Reuse the plugin handler instance
 	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
 	mux.HandleFunc("/api/plugins/tool-call", s.pluginHandler.DirectToolCallHandler)
+
+	// Tags endpoints for the plugins management UI
+	mux.HandleFunc("/api/plugins/tags", s.pluginsPageHandler.HandleListPluginTags)
+	mux.HandleFunc("/api/plugins/tags/", s.pluginsPageHandler.HandleListPluginsByTag)
 
 	// Main plugins list endpoint - route based on query parameters
 	mux.HandleFunc("/api/plugins", func(w http.ResponseWriter, r *http.Request) {

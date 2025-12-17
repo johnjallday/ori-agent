@@ -2560,21 +2560,17 @@ async function showAgentDetails(agent) {
   let systemPrompt = '';
 
   try {
-    // Fetch full agent details from settings file
-    const response = await fetch(`/agents/${encodeURIComponent(agent.name)}/agent_settings.json`);
+    // Fetch agent details from API (returns actual runtime state with enabled plugins)
+    const response = await fetch(`/api/agents/${encodeURIComponent(agent.name)}`);
     if (response.ok) {
       agentSettings = await response.json();
+      // API returns enabled_plugins as an array
+      enabledPlugins = agentSettings.enabled_plugins || [];
+      agentType = agentSettings.type || 'tool-calling';
+      model = agentSettings.model || 'N/A';
+      temperature = agentSettings.temperature || 1.0;
+      systemPrompt = agentSettings.system_prompt || '';
     }
-
-    // Fetch enabled plugins
-    if (agentSettings && agentSettings.Plugins) {
-      enabledPlugins = Object.keys(agentSettings.Plugins);
-    }
-
-    agentType = agentSettings?.type || 'tool-calling';
-    model = agentSettings?.Settings?.model || 'N/A';
-    temperature = agentSettings?.Settings?.temperature || 1.0;
-    systemPrompt = agentSettings?.Settings?.system || '';
   } catch (error) {
     console.error('Failed to load agent details:', error);
   }
@@ -2652,21 +2648,75 @@ async function showAgentDetails(agent) {
       </div>
     ` : ''}
 
-    ${enabledPlugins.length > 0 ? `
-      <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
-        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Enabled Plugins (${enabledPlugins.length})</h6>
-        <div class="small" style="color: var(--text-secondary);">
-          ${enabledPlugins.map(plugin => `
-            <div class="mb-1 p-1" style="background: rgba(255,255,255,0.05); border-radius: 3px;">
-              ${escapeHtml(plugin)}
-            </div>
-          `).join('')}
-        </div>
+    <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin: 0;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+            <path d="M22.7,19L13.6,9.9C14.5,7.6 14,4.9 12.1,3C10.1,1 7.1,0.6 4.7,1.7L9,6L6,9L1.6,4.7C0.4,7.1 0.9,10.1 2.9,12.1C4.8,14 7.5,14.5 9.8,13.6L18.9,22.7C19.3,23.1 19.9,23.1 20.3,22.7L22.6,20.4C23.1,20 23.1,19.3 22.7,19Z"/>
+          </svg>
+          Enabled Tools ${enabledPlugins.length > 0 ? `(${enabledPlugins.length})` : ''}
+        </h6>
+        <a href="/agents-detail.html?name=${encodeURIComponent(agent.name)}" class="modern-btn modern-btn-secondary" style="padding: 4px 8px; font-size: 0.7rem; text-decoration: none;" title="Configure plugins for this agent">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+          </svg>
+          Configure
+        </a>
       </div>
-    ` : ''}
+      <div class="small" style="color: var(--text-secondary);">
+        ${enabledPlugins.length > 0 ? enabledPlugins.map(plugin => `
+          <div class="mb-1 p-2" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); border-radius: 6px; display: flex; align-items: center;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="color: #7c3aed; margin-right: 8px;">
+              <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+            </svg>
+            <span style="color: #7c3aed; font-weight: 500;">${escapeHtml(plugin)}</span>
+          </div>
+        `).join('') : `
+          <div class="text-center py-3" style="color: var(--text-muted);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="opacity: 0.4;">
+              <path d="M22.7,19L13.6,9.9C14.5,7.6 14,4.9 12.1,3C10.1,1 7.1,0.6 4.7,1.7L9,6L6,9L1.6,4.7C0.4,7.1 0.9,10.1 2.9,12.1C4.8,14 7.5,14.5 9.8,13.6L18.9,22.7C19.3,23.1 19.9,23.1 20.3,22.7L22.6,20.4C23.1,20 23.1,19.3 22.7,19Z"/>
+            </svg>
+            <div style="font-style: italic;">No tools enabled</div>
+            <div class="mt-2">
+              <a href="/agents-detail.html?name=${encodeURIComponent(agent.name)}" class="modern-btn modern-btn-primary" style="padding: 6px 12px; font-size: 0.75rem; text-decoration: none;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+                Enable Plugins
+              </a>
+            </div>
+          </div>
+        `}
+      </div>
+    </div>
   `;
 }
 
+/**
+ * Open plugin configuration for a specific agent
+ * Switches to the agent first, then navigates to plugins page
+ */
+async function openPluginConfigForAgent(agentName) {
+  try {
+    // Switch to this agent first
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+      method: 'PUT'
+    });
+
+    if (!response.ok) {
+      console.error('Failed to switch agent:', await response.text());
+      alert(`Failed to switch to agent "${agentName}". Please try again.`);
+      return;
+    }
+
+    // Navigate to plugins page
+    window.location.href = '/plugins';
+  } catch (error) {
+    console.error('Error switching agent:', error);
+    alert(`Error: ${error.message}`);
+  }
+}
+window.openPluginConfigForAgent = openPluginConfigForAgent;
 
 /**
  * Add timeline event (placeholder)

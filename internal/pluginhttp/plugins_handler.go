@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
+	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -51,6 +53,16 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	tagFilter := strings.TrimSpace(r.URL.Query().Get("tag"))
+	var normalizedTagFilter string
+	if tagFilter != "" {
+		normalizedTagFilter = internaltags.NormalizeTag(tagFilter)
+		if err := internaltags.ValidateTag(normalizedTagFilter); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid tag filter: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Load local registry to get all plugins
 	localReg, err := h.RegistryManager.LoadLocal()
 	if err != nil {
@@ -66,6 +78,11 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	plugins := make([]map[string]interface{}, 0, len(localReg.Plugins))
 
 	for _, plugin := range localReg.Plugins {
+		tags := pluginAllTags(&plugin)
+		if normalizedTagFilter != "" && !pluginHasTag(&plugin, normalizedTagFilter) {
+			continue
+		}
+
 		// Check if plugin is enabled
 		isEnabled := false
 		var loadedPlugin *types.LoadedPlugin
@@ -86,6 +103,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			"name":                 plugin.Name,
 			"description":          plugin.Description,
 			"version":              plugin.Version,
+			"tags":                 tags,
 			"category":             plugin.Category,
 			"status":               status,
 			"enabled":              plugin.Enabled,
@@ -106,6 +124,64 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+// HandleListPluginTags lists all unique tags across plugins.
+// GET /api/plugins/tags
+func (h *PluginsPageHandler) HandleListPluginTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	localReg, err := h.RegistryManager.LoadLocal()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load registry: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	seen := make(map[string]struct{})
+	for _, plugin := range localReg.Plugins {
+		for _, raw := range pluginAllTags(&plugin) {
+			normalized := internaltags.NormalizeTag(raw)
+			if err := internaltags.ValidateTag(normalized); err != nil {
+				continue
+			}
+			seen[normalized] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for tag := range seen {
+		out = append(out, tag)
+	}
+	sort.Strings(out)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tags": out})
+}
+
+// HandleListPluginsByTag returns plugins filtered by tag.
+// GET /api/plugins/tags/:tag
+func (h *PluginsPageHandler) HandleListPluginsByTag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rawTag := strings.TrimPrefix(r.URL.Path, "/api/plugins/tags/")
+	rawTag = strings.Split(rawTag, "/")[0]
+	normalized := internaltags.NormalizeTag(rawTag)
+	if err := internaltags.ValidateTag(normalized); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid tag: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Reuse list handler by injecting the tag filter via the query string.
+	q := r.URL.Query()
+	q.Set("tag", normalized)
+	r.URL.RawQuery = q.Encode()
+	h.HandleListPlugins(w, r)
 }
 
 // HandleGetPluginDetails returns detailed information about a specific plugin
@@ -158,6 +234,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 		"name":                 plugin.Name,
 		"description":          plugin.Description,
 		"version":              plugin.Version,
+		"tags":                 pluginAllTags(plugin),
 		"category":             plugin.Category,
 		"path":                 plugin.Path,
 		"enabled":              plugin.Enabled,
@@ -173,6 +250,26 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(details)
+}
+
+func pluginAllTags(plugin *types.PluginRegistryEntry) []string {
+	if len(plugin.Tags) > 0 {
+		return plugin.Tags
+	}
+	if plugin.Metadata != nil && len(plugin.Metadata.Tags) > 0 {
+		return plugin.Metadata.Tags
+	}
+	return nil
+}
+
+func pluginHasTag(plugin *types.PluginRegistryEntry, normalizedTag string) bool {
+	for _, raw := range pluginAllTags(plugin) {
+		normalized := internaltags.NormalizeTag(raw)
+		if normalized == normalizedTag {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleEnablePlugin enables a plugin for the current agent

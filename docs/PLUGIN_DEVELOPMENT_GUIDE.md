@@ -84,6 +84,7 @@ This is the **single source of truth** for your plugin:
 name: my-plugin
 version: 0.1.0
 description: A simple example plugin
+tags: ["utility", "math"]
 license: MIT
 repository: https://github.com/yourusername/my-plugin
 

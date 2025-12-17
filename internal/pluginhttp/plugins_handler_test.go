@@ -92,6 +92,24 @@ func (m *mockTool) Call(ctx context.Context, args string) (string, error) {
 func setupTestHandler(t *testing.T) (*PluginsPageHandler, string, func()) {
 	t.Helper()
 
+	defaultPlugins := []types.PluginRegistryEntry{
+		{
+			Name:         "test-plugin",
+			Description:  "Test plugin",
+			Version:      "1.0.0",
+			Tags:         []string{"system", "utility"},
+			Path:         "/path/to/plugin",
+			Category:     "System Tools",
+			Enabled:      true,
+			HealthStatus: "healthy",
+		},
+	}
+	return setupTestHandlerWithPlugins(t, defaultPlugins)
+}
+
+func setupTestHandlerWithPlugins(t *testing.T, plugins []types.PluginRegistryEntry) (*PluginsPageHandler, string, func()) {
+	t.Helper()
+
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "handler-test-*")
 	if err != nil {
@@ -111,17 +129,7 @@ func setupTestHandler(t *testing.T) (*PluginsPageHandler, string, func()) {
 	// Initialize registry manager
 	regMgr := registry.NewManager()
 	_ = regMgr.SaveLocal(types.PluginRegistry{
-		Plugins: []types.PluginRegistryEntry{
-			{
-				Name:         "test-plugin",
-				Description:  "Test plugin",
-				Version:      "1.0.0",
-				Path:         "/path/to/plugin",
-				Category:     "System Tools",
-				Enabled:      true,
-				HealthStatus: "healthy",
-			},
-		},
+		Plugins: plugins,
 	})
 
 	// Initialize managers
@@ -169,6 +177,120 @@ func TestHandleListPlugins(t *testing.T) {
 
 	if len(plugins) != 1 {
 		t.Errorf("Expected 1 plugin, got %d", len(plugins))
+	}
+}
+
+func TestHandleListPlugins_IncludesTags(t *testing.T) {
+	handler, _, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleListPlugins(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	plugins, ok := response["plugins"].([]interface{})
+	if !ok || len(plugins) != 1 {
+		t.Fatalf("Expected 1 plugin, got %#v", response["plugins"])
+	}
+
+	pluginObj, ok := plugins[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected plugin object, got %T", plugins[0])
+	}
+
+	tags, ok := pluginObj["tags"].([]interface{})
+	if !ok || len(tags) != 2 {
+		t.Fatalf("Expected tags array, got %#v", pluginObj["tags"])
+	}
+}
+
+func TestHandleListPlugins_FilterByTag(t *testing.T) {
+	handler, _, cleanup := setupTestHandlerWithPlugins(t, []types.PluginRegistryEntry{
+		{
+			Name:        "audio-plugin",
+			Description: "Audio plugin",
+			Version:     "1.0.0",
+			Tags:        []string{"audio", "daw"},
+			Path:        "/path/to/audio",
+		},
+		{
+			Name:        "system-plugin",
+			Description: "System plugin",
+			Version:     "1.0.0",
+			Tags:        []string{"system"},
+			Path:        "/path/to/system",
+		},
+	})
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins?tag=audio", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleListPlugins(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	plugins, ok := response["plugins"].([]interface{})
+	if !ok {
+		t.Fatalf("Response missing plugins array: %#v", response)
+	}
+	if len(plugins) != 1 {
+		t.Fatalf("Expected 1 plugin, got %d", len(plugins))
+	}
+
+	pluginObj, ok := plugins[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected plugin object, got %T", plugins[0])
+	}
+	if pluginObj["name"] != "audio-plugin" {
+		t.Fatalf("Expected audio-plugin, got %#v", pluginObj["name"])
+	}
+}
+
+func TestHandleListPluginTags(t *testing.T) {
+	handler, _, cleanup := setupTestHandlerWithPlugins(t, []types.PluginRegistryEntry{
+		{Name: "p1", Tags: []string{"audio", "utility"}, Path: "/p1"},
+		{Name: "p2", Tags: []string{"audio", "system"}, Path: "/p2"},
+	})
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/plugins/tags", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleListPluginTags(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	tags, ok := response["tags"].([]interface{})
+	if !ok {
+		t.Fatalf("Expected tags array, got %#v", response["tags"])
+	}
+	if len(tags) != 3 {
+		t.Fatalf("Expected 3 unique tags, got %d (%v)", len(tags), tags)
 	}
 }
 
