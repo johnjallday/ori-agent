@@ -64,7 +64,7 @@ open dist/OriAgent-*-$ARCH.dmg
 SERVER_PID=$!
 
 # 4. Verify
-curl http://localhost:18765/api/health
+curl http://localhost:18765/health
 
 # 5. Cleanup
 kill $SERVER_PID
@@ -84,7 +84,7 @@ sudo dpkg -i dist/ori-agent_*_linux_amd64.deb
 SERVER_PID=$!
 
 # 4. Verify
-curl http://localhost:18765/api/health
+curl http://localhost:18765/health
 
 # 5. Cleanup
 kill $SERVER_PID
@@ -106,7 +106,7 @@ msiexec /i dist\ori-agent-$VERSION-amd64.msi /qn
 & "C:\Program Files\OriAgent\bin\ori-agent.exe" --port=18765
 
 # 4. Verify (in another PowerShell)
-Invoke-WebRequest -Uri "http://localhost:18765/api/health"
+Invoke-WebRequest -Uri "http://localhost:18765/health"
 
 # 5. Cleanup
 msiexec /x {PRODUCT-CODE} /qn
@@ -166,7 +166,7 @@ gh run view <run-id> --log
 ✓ Server binary exists in Resources/
 ✓ Server starts on custom port
 ✓ HTTP server responds within 15 seconds
-✓ /api/health endpoint returns "ok"
+✓ /health endpoint returns "ok"
 ✓ Server can be stopped gracefully
 ```
 
@@ -181,7 +181,7 @@ gh run view <run-id> --log
 ✓ Desktop entry installed
 ✓ Server starts on custom port
 ✓ HTTP server responds within 15 seconds
-✓ /api/health endpoint returns "ok"
+✓ /health endpoint returns "ok"
 ```
 
 ### Linux .rpm (Red Hat/Fedora)
@@ -194,7 +194,7 @@ gh run view <run-id> --log
 ✓ Config directory created
 ✓ Server starts on custom port
 ✓ HTTP server responds within 15 seconds
-✓ /api/health endpoint returns "ok"
+✓ /health endpoint returns "ok"
 ```
 
 ### Windows MSI
@@ -206,7 +206,7 @@ gh run view <run-id> --log
 ✓ Start Menu shortcuts created
 ✓ Server starts on custom port
 ✓ HTTP server responds within 15 seconds
-✓ /api/health endpoint returns "ok"
+✓ /health endpoint returns "ok"
 ```
 
 ## Smoke Test Output
@@ -346,7 +346,7 @@ git push origin v0.0.12
 
 ```bash
 # scripts/test-all-installers.sh
-curl http://localhost:18765/api/health
+curl http://localhost:18765/health
 ```
 
 ### Add Plugin Test

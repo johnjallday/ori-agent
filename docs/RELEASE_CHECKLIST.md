@@ -239,7 +239,7 @@ msiexec /i dist\ori-agent-0.0.12-test-amd64.msi /l*v install.log
 & "C:\Program Files\OriAgent\bin\ori-agent.exe" --port=18765
 
 # 4. Verify
-Invoke-WebRequest -Uri "http://localhost:18765/api/health"
+Invoke-WebRequest -Uri "http://localhost:18765/health"
 ```
 
 **Must pass**: Yes (if Windows available)

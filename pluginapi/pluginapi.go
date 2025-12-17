@@ -139,6 +139,10 @@ type MetadataProvider interface {
 	// GetMetadata returns plugin metadata (maintainers, license, repository)
 	// Returns the proto-generated PluginMetadata struct
 	GetMetadata() (*PluginMetadata, error)
+
+	// GetTags returns plugin tags (typically sourced from plugin.yaml).
+	// Tags should be lowercase and hyphen-separated; ori-agent may normalize/validate them.
+	GetTags() []string
 }
 
 // WebPageProvider allows plugins to serve custom web pages through ori-agent.

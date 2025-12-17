@@ -83,6 +83,7 @@ type PluginConfig struct {
 	Name         string              `yaml:"name"`
 	Version      string              `yaml:"version"`
 	Description  string              `yaml:"description"`
+	Tags         []string            `yaml:"tags,omitempty"`
 	License      string              `yaml:"license"`
 	Repository   string              `yaml:"repository"`
 	Platforms    []YAMLPlatform      `yaml:"platforms"`
@@ -196,6 +197,7 @@ func (c *PluginConfig) ToMetadata() (*PluginMetadata, error) {
 		Name:         c.Name,
 		Version:      c.Version,
 		Description:  c.Description,
+		Tags:         c.Tags,
 		License:      c.License,
 		Repository:   c.Repository,
 		Maintainers:  maintainers,

@@ -98,7 +98,7 @@ if [ -d "$TEMP_APP" ]; then
     # Wait for server to start (max 10 seconds)
     echo "    → Starting server (PID: $SERVER_PID)..."
     for i in {1..20}; do
-      if curl -s "http://localhost:$PORT/api/health" > /dev/null 2>&1; then
+      if curl -s "http://localhost:$PORT/health" > /dev/null 2>&1; then
         echo "    ✓ Server responded to HTTP"
         break
       fi
@@ -106,7 +106,7 @@ if [ -d "$TEMP_APP" ]; then
     done
 
     # Test health endpoint
-    if curl -s "http://localhost:$PORT/api/health" | grep -q "ok"; then
+    if curl -s "http://localhost:$PORT/health" | grep -q "ok"; then
       echo "    ✓ Health check passed"
     else
       echo "    ⚠️  Health check failed (server may need API key)"
@@ -160,7 +160,7 @@ else
     echo '  → Starting server...'
     apt-get install -y -qq curl > /dev/null 2>&1
     for i in {1..20}; do
-      if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
+      if curl -s http://localhost:18765/health > /dev/null 2>&1; then
         echo '  ✓ Server responded to HTTP'
         break
       fi
@@ -168,7 +168,7 @@ else
     done
 
     # Test health endpoint
-    if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
+    if curl -s http://localhost:18765/health | grep -q 'ok'; then
       echo '  ✓ Health check passed'
     else
       echo '  ⚠️  Health check failed (may need API key)'
@@ -219,7 +219,7 @@ else
     # Wait for server to start (max 10 seconds)
     echo '  → Starting server...'
     for i in {1..20}; do
-      if curl -s http://localhost:18765/api/health > /dev/null 2>&1; then
+      if curl -s http://localhost:18765/health > /dev/null 2>&1; then
         echo '  ✓ Server responded to HTTP'
         break
       fi
@@ -227,7 +227,7 @@ else
     done
 
     # Test health endpoint
-    if curl -s http://localhost:18765/api/health | grep -q 'ok'; then
+    if curl -s http://localhost:18765/health | grep -q 'ok'; then
       echo '  ✓ Health check passed'
     else
       echo '  ⚠️  Health check failed (may need API key)'

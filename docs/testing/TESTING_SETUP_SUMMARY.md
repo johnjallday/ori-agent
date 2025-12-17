@@ -40,7 +40,7 @@ func TestEndpoint(t *testing.T) {
     server := testutil.NewTestServer(t, handler)
     defer server.Cleanup()
 
-    rec := server.Get("/api/health")
+    rec := server.Get("/health")
     testutil.AssertStatusCode(t, http.StatusOK, rec.Code)
 }
 ```

@@ -160,6 +160,7 @@ message PluginMetadata {
     repeated Maintainer maintainers = 6;
     repeated Platform platforms = 7;   // Supported platforms
     Requirements requirements = 8;     // Plugin requirements
+    repeated string tags = 9;          // Plugin tags (normalized, e.g., "dev-tools", "audio")
 }
 
 // MetadataResponse contains plugin metadata

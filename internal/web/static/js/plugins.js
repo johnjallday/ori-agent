@@ -165,6 +165,7 @@ function renderPluginsTable() {
                     <div>
                         <div class="plugin-name">${plugin.name}</div>
                         <div class="plugin-description">${plugin.description || 'No description'}</div>
+                        ${renderTagBadges(plugin.tags)}
                     </div>
                 </div>
             </td>
@@ -186,6 +187,18 @@ function renderPluginsTable() {
     document.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', handlePluginCheckbox);
     });
+}
+
+function renderTagBadges(tags) {
+    if (!Array.isArray(tags) || tags.length === 0) {
+        return '';
+    }
+
+    return `
+        <div class="plugin-tags">
+            ${tags.map(t => `<span class="tag-badge">${t}</span>`).join('')}
+        </div>
+    `;
 }
 
 function renderStatusBadge(plugin) {
@@ -251,6 +264,7 @@ function createDetailsModal(plugin) {
                 <div style="margin-bottom: 1.5rem;">
                     <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Description</h3>
                     <p style="color: var(--text-primary);">${plugin.description || 'No description available'}</p>
+                    ${renderTagBadges(plugin.tags)}
                 </div>
                 <div style="margin-bottom: 1.5rem;">
                     <h3 style="font-size: 1rem; margin-bottom: 0.5rem; color: var(--text-secondary);">Details</h3>
@@ -261,6 +275,8 @@ function createDetailsModal(plugin) {
                         <span style="color: var(--text-primary);">${plugin.category || 'Uncategorized'}</span>
                         <span style="color: var(--text-muted);">Status:</span>
                         <span>${renderStatusBadge(plugin)}</span>
+                        <span style="color: var(--text-muted);">Tags:</span>
+                        <div>${renderTagBadges(plugin.tags) || '<span style="color: var(--text-muted);">None</span>'}</div>
                         <span style="color: var(--text-muted);">Path:</span>
                         <span style="color: var(--text-primary); font-family: monospace; font-size: 0.85rem;">${plugin.path || 'N/A'}</span>
                     </div>

@@ -158,6 +158,10 @@ func (s *grpcServer) GetMetadata(ctx context.Context, _ *Empty) (*MetadataRespon
 			return &MetadataResponse{Error: err.Error()}, nil
 		}
 
+		if metadata != nil {
+			metadata.Tags = metadataProvider.GetTags()
+		}
+
 		// metadata is already a *PluginMetadata from the proto
 		return &MetadataResponse{Metadata: metadata}, nil
 	}
@@ -321,6 +325,14 @@ func (c *grpcClient) GetMetadata() (*PluginMetadata, error) {
 
 	// Return the proto-generated metadata directly
 	return resp.Metadata, nil
+}
+
+func (c *grpcClient) GetTags() []string {
+	metadata, err := c.GetMetadata()
+	if err != nil || metadata == nil {
+		return nil
+	}
+	return metadata.Tags
 }
 
 func (c *grpcClient) MinAgentVersion() string {

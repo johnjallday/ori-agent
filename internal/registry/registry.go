@@ -12,9 +12,55 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/web"
+	"gopkg.in/yaml.v3"
 )
+
+type pluginYAMLManifest struct {
+	Name        string   `yaml:"name"`
+	Version     string   `yaml:"version"`
+	Description string   `yaml:"description"`
+	Tags        []string `yaml:"tags"`
+}
+
+func normalizeTagsWithWarnings(pluginName string, rawTags []string) []string {
+	if len(rawTags) == 0 {
+		return nil
+	}
+
+	if _, errs := internaltags.ValidateTags(rawTags); len(errs) > 0 {
+		fmt.Printf("Warning: plugin %q has invalid tags: %v\n", pluginName, errs)
+	}
+	if len(rawTags) > 5 {
+		fmt.Printf("Warning: plugin %q has more than 5 tags; truncating to 5\n", pluginName)
+	}
+
+	return internaltags.NormalizeTags(rawTags)
+}
+
+func loadManifestForUploadedPlugin(pluginName, pluginPath string) (*pluginYAMLManifest, error) {
+	candidates := []string{
+		pluginPath + ".yaml",
+		pluginPath + ".plugin.yaml",
+		filepath.Join("..", "plugins", pluginName, "plugin.yaml"),
+	}
+
+	for _, p := range candidates {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var m pluginYAMLManifest
+		if err := yaml.Unmarshal(b, &m); err != nil {
+			return nil, fmt.Errorf("failed to parse manifest %q: %w", p, err)
+		}
+		return &m, nil
+	}
+
+	return nil, fmt.Errorf("no manifest found for %q", pluginName)
+}
 
 // Manager handles plugin registry operations
 type Manager struct {
@@ -105,9 +151,11 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 		// Convert metadata format to registry entry format
 		reg.Plugins = make([]types.PluginRegistryEntry, len(metadataReg.Plugins))
 		for i, meta := range metadataReg.Plugins {
+			meta.Tags = normalizeTagsWithWarnings(meta.Name, meta.Tags)
 			entry := types.PluginRegistryEntry{
 				Name:        meta.Name,
 				Description: meta.Description,
+				Tags:        meta.Tags,
 				Version:     meta.Version,
 				Metadata:    &meta,
 			}
@@ -303,6 +351,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 					Name:         protoMeta.Name,
 					Version:      protoMeta.Version,
 					Description:  protoMeta.Description,
+					Tags:         normalizeTagsWithWarnings(pluginName, protoMeta.Tags),
 					Maintainers:  maintainers,
 					License:      protoMeta.License,
 					Repository:   protoMeta.Repository,
@@ -313,6 +362,22 @@ func (m *Manager) ScanUploadedPlugins() error {
 
 			// Clean up RPC plugins after getting metadata
 			pluginloader.CloseRPCPlugin(tool)
+		} else {
+			// Fall back to parsing plugin.yaml (useful in dev when external plugins are checked out under ../plugins/)
+			if manifest, err := loadManifestForUploadedPlugin(pluginName, pluginPath); err == nil {
+				if description == "" {
+					description = manifest.Description
+				}
+				if version == "" {
+					version = manifest.Version
+				}
+				metadata = &types.PluginMetadata{
+					Name:        manifest.Name,
+					Version:     manifest.Version,
+					Description: manifest.Description,
+					Tags:        normalizeTagsWithWarnings(pluginName, manifest.Tags),
+				}
+			}
 		}
 
 		// Fallback values if loading failed
@@ -323,10 +388,16 @@ func (m *Manager) ScanUploadedPlugins() error {
 			version = "unknown"
 		}
 
+		var pluginTags []string
+		if metadata != nil {
+			pluginTags = metadata.Tags
+		}
+
 		// Add to registry
 		newPlugin := types.PluginRegistryEntry{
 			Name:        pluginName,
 			Description: description,
+			Tags:        pluginTags,
 			Path:        pluginPath,
 			Version:     version,
 			Metadata:    metadata,
@@ -426,6 +497,7 @@ func (m *Manager) RefreshLocalRegistry() error {
 					Name:         protoMeta.Name,
 					Version:      protoMeta.Version,
 					Description:  protoMeta.Description,
+					Tags:         normalizeTagsWithWarnings(pluginName, protoMeta.Tags),
 					Maintainers:  maintainers,
 					License:      protoMeta.License,
 					Repository:   protoMeta.Repository,
@@ -436,6 +508,22 @@ func (m *Manager) RefreshLocalRegistry() error {
 
 			// Clean up RPC plugins after getting metadata
 			pluginloader.CloseRPCPlugin(tool)
+		} else {
+			// Fall back to parsing plugin.yaml (useful in dev when external plugins are checked out under ../plugins/)
+			if manifest, err := loadManifestForUploadedPlugin(pluginName, pluginPath); err == nil {
+				if description == "" {
+					description = manifest.Description
+				}
+				if version == "" {
+					version = manifest.Version
+				}
+				metadata = &types.PluginMetadata{
+					Name:        manifest.Name,
+					Version:     manifest.Version,
+					Description: manifest.Description,
+					Tags:        normalizeTagsWithWarnings(pluginName, manifest.Tags),
+				}
+			}
 		}
 
 		// Fallback values if loading failed
@@ -446,10 +534,16 @@ func (m *Manager) RefreshLocalRegistry() error {
 			version = "unknown"
 		}
 
+		var pluginTags []string
+		if metadata != nil {
+			pluginTags = metadata.Tags
+		}
+
 		// Add to new registry
 		newPlugin := types.PluginRegistryEntry{
 			Name:        pluginName,
 			Description: description,
+			Tags:        pluginTags,
 			Path:        pluginPath,
 			Version:     version,
 			Metadata:    metadata,
