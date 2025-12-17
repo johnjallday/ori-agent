@@ -1,12 +1,21 @@
 name: Scheduled Release
 
-# This workflow handles scheduled and manual releases from release branches
+# This workflow handles the FULL release process from release branches:
+#   - Merges release branch to main
+#   - Creates and pushes version tag
+#   - Runs GoReleaser to build binaries and create GitHub release
+#   - Creates macOS DMG installers (Intel + Apple Silicon)
+#   - Creates Windows MSI installer
+#
 # It follows Git Flow: release/vX.Y.Z branches are merged to main and tagged
 #
 # Usage:
 #   1. Create release branch: ./scripts/create-release.sh v1.3.0
 #   2. Schedule for later:    ./scripts/schedule-release.sh 2d   (or specific date)
 #   3. Or release immediately: gh workflow run scheduled-release.yml -f release_branch=release/v1.3.0
+#
+# Note: The release.yml workflow is for tag-triggered releases only (e.g., manual tag pushes).
+#       This workflow handles the complete release pipeline including artifact builds.
 
 on:
   # Daily check for scheduled releases (runs at 10:00 UTC)
@@ -211,6 +220,129 @@ jobs:
           git push origin dev
 
           echo "- **Dev sync:** Merged release fixes back to dev" >> $GITHUB_STEP_SUMMARY
+
+  # Build release artifacts (macOS/Linux) - runs GoReleaser and creates DMGs
+  build-release:
+    name: Build Release (macOS/Linux)
+    needs: [prepare, release]
+    if: |
+      needs.prepare.outputs.should_release == 'true' &&
+      !inputs.dry_run
+    runs-on: macos-latest  # macOS runner needed for DMG creation
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create macOS DMG installers
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          SHORT_VERSION="${VERSION#v}"
+
+          echo "Creating DMGs for version $SHORT_VERSION..."
+
+          # Create DMG for Intel Macs
+          ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin amd64 dist || echo "Warning: amd64 DMG creation failed"
+
+          # Create DMG for Apple Silicon
+          ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist || echo "Warning: arm64 DMG creation failed"
+
+          # List created DMGs
+          echo "Created DMGs:"
+          ls -la dist/*.dmg 2>/dev/null || echo "No DMGs found"
+
+      - name: Upload DMGs to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          files: dist/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts:** GoReleaser binaries, macOS DMGs" >> $GITHUB_STEP_SUMMARY
+
+  # Build Windows MSI installer
+  build-msi:
+    name: Build Windows MSI
+    needs: [prepare, build-release]  # Wait for main release to create the GitHub release
+    if: |
+      needs.prepare.outputs.should_release == 'true' &&
+      !inputs.dry_run
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.version }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install WiX Toolset
+        run: |
+          choco install wixtoolset -y
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build Windows binaries
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}"
+          $env:CGO_ENABLED = "0"
+
+          # Create dist structure expected by create-msi.ps1
+          New-Item -ItemType Directory -Path "dist\server_windows_amd64" -Force
+
+          # Build with version information
+          go build -ldflags="-s -w -X 'github.com/johnjallday/ori-agent/internal/version.Version=$version'" -o dist\server_windows_amd64\ori-agent.exe .\cmd\server
+
+      - name: Create MSI installer
+        run: |
+          $version = "${{ needs.prepare.outputs.version }}".TrimStart('v')
+          .\build\windows\create-msi.ps1 -Version $version -Arch amd64 -DistDir dist
+
+      - name: Upload MSI to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          files: dist/ori-agent-*.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## Windows MSI Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact:** Windows MSI installer" >> $GITHUB_STEP_SUMMARY
 
   # Dry run summary
   dry-run:
