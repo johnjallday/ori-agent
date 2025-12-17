@@ -263,6 +263,13 @@ jobs:
           # Create DMG for Intel Macs
           ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin amd64 dist || echo "Warning: amd64 DMG creation failed"
 
+          # Eject any mounted DMG volumes and wait for resources to be released
+          echo "Cleaning up before next DMG..."
+          hdiutil info | grep -E "^/dev/" | awk '{print $1}' | while read dev; do
+            hdiutil detach "$dev" -force 2>/dev/null || true
+          done
+          sleep 3
+
           # Create DMG for Apple Silicon
           ./build/macos/create-dmg.sh "$SHORT_VERSION" darwin arm64 dist || echo "Warning: arm64 DMG creation failed"
 
