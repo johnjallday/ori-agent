@@ -159,6 +159,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.healthHandler.HandlePluginHealth(w, r)
 			return
 		}
+		// Check if this is an enable endpoint
+		if strings.HasSuffix(r.URL.Path, "/enable") {
+			s.pluginsPageHandler.HandleEnablePlugin(w, r)
+			return
+		}
+		// Check if this is a disable endpoint
+		if strings.HasSuffix(r.URL.Path, "/disable") {
+			s.pluginsPageHandler.HandleDisablePlugin(w, r)
+			return
+		}
 		// Check if this is an update endpoint
 		if strings.HasSuffix(r.URL.Path, "/update") {
 			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)

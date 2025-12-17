@@ -462,6 +462,119 @@ function renderTags() {
     });
 }
 
+// ============================================
+// Plugin Management Functions
+// ============================================
+
+let pluginManagerVisible = false;
+let allAvailablePlugins = [];
+
+// Toggle plugin manager panel
+async function togglePluginManager() {
+    const panel = document.getElementById('pluginManagerPanel');
+    pluginManagerVisible = !pluginManagerVisible;
+
+    if (pluginManagerVisible) {
+        panel.style.display = 'block';
+        await loadAvailablePlugins();
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+// Load all available plugins from registry
+async function loadAvailablePlugins() {
+    const container = document.getElementById('availablePluginsList');
+    container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading plugins...</div>';
+
+    try {
+        const response = await fetch('/api/plugins');
+        if (!response.ok) throw new Error('Failed to load plugins');
+
+        const data = await response.json();
+        allAvailablePlugins = data.plugins || [];
+
+        renderAvailablePlugins();
+    } catch (error) {
+        console.error('Error loading plugins:', error);
+        container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load plugins</div>';
+    }
+}
+
+// Render available plugins with toggle switches
+function renderAvailablePlugins() {
+    const container = document.getElementById('availablePluginsList');
+    const enabledPlugins = currentAgent?.enabled_plugins || [];
+    // enabled_plugins can be an array of strings or objects with 'name' property
+    const enabledNames = enabledPlugins.map(p => typeof p === 'string' ? p : (p?.name || p));
+    const enabledSet = new Set(enabledNames);
+
+    if (allAvailablePlugins.length === 0) {
+        container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No plugins available. Upload plugins from the Plugins page.</div>';
+        return;
+    }
+
+    container.innerHTML = '';
+    allAvailablePlugins.forEach(plugin => {
+        const pluginName = plugin.name || plugin;
+        const isEnabled = enabledSet.has(pluginName);
+
+        const item = document.createElement('div');
+        item.className = 'plugin-item';
+        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
+        item.innerHTML = `
+            <div style="flex: 1;">
+                <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(pluginName)}</div>
+                ${plugin.description ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${escapeHtml(plugin.description)}</div>` : ''}
+            </div>
+            <label class="toggle-switch" style="margin-left: 12px;">
+                <input type="checkbox" id="plugin_${pluginName}" ${isEnabled ? 'checked' : ''} onchange="togglePlugin('${escapeHtml(pluginName)}', this.checked)">
+                <span class="toggle-slider"></span>
+            </label>
+        `;
+        container.appendChild(item);
+    });
+}
+
+// Toggle plugin for this agent
+async function togglePlugin(pluginName, enabled) {
+    const checkbox = document.getElementById(`plugin_${pluginName}`);
+
+    try {
+        // First, switch to this agent
+        const switchResponse = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+            method: 'PUT'
+        });
+
+        if (!switchResponse.ok) {
+            throw new Error('Failed to switch to agent');
+        }
+
+        // Then enable/disable the plugin
+        const endpoint = `/api/plugins/${encodeURIComponent(pluginName)}/${enabled ? 'enable' : 'disable'}`;
+        const response = await fetch(endpoint, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            showToast(`${pluginName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+            // Reload agent details to refresh the enabled plugins list
+            await loadAgentDetails();
+            if (pluginManagerVisible) {
+                renderAvailablePlugins();
+            }
+        } else {
+            const error = await response.text();
+            showToast(`Failed: ${error}`, 'error');
+            if (checkbox) checkbox.checked = !enabled;
+        }
+    } catch (error) {
+        console.error('Toggle plugin error:', error);
+        showToast(`Failed to ${enabled ? 'enable' : 'disable'} plugin`, 'error');
+        if (checkbox) checkbox.checked = !enabled;
+    }
+}
+
 // Render MCP servers
 function renderMCPServers() {
     const container = document.getElementById('mcpList');
