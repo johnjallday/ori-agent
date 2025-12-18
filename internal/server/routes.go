@@ -260,6 +260,39 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
 
 	// =============================================================================
+	// Marketplace Management Endpoints
+	// =============================================================================
+	if s.marketplaceHandler != nil {
+		mux.HandleFunc("/api/marketplaces", func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				s.marketplaceHandler.ListMarketplaces(w, r)
+			case http.MethodPost:
+				s.marketplaceHandler.AddMarketplace(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		mux.HandleFunc("/api/marketplaces/reorder", s.marketplaceHandler.ReorderMarketplaces)
+		mux.HandleFunc("/api/marketplaces/test", s.marketplaceHandler.TestMarketplace)
+		mux.HandleFunc("/api/marketplaces/", func(w http.ResponseWriter, r *http.Request) {
+			// Handle /api/marketplaces/{id} and /api/marketplaces/{id}/refresh
+			if strings.HasSuffix(r.URL.Path, "/refresh") {
+				s.marketplaceHandler.RefreshMarketplace(w, r)
+				return
+			}
+			switch r.Method {
+			case http.MethodPut:
+				s.marketplaceHandler.UpdateMarketplace(w, r)
+			case http.MethodDelete:
+				s.marketplaceHandler.DeleteMarketplace(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+	}
+
+	// =============================================================================
 	// Chat Endpoint
 	// =============================================================================
 	mux.HandleFunc("/api/chat", s.chatHandler.ChatHandler)

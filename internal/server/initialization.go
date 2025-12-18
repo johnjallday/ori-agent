@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/marketplace"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -38,9 +39,29 @@ func createConfigManager(configPath string) (*config.Manager, error) {
 	return mgr, nil
 }
 
+// createMarketplaceStore initializes the marketplace configuration store.
+func createMarketplaceStore() (*marketplace.Store, error) {
+	mpStore := marketplace.NewStore("marketplace_config.json")
+	if err := mpStore.Load(); err != nil {
+		logger.Error("Failed to load marketplace config", logger.Fields{"error": err})
+		// Not fatal - will use defaults
+	}
+	return mpStore, nil
+}
+
 // createRegistryManager initializes the plugin registry manager and refreshes from GitHub.
 func createRegistryManager() (*registry.Manager, error) {
-	mgr := registry.NewManager()
+	// Create marketplace store first
+	mpStore, _ := createMarketplaceStore()
+
+	// Create registry manager with marketplace support
+	var mgr *registry.Manager
+	if mpStore != nil {
+		mgr = registry.NewManagerWithMarketplaces(mpStore)
+		logger.Debug("Registry manager initialized with marketplace support", logger.Fields{})
+	} else {
+		mgr = registry.NewManager()
+	}
 
 	// Refresh plugin registry from GitHub on startup
 	if err := mgr.RefreshFromGitHub(); err != nil {
@@ -56,6 +77,35 @@ func createRegistryManager() (*registry.Manager, error) {
 	}
 
 	return mgr, nil
+}
+
+// createRegistryManagerWithMarketplace initializes the plugin registry manager with marketplace support.
+// Returns both the manager and the marketplace store.
+func createRegistryManagerWithMarketplace() (*registry.Manager, *marketplace.Store, error) {
+	mpStore, _ := createMarketplaceStore()
+
+	var mgr *registry.Manager
+	if mpStore != nil {
+		mgr = registry.NewManagerWithMarketplaces(mpStore)
+		logger.Debug("Registry manager initialized with marketplace support", logger.Fields{})
+	} else {
+		mgr = registry.NewManager()
+	}
+
+	// Refresh plugin registry from GitHub on startup
+	if err := mgr.RefreshFromGitHub(); err != nil {
+		logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
+		logger.Debug("Will use cached or local registry", logger.Fields{})
+	}
+
+	// Scan uploaded_plugins directory and auto-register any new plugins
+	if err := mgr.ScanUploadedPlugins(); err != nil {
+		logger.Error("Failed to scan uploaded_plugins directory", logger.Fields{"error": err})
+	} else {
+		logger.Debug("Scanned uploaded_plugins directory for new plugins", logger.Fields{})
+	}
+
+	return mgr, mpStore, nil
 }
 
 // createLLMFactory creates a new LLM factory instance.

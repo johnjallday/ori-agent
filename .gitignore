@@ -132,3 +132,4 @@ sessions/
 *.session
 
 tasks/
+marketplace_config.json
