@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -230,13 +230,13 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Form should already be parsed in ServeHTTP, but ensure it's parsed
 	if r.MultipartForm == nil {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 	}
 	file, header, err := r.FormFile("plugin")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 	defer func() { _ = file.Close() }()
@@ -244,13 +244,13 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// SECURITY: Sanitize filename to prevent path traversal attacks
 	cleanFilename := filepath.Base(header.Filename)
 	if cleanFilename == "" || cleanFilename == "." || cleanFilename == ".." {
-		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid filename")
 		return
 	}
 
 	// SECURITY: Reject hidden files (files starting with .)
 	if strings.HasPrefix(cleanFilename, ".") {
-		http.Error(w, "Hidden files not allowed", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Hidden files not allowed")
 		return
 	}
 
@@ -261,7 +261,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		isDigit := c >= '0' && c <= '9'
 		isAllowed := c == '-' || c == '_' || c == '.'
 		if !isLower && !isUpper && !isDigit && !isAllowed {
-			http.Error(w, "Invalid characters in filename", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "Invalid characters in filename")
 			return
 		}
 	}
@@ -269,19 +269,19 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Create a permanent directory for uploaded plugins
 	uploadsDir := "uploaded_plugins"
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
 	pluginFile := filepath.Join(uploadsDir, cleanFilename)
 	out, err := os.Create(pluginFile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 	if _, err := io.Copy(out, file); err != nil {
 		_ = out.Close()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 	_ = out.Close()
@@ -292,14 +292,14 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Clean up the file if plugin is invalid
 		_ = os.Remove(pluginFile)
-		http.Error(w, "Invalid plugin: "+err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid plugin: "+err.Error())
 		return
 	}
 
 	// Only make the plugin executable AFTER successful validation
 	if err := os.Chmod(pluginFile, 0755); err != nil {
 		_ = os.Remove(pluginFile)
-		http.Error(w, "Failed to set plugin permissions: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to set plugin permissions: "+err.Error())
 		return
 	}
 	def := tool.Definition()
@@ -311,7 +311,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
 		_ = os.Remove(pluginFile)
-		http.Error(w, "Failed to register plugin: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to register plugin: "+err.Error())
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	// Try to parse multipart form first, then regular form
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 	}
@@ -343,14 +343,14 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	path := r.FormValue("path")
 
 	if name == "" || path == "" {
-		http.Error(w, "name and path required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name and path required")
 		return
 	}
 
 	// Load plugin from the specified path
 	tool, err := h.Loader.Load(path)
 	if err != nil {
-		http.Error(w, "Failed to load plugin: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to load plugin: "+err.Error())
 		return
 	}
 
@@ -361,7 +361,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 
@@ -388,7 +388,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	logger.Verbosef("💾 Saving agent '%s' to state...", current)
 	if err := h.State.SetAgent(current, ag); err != nil {
 		logger.Verbosef("❌ Failed to save agent: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 	logger.Verbosef("✅ Agent saved successfully")
@@ -424,18 +424,18 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name required")
 		return
 	}
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 	delete(ag.Plugins, name)
 	if err := h.State.SetAgent(current, ag); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -564,7 +564,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Failed to read request body")
 		return
 	}
 
@@ -574,12 +574,12 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Failed to parse JSON")
 		return
 	}
 
 	if req.PluginName == "" {
-		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "plugin_name required")
 		return
 	}
 
@@ -634,7 +634,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", current)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create agent directory: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err))
 		return
 	}
 
@@ -645,12 +645,12 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Convert normalized settings to JSON
 	settingsData, err := json.MarshalIndent(normalizedSettings, "", "  ")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal settings: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal settings: %v", err))
 		return
 	}
 
 	if err := os.WriteFile(settingsPath, settingsData, 0644); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to write settings file: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write settings file: %v", err))
 		return
 	}
 
@@ -731,7 +731,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Failed to read request body")
 		return
 	}
 
@@ -743,30 +743,30 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Failed to parse JSON", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Failed to parse JSON")
 		return
 	}
 
 	if req.PluginName == "" {
-		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "plugin_name required")
 		return
 	}
 
 	if req.Filename == "" {
-		http.Error(w, "filename required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "filename required")
 		return
 	}
 
 	// SECURITY: Sanitize filename to prevent path traversal attacks
 	cleanFilename := filepath.Base(req.Filename)
 	if cleanFilename != req.Filename || strings.Contains(req.Filename, "..") {
-		http.Error(w, "Invalid filename: path traversal not allowed", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid filename: path traversal not allowed")
 		return
 	}
 
 	// SECURITY: Only allow .json files
 	if !strings.HasSuffix(cleanFilename, ".json") {
-		http.Error(w, "Invalid filename: only .json files allowed", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid filename: only .json files allowed")
 		return
 	}
 
@@ -776,7 +776,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", current)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create agent directory: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err))
 		return
 	}
 
@@ -786,12 +786,12 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	// Convert config to JSON
 	configData, err := json.MarshalIndent(req.Config, "", "  ")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to marshal config: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal config: %v", err))
 		return
 	}
 
 	if err := os.WriteFile(configPath, configData, 0644); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to write config file: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write config file: %v", err))
 		return
 	}
 
