@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -40,14 +41,14 @@ func NewRollbackHandler(
 // Request body: { "version": "1.0.0" }
 func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract plugin name from URL
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		http.Error(w, "Plugin name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Plugin name required")
 		return
 	}
 
@@ -57,31 +58,31 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&rollbackReq); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err))
 		return
 	}
 
 	if rollbackReq.Version == "" {
-		http.Error(w, "Version required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Version required")
 		return
 	}
 
 	// Get plugin from registry to find current path
 	plugin, err := h.RegistryManager.GetPluginByName(pluginName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Plugin not found: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Plugin not found: %v", err))
 		return
 	}
 
 	if plugin.Path == "" {
-		http.Error(w, "Plugin path not found", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Plugin path not found")
 		return
 	}
 
 	// Perform rollback
 	err = h.VersionManager.RollbackToVersion(pluginName, rollbackReq.Version, plugin.Path)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Rollback failed: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Rollback failed: %v", err))
 		return
 	}
 

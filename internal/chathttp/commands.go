@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -55,7 +56,7 @@ func (ch *CommandHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Reque
 
 	ag, ok := ch.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 
@@ -120,7 +121,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 	ag, ok := ch.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 

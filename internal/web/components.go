@@ -1,6 +1,7 @@
 package web
 
 import (
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 )
@@ -39,7 +40,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Extract component name from URL path
 	componentName := r.URL.Query().Get("name")
 	if componentName == "" {
-		http.Error(w, "Missing component name", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Missing component name")
 		return
 	}
 
@@ -54,7 +55,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Render the component
 	content, err := ch.renderer.RenderComponent(componentName, data)
 	if err != nil {
-		http.Error(w, "Failed to render component: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to render component: "+err.Error())
 		return
 	}
 

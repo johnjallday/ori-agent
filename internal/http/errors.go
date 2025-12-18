@@ -17,6 +17,7 @@ const (
 	ErrCodeInternal            = "internal_error"
 	ErrCodeServiceUnavailable  = "service_unavailable"
 	ErrCodeMethodNotAllowed    = "method_not_allowed"
+	ErrCodeNotImplemented      = "not_implemented"
 	ErrCodeTooManyRequests     = "too_many_requests"
 	ErrCodeUnprocessableEntity = "unprocessable_entity"
 )
@@ -153,4 +154,10 @@ func RespondServiceUnavailable(w http.ResponseWriter, message string) error {
 func RespondMethodNotAllowed(w http.ResponseWriter) error {
 	return RespondAPIError(w, http.StatusMethodNotAllowed,
 		NewAPIError(ErrCodeMethodNotAllowed, "Method not allowed"))
+}
+
+// RespondNotImplemented writes a 501 Not Implemented error response.
+func RespondNotImplemented(w http.ResponseWriter, message string) error {
+	return RespondAPIError(w, http.StatusNotImplemented,
+		NewAPIError(ErrCodeNotImplemented, message))
 }

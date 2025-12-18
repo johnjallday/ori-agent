@@ -160,14 +160,14 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	}
 
 	if agentName == "" {
-		http.Error(w, "Agent name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name is required")
 		return
 	}
 
 	// Get agent
 	ag, ok := h.State.GetAgent(agentName)
 	if !ok || ag == nil {
-		http.Error(w, "Agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Agent not found")
 		return
 	}
 
@@ -316,7 +316,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	if agentName == "" {
-		http.Error(w, "Agent name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name is required")
 		return
 	}
 
@@ -337,14 +337,14 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		string(types.AgentStatusDisabled): true,
 	}
 	if !validStatuses[req.Status] {
-		http.Error(w, "Invalid status. Must be one of: active, idle, error, disabled", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid status. Must be one of: active, idle, error, disabled")
 		return
 	}
 
 	// Get agent
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
-		http.Error(w, "Agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Agent not found")
 		return
 	}
 
@@ -390,7 +390,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 // Returns activity log for a specific agent with pagination and filtering
 func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Request) {
 	if h.ActivityLogger == nil {
-		http.Error(w, "Activity logging not enabled", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "Activity logging not enabled")
 		return
 	}
 
@@ -406,7 +406,7 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 	}
 
 	if agentName == "" {
-		http.Error(w, "Agent name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name is required")
 		return
 	}
 
@@ -450,7 +450,7 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 	// Get activity logs
 	logs, total, err := h.ActivityLogger.GetActivityLog(agentName, limit, offset, eventType, startDate, endDate)
 	if err != nil {
-		http.Error(w, "Failed to retrieve activity log: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to retrieve activity log: "+err.Error())
 		return
 	}
 

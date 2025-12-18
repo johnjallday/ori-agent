@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
@@ -749,12 +750,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		Files     []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
-		http.Error(w, "empty question", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "empty question")
 		return
 	}
 
@@ -855,7 +856,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "current agent not found")
 			return
 		}
 
@@ -894,7 +895,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		http.Error(w, fmt.Sprintf("agent '%s' not found", current), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current))
 		return
 	}
 
@@ -1166,7 +1167,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			tool, found := h.findTool(ag, name)
 
 			if !found {
-				http.Error(w, fmt.Sprintf("tool %q not found", name), http.StatusInternalServerError)
+				orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name))
 				return
 			}
 

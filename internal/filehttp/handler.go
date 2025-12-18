@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/fileparser"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -32,7 +33,7 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req ParseFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 

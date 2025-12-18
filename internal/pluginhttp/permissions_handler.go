@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 )
@@ -31,20 +32,20 @@ func NewPermissionsHandler(
 // GET /api/plugins/:name/permissions
 func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		http.Error(w, "Plugin name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Plugin name required")
 		return
 	}
 
 	// Get permissions from permission manager
 	permissionEntry, err := h.PermissionManager.GetPermissionEntry(pluginName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get permissions: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to get permissions: %v", err))
 		return
 	}
 
@@ -56,19 +57,19 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 // POST /api/plugins/:name/permissions/approve
 func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		http.Error(w, "Plugin name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Plugin name required")
 		return
 	}
 
 	// Approve permissions
 	if err := h.PermissionManager.ApprovePermissions(pluginName); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to approve permissions: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to approve permissions: %v", err))
 		return
 	}
 

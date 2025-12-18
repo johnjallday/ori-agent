@@ -32,7 +32,7 @@ func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request
 
 	wsID := r.URL.Query().Get("studio_id")
 	if wsID == "" {
-		http.Error(w, "workspace_id parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id parameter required")
 		return
 	}
 
@@ -40,7 +40,7 @@ func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request
 	ws, err := mh.workspaceStore.Get(wsID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": wsID, "error": err})
-		http.Error(w, err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, err.Error())
 		return
 	}
 
@@ -65,7 +65,7 @@ func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Reque
 		// Get messages since timestamp
 		since, err := time.Parse(time.RFC3339, sinceStr)
 		if err != nil {
-			http.Error(w, "Invalid since timestamp format (use RFC3339)", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "Invalid since timestamp format (use RFC3339)")
 			return
 		}
 		messages = ws.GetMessagesSince(since)
@@ -95,18 +95,18 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 
 	// Validate required fields
 	if msg.From == "" {
-		http.Error(w, "from field is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "from field is required")
 		return
 	}
 	if msg.Content == "" {
-		http.Error(w, "content field is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "content field is required")
 		return
 	}
 
 	// Add message to workspace
 	if err := ws.AddMessage(msg); err != nil {
 		logger.Error("Error adding message to workspace", logger.Fields{"error": err})
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 

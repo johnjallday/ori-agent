@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"strings"
@@ -28,7 +29,7 @@ type ToolCallResponse struct {
 // DirectToolCallHandler handles direct plugin tool calls without going through OpenAI
 func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -31,7 +32,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(path, "/pages/", 2)
 
 	if len(parts) != 2 {
-		http.Error(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}")
 		return
 	}
 
@@ -42,21 +43,21 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		http.Error(w, "Current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Current agent not found")
 		return
 	}
 
 	// Find the plugin
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
-		http.Error(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
 		return
 	}
 
 	// Check if plugin implements WebPageProvider
 	webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
 	if !ok {
-		http.Error(w, fmt.Sprintf("Plugin '%s' does not support web pages", pluginName), http.StatusNotImplemented)
+		orihttp.RespondNotImplemented(w, fmt.Sprintf("Plugin '%s' does not support web pages", pluginName))
 		return
 	}
 
@@ -71,7 +72,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Serve the page
 	content, contentType, err := webProvider.ServeWebPage(pagePath, queryParams)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error serving page: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Error serving page: %v", err))
 		return
 	}
 
@@ -99,14 +100,14 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		http.Error(w, "Current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Current agent not found")
 		return
 	}
 
 	// Find the plugin
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
-		http.Error(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
 		return
 	}
 

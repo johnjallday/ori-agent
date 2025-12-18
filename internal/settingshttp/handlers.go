@@ -44,7 +44,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "agent not found", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "agent not found")
 			return
 		}
 		// Wrap settings in the expected format for frontend compatibility
@@ -58,7 +58,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var s types.Settings
 		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 
@@ -71,12 +71,12 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "agent not found", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "agent not found")
 			return
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -110,7 +110,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 
@@ -150,7 +150,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, err.Error())
 			return
 		}
 

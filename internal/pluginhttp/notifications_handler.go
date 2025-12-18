@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
 
@@ -25,7 +26,7 @@ func NewNotificationsHandler(notifMgr *pluginmanager.NotificationManager) *Notif
 // GET /api/plugins/notifications
 func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -45,18 +46,18 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 // POST /api/plugins/notifications/:id/dismiss
 func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	notificationID := h.extractNotificationID(r.URL.Path)
 	if notificationID == "" {
-		http.Error(w, "Notification ID required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Notification ID required")
 		return
 	}
 
 	if err := h.NotificationManager.DismissNotification(notificationID); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to dismiss notification: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err))
 		return
 	}
 

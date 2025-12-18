@@ -140,7 +140,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
 			logger.Error("CreateAgent decode error", logger.Fields{"error": errMsg})
-			http.Error(w, errMsg, http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, errMsg)
 			return
 		}
 		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
