@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -265,13 +266,20 @@ func (b *ServerBuilder) initializeConfiguration() error {
 	return nil
 }
 
-// initializeRegistry creates and refreshes the plugin registry manager.
+// initializeRegistry creates and refreshes the plugin registry manager with marketplace support.
 func (b *ServerBuilder) initializeRegistry() error {
-	mgr, err := createRegistryManager()
+	mgr, mpStore, err := createRegistryManagerWithMarketplace()
 	if err != nil {
 		return err
 	}
 	b.server.registryManager = mgr
+	b.server.marketplaceStore = mpStore
+
+	// Create marketplace HTTP handler
+	if mpStore != nil {
+		b.server.marketplaceHandler = marketplacehttp.NewHandler(mpStore, mgr)
+	}
+
 	return nil
 }
 

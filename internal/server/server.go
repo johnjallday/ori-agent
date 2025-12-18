@@ -21,6 +21,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/marketplace"
+	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -108,6 +110,8 @@ type Server struct {
 	backupHandler         *pluginhttp.BackupHandler
 	notificationsHandler  *pluginhttp.NotificationsHandler
 	workflowHandler       *workflowhttp.Handler
+	marketplaceStore      *marketplace.Store
+	marketplaceHandler    *marketplacehttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

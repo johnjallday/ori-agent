@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/marketplace"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -70,6 +72,7 @@ type Manager struct {
 	lastFetchTime      time.Time
 	fetchInterval      time.Duration
 	mu                 sync.RWMutex // Protects concurrent access to local registry file
+	marketplaceStore   *marketplace.Store
 }
 
 // NewManager creates a new registry manager
@@ -80,6 +83,22 @@ func NewManager() *Manager {
 		uploadedPluginsDir: "uploaded_plugins",
 		fetchInterval:      12 * time.Hour, // Refresh every 12 hours
 	}
+}
+
+// NewManagerWithMarketplaces creates a new registry manager with marketplace support
+func NewManagerWithMarketplaces(mpStore *marketplace.Store) *Manager {
+	return &Manager{
+		cachePath:          "plugin_registry_cache.json",
+		localRegistryPath:  "local_plugin_registry.json",
+		uploadedPluginsDir: "uploaded_plugins",
+		fetchInterval:      12 * time.Hour,
+		marketplaceStore:   mpStore,
+	}
+}
+
+// SetMarketplaceStore sets the marketplace store for multi-marketplace support
+func (m *Manager) SetMarketplaceStore(mpStore *marketplace.Store) {
+	m.marketplaceStore = mpStore
 }
 
 // shouldFetchFromGitHub checks if enough time has passed since the last fetch
@@ -220,6 +239,179 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	m.lastFetchTime = time.Now()
 
 	return reg, nil
+}
+
+// FetchFromMarketplace fetches plugins from a single marketplace
+func (m *Manager) FetchFromMarketplace(mp types.Marketplace) (types.PluginRegistry, error) {
+	var reg types.PluginRegistry
+
+	url := mp.ResolveURL()
+	resp, err := http.Get(url)
+	if err != nil {
+		return reg, fmt.Errorf("failed to fetch from %s: %w", mp.Name, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return reg, fmt.Errorf("marketplace %s returned status %d", mp.Name, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return reg, fmt.Errorf("failed to read response from %s: %w", mp.Name, err)
+	}
+
+	// Try to parse as the new metadata format first
+	var metadataReg struct {
+		Plugins []types.PluginMetadata `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &metadataReg); err == nil && len(metadataReg.Plugins) > 0 {
+		// Convert metadata format to registry entry format
+		reg.Plugins = make([]types.PluginRegistryEntry, len(metadataReg.Plugins))
+		for i, meta := range metadataReg.Plugins {
+			meta.Tags = normalizeTagsWithWarnings(meta.Name, meta.Tags)
+			entry := types.PluginRegistryEntry{
+				Name:              meta.Name,
+				Description:       meta.Description,
+				Tags:              meta.Tags,
+				Version:           meta.Version,
+				Metadata:          &meta,
+				SourceMarketplace: mp.ID,
+			}
+
+			// Extract supported OS, arch, and explicit platform combos
+			if len(meta.Platforms) > 0 {
+				osSet := make(map[string]bool)
+				archSet := make(map[string]bool)
+				var platformCombos []string
+
+				for _, platform := range meta.Platforms {
+					osSet[platform.Os] = true
+					for _, arch := range platform.Architectures {
+						archSet[arch] = true
+						platformCombos = append(platformCombos, fmt.Sprintf("%s-%s", platform.Os, arch))
+					}
+				}
+
+				entry.SupportedOS = make([]string, 0, len(osSet))
+				for os := range osSet {
+					entry.SupportedOS = append(entry.SupportedOS, os)
+				}
+
+				entry.SupportedArch = make([]string, 0, len(archSet))
+				for arch := range archSet {
+					entry.SupportedArch = append(entry.SupportedArch, arch)
+				}
+
+				entry.Platforms = platformCombos
+			}
+
+			// Set GitHub repo and download URL if available in repository field
+			if meta.Repository != "" {
+				repoURL := strings.TrimSuffix(meta.Repository, ".git")
+				repoURL = strings.TrimSuffix(repoURL, "/")
+				if repoURL == "" {
+					repoURL = meta.Repository
+				}
+				entry.GitHubRepo = repoURL
+
+				repoName := strings.TrimSuffix(filepath.Base(repoURL), ".git")
+
+				if strings.Contains(repoURL, "github.com") {
+					entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s-{os}-{arch}%s", repoURL, repoName, "{ext}")
+				} else {
+					entry.DownloadURL = fmt.Sprintf("%s/releases/latest/download/%s", repoURL, repoName)
+				}
+			}
+
+			reg.Plugins[i] = entry
+		}
+	} else {
+		// Fall back to old format
+		if err := json.Unmarshal(data, &reg); err != nil {
+			return reg, fmt.Errorf("failed to parse plugin registry JSON from %s: %w", mp.Name, err)
+		}
+		// Tag plugins with source marketplace
+		for i := range reg.Plugins {
+			reg.Plugins[i].SourceMarketplace = mp.ID
+		}
+	}
+
+	return reg, nil
+}
+
+// FetchAllMarketplaces fetches from all enabled marketplaces and merges results
+func (m *Manager) FetchAllMarketplaces() (types.PluginRegistry, error) {
+	if m.marketplaceStore == nil {
+		// Fall back to single GitHub registry
+		return m.fetchGitHubPluginRegistry()
+	}
+
+	enabledMarketplaces := m.marketplaceStore.GetEnabled()
+	if len(enabledMarketplaces) == 0 {
+		return types.PluginRegistry{}, nil
+	}
+
+	var allRegistries []types.PluginRegistry
+	var marketplaceOrder []types.Marketplace
+
+	for _, mp := range enabledMarketplaces {
+		reg, err := m.FetchFromMarketplace(mp)
+		if err != nil {
+			fmt.Printf("Warning: failed to fetch from marketplace %s: %v\n", mp.Name, err)
+			// Update marketplace with error
+			now := time.Now()
+			mp.LastFetched = &now
+			mp.LastError = err.Error()
+			_ = m.marketplaceStore.SetLastFetched(mp.ID, &mp)
+			continue
+		}
+
+		// Update marketplace with success
+		now := time.Now()
+		mp.LastFetched = &now
+		mp.LastError = ""
+		_ = m.marketplaceStore.SetLastFetched(mp.ID, &mp)
+
+		// Cache per marketplace
+		cacheFile := fmt.Sprintf("marketplace_cache_%s.json", mp.ID)
+		if data, marshalErr := json.MarshalIndent(reg, "", "  "); marshalErr == nil {
+			_ = os.WriteFile(cacheFile, data, 0644)
+		}
+
+		allRegistries = append(allRegistries, reg)
+		marketplaceOrder = append(marketplaceOrder, mp)
+	}
+
+	return m.MergeWithPriority(allRegistries, marketplaceOrder), nil
+}
+
+// MergeWithPriority merges multiple registries respecting marketplace priority
+// First match wins for duplicate plugin names
+func (m *Manager) MergeWithPriority(registries []types.PluginRegistry, marketplaces []types.Marketplace) types.PluginRegistry {
+	merged := types.PluginRegistry{}
+	seen := make(map[string]bool)
+
+	// Sort marketplaces by order (should already be sorted, but ensure it)
+	sort.Slice(marketplaces, func(i, j int) bool {
+		return marketplaces[i].Order < marketplaces[j].Order
+	})
+
+	// Process registries in order - first match wins
+	for i, reg := range registries {
+		for _, plugin := range reg.Plugins {
+			if !seen[plugin.Name] {
+				// Ensure source marketplace is set
+				if plugin.SourceMarketplace == "" && i < len(marketplaces) {
+					plugin.SourceMarketplace = marketplaces[i].ID
+				}
+				merged.Plugins = append(merged.Plugins, plugin)
+				seen[plugin.Name] = true
+			}
+		}
+	}
+
+	return merged
 }
 
 // loadLocalUnlocked loads the user's local plugin registry without locking (internal use only)
@@ -700,30 +892,42 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		}
 	}
 
-	// 2) Try to fetch from GitHub (primary online source) - with time-based caching
-	if m.shouldFetchFromGitHub() {
-		if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
-			// Success! Cache it for offline use
-			if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
-				_ = os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
+	// 2) Multi-marketplace support - if marketplace store is set, use it
+	if m.marketplaceStore != nil {
+		if m.shouldFetchFromGitHub() {
+			if mpReg, err := m.FetchAllMarketplaces(); err == nil && len(mpReg.Plugins) > 0 {
+				onlineReg = mpReg
+				fmt.Printf("plugin registry loaded from %d marketplace(s)\n", len(m.marketplaceStore.GetEnabled()))
+			} else if err != nil {
+				fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
 			}
-			onlineReg = githubReg
-			fmt.Println("plugin registry loaded from GitHub")
-		} else {
-			fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
+		}
+	} else {
+		// 3) Fallback: Try to fetch from single GitHub source (legacy behavior)
+		if m.shouldFetchFromGitHub() {
+			if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
+				// Success! Cache it for offline use
+				if data, marshalErr := json.MarshalIndent(githubReg, "", "  "); marshalErr == nil {
+					_ = os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
+				}
+				onlineReg = githubReg
+				fmt.Println("plugin registry loaded from GitHub")
+			} else {
+				fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
+			}
 		}
 	}
 
-	// If GitHub fetch was skipped or failed, try other fallback sources
+	// If fetch was skipped or failed, try other fallback sources
 	if len(onlineReg.Plugins) == 0 {
-		// 3) Try cached version (use if fresh enough or as offline fallback)
+		// 4) Try cached version (use if fresh enough or as offline fallback)
 		if b, err := os.ReadFile(m.cachePath); err == nil {
 			if err := json.Unmarshal(b, &onlineReg); err != nil {
 				fmt.Printf("Failed to parse cached plugin registry: %v\n", err)
 			}
 		}
 
-		// 4) Local files (legacy fallback)
+		// 5) Local files (legacy fallback)
 		if len(onlineReg.Plugins) == 0 {
 			for _, p := range []string{
 				"plugin_registry.json",
@@ -738,7 +942,7 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 			}
 		}
 
-		// 5) Embedded fallback (last resort)
+		// 6) Embedded fallback (last resort)
 		if len(onlineReg.Plugins) == 0 {
 			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
 				if err := json.Unmarshal(b, &onlineReg); err == nil {
