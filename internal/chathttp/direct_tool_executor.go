@@ -174,7 +174,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 	if err != nil {
 		result.Success = false
 		result.Error = err.Error()
-		result.Result = fmt.Sprintf("❌ Error executing %s: %v", cmd.ToolName, err)
+		result.Result = augmentToolExecutionError(cmd.ToolName, cmd.Args, err)
 		result.ExecutionTimeMs = duration.Milliseconds()
 		logger.Error("Direct tool execution failed", logger.Fields{"tool": err})
 		return result

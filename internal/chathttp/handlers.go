@@ -326,8 +326,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				// IMPORTANT: Convert error to string result instead of returning HTTP error
 				// This prevents conversation history corruption
 				if err != nil {
-					errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
-					result = errorMsg
+					result = augmentToolExecutionError(name, args, err)
 					logger.Error("Tool execution failed", logger.Fields{"tool": name, "error": err})
 				} else {
 					logger.Info("Tool execution completed", logger.Fields{"tool": name})
@@ -565,7 +564,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 				if err != nil {
 					logger.Error("Tool execution failed", logger.Fields{"tool": tc.Name, "error": err})
-					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
+					result = augmentToolExecutionError(tc.Name, tc.Arguments, err)
 				} else {
 					logger.Debug("Tool executed successfully", logger.Fields{"tool": tc.Name, "result": result})
 				}
