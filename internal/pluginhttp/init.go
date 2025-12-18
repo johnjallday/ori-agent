@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -49,7 +50,7 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
-			http.Error(w, "Failed to get default settings", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "Failed to get default settings")
 			return
 		}
 
@@ -68,7 +69,7 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 		// Parse the JSON settings to ensure it's valid
 		var settings map[string]interface{}
 		if err := json.Unmarshal([]byte(defaultSettings), &settings); err != nil {
-			http.Error(w, "Invalid default settings format", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "Invalid default settings format")
 			return
 		}
 
@@ -103,7 +104,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(pathParts) < 2 {
 		fmt.Printf("❌ Invalid path format - not enough parts\n")
-		http.Error(w, "invalid path format", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid path format")
 		return
 	}
 
@@ -113,7 +114,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if pluginName == "" {
 		fmt.Printf("❌ Plugin name is empty\n")
-		http.Error(w, "plugin name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "plugin name required")
 		return
 	}
 
@@ -124,7 +125,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		fmt.Printf("❌ Agent '%s' not found\n", current)
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 
@@ -178,7 +179,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !exists {
-		http.Error(w, "plugin not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "plugin not found")
 		return
 	}
 
@@ -205,7 +206,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		h.handlePluginDefaultSettings(w, plugin.Tool, pluginName)
 
 	default:
-		http.Error(w, "invalid action", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid action")
 	}
 }
 
@@ -375,12 +376,12 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid JSON")
 		return
 	}
 
 	if req.PluginName == "" {
-		http.Error(w, "plugin_name required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "plugin_name required")
 		return
 	}
 
@@ -388,28 +389,28 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	_, current := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "current agent not found")
 		return
 	}
 
 	// Find the plugin
 	plugin, exists := ag.Plugins[req.PluginName]
 	if !exists {
-		http.Error(w, "plugin not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "plugin not found")
 		return
 	}
 
 	// Convert parameters to JSON string
 	argsJSON, err := json.Marshal(req.Parameters)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to marshal parameters: %v", err), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err))
 		return
 	}
 
 	// Execute the plugin function
 	result, err := plugin.Tool.Call(r.Context(), string(argsJSON))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("plugin execution error: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("plugin execution error: %v", err))
 		return
 	}
 
@@ -426,7 +427,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 // PluginInitStatusHandler checks filesystem for settings files
 func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
