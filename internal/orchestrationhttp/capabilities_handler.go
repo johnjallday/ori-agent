@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -40,13 +41,13 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 	agentName := r.URL.Query().Get("name")
 	if agentName == "" {
-		http.Error(w, "name parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name parameter required")
 		return
 	}
 
 	agent, ok := ch.agentStore.GetAgent(agentName)
 	if !ok {
-		http.Error(w, "agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "agent not found")
 		return
 	}
 
@@ -65,7 +66,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 			return
 		}
 
@@ -79,7 +80,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 		if err := ch.agentStore.SetAgent(agentName, agent); err != nil {
 			logger.Error("Error updating agent capabilities", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, err.Error())
 			return
 		}
 
@@ -117,25 +118,25 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 	if req.From == "" {
-		http.Error(w, "from is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "from is required")
 		return
 	}
 	if req.To == "" {
-		http.Error(w, "to is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "to is required")
 		return
 	}
 	if req.Description == "" {
-		http.Error(w, "description is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "description is required")
 		return
 	}
 
@@ -163,7 +164,7 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 
 	if err != nil {
 		logger.Error("Failed to delegate task", logger.Fields{"task_id": err})
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 

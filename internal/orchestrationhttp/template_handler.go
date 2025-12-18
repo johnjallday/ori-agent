@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
@@ -44,7 +45,7 @@ func (th *TemplateHandler) TemplatesHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 
 	if th.templateManager == nil {
-		http.Error(w, "template manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "template manager not initialized")
 		return
 	}
 
@@ -69,7 +70,7 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 		// Get specific template
 		template, err := th.templateManager.GetTemplate(templateID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
 		_ = json.NewEncoder(w).Encode(template)
@@ -94,14 +95,14 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var template templates.WorkflowTemplate
 	if err := json.NewDecoder(r.Body).Decode(&template); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	// Save template
 	if err := th.templateManager.SaveTemplate(&template); err != nil {
 		logger.Error("Failed to save template", logger.Fields{"err": err})
-		http.Error(w, fmt.Sprintf("failed to save template: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("failed to save template: %v", err))
 		return
 	}
 
@@ -114,13 +115,13 @@ func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.R
 func (th *TemplateHandler) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	templateID := r.URL.Query().Get("id")
 	if templateID == "" {
-		http.Error(w, "template id required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "template id required")
 		return
 	}
 
 	if err := th.templateManager.DeleteTemplate(templateID); err != nil {
 		logger.Error("Failed to delete template", logger.Fields{"templateID": templateID, "err": err})
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -139,7 +140,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	if th.templateManager == nil {
-		http.Error(w, "template manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "template manager not initialized")
 		return
 	}
 
@@ -150,7 +151,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
@@ -158,7 +159,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	instance, err := th.templateManager.InstantiateTemplate(req.TemplateID, req.Parameters)
 	if err != nil {
 		logger.Error("Failed to instantiate template", logger.Fields{"templateid": req.TemplateID, "err": err})
-		http.Error(w, fmt.Sprintf("failed to instantiate template: %v", err), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("failed to instantiate template: %v", err))
 		return
 	}
 
@@ -174,7 +175,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	result, err := th.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
 	if err != nil {
 		logger.Error("Failed to execute collaborative task", logger.Fields{"task_id": err})
-		http.Error(w, fmt.Sprintf("failed to execute workflow: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("failed to execute workflow: %v", err))
 		return
 	}
 

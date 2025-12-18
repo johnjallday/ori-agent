@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -36,7 +37,7 @@ func (nh *NotificationHandler) NotificationsHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 
 	if nh.notificationService == nil {
-		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "notification service not initialized")
 		return
 	}
 
@@ -84,7 +85,7 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
@@ -108,25 +109,25 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 		return
 	}
 
-	http.Error(w, "notification_id or agent_name with mark_all required", http.StatusBadRequest)
+	orihttp.RespondBadRequest(w, "notification_id or agent_name with mark_all required")
 }
 
 // NotificationStreamHandler streams notifications using Server-Sent Events (SSE)
 // GET /api/orchestration/notifications/stream?agent=<name>
 func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if nh.notificationService == nil {
-		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "notification service not initialized")
 		return
 	}
 
 	agentName := r.URL.Query().Get("agent")
 	if agentName == "" {
-		http.Error(w, "agent parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "agent parameter required")
 		return
 	}
 
@@ -139,7 +140,7 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "streaming not supported")
 		return
 	}
 
@@ -201,12 +202,12 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if nh.eventBus == nil {
-		http.Error(w, "event bus not initialized", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "event bus not initialized")
 		return
 	}
 
@@ -220,7 +221,7 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		// Get events since timestamp
 		since, err := time.Parse(time.RFC3339, sinceStr)
 		if err != nil {
-			http.Error(w, "invalid since timestamp (use RFC3339)", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "invalid since timestamp (use RFC3339)")
 			return
 		}
 		events = nh.eventBus.GetEventsSince(since, limit)
