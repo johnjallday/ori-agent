@@ -54,7 +54,7 @@ func (th *TaskHandler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		th.handleDeleteTask(w, r)
 	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -68,7 +68,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		// Get specific task
 		task, err := th.communicator.GetTask(taskID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
 		_ = json.NewEncoder(w).Encode(task)
@@ -98,7 +98,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, "id, workspace_id, or agent parameter required", http.StatusBadRequest)
+	orihttp.RespondBadRequest(w, "id, workspace_id, or agent parameter required")
 }
 
 // handleCreateTask creates a new task in a workspace
@@ -122,19 +122,19 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 	if req.From == "" {
-		http.Error(w, "from (sender agent) is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "from (sender agent) is required")
 		return
 	}
 	if req.To == "" {
-		http.Error(w, "to (recipient agent) is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "to (recipient agent) is required")
 		return
 	}
 	if req.Description == "" {
-		http.Error(w, "description is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "description is required")
 		return
 	}
 
@@ -184,7 +184,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	if createdTask == nil {
 		logger.Error("Could not find created task", logger.Fields{})
-		http.Error(w, "Task created but could not be retrieved", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Task created but could not be retrieved")
 		return
 	}
 
@@ -270,7 +270,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 					if err != nil {
 						logger.Error("", logger.Fields{"err": err})
-						http.Error(w, err.Error(), http.StatusInternalServerError)
+						orihttp.RespondInternalError(w, err.Error())
 						return
 					}
 				}
@@ -280,7 +280,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		if taskIndex == -1 {
 			logger.Error("Task not found in workspace", logger.Fields{"task_id": req.TaskID, "workspaceid": task.WorkspaceID})
-			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "Task not found in workspace")
 			return
 		}
 
@@ -339,7 +339,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 		if err != nil {
 			logger.Error("", logger.Fields{"err": err})
-			http.Error(w, "Task not found in workspace", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "Task not found in workspace")
 			return
 		}
 		logger.Debug("📝 Updated task in workspace: ->", logger.Fields{"task_id": req.TaskID, "to": *req.To})
@@ -372,7 +372,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Handle status update
 	if req.Status == "" {
-		http.Error(w, "status is required when not reassigning task", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "status is required when not reassigning task")
 		return
 	}
 
@@ -386,7 +386,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	if err != nil {
 		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 
@@ -402,7 +402,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
 	if taskID == "" {
-		http.Error(w, "id parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "id parameter required")
 		return
 	}
 
@@ -442,7 +442,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	// Fallback: search all workspaces
 	if err := th.communicator.DeleteTask(taskID); err != nil {
 		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
-		http.Error(w, err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, err.Error())
 		return
 	}
 
@@ -461,14 +461,14 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Get task IDs from query parameter
 	taskIDsStr := r.URL.Query().Get("task_ids")
 	if taskIDsStr == "" {
-		http.Error(w, "task_ids parameter required (comma-separated)", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "task_ids parameter required (comma-separated)")
 		return
 	}
 
@@ -483,7 +483,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		http.Error(w, "Failed to retrieve workspaces", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to retrieve workspaces")
 		return
 	}
 
@@ -529,7 +529,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 // ExecuteTaskHandler handles manual task execution
 func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -543,7 +543,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if req.TaskID == "" {
-		http.Error(w, "task_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "task_id is required")
 		return
 	}
 
@@ -573,7 +573,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask == nil {
-		http.Error(w, fmt.Sprintf("Task %s not found", req.TaskID), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
 		return
 	}
 
@@ -590,25 +590,25 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
 			logger.Error("Failed to reset task status", logger.Fields{"status": err})
-			http.Error(w, "Failed to reset task for rerun", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "Failed to reset task for rerun")
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
-			http.Error(w, "Failed to save workspace", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "Failed to save workspace")
 			return
 		}
 	}
 
 	if foundTask.Status == agentstudio.TaskStatusInProgress {
-		http.Error(w, "Task is already in progress", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Task is already in progress")
 		return
 	}
 
 	// Check if task handler is available
 	if th.taskHandler == nil {
 		logger.Error("Task handler not set", logger.Fields{})
-		http.Error(w, "Task execution not available", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Task execution not available")
 		return
 	}
 
@@ -618,7 +618,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
 			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
-			http.Error(w, fmt.Sprintf("Failed to execute input tasks: %v", err), http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err))
 			return
 		}
 	}
@@ -924,7 +924,7 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateScheduledTask(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -932,7 +932,7 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -970,23 +970,23 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name is required")
 		return
 	}
 	if req.Prompt == "" {
-		http.Error(w, "prompt is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "prompt is required")
 		return
 	}
 	if req.From == "" {
-		http.Error(w, "from is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "from is required")
 		return
 	}
 	if req.To == "" {
-		http.Error(w, "to is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "to is required")
 		return
 	}
 
@@ -1060,7 +1060,7 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 
 	// Minimum parts: ["", "api", "orchestration", "scheduled-tasks", "{id}"] = 5
 	if len(parts) < 5 {
-		http.Error(w, "Invalid URL: missing task ID", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid URL: missing task ID")
 		return
 	}
 
@@ -1081,7 +1081,7 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 			th.handleTriggerScheduledTask(w, r, id)
 			return
 		default:
-			http.Error(w, fmt.Sprintf("Unknown action: %s", action), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action))
 			return
 		}
 	}
@@ -1094,7 +1094,7 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteScheduledTask(w, r, id)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -1123,7 +1123,7 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // handleUpdateScheduledTask updates a scheduled task
@@ -1220,7 +1220,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		return
 	}
 
-	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // handleDeleteScheduledTask deletes a scheduled task
@@ -1254,13 +1254,13 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 		}
 	}
 
-	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // handleEnableScheduledTask enables or disables a scheduled task
 func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Request, id string, enable bool) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -1325,13 +1325,13 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		return
 	}
 
-	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // handleTriggerScheduledTask manually triggers a scheduled task
 func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -1391,7 +1391,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		return
 	}
 
-	http.Error(w, fmt.Sprintf("Scheduled task %s not found", id), http.StatusNotFound)
+	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // calculateInitialNextRun calculates the initial next run time for a schedule
@@ -1601,7 +1601,7 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateSchedulerNode(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -1611,7 +1611,7 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -1714,7 +1714,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		http.Error(w, "workspace_id is required in URL path", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required in URL path")
 		return
 	}
 
@@ -1738,7 +1738,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Validate required fields
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name is required")
 		return
 	}
 
@@ -1769,7 +1769,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 		}
 	}
 	if schedulerNodeCount >= 50 {
-		http.Error(w, "Maximum of 50 scheduler nodes per workspace reached", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Maximum of 50 scheduler nodes per workspace reached")
 		return
 	}
 
@@ -1863,7 +1863,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 
 	// Find node_id in path (should be last part)
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL: missing node ID", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid URL: missing node ID")
 		return
 	}
 	nodeID := parts[len(parts)-1]
@@ -1880,7 +1880,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteSchedulerNode(w, r, nodeID)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -1888,7 +1888,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -1909,7 +1909,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	if foundTask == nil {
-		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -1956,7 +1956,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		http.Error(w, "studio_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "studio_id is required")
 		return
 	}
 
@@ -1987,7 +1987,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if st == nil {
-		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -2077,7 +2077,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -2104,7 +2104,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if !found {
-		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -2132,21 +2132,21 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 // SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
 func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract node ID from URL path
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL: missing node ID", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid URL: missing node ID")
 		return
 	}
 	nodeID := parts[len(parts)-2] // node ID is before "trigger"
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "studio_id parameter is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -2167,7 +2167,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	if foundTask == nil {
-		http.Error(w, fmt.Sprintf("Scheduler node %s not found", nodeID), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 

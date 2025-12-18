@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 )
@@ -61,7 +62,7 @@ func (h *Handler) WorkflowsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.handleCreateWorkflow(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -78,7 +79,7 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	workflowID := parts[0]
 
 	if workflowID == "" {
-		http.Error(w, "Workflow ID is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Workflow ID is required")
 		return
 	}
 
@@ -94,14 +95,14 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.handleDeleteWorkflow(w, r, workflowID)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
 // handleListWorkflows returns all custom workflows
 func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 	if h.workflowManager == nil {
-		http.Error(w, "Workflow manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Workflow manager not initialized")
 		return
 	}
 
@@ -118,29 +119,29 @@ func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 // handleCreateWorkflow creates a new custom workflow
 func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	if h.workflowManager == nil {
-		http.Error(w, "Workflow manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	var req CreateWorkflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err))
 		return
 	}
 
 	// Validate required fields
 	if req.Name == "" {
-		http.Error(w, "Workflow name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Workflow name is required")
 		return
 	}
 
 	if len(req.Nodes) == 0 {
-		http.Error(w, "At least one node is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "At least one node is required")
 		return
 	}
 
 	if len(req.Nodes) > templates.MaxWorkflowNodes {
-		http.Error(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes)), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes)))
 		return
 	}
 
@@ -155,7 +156,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Save workflow
 	if err := h.workflowManager.SaveWorkflow(workflow); err != nil {
 		logger.Error("Failed to save workflow", logger.Fields{"err": err})
-		http.Error(w, fmt.Sprintf("Failed to save workflow: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save workflow: %v", err))
 		return
 	}
 
@@ -174,13 +175,13 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 // handleGetWorkflow retrieves a specific workflow
 func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if h.workflowManager == nil {
-		http.Error(w, "Workflow manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Workflow not found: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
@@ -192,27 +193,27 @@ func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, work
 // handleDeleteWorkflow deletes a custom workflow
 func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if h.workflowManager == nil {
-		http.Error(w, "Workflow manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	// Check if workflow exists
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Workflow not found: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
 	// Only allow deletion of custom workflows
 	if workflow.Source != templates.WorkflowSourceCustom {
-		http.Error(w, "Cannot delete built-in workflows", http.StatusForbidden)
+		orihttp.RespondForbidden(w, "Cannot delete built-in workflows")
 		return
 	}
 
 	// Delete workflow
 	if err := h.workflowManager.DeleteWorkflow(workflowID); err != nil {
 		logger.Error("Failed to delete workflow", logger.Fields{"id": workflowID, "err": err})
-		http.Error(w, fmt.Sprintf("Failed to delete workflow: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to delete workflow: %v", err))
 		return
 	}
 
@@ -223,38 +224,38 @@ func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, w
 // handleCheckAgents checks if all agents required by a workflow are available in a studio
 func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if h.workflowManager == nil {
-		http.Error(w, "Workflow manager not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	// Get workflow
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Workflow not found: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
 	// Parse request
 	var req CheckAgentsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err))
 		return
 	}
 
 	if req.StudioID == "" {
-		http.Error(w, "Studio ID is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Studio ID is required")
 		return
 	}
 
 	// Get studio agents
 	studio, err := h.workspaceStore.Get(req.StudioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 

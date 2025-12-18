@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
@@ -42,7 +43,7 @@ func (wh *WorkspaceHandler) WorkspaceHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodDelete:
 		wh.handleDeleteWorkspace(w, r)
 	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -57,7 +58,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		ws, err := wh.workspaceStore.Get(wsID)
 		if err != nil {
 			logger.Error("Error getting workspace", logger.Fields{"workspace_id": wsID, "error": err})
-			http.Error(w, err.Error(), http.StatusNotFound)
+			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
 
@@ -71,7 +72,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		workspaces, err := wh.workspaceStore.ListActive()
 		if err != nil {
 			logger.Error("Error listing active workspaces", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, err.Error())
 			return
 		}
 
@@ -86,7 +87,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 	ids, err := wh.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -117,13 +118,13 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		logger.Error("Error decoding workspace creation request", logger.Fields{"error": err})
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	// Validate required fields
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "name is required")
 		return
 	}
 
@@ -131,7 +132,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 	for _, agentName := range req.Agents {
 		_, ok := wh.agentStore.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "agent not found: "+agentName, http.StatusNotFound)
+			orihttp.RespondNotFound(w, "agent not found: "+agentName)
 			return
 		}
 	}
@@ -147,7 +148,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
 		logger.Error("Error saving workspace", logger.Fields{"error": err})
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to save workspace: "+err.Error())
 		return
 	}
 
@@ -180,13 +181,13 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 func (wh *WorkspaceHandler) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("id")
 	if wsID == "" {
-		http.Error(w, "id parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "id parameter required")
 		return
 	}
 
 	if err := wh.workspaceStore.Delete(wsID); err != nil {
 		logger.Error("Error deleting workspace", logger.Fields{"workspace_id": wsID, "error": err})
-		http.Error(w, err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, err.Error())
 		return
 	}
 
@@ -210,7 +211,7 @@ func (wh *WorkspaceHandler) WorkspaceAgentsHandler(w http.ResponseWriter, r *htt
 	case http.MethodDelete:
 		wh.handleRemoveAgentFromWorkspace(w, r)
 	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -222,23 +223,23 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 	if req.AgentName == "" {
-		http.Error(w, "agent_name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "agent_name is required")
 		return
 	}
 
 	// Verify agent exists
 	_, ok := wh.agentStore.GetAgent(req.AgentName)
 	if !ok {
-		http.Error(w, "agent not found: "+req.AgentName, http.StatusNotFound)
+		orihttp.RespondNotFound(w, "agent not found: "+req.AgentName)
 		return
 	}
 
@@ -246,21 +247,21 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 	ws, err := wh.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": req.WorkspaceID, "error": err})
-		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Workspace not found: "+err.Error())
 		return
 	}
 
 	// Add agent
 	if err := ws.AddAgent(req.AgentName); err != nil {
 		logger.Error("Error adding agent to workspace", logger.Fields{"error": err})
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
 		logger.Error("Error saving workspace", logger.Fields{"error": err})
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to save workspace: "+err.Error())
 		return
 	}
 
@@ -295,11 +296,11 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 	agentName := r.URL.Query().Get("agent_name")
 
 	if workspaceID == "" {
-		http.Error(w, "workspace_id parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id parameter required")
 		return
 	}
 	if agentName == "" {
-		http.Error(w, "agent_name parameter required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "agent_name parameter required")
 		return
 	}
 
@@ -307,21 +308,21 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 	ws, err := wh.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "error": err})
-		http.Error(w, "Workspace not found: "+err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Workspace not found: "+err.Error())
 		return
 	}
 
 	// Remove agent
 	if err := ws.RemoveAgent(agentName); err != nil {
 		logger.Error("Error removing agent from workspace", logger.Fields{"error": err})
-		http.Error(w, err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, err.Error())
 		return
 	}
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
 		logger.Error("Error saving workspace", logger.Fields{"error": err})
-		http.Error(w, "Failed to save workspace: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to save workspace: "+err.Error())
 		return
 	}
 
@@ -354,7 +355,7 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 // PUT: Save workspace layout (task positions, agent positions, zoom, pan)
 func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -372,19 +373,19 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
 	if req.WorkspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
 	// Get workspace
 	ws, err := wh.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get workspace: %v", err), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("Failed to get workspace: %v", err))
 		return
 	}
 
@@ -405,7 +406,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 
 	// Save workspace
 	if err := wh.workspaceStore.Save(ws); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save workspace: %v", err), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
 	}
 
