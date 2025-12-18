@@ -10,6 +10,7 @@ import (
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/filehttp"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 )
@@ -270,7 +271,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodPost:
 				s.marketplaceHandler.AddMarketplace(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		})
 		mux.HandleFunc("/api/marketplaces/reorder", s.marketplaceHandler.ReorderMarketplaces)
@@ -287,7 +288,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.marketplaceHandler.DeleteMarketplace(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		})
 	}
@@ -329,7 +330,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.onboardingHandler.SetTheme(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			orihttp.RespondMethodNotAllowed(w)
 		}
 	})
 
@@ -361,7 +362,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.locationHandler.CreateZone(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			orihttp.RespondMethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +372,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodDelete:
 			s.locationHandler.DeleteZone(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			orihttp.RespondMethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
@@ -386,7 +387,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.mcpHandler.AddServerHandler(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			orihttp.RespondMethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
@@ -406,7 +407,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		} else if r.Method == http.MethodDelete {
 			s.mcpHandler.RemoveServerHandler(w, r)
 		} else {
-			http.Error(w, "Not found", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "Not found")
 		}
 	})
 	mux.HandleFunc("/api/mcp/import", s.mcpHandler.ImportServersHandler)
@@ -495,7 +496,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodGet:
 			s.studioHandler.ListStudios(w, r)
 		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			orihttp.RespondMethodNotAllowed(w)
 		}
 	})
 
@@ -515,7 +516,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteTask(w, r)
 			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/attachments") {
 			// Handle attachment operations
@@ -527,7 +528,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.studioHandler.DeleteAttachment(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
 			// Handle canvas store node operations (must be before /store-nodes check)
@@ -542,7 +543,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/store-nodes") {
 			// Handle store node operations
@@ -557,7 +558,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/agents") {
 			// Handle agent add/remove operations
@@ -567,7 +568,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.studioHandler.RemoveAgent(w, r)
 			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				orihttp.RespondMethodNotAllowed(w)
 			}
 		} else {
 			s.studioHandler.GetStudio(w, r)

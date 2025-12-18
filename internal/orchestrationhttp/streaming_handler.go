@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 )
@@ -38,18 +39,18 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if sh.orchestrator == nil {
-		http.Error(w, "orchestrator not initialized", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "orchestrator not initialized")
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -57,7 +58,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err != nil {
 		logger.Error("Failed to get workflow status", logger.Fields{"status": err})
-		http.Error(w, err.Error(), http.StatusNotFound)
+		orihttp.RespondNotFound(w, err.Error())
 		return
 	}
 
@@ -68,13 +69,13 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 // GET /api/orchestration/workflow/stream?workspace_id=<id>
 func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -87,7 +88,7 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "streaming not supported")
 		return
 	}
 
@@ -175,7 +176,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 // streamEventsFromPolling streams events using polling (fallback)
 func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	if sh.orchestrator == nil {
-		http.Error(w, "orchestrator not initialized and event bus not available", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "orchestrator not initialized and event bus not available")
 		return
 	}
 
@@ -272,13 +273,13 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 // GET /api/orchestration/progress/stream?workspace_id=<id>
 func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		http.Error(w, "workspace_id is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -291,7 +292,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "streaming not supported")
 		return
 	}
 
@@ -299,7 +300,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 
 	// If no event bus, return error
 	if sh.eventBus == nil {
-		http.Error(w, "event bus not available", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "event bus not available")
 		return
 	}
 

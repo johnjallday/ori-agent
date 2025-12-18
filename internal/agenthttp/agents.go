@@ -67,7 +67,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if agentName != "" {
 			agent, ok := h.State.GetAgent(agentName)
 			if !ok || agent == nil {
-				http.Error(w, "Agent not found", http.StatusNotFound)
+				orihttp.RespondNotFound(w, "Agent not found")
 				return
 			}
 
@@ -149,7 +149,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
 			logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 
@@ -166,7 +166,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("🔄 Creating agent", logger.Fields{"agent": req.Name})
 		if err := h.State.CreateAgent(req.Name, config); err != nil {
 			logger.Error("CreateAgent error", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 
@@ -212,11 +212,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			http.Error(w, "name required", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "name required")
 			return
 		}
 		if err := h.State.SwitchAgent(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -232,14 +232,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agentName = r.URL.Query().Get("name")
 		}
 		if agentName == "" {
-			http.Error(w, "agent name required", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "agent name required")
 			return
 		}
 
 		// Get existing agent
 		agent, ok := h.State.GetAgent(agentName)
 		if !ok || agent == nil {
-			http.Error(w, "Agent not found", http.StatusNotFound)
+			orihttp.RespondNotFound(w, "Agent not found")
 			return
 		}
 
@@ -321,12 +321,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
 			// Validate the new agent name
 			if err := validateAgentName(*req.Name); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				orihttp.RespondBadRequest(w, err.Error())
 				return
 			}
 
 			if _, exists := h.State.GetAgent(*req.Name); exists {
-				http.Error(w, "Agent with that name already exists", http.StatusConflict)
+				orihttp.RespondConflict(w, "Agent with that name already exists")
 				return
 			}
 
@@ -412,11 +412,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			http.Error(w, "name required", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "name required")
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
 

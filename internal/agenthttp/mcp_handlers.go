@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 )
@@ -31,7 +32,7 @@ func NewMCPHandler(registry *mcp.Registry, configManager *mcp.ConfigManager, age
 // GET /api/agents/{name}/mcp-servers
 func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -39,7 +40,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	path := r.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 4 {
-		http.Error(w, "Agent name required in path", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name required in path")
 		return
 	}
 	agentName := parts[2] // api/agents/{name}/mcp-servers
@@ -47,7 +48,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		http.Error(w, "Agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Agent not found")
 		return
 	}
 
@@ -110,7 +111,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 // POST /api/agents/{name}/mcp-servers/{serverName}/enable
 func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -118,7 +119,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	path := r.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 5 {
-		http.Error(w, "Agent name and server name required in path", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name and server name required in path")
 		return
 	}
 	agentName := parts[2]  // api/agents/{name}/mcp-servers/{serverName}/enable
@@ -127,21 +128,21 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		http.Error(w, "Agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Agent not found")
 		return
 	}
 
 	// Verify server exists in global registry
 	_, err := h.registry.GetServer(serverName)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("MCP server '%s' not found in global registry", serverName), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("MCP server '%s' not found in global registry", serverName))
 		return
 	}
 
 	// Enable server for agent
 	if err := h.configManager.EnableServerForAgent(agentName, serverName); err != nil {
 		logger.Error("Failed to enable MCP server for agent", logger.Fields{"agentName": agentName, "err": err, "agent": serverName})
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -169,7 +170,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 // POST /api/agents/{name}/mcp-servers/{serverName}/disable
 func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -177,7 +178,7 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	path := r.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 5 {
-		http.Error(w, "Agent name and server name required in path", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Agent name and server name required in path")
 		return
 	}
 	agentName := parts[2]  // api/agents/{name}/mcp-servers/{serverName}/disable
@@ -186,14 +187,14 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		http.Error(w, "Agent not found", http.StatusNotFound)
+		orihttp.RespondNotFound(w, "Agent not found")
 		return
 	}
 
 	// Disable server for agent
 	if err := h.configManager.DisableServerForAgent(agentName, serverName); err != nil {
 		logger.Error("Failed to disable MCP server for agent", logger.Fields{"server": serverName, "agentName": agentName, "err": err})
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
