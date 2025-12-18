@@ -582,6 +582,39 @@ function addMessageToChat(message, isUser = false, isError = false, isSystemNoti
   saveChatToLocalStorage();
 }
 
+function formatToolCallsForChat(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return '';
+
+  // Render as markdown with collapsible details (works with marked)
+  return toolCalls
+    .map((tc, idx) => {
+      const functionName = tc.function || tc.name || `tool_${idx + 1}`;
+      const args = typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}, null, 2);
+      const result = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result ?? '', null, 2);
+      return [
+        `<details>`,
+        `<summary>Tool: <code>${functionName}</code></summary>`,
+        `<div style="margin-top:8px">`,
+        `<div><strong>Args</strong></div>`,
+        `<pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(args)}</pre>`,
+        `<div><strong>Result</strong></div>`,
+        `<pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(result)}</pre>`,
+        `</div>`,
+        `</details>`
+      ].join('\n');
+    })
+    .join('\n\n');
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 // Show typing indicator
 function showTypingIndicator() {
   const chatArea = document.getElementById('chatArea');
@@ -688,20 +721,30 @@ async function sendMessage(message) {
       window.clearFilesAfterSend();
     }
 
-    if (data.response) {
+    const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
+    const responseText = typeof data.response === 'string' ? data.response : null;
+    const toolCallsText = formatToolCallsForChat(data.toolCalls);
+
+    if (hasResponseField && responseText !== null) {
       // Skip persisting assistant replies for slash commands
-      addMessageToChat(data.response, false, false, false, isSlashCommand);
+      if (responseText.trim().length > 0) {
+        addMessageToChat(responseText, false, false, false, isSlashCommand);
+      } else if (toolCallsText) {
+        addMessageToChat(toolCallsText, false, false, false, isSlashCommand);
+      } else {
+        addMessageToChat('(no text response)', false, false, false, isSlashCommand);
+      }
 
       // Check if this was a successful /switch command and refresh agent display and sidebar
       console.log('Checking for switch command:', {
         message: trimmedMessage,
         startsWithSwitch: trimmedMessage.startsWith('/switch'),
-        hasCheckmark: data.response.includes('✅'),
-        hasSwitched: data.response.includes('Switched to agent'),
-        response: data.response
+        hasCheckmark: responseText.includes('✅'),
+        hasSwitched: responseText.includes('Switched to agent'),
+        response: responseText
       });
 
-      if (trimmedMessage.startsWith('/switch') && data.response.includes('✅') && data.response.includes('Switched to agent')) {
+      if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
         console.log('Successful agent switch detected, refreshing agent display and sidebar');
         setTimeout(() => {
           refreshAgentDisplay();
@@ -713,7 +756,8 @@ async function sendMessage(message) {
       }
     } else {
       console.error('No response field found. Available fields:', Object.keys(data));
-      addMessageToChat('Sorry, I received an unexpected response format.', false, true);
+      const details = escapeHtml(JSON.stringify(data, null, 2));
+      addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
     }
 
   } catch (error) {

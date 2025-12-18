@@ -600,13 +600,25 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 			return
 		}
 
-		logger.Debug("Final response from LLM", logger.Fields{"content": finalResp.Content})
+		finalText := strings.TrimSpace(finalResp.Content)
+		if finalText == "" && len(toolResults) > 0 {
+			var b strings.Builder
+			for i, tr := range toolResults {
+				if i > 0 {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(fmt.Sprintf("**%s**\n\n%s", tr["function"], tr["result"]))
+			}
+			finalText = b.String()
+		}
 
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
+		logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
+
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 		_ = h.store.SetAgent(agentName, ag)
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"response":  finalResp.Content,
+			"response":  finalText,
 			"toolCalls": toolResults,
 		})
 		return
