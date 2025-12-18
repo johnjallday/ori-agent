@@ -3,13 +3,13 @@ package healthhttp
 import (
 	"encoding/json"
 	"fmt"
-
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/health"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/notifications"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -459,7 +459,7 @@ type AllPluginsHealthResponse struct {
 // GET /api/plugins/health
 func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -483,7 +483,7 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding health response", logger.Fields{"response": err})
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Internal server error")
 		return
 	}
 }
@@ -492,7 +492,7 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 // GET /api/plugins/{name}/health
 func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -500,7 +500,7 @@ func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 	// Expected format: /api/plugins/{name}/health
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid URL format")
 		return
 	}
 	pluginName := parts[2]
@@ -508,14 +508,14 @@ func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 	// Get health info for the plugin
 	result, ok := h.manager.GetPluginHealth(pluginName)
 	if !ok {
-		http.Error(w, fmt.Sprintf("No health information for plugin: %s", pluginName), http.StatusNotFound)
+		orihttp.RespondNotFound(w, fmt.Sprintf("No health information for plugin: %s", pluginName))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		logger.Error("Error encoding health response", logger.Fields{"error": err})
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Internal server error")
 		return
 	}
 }

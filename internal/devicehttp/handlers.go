@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
 
@@ -31,7 +32,7 @@ type SetDeviceTypeRequest struct {
 // GET /api/device/info
 func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -41,7 +42,7 @@ func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
 	// If device hasn't been detected yet, detect it now
 	if !deviceInfo.Detected {
 		if err := h.onboardingManager.DetectAndStoreDevice(); err != nil {
-			http.Error(w, "Failed to detect device", http.StatusInternalServerError)
+			orihttp.RespondInternalError(w, "Failed to detect device")
 			return
 		}
 		// Get the updated device info
@@ -50,7 +51,7 @@ func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(deviceInfo); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
@@ -59,23 +60,23 @@ func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
 // POST /api/device/type
 func (h *Handler) SetDeviceType(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	var req SetDeviceTypeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
 	// Update device type via onboarding manager
 	if err := h.onboardingManager.SetDeviceType(req.DeviceType); err != nil {
 		if err == onboarding.ErrInvalidDeviceType {
-			http.Error(w, "Invalid device type", http.StatusBadRequest)
+			orihttp.RespondBadRequest(w, "Invalid device type")
 			return
 		}
-		http.Error(w, "Failed to update device type", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to update device type")
 		return
 	}
 
@@ -85,7 +86,7 @@ func (h *Handler) SetDeviceType(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(deviceInfo); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
@@ -99,7 +100,7 @@ type WiFiInfo struct {
 // GET /api/device/wifi/current
 func (h *Handler) GetCurrentWiFi(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -107,7 +108,7 @@ func (h *Handler) GetCurrentWiFi(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(WiFiInfo{SSID: ssid}); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
