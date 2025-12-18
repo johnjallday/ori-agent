@@ -76,7 +76,7 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		logger.Error("Failed to save studio", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to save studio", logger.Fields{"error": err})
 		http.Error(w, "Failed to create studio", http.StatusInternalServerError)
 		return
 	}

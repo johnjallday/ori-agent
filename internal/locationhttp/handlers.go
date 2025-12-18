@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -68,7 +68,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Add zone
 	if err := h.manager.AddZone(zone); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, "failed to add zone", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to add zone", err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "zone not found" {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			httputil.RespondError(w, http.StatusInternalServerError, "failed to update zone", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to update zone", err)
 		}
 		return
 	}
@@ -165,7 +165,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "zone not found" {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			httputil.RespondError(w, http.StatusInternalServerError, "failed to delete zone", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to delete zone", err)
 		}
 		return
 	}
@@ -185,7 +185,7 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -89,7 +89,7 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		logger.Error("Error decoding message", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 	// Save updated workspace
 	if err := mh.workspaceStore.Save(ws); err != nil {
 		logger.Error("Error saving workspace after adding message", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 

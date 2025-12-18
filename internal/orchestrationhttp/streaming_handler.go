@@ -390,7 +390,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	ws, err := sh.workspaceStore.Get(workspaceID)
 	if err != nil {
-		logger.Error("Failed to get workspace for initial progress", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to get workspace for initial progress", logger.Fields{"error": err})
 		return
 	}
 
@@ -436,7 +436,7 @@ func (sh *StreamingHandler) sendWorkspaceProgressUpdate(w http.ResponseWriter, f
 
 	data, err := json.Marshal(eventData)
 	if err != nil {
-		logger.Error("Failed to marshal workspace progress", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to marshal workspace progress", logger.Fields{"error": err})
 		return
 	}
 

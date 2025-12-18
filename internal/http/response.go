@@ -2,8 +2,18 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
+
+// ErrorResponse represents a standardized error response
+type ErrorResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+}
 
 // RespondJSON writes a JSON response with the given status code and data.
 // It sets the Content-Type header to application/json and returns any encoding errors.
@@ -71,4 +81,30 @@ func RespondCreated(w http.ResponseWriter, data interface{}) error {
 //	http.RespondNoContent(w)
 func RespondNoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RespondErrorWithErr sends a standardized JSON error response.
+// It automatically sets Content-Type and status code.
+// If err is not nil, it will be appended to the message.
+//
+// Usage:
+//
+//	RespondErrorWithErr(w, http.StatusBadRequest, "Invalid input", err)
+func RespondErrorWithErr(w http.ResponseWriter, status int, message string, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	errMsg := message
+	if err != nil {
+		errMsg = fmt.Sprintf("%s: %v", message, err)
+	}
+
+	response := ErrorResponse{
+		Success: false,
+		Error:   errMsg,
+	}
+
+	if encodeErr := json.NewEncoder(w).Encode(response); encodeErr != nil {
+		logger.Error("Failed to encode error response", logger.Fields{"error": encodeErr})
+	}
 }

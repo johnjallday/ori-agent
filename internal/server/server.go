@@ -487,7 +487,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("studios", data)
 	if err != nil {
-		logger.Error("Failed to render studios template", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to render studios template", logger.Fields{"error": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -552,7 +552,7 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request,
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
 	if err != nil {
-		logger.Error("Failed to render workspace dashboard template", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to render workspace dashboard template", logger.Fields{"error": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -593,7 +593,7 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-canvas", data)
 	if err != nil {
-		logger.Error("Failed to render workspace canvas template", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to render workspace canvas template", logger.Fields{"error": err})
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

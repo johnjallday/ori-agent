@@ -68,7 +68,7 @@ func (o *Orchestrator) ExecuteMission(ctx context.Context, studioID string, miss
 
 	// Save updated studio
 	if err := o.studioStore.Save(studio); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"error": err})
 	}
 
 	// Step 3: Start task execution in background
@@ -257,7 +257,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 
 	// Save studio with updated task and message
 	if err := o.studioStore.Save(studio); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"error": err})
 	}
 
 	o.publishEvent("message_sent", studioID, map[string]interface{}{
@@ -303,7 +303,7 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 
 	// Save final studio state
 	if err := o.studioStore.Save(studio); err != nil {
-		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"workspace_id": err})
+		logger.Error("[Orchestrator] Warning: failed to save studio", logger.Fields{"error": err})
 	}
 
 	o.publishEvent("task_completed", studioID, map[string]interface{}{

@@ -12,7 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/robfig/cron/v3"
 )
@@ -116,7 +116,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -141,8 +141,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	// Get workspace
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
-		logger.Error("Error getting workspace", logger.Fields{"err": err, "error": req.WorkspaceID})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		logger.Error("Error getting workspace", logger.Fields{"error": err, "workspace_id": req.WorkspaceID})
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -160,15 +160,15 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
-		logger.Error("Failed to add task to workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusBadRequest, "Failed to add task", err)
+		logger.Error("Failed to add task to workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add task", err)
 		return
 	}
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -221,7 +221,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -232,7 +232,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.TaskID == "" {
-		httputil.RespondValidationError(w, "task_id", "is required")
+		orihttp.RespondValidationError(w, "task_id is required", nil)
 		return
 	}
 
@@ -244,7 +244,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		task, ws, err := th.getTaskWithWorkspace(req.TaskID)
 		if err != nil {
 			logger.Error("", logger.Fields{"err": err})
-			httputil.RespondError(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
 			return
 		}
 
@@ -286,8 +286,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		// Save workspace
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update task", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update task", err)
 			return
 		}
 
@@ -331,7 +331,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		task, ws, err := th.getTaskWithWorkspace(req.TaskID)
 		if err != nil {
 			logger.Error("", logger.Fields{"err": err})
-			httputil.RespondError(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Failed to retrieve task or workspace", err)
 			return
 		}
 
@@ -346,8 +346,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		// Save workspace
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update task", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update task", err)
 			return
 		}
 
@@ -414,18 +414,18 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	if workspaceID != "" {
 		ws, err := th.workspaceStore.Get(workspaceID)
 		if err != nil {
-			httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 			return
 		}
 
 		if err := ws.DeleteTask(taskID); err != nil {
-			httputil.RespondError(w, http.StatusNotFound, "Task not found", err)
+			orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -538,7 +538,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -551,7 +551,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -594,7 +594,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 			http.Error(w, "Failed to save workspace", http.StatusInternalServerError)
 			return
 		}
@@ -637,7 +637,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 			return
 		}
 
@@ -756,7 +756,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		}
 
 		// Publish workspace updated event
@@ -939,7 +939,7 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"error": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -964,7 +964,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -994,7 +994,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"err": err, "workspace_id": req.WorkspaceID})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -1023,14 +1023,14 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	// Add to workspace
 	if err := ws.AddScheduledTask(st); err != nil {
 		logger.Error("Failed to add scheduled task", logger.Fields{"task_id": err})
-		httputil.RespondError(w, http.StatusBadRequest, "Failed to add scheduled task", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add scheduled task", err)
 		return
 	}
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -1104,7 +1104,7 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1138,7 +1138,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -1146,7 +1146,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1201,13 +1201,13 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
 			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -1228,7 +1228,7 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1240,8 +1240,8 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 
 		if err := ws.DeleteScheduledTask(id); err == nil {
 			if err := th.workspaceStore.Save(ws); err != nil {
-				logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+				logger.Error("Failed to save workspace", logger.Fields{"error": err})
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 				return
 			}
 
@@ -1267,7 +1267,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1296,13 +1296,13 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 
 		if err := ws.UpdateScheduledTask(*st); err != nil {
 			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update scheduled task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -1338,7 +1338,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to list workspaces", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to list workspaces", err)
 		return
 	}
 
@@ -1366,13 +1366,13 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 
 		if err := ws.AddTask(task); err != nil {
 			logger.Error("Failed to create task from scheduled task", logger.Fields{"task_id": err})
-			httputil.RespondError(w, http.StatusBadRequest, "Failed to create task", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to create task", err)
 			return
 		}
 
 		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
 		}
 
@@ -1618,7 +1618,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -1732,7 +1732,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -1749,7 +1749,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Validate schedule configuration
 	if err := validateScheduleConfig(req.Schedule); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid schedule configuration", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid schedule configuration", err)
 		return
 	}
 
@@ -1757,7 +1757,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -1802,7 +1802,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	// Add to workspace
 	if err := ws.AddScheduledTask(st); err != nil {
 		logger.Error("Failed to add scheduled task", logger.Fields{"err": err})
-		httputil.RespondError(w, http.StatusBadRequest, "Failed to add scheduler node", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to add scheduler node", err)
 		return
 	}
 
@@ -1822,8 +1822,8 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -1895,7 +1895,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -1945,7 +1945,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -1963,7 +1963,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	// Validate schedule configuration if provided
 	if req.Schedule != nil {
 		if err := validateScheduleConfig(*req.Schedule); err != nil {
-			httputil.RespondError(w, http.StatusBadRequest, "Invalid schedule configuration", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid schedule configuration", err)
 			return
 		}
 	}
@@ -1971,7 +1971,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -2059,8 +2059,8 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -2084,7 +2084,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -2095,7 +2095,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 			scheduledTaskID := ws.ScheduledTasks[i].ID
 			if err := ws.DeleteScheduledTask(scheduledTaskID); err != nil {
 				logger.Error("Failed to delete scheduled task", logger.Fields{"scheduled_task_id": scheduledTaskID, "err": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to delete scheduler node", err)
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to delete scheduler node", err)
 				return
 			}
 			found = true
@@ -2115,8 +2115,8 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Save workspace
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 
@@ -2153,7 +2153,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	ws, err := th.workspaceStore.Get(workspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": workspaceID, "err": err})
-		httputil.RespondError(w, http.StatusNotFound, "Workspace not found", err)
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
@@ -2180,18 +2180,18 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		task, err := ws.GetTask(foundTask.TargetTaskID)
 		if err != nil {
 			logger.Error("Target task not found for scheduler node", logger.Fields{"node_id": nodeID, "target_task_id": foundTask.TargetTaskID, "err": err})
-			httputil.RespondError(w, http.StatusBadRequest, "Linked task not found for scheduler", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Linked task not found for scheduler", err)
 			return
 		}
 		targetTask = task
 
 		if targetTask.Status == agentstudio.TaskStatusInProgress {
-			httputil.RespondError(w, http.StatusBadRequest, "Linked task is already running", fmt.Errorf("task %s in progress", targetTask.ID))
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Linked task is already running", fmt.Errorf("task %s in progress", targetTask.ID))
 			return
 		}
 
 		if targetTask.To == "" || targetTask.To == "unassigned" {
-			httputil.RespondError(w, http.StatusBadRequest, "Linked task must be assigned to an agent", fmt.Errorf("task %s unassigned", targetTask.ID))
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Linked task must be assigned to an agent", fmt.Errorf("task %s unassigned", targetTask.ID))
 			return
 		}
 
@@ -2205,13 +2205,13 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 		if err := ws.UpdateTask(*targetTask); err != nil {
 			logger.Error("Failed to reset task for immediate execution", logger.Fields{"node_id": nodeID, "task_id": targetTask.ID, "err": err})
-			httputil.RespondError(w, http.StatusInternalServerError, "Failed to reset task for execution", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to reset task for execution", err)
 			return
 		}
 
 		taskID = targetTask.ID
 	} else {
-		httputil.RespondError(w, http.StatusBadRequest, "Scheduler node is not linked to a task. Connect it to a task node first.", fmt.Errorf("missing target_task_id"))
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Scheduler node is not linked to a task. Connect it to a task node first.", fmt.Errorf("missing target_task_id"))
 		return
 	}
 
@@ -2239,13 +2239,13 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	if err := ws.UpdateScheduledTask(*foundTask); err != nil {
 		logger.Error("Failed to update scheduler node", logger.Fields{"node_id": nodeID, "err": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to update scheduler node", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update scheduler node", err)
 		return
 	}
 
 	if err := th.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to save workspace", err)
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 		return
 	}
 

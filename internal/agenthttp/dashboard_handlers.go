@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -325,7 +325,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		Status string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 		return
 	}
 
@@ -361,7 +361,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Save agent
 	if err := h.State.SetAgent(agentName, agent); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent status", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent status", err)
 		return
 	}
 

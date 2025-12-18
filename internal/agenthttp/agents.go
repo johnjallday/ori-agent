@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -261,7 +261,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Favorite    *bool     `json:"favorite,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 			return
 		}
 
@@ -332,7 +332,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if err := h.State.SetAgent(*req.Name, agent); err != nil {
 				logger.Error("Failed to save renamed agent", logger.Fields{"agent": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 			if err := h.State.DeleteAgent(agentName); err != nil {
@@ -345,7 +345,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if err := h.State.SetAgent(agentName, agent); err != nil {
 				logger.Error("Failed to update agent metadata", logger.Fields{"agent": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 		}

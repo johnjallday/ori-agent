@@ -8,7 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -120,7 +120,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		// Update OpenAI API key if provided
 		if req.OpenAIAPIKey != "" {
 			if err := h.configManager.SetAPIKey(req.OpenAIAPIKey); err != nil {
-				httputil.RespondError(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
 				return
 			}
 			// Update global client with new API key
@@ -137,7 +137,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if req.AnthropicAPIKey != "" {
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
 			if err := h.configManager.Update(cfg); err != nil {
-				httputil.RespondError(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
 				return
 			}
 
