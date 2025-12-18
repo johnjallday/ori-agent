@@ -2,9 +2,9 @@ package onboardinghttp
 
 import (
 	"encoding/json"
-
 	"net/http"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
@@ -39,7 +39,7 @@ type CompleteStepRequest struct {
 // GET /api/onboarding/status
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -64,23 +64,23 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/step
 func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	var req CompleteStepRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
 	if req.StepName == "" {
-		http.Error(w, "step_name is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "step_name is required")
 		return
 	}
 
 	if err := h.onboardingMgr.CompleteStep(req.StepName); err != nil {
-		http.Error(w, "Failed to complete step: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to complete step: "+err.Error())
 		return
 	}
 
@@ -106,12 +106,12 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/skip
 func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.SkipOnboarding(); err != nil {
-		http.Error(w, "Failed to skip onboarding: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to skip onboarding: "+err.Error())
 		return
 	}
 
@@ -125,12 +125,12 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/complete
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.CompleteOnboarding(); err != nil {
-		http.Error(w, "Failed to complete onboarding: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to complete onboarding: "+err.Error())
 		return
 	}
 
@@ -144,12 +144,12 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/reset
 func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.ResetOnboarding(); err != nil {
-		http.Error(w, "Failed to reset onboarding: "+err.Error(), http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to reset onboarding: "+err.Error())
 		return
 	}
 
@@ -173,7 +173,7 @@ type SetThemeRequest struct {
 // GET /api/theme
 func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -193,23 +193,23 @@ func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 // POST /api/theme
 func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	var req SetThemeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
 	if req.Theme == "" {
-		http.Error(w, "theme is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "theme is required")
 		return
 	}
 
 	if err := h.onboardingMgr.SetTheme(req.Theme); err != nil {
-		http.Error(w, "Failed to set theme: "+err.Error(), http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Failed to set theme: "+err.Error())
 		return
 	}
 

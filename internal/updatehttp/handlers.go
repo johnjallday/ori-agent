@@ -2,11 +2,11 @@ package updatehttp
 
 import (
 	"encoding/json"
-
 	"net/http"
 	"strconv"
 	"time"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 )
@@ -26,7 +26,7 @@ func NewHandler(updateManager *updatemanager.Manager) *Handler {
 // CheckUpdatesHandler handles GET /api/updates/check
 func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -36,14 +36,14 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	updateInfo, err := h.updateManager.CheckUpdates(includePrerelease)
 	if err != nil {
 		logger.Warn("Update check unavailable", logger.Fields{"error": err})
-		http.Error(w, "Update check unavailable. Provide GITHUB_TOKEN/GH_TOKEN to increase GitHub API limits.", http.StatusServiceUnavailable)
+		orihttp.RespondServiceUnavailable(w, "Update check unavailable. Provide GITHUB_TOKEN/GH_TOKEN to increase GitHub API limits.")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(updateInfo); err != nil {
 		logger.Error("Error encoding update info", logger.Fields{"error": err})
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
@@ -51,7 +51,7 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 // ListReleasesHandler handles GET /api/updates/releases
 func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	releases, err := h.updateManager.ListReleases(includePrerelease, limit)
 	if err != nil {
 		logger.Error("Error listing releases", logger.Fields{"error": err})
-		http.Error(w, "Failed to list releases", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to list releases")
 		return
 	}
 
@@ -81,7 +81,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding releases", logger.Fields{"error": err})
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
@@ -89,7 +89,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 // DownloadUpdateHandler handles POST /api/updates/download
 func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -99,19 +99,19 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
 	if request.Version == "" {
-		http.Error(w, "Version is required", http.StatusBadRequest)
+		orihttp.RespondBadRequest(w, "Version is required")
 		return
 	}
 
 	filePath, err := h.updateManager.DownloadUpdate(request.Version)
 	if err != nil {
 		logger.Error("Error downloading update", logger.Fields{"error": err})
-		http.Error(w, "Failed to download update", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to download update")
 		return
 	}
 
@@ -131,7 +131,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding download response", logger.Fields{"response": err})
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 
@@ -148,7 +148,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 // GetVersionHandler handles GET /api/updates/version
 func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
 		logger.Error("Error encoding version info", logger.Fields{"error": err})
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		orihttp.RespondInternalError(w, "Failed to encode response")
 		return
 	}
 }
