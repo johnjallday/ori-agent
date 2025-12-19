@@ -50,11 +50,15 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
-			orihttp.RespondInternalError(w, "Failed to get default settings")
+			if err := orihttp.RespondInternalError(w, "Failed to get default settings"); err != nil {
+				logger.Error(
+
+					// Check if default settings is empty (plugin doesn't actually have settings)
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Check if default settings is empty (plugin doesn't actually have settings)
 		if defaultSettings == "" {
 			response := map[string]interface{}{
 				"success": false,
@@ -69,11 +73,15 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 		// Parse the JSON settings to ensure it's valid
 		var settings map[string]interface{}
 		if err := json.Unmarshal([]byte(defaultSettings), &settings); err != nil {
-			orihttp.RespondInternalError(w, "Invalid default settings format")
+			if err := orihttp.RespondInternalError(w, "Invalid default settings format"); err != nil {
+				logger.Error(
+
+					// Return the default settings
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Return the default settings
 		response := map[string]interface{}{
 			"success":          true,
 			"default_settings": settings,
@@ -104,7 +112,9 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(pathParts) < 2 {
 		fmt.Printf("❌ Invalid path format - not enough parts\n")
-		orihttp.RespondBadRequest(w, "invalid path format")
+		if err := orihttp.RespondBadRequest(w, "invalid path format"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -114,22 +124,30 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if pluginName == "" {
 		fmt.Printf("❌ Plugin name is empty\n")
-		orihttp.RespondBadRequest(w, "plugin name required")
+		if err := orihttp.RespondBadRequest(w, "plugin name required"); err != nil {
+			logger.
+
+				// Get current agent and its plugins
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	fmt.Printf("📁 Current agent: %s\n", current)
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		fmt.Printf("❌ Agent '%s' not found\n", current)
-		orihttp.RespondInternalError(w, "current agent not found")
+		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+			logger.
+
+				// Find the plugin
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the plugin
 	plugin, exists := ag.Plugins[pluginName]
 
 	// For default-settings and config, also check local registry if plugin not loaded in agent
@@ -179,7 +197,9 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !exists {
-		orihttp.RespondNotFound(w, "plugin not found")
+		if err := orihttp.RespondNotFound(w, "plugin not found"); err != nil {
+			logger.Error("Failed to write not found response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -206,7 +226,9 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		h.handlePluginDefaultSettings(w, plugin.Tool, pluginName)
 
 	default:
-		orihttp.RespondBadRequest(w, "invalid action")
+		if err := orihttp.RespondBadRequest(w, "invalid action"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
@@ -376,45 +398,65 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid JSON")
+		if err := orihttp.RespondBadRequest(w, "invalid JSON"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if req.PluginName == "" {
-		orihttp.RespondBadRequest(w, "plugin_name required")
+		if err := orihttp.RespondBadRequest(w, "plugin_name required"); err != nil {
+			logger.
+
+				// Get current agent and its plugins
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		orihttp.RespondInternalError(w, "current agent not found")
+		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+			logger.
+
+				// Find the plugin
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the plugin
 	plugin, exists := ag.Plugins[req.PluginName]
 	if !exists {
-		orihttp.RespondNotFound(w, "plugin not found")
+		if err := orihttp.RespondNotFound(w, "plugin not found"); err != nil {
+			logger.Error("Failed to write not found response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	// Convert parameters to JSON string
 	argsJSON, err := json.Marshal(req.Parameters)
 	if err != nil {
-		orihttp.RespondBadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err))
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err)); err != nil {
+			logger.
+
+				// Execute the plugin function
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Execute the plugin function
 	result, err := plugin.Tool.Call(r.Context(), string(argsJSON))
 	if err != nil {
-		orihttp.RespondInternalError(w, fmt.Sprintf("plugin execution error: %v", err))
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("plugin execution error: %v", err)); err != nil {
+			logger.
+
+				// Return the result
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Return the result
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -427,7 +469,9 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 // PluginInitStatusHandler checks filesystem for settings files
 func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 

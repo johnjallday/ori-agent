@@ -39,47 +39,65 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if sh.orchestrator == nil {
-		orihttp.RespondInternalError(w, "orchestrator not initialized")
+		if err := orihttp.RespondInternalError(w, "orchestrator not initialized"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.
+
+				// Get workflow status from orchestrator
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get workflow status from orchestrator
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err != nil {
 		logger.Error("Failed to get workflow status", logger.Fields{"status": err})
-		orihttp.RespondNotFound(w, err.Error())
+		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.
+
+				// WorkflowStatusStreamHandler streams real-time workflow status updates using Server-Sent Events (SSE)
+				// GET /api/orchestration/workflow/stream?workspace_id=<id>
+				Fields{"error": err})
+		}
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(status)
 }
 
-// WorkflowStatusStreamHandler streams real-time workflow status updates using Server-Sent Events (SSE)
-// GET /api/orchestration/workflow/stream?workspace_id=<id>
 func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.
+
+				// Set headers for SSE
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -88,11 +106,15 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		orihttp.RespondInternalError(w, "streaming not supported")
+		if err := orihttp.RespondInternalError(w, "streaming not supported"); err != nil {
+			logger.
+
+				// Context with cancellation
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Context with cancellation
 	ctx := r.Context()
 
 	logger.Debug("🔄 Starting SSE stream for workspace", logger.Fields{"workspace_id": workspaceID})
@@ -176,11 +198,15 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 // streamEventsFromPolling streams events using polling (fallback)
 func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	if sh.orchestrator == nil {
-		orihttp.RespondInternalError(w, "orchestrator not initialized and event bus not available")
+		if err := orihttp.RespondInternalError(w, "orchestrator not initialized and event bus not available"); err != nil {
+			logger.
+
+				// Create ticker for periodic updates (every 2 seconds)
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Create ticker for periodic updates (every 2 seconds)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -273,17 +299,23 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 // GET /api/orchestration/progress/stream?workspace_id=<id>
 func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.
+
+				// Set headers for SSE
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -292,15 +324,21 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		orihttp.RespondInternalError(w, "streaming not supported")
+		if err := orihttp.RespondInternalError(w, "streaming not supported"); err != nil {
+			logger.Error("Failed to write response",
+
+				// If no event bus, return error
+				logger.Fields{"error": err})
+		}
 		return
 	}
 
 	ctx := r.Context()
 
-	// If no event bus, return error
 	if sh.eventBus == nil {
-		orihttp.RespondServiceUnavailable(w, "event bus not available")
+		if err := orihttp.RespondServiceUnavailable(w, "event bus not available"); err != nil {
+			logger.Error("Failed to write service unavailable response", logger.Fields{"error": err})
+		}
 		return
 	}
 

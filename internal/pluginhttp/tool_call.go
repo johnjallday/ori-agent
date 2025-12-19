@@ -29,7 +29,9 @@ type ToolCallResponse struct {
 // DirectToolCallHandler handles direct plugin tool calls without going through OpenAI
 func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
