@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,14 +55,24 @@ func NewTestContext(t *testing.T) *TestContext {
 	}
 
 	// Start server
-	port := "18765" // Use different port for tests
+	port := getFreePort(t)
 	serverURL := fmt.Sprintf("http://localhost:%s", port)
 
 	// Use a longer-lived context for the server process
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	_ = serverCancel // Will be called in cleanup
 
-	serverCmd := startTestServer(t, serverCtx, port)
+	agentStorePath := filepath.Join(tempDir, "agents.json")
+	workspaceDir := filepath.Join(tempDir, "workspaces")
+	pluginCacheDir := filepath.Join(tempDir, "plugin_cache")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("Failed to create workspace dir: %v", err)
+	}
+	if err := os.MkdirAll(pluginCacheDir, 0o755); err != nil {
+		t.Fatalf("Failed to create plugin cache dir: %v", err)
+	}
+
+	serverCmd := startTestServer(t, serverCtx, port, agentStorePath, workspaceDir, pluginCacheDir)
 
 	// Wait for server to be ready with longer timeout
 	if err := waitForServer(serverURL, 15*time.Second); err != nil {
@@ -100,6 +112,22 @@ func NewTestContext(t *testing.T) *TestContext {
 	}
 
 	return tc
+}
+
+func getFreePort(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to find free port: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("Unexpected listener address type: %T", ln.Addr())
+	}
+	return strconv.Itoa(addr.Port)
 }
 
 // CreateAgent creates a new agent and tracks it for cleanup
@@ -441,7 +469,7 @@ func (tc *TestContext) cleanupAll() {
 	}
 }
 
-func startTestServer(t *testing.T, ctx context.Context, port string) *exec.Cmd {
+func startTestServer(t *testing.T, ctx context.Context, port string, agentStorePath string, workspaceDir string, pluginCacheDir string) *exec.Cmd {
 	t.Helper()
 
 	// Get absolute paths for project root and server binary
@@ -458,6 +486,9 @@ func startTestServer(t *testing.T, ctx context.Context, port string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, serverBinary)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PORT=%s", port),
+		fmt.Sprintf("AGENT_STORE_PATH=%s", agentStorePath),
+		fmt.Sprintf("WORKSPACE_DIR=%s", workspaceDir),
+		fmt.Sprintf("PLUGIN_CACHE_DIR=%s", pluginCacheDir),
 		// Add test mode indicator
 		"TEST_MODE=true",
 		// Don't open browser during tests
