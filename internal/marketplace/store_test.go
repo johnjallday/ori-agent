@@ -328,6 +328,63 @@ func TestMarketplaceResolveURL(t *testing.T) {
 			sourceType: "",
 			expected:   "https://registry.example.com/plugins.json",
 		},
+		// GitLab URL tests
+		{
+			name:       "GitLab project URL",
+			source:     "https://gitlab.com/johnjallday/ori-music-plugin-registry",
+			sourceType: "url",
+			expected:   "https://gitlab.com/johnjallday/ori-music-plugin-registry/-/raw/main/plugin_registry.json",
+		},
+		{
+			name:       "GitLab project URL with trailing slash",
+			source:     "https://gitlab.com/myuser/myrepo/",
+			sourceType: "url",
+			expected:   "https://gitlab.com/myuser/myrepo/-/raw/main/plugin_registry.json",
+		},
+		{
+			name:       "GitLab already raw URL",
+			source:     "https://gitlab.com/myuser/myrepo/-/raw/main/plugin_registry.json",
+			sourceType: "url",
+			expected:   "https://gitlab.com/myuser/myrepo/-/raw/main/plugin_registry.json",
+		},
+		{
+			name:       "GitLab direct file URL",
+			source:     "https://gitlab.com/myuser/myrepo/-/blob/main/custom_registry.json",
+			sourceType: "url",
+			expected:   "https://gitlab.com/myuser/myrepo/-/blob/main/custom_registry.json",
+		},
+		// Bitbucket URL tests
+		{
+			name:       "Bitbucket project URL",
+			source:     "https://bitbucket.org/myuser/myrepo",
+			sourceType: "url",
+			expected:   "https://bitbucket.org/myuser/myrepo/raw/main/plugin_registry.json",
+		},
+		{
+			name:       "Bitbucket already raw URL",
+			source:     "https://bitbucket.org/myuser/myrepo/raw/main/plugin_registry.json",
+			sourceType: "url",
+			expected:   "https://bitbucket.org/myuser/myrepo/raw/main/plugin_registry.json",
+		},
+		// GitHub web URL tests (full URL, not shorthand)
+		{
+			name:       "GitHub web URL",
+			source:     "https://github.com/testuser/testrepo",
+			sourceType: "url",
+			expected:   "https://raw.githubusercontent.com/testuser/testrepo/main/plugin_registry.json",
+		},
+		{
+			name:       "GitHub web URL with trailing slash",
+			source:     "https://github.com/testuser/testrepo/",
+			sourceType: "url",
+			expected:   "https://raw.githubusercontent.com/testuser/testrepo/main/plugin_registry.json",
+		},
+		{
+			name:       "GitHub already raw URL",
+			source:     "https://raw.githubusercontent.com/testuser/testrepo/main/plugin_registry.json",
+			sourceType: "url",
+			expected:   "https://raw.githubusercontent.com/testuser/testrepo/main/plugin_registry.json",
+		},
 	}
 
 	for _, tt := range tests {
