@@ -314,26 +314,22 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = out.Close()
 
+	// Make the plugin executable BEFORE loading - RPC plugins must be executable to validate
+	if err := os.Chmod(pluginFile, 0755); err != nil {
+		_ = os.Remove(pluginFile)
+		if err := orihttp.RespondInternalError(w, "Failed to set plugin permissions: "+err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
+		return
+	}
+
+	// Load plugin to validate it
 	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {
 		// Clean up the file if plugin is invalid
 		_ = os.Remove(pluginFile)
 		if err := orihttp.RespondBadRequest(w, "Invalid plugin: "+err.Error()); err != nil {
-			logger.
-
-				// Only make the plugin executable AFTER successful validation
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	if err := os.Chmod(pluginFile, 0755); err != nil {
-		_ = os.Remove(pluginFile)
-		if err := orihttp.RespondInternalError(w, "Failed to set plugin permissions: "+err.Error()); err != nil {
-			logger.Error("Failed to write response",
-
-				// Extract version information if available
-				logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
