@@ -141,6 +141,130 @@ class PluginMarketplace {
         document.getElementById('listViewBtn')?.addEventListener('click', () => {
             this.setViewMode('list');
         });
+
+        // Add Marketplace button - uses shared modal from modals.tmpl
+        document.getElementById('addMarketplaceBtn')?.addEventListener('click', () => {
+            this.showAddMarketplaceModal();
+        });
+
+        // Shared modal buttons (same IDs used by settings page)
+        document.getElementById('testMarketplaceBtn')?.addEventListener('click', () => {
+            this.testMarketplace();
+        });
+
+        document.getElementById('saveMarketplaceBtn')?.addEventListener('click', () => {
+            this.saveMarketplace();
+        });
+    }
+
+    showAddMarketplaceModal() {
+        document.getElementById('marketplaceNameInput').value = '';
+        document.getElementById('marketplaceSourceInput').value = '';
+        document.getElementById('marketplaceTestResult').style.display = 'none';
+        document.getElementById('marketplaceTestResult').innerHTML = '';
+        document.getElementById('saveMarketplaceBtn').disabled = true;
+
+        const modal = new bootstrap.Modal(document.getElementById('marketplaceModal'));
+        modal.show();
+    }
+
+    async testMarketplace() {
+        const source = document.getElementById('marketplaceSourceInput').value.trim();
+        const resultDiv = document.getElementById('marketplaceTestResult');
+        const saveBtn = document.getElementById('saveMarketplaceBtn');
+
+        if (!source) {
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `
+                <div class="alert alert-warning mb-0">
+                    Please enter a source URL or repository.
+                </div>`;
+            return;
+        }
+
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="d-flex align-items-center" style="color: var(--text-secondary);">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                Testing connection...
+            </div>`;
+
+        try {
+            const response = await fetch('/api/marketplaces/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source })
+            });
+
+            const result = await response.json();
+
+            if (result.valid) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success mb-0">
+                        <strong>Valid source!</strong><br>
+                        <small>Found ${result.plugin_count} plugin(s)</small><br>
+                        <small class="text-muted">Type: ${result.source_type === 'github' ? 'GitHub' : result.source_type === 'gitlab' ? 'GitLab' : 'Direct URL'}</small>
+                    </div>`;
+                saveBtn.disabled = false;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <strong>Invalid source</strong><br>
+                        <small>${this.escapeHtml(result.error)}</small>
+                    </div>`;
+                saveBtn.disabled = true;
+            }
+        } catch (error) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <strong>Connection failed</strong><br>
+                    <small>${this.escapeHtml(error.message)}</small>
+                </div>`;
+            saveBtn.disabled = true;
+        }
+    }
+
+    async saveMarketplace() {
+        const name = document.getElementById('marketplaceNameInput').value.trim();
+        const source = document.getElementById('marketplaceSourceInput').value.trim();
+
+        if (!name || !source) {
+            alert('Please fill in both name and source fields');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/marketplaces', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, source })
+            });
+
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(error);
+            }
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('marketplaceModal'));
+            modal.hide();
+
+            // Show success message
+            alert('Marketplace added! Refreshing plugins...');
+
+            // Reload marketplace data
+            await this.loadMarketplaceData();
+            this.render();
+        } catch (error) {
+            console.error('Error adding marketplace:', error);
+            alert('Failed to add marketplace: ' + error.message);
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     // Check if plugin is compatible with current platform
@@ -271,14 +395,15 @@ class PluginMarketplace {
         if (!marketplaceId) return '';
 
         const marketplaceName = this.getMarketplaceName(marketplaceId);
-        if (!marketplaceName) return '';
+        // Use marketplace name if available, otherwise show the ID
+        const displayName = marketplaceName || marketplaceId;
 
         // Use different colors for official vs custom marketplaces
         const isOfficial = marketplaceId === 'official';
         const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
-        const icon = isOfficial ? '🏪' : '📦';
+        const icon = isOfficial ? '🏠' : '📦';
 
-        return `<span class="badge ${badgeClass} me-1" title="Source: ${marketplaceName}">${icon} ${marketplaceName}</span>`;
+        return `<span class="badge ${badgeClass} me-1" title="Source marketplace: ${displayName}">${icon} ${displayName}</span>`;
     }
 
     render() {
