@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -67,7 +67,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if agentName != "" {
 			agent, ok := h.State.GetAgent(agentName)
 			if !ok || agent == nil {
-				http.Error(w, "Agent not found", http.StatusNotFound)
+				if err := orihttp.RespondNotFound(w, "Agent not found"); err != nil {
+					logger.Error("Failed to write response", logger.Fields{"error": err})
+				}
 				return
 			}
 
@@ -140,7 +142,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			errMsg := "Failed to decode request: " + err.Error()
 			logger.Error("CreateAgent decode error", logger.Fields{"error": errMsg})
-			http.Error(w, errMsg, http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, errMsg); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
@@ -149,7 +153,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
 			logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -166,7 +172,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("🔄 Creating agent", logger.Fields{"agent": req.Name})
 		if err := h.State.CreateAgent(req.Name, config); err != nil {
 			logger.Error("CreateAgent error", logger.Fields{"error": err})
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -212,11 +220,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			http.Error(w, "name required", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+			}
 			return
 		}
 		if err := h.State.SwitchAgent(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -232,14 +244,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agentName = r.URL.Query().Get("name")
 		}
 		if agentName == "" {
-			http.Error(w, "agent name required", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "agent name required"); err != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+			}
 			return
 		}
 
 		// Get existing agent
 		agent, ok := h.State.GetAgent(agentName)
 		if !ok || agent == nil {
-			http.Error(w, "Agent not found", http.StatusNotFound)
+			if err := orihttp.RespondNotFound(w, "Agent not found"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -261,7 +277,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Favorite    *bool     `json:"favorite,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			httputil.RespondError(w, http.StatusBadRequest, "Invalid request body", err)
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
 			return
 		}
 
@@ -321,18 +337,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
 			// Validate the new agent name
 			if err := validateAgentName(*req.Name); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+					logger.Error("Failed to write response", logger.Fields{"error": err})
+				}
 				return
 			}
 
 			if _, exists := h.State.GetAgent(*req.Name); exists {
-				http.Error(w, "Agent with that name already exists", http.StatusConflict)
+				if err := orihttp.RespondConflict(w, "Agent with that name already exists"); err != nil {
+					logger.Error("Failed to write response", logger.Fields{"error": err})
+				}
 				return
 			}
 
 			if err := h.State.SetAgent(*req.Name, agent); err != nil {
 				logger.Error("Failed to save renamed agent", logger.Fields{"agent": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 			if err := h.State.DeleteAgent(agentName); err != nil {
@@ -345,7 +365,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if err := h.State.SetAgent(agentName, agent); err != nil {
 				logger.Error("Failed to update agent metadata", logger.Fields{"agent": err})
-				httputil.RespondError(w, http.StatusInternalServerError, "Failed to update agent", err)
+				orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
 				return
 			}
 		}
@@ -412,11 +432,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			http.Error(w, "name required", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 

@@ -84,7 +84,7 @@ func (te *TaskExecutor) Start() {
 func (te *TaskExecutor) cleanupOrphanedTasks() {
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces for orphaned task cleanup", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces for orphaned task cleanup", logger.Fields{"error": err})
 		return
 	}
 
@@ -161,7 +161,7 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 	// Get all workspaces
 	workspaceIDs, err := te.workspaceStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return
 	}
 
@@ -273,7 +273,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 		logger.Error("Failed to update task status", logger.Fields{"status": err})
 	}
 	if err := te.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 	}
 
 	// Publish task started event
@@ -361,7 +361,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 			return
 		}
 		if err := te.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		}
 
 		// Publish workspace updated event

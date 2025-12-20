@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -55,12 +56,16 @@ func (ch *CommandHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Reque
 
 	ag, ok := ch.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+			logger.
+
+				// Get API key status - this would need to be passed in or accessed differently
+				// For now, we'll simplify this
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get API key status - this would need to be passed in or accessed differently
-	// For now, we'll simplify this
 	apiKeyStatus := "Configured"
 
 	// Build status dashboard
@@ -120,11 +125,15 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 	ag, ok := ch.store.GetAgent(current)
 	if !ok {
-		http.Error(w, "current agent not found", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+			logger.
+
+				// Build tools list response
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Build tools list response
 	var toolsResponse strings.Builder
 	toolsResponse.WriteString("## 🔧 Available Tools\n\n")
 

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -26,7 +26,9 @@ func NewHandler(manager *location.Manager) *Handler {
 // GetCurrentLocation handles GET /api/location/current
 func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -47,7 +49,9 @@ func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 // GetZones handles GET /api/location/zones
 func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -62,30 +66,36 @@ func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 // CreateZone handles POST /api/location/zones
 func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
 	// Validate zone
 	if zone.Name == "" {
-		http.Error(w, "zone name is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if len(zone.DetectionRules) == 0 {
-		http.Error(w, "at least one detection rule is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "at least one detection rule is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	// Add zone
 	if err := h.manager.AddZone(zone); err != nil {
-		httputil.RespondError(w, http.StatusInternalServerError, "failed to add zone", err)
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to add zone", err)
 		return
 	}
 
@@ -99,23 +109,29 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 // UpdateZone handles PUT /api/location/zones/:id
 func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract zone ID from URL path
+				// URL format: /api/location/zones/{id}
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract zone ID from URL path
-	// URL format: /api/location/zones/{id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		http.Error(w, "zone ID is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	var zone location.Zone
 	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
@@ -124,16 +140,22 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Validate zone
 	if zone.Name == "" {
-		http.Error(w, "zone name is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
+			logger.
+
+				// Update zone
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Update zone
 	if err := h.manager.UpdateZone(zone); err != nil {
 		if err.Error() == "zone not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
+			}
 		} else {
-			httputil.RespondError(w, http.StatusInternalServerError, "failed to update zone", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to update zone", err)
 		}
 		return
 	}
@@ -147,25 +169,35 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 // DeleteZone handles DELETE /api/location/zones/:id
 func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract zone ID from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract zone ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		http.Error(w, "zone ID is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
+			logger.
+
+				// Delete zone
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Delete zone
 	if err := h.manager.RemoveZone(zoneID); err != nil {
 		if err.Error() == "zone not found" {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
+			}
 		} else {
-			httputil.RespondError(w, http.StatusInternalServerError, "failed to delete zone", err)
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to delete zone", err)
 		}
 		return
 	}
@@ -176,7 +208,9 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 // SetManualLocation handles POST /api/location/override
 func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -185,16 +219,20 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		httputil.RespondError(w, http.StatusBadRequest, "invalid request body", err)
+		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
 
 	if request.Location == "" {
-		http.Error(w, "location is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "location is required"); err != nil {
+			logger.
+
+				// Set manual location
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set manual location
 	h.manager.SetManualLocation(request.Location)
 
 	response := struct {

@@ -1,8 +1,10 @@
 package web
 
 import (
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
+
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ComponentData represents data that can be passed to components
@@ -39,7 +41,9 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Extract component name from URL path
 	componentName := r.URL.Query().Get("name")
 	if componentName == "" {
-		http.Error(w, "Missing component name", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Missing component name"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -54,7 +58,9 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Render the component
 	content, err := ch.renderer.RenderComponent(componentName, data)
 	if err != nil {
-		http.Error(w, "Failed to render component: "+err.Error(), http.StatusInternalServerError)
+		if encodeErr := orihttp.RespondInternalError(w, "Failed to render component: "+err.Error()); encodeErr != nil {
+			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 

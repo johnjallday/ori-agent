@@ -65,6 +65,37 @@ echo ""
 cat "$TEMP_ERRORS"
 echo ""
 
+# Step 2.5: Attempt automatic fixes for common orihttp errcheck patterns
+# Enable with: FIX_ORIHTTP_ERRCHECK=1 ./scripts/fix-all-lint.sh
+if [ "${FIX_ORIHTTP_ERRCHECK:-}" = "1" ] && [ -f "./scripts/fix-orihttp-errcheck.go" ]; then
+  if rg -q "errcheck" "$TEMP_ERRORS" && rg -q "orihttp\\.Respond" "$TEMP_ERRORS"; then
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}Step 2.5: Fixing orihttp errcheck patterns${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    mapfile -t ERR_FILES < <(rg -o "^[^:]+\\.go" "$TEMP_ERRORS" | sort -u)
+    if [ ${#ERR_FILES[@]} -gt 0 ]; then
+      go run ./scripts/fix-orihttp-errcheck.go -w "${ERR_FILES[@]}" || true
+      gofmt -w "${ERR_FILES[@]}" || true
+    fi
+
+    echo ""
+    echo "Re-running lint after orihttp errcheck fix..."
+    if $GOLANGCI_LINT run ./... > "$TEMP_ERRORS" 2>&1; then
+      echo -e "${GREEN}✅ All lint issues resolved!${NC}"
+      echo ""
+      exit 0
+    fi
+
+    echo ""
+    echo -e "${YELLOW}Some issues remain after orihttp errcheck fix:${NC}"
+    echo ""
+    cat "$TEMP_ERRORS"
+    echo ""
+  fi
+fi
+
 # Step 4: AI-powered fixing (automatic)
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}Step 3: AI-Powered Fix${NC}"

@@ -8,7 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
-	"github.com/johnjallday/ori-agent/internal/httputil"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -44,7 +44,9 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "agent not found", http.StatusNotFound)
+			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			}
 			return
 		}
 		// Wrap settings in the expected format for frontend compatibility
@@ -58,7 +60,9 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var s types.Settings
 		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -71,12 +75,16 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			http.Error(w, "agent not found", http.StatusNotFound)
+			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			}
 			return
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -110,7 +118,9 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -120,7 +130,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		// Update OpenAI API key if provided
 		if req.OpenAIAPIKey != "" {
 			if err := h.configManager.SetAPIKey(req.OpenAIAPIKey); err != nil {
-				httputil.RespondError(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid OpenAI API key", err)
 				return
 			}
 			// Update global client with new API key
@@ -137,7 +147,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if req.AnthropicAPIKey != "" {
 			cfg.AnthropicAPIKey = req.AnthropicAPIKey
 			if err := h.configManager.Update(cfg); err != nil {
-				httputil.RespondError(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid Anthropic API key", err)
 				return
 			}
 
@@ -150,7 +160,9 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 

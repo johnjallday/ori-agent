@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -39,23 +40,31 @@ type CreateStudioRequest struct {
 // CreateStudio handles POST /api/studios
 func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	var req CreateStudioRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if encodeErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); encodeErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
 	// Validate request
 	if req.Name == "" {
-		http.Error(w, "Studio name is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Studio name is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if len(req.Agents) == 0 {
-		http.Error(w, "At least one agent is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "At least one agent is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -76,8 +85,10 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		logger.Error("Failed to save studio", logger.Fields{"workspace_id": err})
-		http.Error(w, "Failed to create studio", http.StatusInternalServerError)
+		logger.Error("Failed to save studio", logger.Fields{"error": err})
+		if encodeErr := orihttp.RespondInternalError(w, "Failed to create studio"); encodeErr != nil {
+			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
@@ -100,7 +111,9 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 // GetStudio handles GET /api/studios/:id
 func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -111,7 +124,9 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if encodeErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); encodeErr != nil {
+			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
@@ -149,18 +164,24 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 // ListStudios handles GET /api/studios
 func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	// Get all studio IDs
 	ids, err := h.store.List()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list studios: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to list studios: %v", err)); err != nil {
+			logger.
+
+				// Get studio details
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get studio details
 	studios := make([]map[string]interface{}, 0, len(ids))
 	for _, id := range ids {
 		studio, err := h.store.Get(id)
@@ -196,18 +217,26 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Verify studio exists
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
-	// Verify studio exists
 	if _, err := h.store.Get(studioID); err != nil {
-		http.Error(w, "Studio not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Studio not found"); err != nil {
+			logger.
+
+				// Set SSE headers
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -256,47 +285,71 @@ type AddAgentRequest struct {
 // AddAgent handles POST /api/studios/:id/agents
 func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Parse request body
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
-	// Parse request body
 	var req AddAgentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if req.AgentName == "" {
-		http.Error(w, "Agent name is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Agent name is required"); err != nil {
+			logger.
+
+				// Get studio
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Add agent using workspace method (creates stable AgentInstance)
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Add agent using workspace method (creates stable AgentInstance)
 	if err := studio.AddAgent(req.AgentName); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to add agent: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to add agent: %v", err)); err != nil {
+			logger.
+
+				// Save updated studio
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -316,28 +369,41 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 // RemoveAgent handles DELETE /api/studios/:id/agents/:agent_name
 func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID and agent identifier from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID and agent identifier from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error":
+
+			// Format: "name" or "name:instanceNumber"
+			err})
+		}
 		return
 	}
 	studioID := parts[0]
-	agentIdentifier := parts[2] // Format: "name" or "name:instanceNumber"
+	agentIdentifier := parts[2]
 
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Parse agent identifier to extract name and instance number
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Parse agent identifier to extract name and instance number
 	var agentName string
 	var instanceNumber int
 	if strings.Contains(agentIdentifier, ":") {
@@ -345,7 +411,9 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		agentName = identParts[0]
 		instanceNumber, err = strconv.Atoi(identParts[1])
 		if err != nil {
-			http.Error(w, "Invalid instance number format", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "Invalid instance number format"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 	} else {
@@ -378,26 +446,41 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if targetInstanceID == "" {
-			http.Error(w, fmt.Sprintf("Agent instance %s not found", agentName), http.StatusNotFound)
+			if err := orihttp.RespondNotFound(w, fmt.Sprintf("Agent instance %s not found", agentName)); err != nil {
+				logger.Error(
+
+					// Remove using new method (maintains stable node IDs, only unassigns tasks for THIS instance)
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Remove using new method (maintains stable node IDs, only unassigns tasks for THIS instance)
 		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to remove agent instance: %v", err), http.StatusInternalServerError)
+			if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to remove agent instance: %v", err)); err != nil {
+				logger.Error("Failed to write response",
+
+					// LEGACY: No AgentInstances exist - use old method (removes first occurrence by name)
+					logger.Fields{"error": err})
+			}
 			return
 		}
 	} else {
-		// LEGACY: No AgentInstances exist - use old method (removes first occurrence by name)
+
 		if err := studio.RemoveAgent(agentName); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to remove agent: %v", err), http.StatusNotFound)
+			if err := orihttp.RespondNotFound(w, fmt.Sprintf("Failed to remove agent: %v", err)); err != nil {
+				logger.Error(
+
+					// Save updated studio
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 	}
 
-	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -479,37 +562,55 @@ func inferAttachmentType(req *CreateAttachmentRequest) AttachmentType {
 // CreateTask handles POST /api/studios/:id/tasks
 func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Parse request body
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
-	// Parse request body
 	var req CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.
+
+				// Validate request
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate request
 	if req.Description == "" {
-		http.Error(w, "Task description is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Task description is required"); err != nil {
+			logger.
+
+				// Note: From and To agents are optional - tasks can be created without connections
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
-	// Note: From and To agents are optional - tasks can be created without connections
 
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -532,13 +633,19 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Add task to studio
 	if err := studio.AddTask(task); err != nil {
 		logger.Error("[DEBUG] CreateTask - AddTask failed", logger.Fields{"task_id": err})
-		http.Error(w, fmt.Sprintf("Failed to add task: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to add task: %v", err)); err != nil {
+			logger.
+
+				// Save updated studio
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -560,22 +667,30 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 // UpdateTask handles PATCH /api/studios/:id/tasks/:task_id
 func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID and task ID from URL path
+				// URL format: /api/studios/{studio_id}/tasks/{task_id}
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{
+
+				// Parse request body
+				"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
 
-	// Parse request body
 	var req struct {
 		Description    *string   `json:"description,omitempty"`
 		To             *string   `json:"to,omitempty"`
@@ -584,18 +699,26 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.
+
+				// Get studio
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find and update task
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find and update task
 	found := false
 	for i, task := range studio.Tasks {
 		if task.ID == taskID {
@@ -621,13 +744,19 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
+			logger.
+
+				// Save updated studio
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -647,29 +776,41 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 // DeleteTask handles DELETE /api/studios/:id/tasks/:task_id
 func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID and task ID from URL path
+				// URL format: /api/studios/{studio_id}/tasks/{task_id}
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{
+
+				// Get studio
+				"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
 
-	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find and remove task
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find and remove task
 	found := false
 	newTasks := make([]Task, 0)
 	for _, task := range studio.Tasks {
@@ -681,15 +822,21 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Save updated studio
+				logger.Fields{"error": err})
+		}
 		return
 	}
 
 	studio.Tasks = newTasks
 
-	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -709,38 +856,50 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 // CreateAttachment handles POST /api/studios/:id/attachments
 func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
 	var req CreateAttachmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if req.Title == "" {
-		http.Error(w, "Attachment title is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Attachment title is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	attType := inferAttachmentType(&req)
 	if attType != AttachmentTypeDoc && attType != AttachmentTypeImage && attType != AttachmentTypeOther {
-		http.Error(w, "Attachment type must be one of: doc, image, other", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Attachment type must be one of: doc, image, other"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -760,16 +919,22 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.AddAttachment(attachment); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to add attachment: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.
+
+				// Publish event for live updates
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Publish event for live updates
 	createdAttachment, _ := studio.GetAttachment(attachment.ID)
 	if createdAttachment == nil {
 		createdAttachment = &attachment
@@ -800,14 +965,18 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 // UpdateAttachment handles PATCH /api/studios/:id/attachments/:attachment_id
 func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
@@ -825,23 +994,31 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	attachment, err := studio.GetAttachment(attachmentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
+			logger.
+
+				// Apply updates
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Apply updates
 	if req.Title != nil {
 		attachment.Title = *req.Title
 	}
@@ -850,7 +1027,9 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type != nil {
 		if *req.Type != AttachmentTypeDoc && *req.Type != AttachmentTypeImage && *req.Type != AttachmentTypeOther {
-			http.Error(w, "Attachment type must be one of: doc, image, other", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "Attachment type must be one of: doc, image, other"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		attachment.Type = *req.Type
@@ -880,12 +1059,16 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.UpdateAttachment(*attachment); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to update attachment: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update attachment: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -918,14 +1101,18 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 // DeleteAttachment handles DELETE /api/studios/:id/attachments/:attachment_id
 func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
@@ -933,17 +1120,23 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if err := studio.DeleteAttachment(attachmentID); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -971,29 +1164,41 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 // ExecuteTaskManually handles POST /api/studios/:id/tasks/:task_id/execute
 func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract studio ID and task ID from URL path
+				// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract studio ID and task ID from URL path
-	// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{
+
+				// Get studio
+				"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
 
-	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find the task
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the task
 	var targetTask *Task
 	for i := range studio.Tasks {
 		if studio.Tasks[i].ID == taskID {
@@ -1003,7 +1208,9 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 	}
 
 	if targetTask == nil {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1042,69 +1249,99 @@ type CreateStoreNodeRequest struct {
 // CreateStoreNode handles POST /api/studios/:id/store-nodes
 func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
 	var req CreateStoreNodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.
+
+				// Validate required fields
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate required fields
 	if req.Name == "" {
-		http.Error(w, "Store node name is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Store node name is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.BaseDir == "" {
-		http.Error(w, "Base directory is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Base directory is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.Format == "" {
-		http.Error(w, "Format is required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Format is required"); err != nil {
+			logger.
+
+				// Validate format
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate format
 	validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
 	if !validFormats[req.Format] {
-		http.Error(w, "Format must be one of: json, text, markdown, binary", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Format must be one of: json, text, markdown, binary"); err != nil {
+			logger.
+
+				// Validate write mode
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate write mode
 	if req.WriteMode == "" {
 		req.WriteMode = "overwrite" // Default
 	}
 	validModes := map[string]bool{"overwrite": true, "append": true}
 	if !validModes[req.WriteMode] {
-		http.Error(w, "Write mode must be one of: overwrite, append", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Write mode must be one of: overwrite, append"); err != nil {
+			logger.
+
+				// Validate base directory - absolute paths allowed, relative paths must use these prefixes
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate base directory - absolute paths allowed, relative paths must use these prefixes
 	allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
 	if err := ValidateBaseDir(req.BaseDir, allowedRelativeDirs); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid base directory: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid base directory: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Generate unique canvas node ID
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Generate unique canvas node ID
 	canvasNodeID := fmt.Sprintf("store-node-%d", len(studio.StoreNodes)+1)
 
 	storeNode := StoreNode{
@@ -1145,7 +1382,9 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1175,21 +1414,27 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 // GetStoreNodes handles GET /api/studios/:id/store-nodes
 func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 1 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1215,19 +1460,25 @@ type UpdateStoreNodeRequest struct {
 // UpdateStoreNode handles PUT /api/studios/:id/store-nodes/:node_id
 func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Handle both /store-nodes/{id} and /canvas/store-nodes/{id} patterns
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
 
-	// Handle both /store-nodes/{id} and /canvas/store-nodes/{id} patterns
 	var nodeID string
 	if parts[1] == "canvas" && len(parts) >= 4 {
 		nodeID = parts[3] // /canvas/store-nodes/{id}
@@ -1237,17 +1488,23 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	var req UpdateStoreNodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find store node by ID or CanvasNodeID
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find store node by ID or CanvasNodeID
 	var storeNode *StoreNode
 	for i := range studio.StoreNodes {
 		if studio.StoreNodes[i].ID == nodeID || studio.StoreNodes[i].CanvasNodeID == nodeID {
@@ -1257,11 +1514,15 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if storeNode == nil {
-		http.Error(w, "Store node not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Store node not found"); err != nil {
+			logger.
+
+				// Apply updates
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Apply updates
 	if req.Name != nil {
 		storeNode.Name = *req.Name
 	}
@@ -1269,7 +1530,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 		// Re-validate base directory - absolute paths allowed, relative paths must use prefixes
 		allowedRelativeDirs := []string{"agents/", "outputs/", "reports/", "data/"}
 		if err := ValidateBaseDir(*req.BaseDir, allowedRelativeDirs); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid base directory: %v", err), http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid base directory: %v", err)); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		storeNode.BaseDir = *req.BaseDir
@@ -1277,7 +1540,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.Format != nil {
 		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
 		if !validFormats[*req.Format] {
-			http.Error(w, "Format must be one of: json, text, markdown, binary", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "Format must be one of: json, text, markdown, binary"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		storeNode.Format = *req.Format
@@ -1285,7 +1550,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.WriteMode != nil {
 		validModes := map[string]bool{"overwrite": true, "append": true}
 		if !validModes[*req.WriteMode] {
-			http.Error(w, "Write mode must be one of: overwrite, append", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "Write mode must be one of: overwrite, append"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		storeNode.WriteMode = *req.WriteMode
@@ -1325,7 +1592,9 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1352,14 +1621,18 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 // DeleteStoreNode handles DELETE /api/studios/:id/store-nodes/:node_id
 func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
@@ -1367,11 +1640,15 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find and remove store node
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find and remove store node
 	found := false
 	var canvasNodeID string
 	for i := range studio.StoreNodes {
@@ -1384,18 +1661,24 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		http.Error(w, "Store node not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Store node not found"); err != nil {
+			logger.
+
+				// Remove from layout
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Remove from layout
 	if studio.Layout != nil && studio.Layout.StorePositions != nil {
 		delete(studio.Layout.StorePositions, canvasNodeID)
 	}
 
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to save studio: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1426,14 +1709,18 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 // GetStoreNodeStatus handles GET /api/studios/:id/store-nodes/:node_id/status
 func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	studioID := parts[0]
@@ -1441,11 +1728,15 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Studio not found: %v", err), http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
+			logger.
+
+				// Find store node
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find store node
 	var storeNode *StoreNode
 	for i := range studio.StoreNodes {
 		if studio.StoreNodes[i].ID == nodeID {
@@ -1455,7 +1746,9 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	if storeNode == nil {
-		http.Error(w, "Store node not found", http.StatusNotFound)
+		if err := orihttp.RespondNotFound(w, "Store node not found"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 

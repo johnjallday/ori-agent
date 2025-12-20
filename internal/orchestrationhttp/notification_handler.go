@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -36,7 +37,9 @@ func (nh *NotificationHandler) NotificationsHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 
 	if nh.notificationService == nil {
-		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		if err := orihttp.RespondServiceUnavailable(w, "notification service not initialized"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -84,12 +87,17 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "invalid request body"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{
+
+				// Mark all notifications for agent as read
+				"error": err})
+		}
 		return
 	}
 
 	if req.MarkAll && req.AgentName != "" {
-		// Mark all notifications for agent as read
+
 		nh.notificationService.MarkAllAsRead(req.AgentName)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -107,30 +115,41 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 		})
 		return
 	}
+	if err := orihttp.RespondBadRequest(w, "notification_id or agent_name with mark_all required"); err !=
 
-	http.Error(w, "notification_id or agent_name with mark_all required", http.StatusBadRequest)
+		// NotificationStreamHandler streams notifications using Server-Sent Events (SSE)
+		// GET /api/orchestration/notifications/stream?agent=<name>
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// NotificationStreamHandler streams notifications using Server-Sent Events (SSE)
-// GET /api/orchestration/notifications/stream?agent=<name>
 func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if nh.notificationService == nil {
-		http.Error(w, "notification service not initialized", http.StatusServiceUnavailable)
+		if err := orihttp.RespondServiceUnavailable(w, "notification service not initialized"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	agentName := r.URL.Query().Get("agent")
 	if agentName == "" {
-		http.Error(w, "agent parameter required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "agent parameter required"); err != nil {
+			logger.
+
+				// Set headers for SSE
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -139,11 +158,15 @@ func (nh *NotificationHandler) NotificationStreamHandler(w http.ResponseWriter, 
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "streaming not supported"); err != nil {
+			logger.
+
+				// Subscribe to notifications
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Subscribe to notifications
 	notifChan := nh.notificationService.Subscribe(agentName)
 	defer nh.notificationService.Unsubscribe(agentName)
 
@@ -201,12 +224,16 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if nh.eventBus == nil {
-		http.Error(w, "event bus not initialized", http.StatusServiceUnavailable)
+		if err := orihttp.RespondServiceUnavailable(w, "event bus not initialized"); err != nil {
+			logger.Error("Failed to write service unavailable response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -220,7 +247,9 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		// Get events since timestamp
 		since, err := time.Parse(time.RFC3339, sinceStr)
 		if err != nil {
-			http.Error(w, "invalid since timestamp (use RFC3339)", http.StatusBadRequest)
+			if err := orihttp.RespondBadRequest(w, "invalid since timestamp (use RFC3339)"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		events = nh.eventBus.GetEventsSince(since, limit)

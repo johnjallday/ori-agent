@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/fileparser"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -32,11 +33,15 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req ParseFileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+			logger.
+
+				// Decode base64 content
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Decode base64 content
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
 		if err := json.NewEncoder(w).Encode(ParseFileResponse{

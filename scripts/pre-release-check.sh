@@ -294,7 +294,15 @@ echo ""
 run_check "Build Server" "go build -o bin/ori-agent ./cmd/server" || true
 run_check "Build Menubar (macOS)" "go build -o bin/ori-menubar ./cmd/menubar 2>/dev/null || echo 'Skipping menubar (not on macOS)'" || true
 run_check "Build Plugins" "./scripts/build-plugins.sh" || true
-run_check "Build External Plugins" "./scripts/build-external-plugins.sh" || true
+
+# External plugins live outside this repo (../plugins/*) and are not required for releasing ori-agent itself.
+# Enable with: BUILD_EXTERNAL_PLUGINS=1 ./scripts/pre-release-check.sh vX.Y.Z
+if [ "${BUILD_EXTERNAL_PLUGINS:-}" = "1" ] || [ "${BUILD_EXTERNAL_PLUGINS:-}" = "true" ]; then
+  run_check "Build External Plugins" "./scripts/build-external-plugins.sh" || true
+else
+  echo -e "${YELLOW}⚠️  Build External Plugins: SKIPPED (set BUILD_EXTERNAL_PLUGINS=1 to enable)${NC}"
+  echo ""
+fi
 
 # 4. DEPENDENCY CHECK
 echo ""

@@ -17,10 +17,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/marketplace"
+	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -108,6 +111,8 @@ type Server struct {
 	backupHandler         *pluginhttp.BackupHandler
 	notificationsHandler  *pluginhttp.NotificationsHandler
 	workflowHandler       *workflowhttp.Handler
+	marketplaceStore      *marketplace.Store
+	marketplaceHandler    *marketplacehttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -212,7 +217,9 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	html, err := s.UI.TemplateRenderer.RenderTemplate(templateName, data)
 	if err != nil {
 		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -286,7 +293,9 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("settings", data)
 	if err != nil {
 		logger.Error("Failed to render settings template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -319,7 +328,9 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("mcp", data)
 	if err != nil {
 		logger.Error("Failed to render mcp template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -356,7 +367,9 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
 	if err != nil {
 		logger.Error("Failed to render marketplace template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -385,7 +398,9 @@ func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("plugins", data)
 	if err != nil {
 		logger.Error("Failed to render plugins template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -415,7 +430,9 @@ func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("models", data)
 	if err != nil {
 		logger.Error("Failed to render models template", logger.Fields{"model": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -450,7 +467,9 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("workflows", data)
 	if err != nil {
 		logger.Error("Failed to render workflows template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -483,8 +502,10 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	html, err := s.templateRenderer.RenderTemplate("studios", data)
 	if err != nil {
-		logger.Error("Failed to render studios template", logger.Fields{"workspace_id": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		logger.Error("Failed to render studios template", logger.Fields{"error": err})
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -548,8 +569,10 @@ func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request,
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
 	if err != nil {
-		logger.Error("Failed to render workspace dashboard template", logger.Fields{"workspace_id": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		logger.Error("Failed to render workspace dashboard template", logger.Fields{"error": err})
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -589,8 +612,10 @@ func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, wo
 
 	html, err := s.templateRenderer.RenderTemplate("workspace-canvas", data)
 	if err != nil {
-		logger.Error("Failed to render workspace canvas template", logger.Fields{"workspace_id": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		logger.Error("Failed to render workspace canvas template", logger.Fields{"error": err})
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -625,7 +650,9 @@ func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	html, err := s.templateRenderer.RenderTemplate("usage", data)
 	if err != nil {
 		logger.Error("Failed to render usage template", logger.Fields{"err": err})
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -714,32 +741,48 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure path doesn't contain traversal sequences
 	if strings.Contains(cleanPath, "..") {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+			logger.
+
+				// Verify path starts with "agents/" to prevent access to other directories
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Verify path starts with "agents/" to prevent access to other directories
 	if !strings.HasPrefix(cleanPath, "agents/") && !strings.HasPrefix(cleanPath, "agents\\") {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+			logger.
+
+				// Resolve to absolute path and verify it's still within the agents directory
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Resolve to absolute path and verify it's still within the agents directory
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	agentsDir, err := filepath.Abs("agents")
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, "Internal server error"); err != nil {
+			logger.
+
+				// Final check: ensure resolved path is within agents directory
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Final check: ensure resolved path is within agents directory
 	if !strings.HasPrefix(absPath, agentsDir+string(filepath.Separator)) {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 

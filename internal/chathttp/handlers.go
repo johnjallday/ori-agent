@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
@@ -325,8 +326,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 				// IMPORTANT: Convert error to string result instead of returning HTTP error
 				// This prevents conversation history corruption
 				if err != nil {
-					errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
-					result = errorMsg
+					result = augmentToolExecutionError(name, args, err)
 					logger.Error("Tool execution failed", logger.Fields{"tool": name, "error": err})
 				} else {
 					logger.Info("Tool execution completed", logger.Fields{"tool": name})
@@ -564,7 +564,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 				if err != nil {
 					logger.Error("Tool execution failed", logger.Fields{"tool": tc.Name, "error": err})
-					result = fmt.Sprintf("❌ Error executing %s: %v", tc.Name, err)
+					result = augmentToolExecutionError(tc.Name, tc.Arguments, err)
 				} else {
 					logger.Debug("Tool executed successfully", logger.Fields{"tool": tc.Name, "result": result})
 				}
@@ -599,13 +599,25 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 			return
 		}
 
-		logger.Debug("Final response from LLM", logger.Fields{"content": finalResp.Content})
+		finalText := strings.TrimSpace(finalResp.Content)
+		if finalText == "" && len(toolResults) > 0 {
+			var b strings.Builder
+			for i, tr := range toolResults {
+				if i > 0 {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(fmt.Sprintf("**%s**\n\n%s", tr["function"], tr["result"]))
+			}
+			finalText = b.String()
+		}
 
-		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalResp.Content))
+		logger.Debug("Final response from LLM", logger.Fields{"content": finalText})
+
+		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 		_ = h.store.SetAgent(agentName, ag)
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"response":  finalResp.Content,
+			"response":  finalText,
 			"toolCalls": toolResults,
 		})
 		return
@@ -749,16 +761,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		Files     []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
-		http.Error(w, "empty question", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "empty question"); err != nil {
+			logger.
+
+				// Debug: Log received files
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Debug: Log received files
 	logger.Info("Chat request received", logger.Fields{
 		"question":   q[:min(50, len(q))],
 		"file_count": len(req.Files),
@@ -855,11 +873,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			http.Error(w, "current agent not found", http.StatusInternalServerError)
+			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+				logger.Error(
+
+					// Execute the tool directly
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Execute the tool directly
 		result := h.executeDirectTool(r.Context(), ag, cmd)
 
 		// Add to conversation history for context
@@ -894,7 +916,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		http.Error(w, fmt.Sprintf("agent '%s' not found", current), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1166,11 +1190,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			tool, found := h.findTool(ag, name)
 
 			if !found {
-				http.Error(w, fmt.Sprintf("tool %q not found", name), http.StatusInternalServerError)
+				if err := orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name)); err != nil {
+					logger.Error(
+
+						// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
+						"Failed to write response", logger.Fields{"error": err})
+				}
 				return
 			}
 
-			// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
 			toolCtx, toolCancel := context.WithTimeout(base, ToolExecutionTimeout)
 			defer toolCancel()
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
 
@@ -25,7 +27,9 @@ func NewBackupHandler(backupMgr *pluginmanager.BackupManager) *BackupHandler {
 // GET /api/plugins/export (all plugins)
 func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -35,7 +39,9 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 		// Export single plugin
 		data, err := h.BackupManager.ExportPluginConfig(pluginName)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to export plugin config: %v", err), http.StatusInternalServerError)
+			if encodeErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to export plugin config: %v", err)); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -46,7 +52,9 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 		// Export all plugins
 		data, err := h.BackupManager.ExportAllPluginConfigs()
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to export all configs: %v", err), http.StatusInternalServerError)
+			if encodeErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to export all configs: %v", err)); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -61,20 +69,26 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 // Request body: JSON configuration data (single or multiple plugins)
 func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	// Read request body
 	var configData json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		if encodeErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); encodeErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
 	// Validate config before import
 	if err := h.BackupManager.ValidateImportedConfig(configData); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid configuration: %v", err), http.StatusBadRequest)
+		if encodeErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid configuration: %v", err)); encodeErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
@@ -83,7 +97,9 @@ func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.
 	if err := h.BackupManager.ImportPluginConfig(configData); err == nil {
 		importedCount = 1
 	} else if err := h.BackupManager.ImportMultipleConfigs(configData); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to import config: %v", err), http.StatusInternalServerError)
+		if encodeErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to import config: %v", err)); encodeErr != nil {
+			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+		}
 		return
 	} else {
 		// Count how many configs were imported

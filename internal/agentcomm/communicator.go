@@ -288,7 +288,7 @@ func (c *Communicator) ListTasksForAgent(agentName string) []agentstudio.Task {
 
 	workspaceIDs, err := c.studioStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return allTasks
 	}
 
@@ -315,7 +315,7 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 
 	workspaceIDs, err := c.studioStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces for cleanup", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces for cleanup", logger.Fields{"error": err})
 		return 0
 	}
 
@@ -345,7 +345,7 @@ func (c *Communicator) CleanupCompletedTasks(olderThan time.Duration) int {
 			ws.Tasks = newTasks
 			ws.UpdatedAt = time.Now()
 			if err := c.studioStore.Save(ws); err != nil {
-				logger.Error("Failed to save workspace after cleanup", logger.Fields{"workspace_id": err})
+				logger.Error("Failed to save workspace after cleanup", logger.Fields{"error": err})
 			}
 		}
 	}
@@ -393,7 +393,7 @@ func (c *Communicator) CheckTimeouts() []agentstudio.Task {
 		if modified {
 			ws.UpdatedAt = now
 			if err := c.studioStore.Save(ws); err != nil {
-				logger.Error("Failed to save workspace after timeout check", logger.Fields{"workspace_id": err})
+				logger.Error("Failed to save workspace after timeout check", logger.Fields{"error": err})
 			}
 		}
 	}

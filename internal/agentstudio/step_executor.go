@@ -100,7 +100,7 @@ func (se *StepExecutor) checkAndExecuteSteps() {
 	// Get all workspaces
 	workspaceIDs, err := se.workspaceStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return
 	}
 

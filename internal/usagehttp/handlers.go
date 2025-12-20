@@ -2,10 +2,10 @@ package usagehttp
 
 import (
 	"encoding/json"
-
 	"net/http"
 	"time"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -63,19 +63,25 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	endStr := r.URL.Query().Get("end")
 
 	if startStr == "" || endStr == "" {
-		http.Error(w, "start and end parameters are required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "start and end parameters are required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		http.Error(w, "invalid start time format, use RFC3339", http.StatusBadRequest)
+		if encodeErr := orihttp.RespondBadRequest(w, "invalid start time format, use RFC3339"); encodeErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		http.Error(w, "invalid end time format, use RFC3339", http.StatusBadRequest)
+		if encodeErr := orihttp.RespondBadRequest(w, "invalid end time format, use RFC3339"); encodeErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
@@ -104,13 +110,17 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 // PUT /api/usage/pricing
 func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	var model llm.PricingModel
 	if err := json.NewDecoder(r.Body).Decode(&model); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "invalid request body"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 

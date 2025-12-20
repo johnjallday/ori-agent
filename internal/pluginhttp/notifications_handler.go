@@ -6,10 +6,14 @@ import (
 	"net/http"
 	"strings"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
+import
 
 // NotificationsHandler handles plugin notification operations
+"github.com/johnjallday/ori-agent/internal/logger"
+
 type NotificationsHandler struct {
 	NotificationManager *pluginmanager.NotificationManager
 }
@@ -25,7 +29,9 @@ func NewNotificationsHandler(notifMgr *pluginmanager.NotificationManager) *Notif
 // GET /api/plugins/notifications
 func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -45,18 +51,24 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 // POST /api/plugins/notifications/:id/dismiss
 func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	notificationID := h.extractNotificationID(r.URL.Path)
 	if notificationID == "" {
-		http.Error(w, "Notification ID required", http.StatusBadRequest)
+		if err := orihttp.RespondBadRequest(w, "Notification ID required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if err := h.NotificationManager.DismissNotification(notificationID); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to dismiss notification: %v", err), http.StatusInternalServerError)
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 

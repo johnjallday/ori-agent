@@ -94,7 +94,7 @@ func (ts *TaskScheduler) pollLoop() {
 func (ts *TaskScheduler) checkScheduledTasks() {
 	workspaceIDs, err := ts.workspaceStore.List()
 	if err != nil {
-		logger.Error("Failed to list workspaces", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		return
 	}
 
@@ -136,7 +136,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+					logger.Error("Failed to save workspace", logger.Fields{"error": err})
 				}
 				continue
 			}
@@ -151,7 +151,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+					logger.Error("Failed to save workspace", logger.Fields{"error": err})
 				}
 				continue
 			}
@@ -165,7 +165,7 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+					logger.Error("Failed to save workspace", logger.Fields{"error": err})
 				}
 				continue
 			}
@@ -203,7 +203,7 @@ func (ts *TaskScheduler) executeScheduledTask(ws *Workspace, st *ScheduledTask) 
 			logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 		}
 		if err := ts.workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -273,7 +273,7 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 	}
 
 	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 		return
 	}
 
@@ -327,7 +327,7 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 		logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
 	}
 	if err := ts.workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace", logger.Fields{"workspace_id": err})
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
 	}
 
 	if ts.eventBus != nil {

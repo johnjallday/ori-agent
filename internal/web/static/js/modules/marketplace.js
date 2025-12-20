@@ -12,6 +12,7 @@ class PluginMarketplace {
         this.currentPlatformDisplay = '';
         this.showIncompatible = true; // Track compatibility filter state (default to showing all)
         this.viewMode = localStorage.getItem('marketplaceViewMode') || 'grid';
+        this.marketplaces = new Map(); // Cache marketplace names by ID
     }
 
     async init() {
@@ -44,6 +45,18 @@ class PluginMarketplace {
 
     async loadMarketplaceData() {
         try {
+            // Load marketplace list to cache names by ID
+            try {
+                const marketplacesResp = await fetch('/api/marketplaces');
+                const marketplacesData = await marketplacesResp.json();
+                this.marketplaces.clear();
+                (marketplacesData.marketplaces || []).forEach(mp => {
+                    this.marketplaces.set(mp.id, mp.name);
+                });
+            } catch (err) {
+                console.warn('Could not load marketplaces:', err);
+            }
+
             // Load plugins from online registry only (exclude local uploads)
             // Request online registry only and include incompatible platforms so the list is never empty
             const registryResp = await fetch('/api/plugin-registry?online_only=true&filter_compatible=false');
@@ -246,6 +259,28 @@ class PluginMarketplace {
         }
     }
 
+    // Get marketplace name from ID
+    getMarketplaceName(marketplaceId) {
+        if (!marketplaceId) return null;
+        return this.marketplaces.get(marketplaceId) || null;
+    }
+
+    // Get source marketplace badge for a plugin
+    getSourceBadge(plugin) {
+        const marketplaceId = plugin.source_marketplace;
+        if (!marketplaceId) return '';
+
+        const marketplaceName = this.getMarketplaceName(marketplaceId);
+        if (!marketplaceName) return '';
+
+        // Use different colors for official vs custom marketplaces
+        const isOfficial = marketplaceId === 'official';
+        const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
+        const icon = isOfficial ? '🏪' : '📦';
+
+        return `<span class="badge ${badgeClass} me-1" title="Source: ${marketplaceName}">${icon} ${marketplaceName}</span>`;
+    }
+
     render() {
         const grid = document.getElementById('pluginGrid');
         if (!grid) return;
@@ -297,11 +332,12 @@ class PluginMarketplace {
             const updateInfo = this.updates.find(u => u.plugin_name === plugin.name);
             const compatibility = this.getCompatibilityIndicator(plugin);
             const platformBadges = this.getPlatformBadges(plugin);
+            const sourceBadge = this.getSourceBadge(plugin);
 
             if (this.viewMode === 'list') {
-                html += this.renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges);
+                html += this.renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
             } else {
-                html += this.renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges);
+                html += this.renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
             }
         });
 
@@ -394,6 +430,19 @@ class PluginMarketplace {
                 <div class="mb-3">
                     <h6>Supported Architectures</h6>
                     <p>${plugin.supported_arch.join(', ')}</p>
+                </div>
+            ` : ''}
+
+            ${plugin.source_marketplace ? `
+                <div class="mb-3">
+                    <h6>Source</h6>
+                    <p>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1 text-muted">
+                            <path d="M12,18H6V14H12M21,14V12L20,7H4L3,12V14H4V20H14V14H18V20H20V14M20,4H4V6H20V4Z"/>
+                        </svg>
+                        ${this.getMarketplaceName(plugin.source_marketplace) || plugin.source_marketplace}
+                        ${plugin.source_marketplace === 'official' ? '<span class="badge bg-primary-subtle text-primary ms-2">Official</span>' : '<span class="badge bg-info-subtle text-info ms-2">Custom</span>'}
+                    </p>
                 </div>
             ` : ''}
         `;
@@ -695,7 +744,7 @@ class PluginMarketplace {
         return this.getPluginNameVariants(plugin).some(variant => this.installedPlugins.has(variant));
     }
 
-    renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges) {
+    renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
         return `
             <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
                 <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
@@ -714,6 +763,7 @@ class PluginMarketplace {
 
                         <div class="mb-2">
                             ${compatibility.badge}
+                            ${sourceBadge || ''}
                         </div>
 
                         <div class="mt-3">
@@ -743,7 +793,7 @@ class PluginMarketplace {
         `;
     }
 
-    renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges) {
+    renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
         return `
             <div class="col-12 mb-3" data-compatible="${compatibility.compatible}">
                 <div class="card plugin-card list-view-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity:0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
@@ -766,6 +816,7 @@ class PluginMarketplace {
                             </div>
                             <div class="mt-2">
                                 ${compatibility.badge}
+                                ${sourceBadge || ''}
                             </div>
                         </div>
                         <div class="plugin-actions">
