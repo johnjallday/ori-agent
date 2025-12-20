@@ -459,11 +459,15 @@ type AllPluginsHealthResponse struct {
 // GET /api/plugins/health
 func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Get agent info from checker
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get agent info from checker
 	agentInfo := h.manager.checker.GetAgentInfo()
 
 	// Collect health info for ALL health-checked plugins (not just agent-loaded ones)
@@ -483,7 +487,9 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding health response", logger.Fields{"response": err})
-		orihttp.RespondInternalError(w, "Internal server error")
+		if encodeErr := orihttp.RespondInternalError(w, "Internal server error"); encodeErr != nil {
+			logger.Error("Error encoding internal error response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 }
@@ -492,30 +498,42 @@ func (h *Handler) HandleAllPluginsHealth(w http.ResponseWriter, r *http.Request)
 // GET /api/plugins/{name}/health
 func (h *Handler) HandlePluginHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract plugin name from URL
+				// Expected format: /api/plugins/{name}/health
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract plugin name from URL
-	// Expected format: /api/plugins/{name}/health
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 3 {
-		orihttp.RespondBadRequest(w, "Invalid URL format")
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Get health info for the plugin
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	pluginName := parts[2]
 
-	// Get health info for the plugin
 	result, ok := h.manager.GetPluginHealth(pluginName)
 	if !ok {
-		orihttp.RespondNotFound(w, fmt.Sprintf("No health information for plugin: %s", pluginName))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("No health information for plugin: %s", pluginName)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		logger.Error("Error encoding health response", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Internal server error")
+		if encodeErr := orihttp.RespondInternalError(w, "Internal server error"); encodeErr != nil {
+			logger.Error("Error encoding internal error response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 }

@@ -26,7 +26,9 @@ func NewHandler(updateManager *updatemanager.Manager) *Handler {
 // CheckUpdatesHandler handles GET /api/updates/check
 func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if encodeErr := orihttp.RespondMethodNotAllowed(w); encodeErr != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
@@ -36,26 +38,36 @@ func (h *Handler) CheckUpdatesHandler(w http.ResponseWriter, r *http.Request) {
 	updateInfo, err := h.updateManager.CheckUpdates(includePrerelease)
 	if err != nil {
 		logger.Warn("Update check unavailable", logger.Fields{"error": err})
-		orihttp.RespondServiceUnavailable(w, "Update check unavailable. Provide GITHUB_TOKEN/GH_TOKEN to increase GitHub API limits.")
+		if encodeErr := orihttp.RespondServiceUnavailable(w, "Update check unavailable. Provide GITHUB_TOKEN/GH_TOKEN to increase GitHub API limits."); encodeErr != nil {
+			logger.Error("Failed to write service unavailable response", logger.Fields{"error": encodeErr})
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(updateInfo); err != nil {
 		logger.Error("Error encoding update info", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to encode response")
+		if err := orihttp.RespondInternalError(w, "Failed to encode response"); err != nil {
+			logger.
+
+				// ListReleasesHandler handles GET /api/updates/releases
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 }
 
-// ListReleasesHandler handles GET /api/updates/releases
 func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Parse query parameters
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Parse query parameters
 	includePrerelease := r.URL.Query().Get("prerelease") == "true"
 
 	limitStr := r.URL.Query().Get("limit")
@@ -69,7 +81,9 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	releases, err := h.updateManager.ListReleases(includePrerelease, limit)
 	if err != nil {
 		logger.Error("Error listing releases", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to list releases")
+		if err := orihttp.RespondInternalError(w, "Failed to list releases"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -81,15 +95,21 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding releases", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to encode response")
+		if err := orihttp.RespondInternalError(w, "Failed to encode response"); err != nil {
+			logger.
+
+				// DownloadUpdateHandler handles POST /api/updates/download
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 }
 
-// DownloadUpdateHandler handles POST /api/updates/download
 func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -99,19 +119,25 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body")
+		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if request.Version == "" {
-		orihttp.RespondBadRequest(w, "Version is required")
+		if err := orihttp.RespondBadRequest(w, "Version is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	filePath, err := h.updateManager.DownloadUpdate(request.Version)
 	if err != nil {
 		logger.Error("Error downloading update", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to download update")
+		if err := orihttp.RespondInternalError(w, "Failed to download update"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -131,11 +157,15 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		logger.Error("Error encoding download response", logger.Fields{"response": err})
-		orihttp.RespondInternalError(w, "Failed to encode response")
+		if err := orihttp.RespondInternalError(w, "Failed to encode response"); err != nil {
+			logger.
+
+				// If auto-restart is requested, trigger restart after response is sent
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// If auto-restart is requested, trigger restart after response is sent
 	if request.AutoRestart {
 		go func() {
 			// Wait a bit to ensure response is sent
@@ -148,7 +178,9 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 // GetVersionHandler handles GET /api/updates/version
 func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -157,7 +189,9 @@ func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
 		logger.Error("Error encoding version info", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to encode response")
+		if err := orihttp.RespondInternalError(w, "Failed to encode response"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 }

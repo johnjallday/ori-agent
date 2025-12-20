@@ -44,7 +44,9 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			orihttp.RespondNotFound(w, "agent not found")
+			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			}
 			return
 		}
 		// Wrap settings in the expected format for frontend compatibility
@@ -58,7 +60,9 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var s types.Settings
 		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-			orihttp.RespondBadRequest(w, err.Error())
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -71,12 +75,16 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			orihttp.RespondNotFound(w, "agent not found")
+			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			}
 			return
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -110,7 +118,9 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			orihttp.RespondBadRequest(w, err.Error())
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -150,7 +160,9 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 

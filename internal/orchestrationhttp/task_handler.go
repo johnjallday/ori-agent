@@ -54,11 +54,14 @@ func (th *TaskHandler) TasksHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		th.handleDeleteTask(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+
+			// handleGetTasks retrieves tasks
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
-// handleGetTasks retrieves tasks
 func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
 	workspaceID := r.URL.Query().Get("studio_id")
@@ -68,7 +71,9 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		// Get specific task
 		task, err := th.communicator.GetTask(taskID)
 		if err != nil {
-			orihttp.RespondNotFound(w, err.Error())
+			if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		_ = json.NewEncoder(w).Encode(task)
@@ -97,11 +102,14 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if err := orihttp.RespondBadRequest(w, "id, workspace_id, or agent parameter required"); err !=
 
-	orihttp.RespondBadRequest(w, "id, workspace_id, or agent parameter required")
+		// handleCreateTask creates a new task in a workspace
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// handleCreateTask creates a new task in a workspace
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		WorkspaceID            string   `json:"studio_id"`
@@ -122,23 +130,33 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.From == "" {
-		orihttp.RespondBadRequest(w, "from (sender agent) is required")
+		if err := orihttp.RespondBadRequest(w, "from (sender agent) is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.To == "" {
-		orihttp.RespondBadRequest(w, "to (recipient agent) is required")
+		if err := orihttp.RespondBadRequest(w, "to (recipient agent) is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.Description == "" {
-		orihttp.RespondBadRequest(w, "description is required")
+		if err := orihttp.RespondBadRequest(w, "description is required"); err != nil {
+			logger.
+
+				// Get workspace
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get workspace
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"error": err, "workspace_id": req.WorkspaceID})
@@ -184,7 +202,9 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	if createdTask == nil {
 		logger.Error("Could not find created task", logger.Fields{})
-		orihttp.RespondInternalError(w, "Task created but could not be retrieved")
+		if err := orihttp.RespondInternalError(w, "Task created but could not be retrieved"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -232,11 +252,15 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if req.TaskID == "" {
-		orihttp.RespondValidationError(w, "task_id is required", nil)
+		if err := orihttp.RespondValidationError(w, "task_id is required", nil); err != nil {
+			logger.
+
+				// Handle task updates (input connections, reassignment, or combination mode)
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Handle task updates (input connections, reassignment, or combination mode)
 	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
@@ -270,7 +294,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 					if err != nil {
 						logger.Error("", logger.Fields{"err": err})
-						orihttp.RespondInternalError(w, err.Error())
+						if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+							logger.Error("Failed to write response", logger.Fields{"error": err})
+						}
 						return
 					}
 				}
@@ -280,11 +306,15 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		if taskIndex == -1 {
 			logger.Error("Task not found in workspace", logger.Fields{"task_id": req.TaskID, "workspaceid": task.WorkspaceID})
-			orihttp.RespondNotFound(w, "Task not found in workspace")
+			if err := orihttp.RespondNotFound(w, "Task not found in workspace"); err != nil {
+				logger.Error(
+
+					// Save workspace
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Save workspace
 		if err := th.workspaceStore.Save(ws); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update task", err)
@@ -339,7 +369,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 		if err != nil {
 			logger.Error("", logger.Fields{"err": err})
-			orihttp.RespondNotFound(w, "Task not found in workspace")
+			if err := orihttp.RespondNotFound(w, "Task not found in workspace"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		logger.Debug("📝 Updated task in workspace: ->", logger.Fields{"task_id": req.TaskID, "to": *req.To})
@@ -372,11 +404,15 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Handle status update
 	if req.Status == "" {
-		orihttp.RespondBadRequest(w, "status is required when not reassigning task")
+		if err := orihttp.RespondBadRequest(w, "status is required when not reassigning task"); err != nil {
+			logger.
+
+				// Update task status
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Update task status
 	err := th.communicator.UpdateTaskStatus(
 		req.TaskID,
 		agentstudio.TaskStatus(req.Status),
@@ -386,7 +422,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	if err != nil {
 		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
-		orihttp.RespondBadRequest(w, err.Error())
+		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -402,7 +440,9 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("id")
 	if taskID == "" {
-		orihttp.RespondBadRequest(w, "id parameter required")
+		if err := orihttp.RespondBadRequest(w, "id parameter required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -442,7 +482,9 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	// Fallback: search all workspaces
 	if err := th.communicator.DeleteTask(taskID); err != nil {
 		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
-		orihttp.RespondNotFound(w, err.Error())
+		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -461,18 +503,26 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Get task IDs from query parameter
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get task IDs from query parameter
 	taskIDsStr := r.URL.Query().Get("task_ids")
 	if taskIDsStr == "" {
-		orihttp.RespondBadRequest(w, "task_ids parameter required (comma-separated)")
+		if err := orihttp.RespondBadRequest(w, "task_ids parameter required (comma-separated)"); err != nil {
+			logger.
+
+				// Split comma-separated task IDs
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Split comma-separated task IDs
 	taskIDs := strings.Split(taskIDsStr, ",")
 	for i := range taskIDs {
 		taskIDs[i] = strings.TrimSpace(taskIDs[i])
@@ -483,11 +533,15 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to retrieve workspaces")
+		if err := orihttp.RespondInternalError(w, "Failed to retrieve workspaces"); err != nil {
+			logger.
+
+				// Collect results from all workspaces
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Collect results from all workspaces
 	allResults := make(map[string]interface{})
 	for _, wsID := range workspaceIDs {
 		ws, err := th.workspaceStore.Get(wsID)
@@ -529,7 +583,9 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 // ExecuteTaskHandler handles manual task execution
 func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -543,11 +599,15 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if req.TaskID == "" {
-		orihttp.RespondBadRequest(w, "task_id is required")
+		if err := orihttp.RespondBadRequest(w, "task_id is required"); err != nil {
+			logger.
+
+				// Find the task across all workspaces
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the task across all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
@@ -573,11 +633,15 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask == nil {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Task %s not found", req.TaskID)); err != nil {
+			logger.
+
+				// Check if task is in a state that can be executed
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Check if task is in a state that can be executed
 	if foundTask.Status == agentstudio.TaskStatusCompleted {
 		// Allow rerun of completed tasks by resetting status
 		logger.Info("🔄 Rerunning completed task", logger.Fields{"task_id": req.TaskID})
@@ -590,40 +654,56 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
 			logger.Error("Failed to reset task status", logger.Fields{"status": err})
-			orihttp.RespondInternalError(w, "Failed to reset task for rerun")
+			if err := orihttp.RespondInternalError(w, "Failed to reset task for rerun"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
-			orihttp.RespondInternalError(w, "Failed to save workspace")
+			if err := orihttp.RespondInternalError(w, "Failed to save workspace"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 	}
 
 	if foundTask.Status == agentstudio.TaskStatusInProgress {
-		orihttp.RespondBadRequest(w, "Task is already in progress")
+		if err := orihttp.RespondBadRequest(w, "Task is already in progress"); err != nil {
+			logger.
+
+				// Check if task handler is available
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Check if task handler is available
 	if th.taskHandler == nil {
 		logger.Error("Task handler not set", logger.Fields{})
-		orihttp.RespondInternalError(w, "Task execution not available")
+		if err := orihttp.RespondInternalError(w, "Task execution not available"); err != nil {
+			logger.
+
+				// Execute any pending input tasks first (cascading execution)
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Execute any pending input tasks first (cascading execution)
 	if len(foundTask.InputTaskIDs) > 0 {
 		logger.Info("🔗 Task has input tasks, checking if they need execution first", logger.Fields{"task_id": foundTask.ID, "input_count": len(foundTask.InputTaskIDs)})
 
 		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
 			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
-			orihttp.RespondInternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err))
+			if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err)); err != nil {
+				logger.Error(
+
+					// Execute the task immediately in a goroutine
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 	}
 
-	// Execute the task immediately in a goroutine
 	go func() {
 		ctx := context.Background()
 
@@ -924,15 +1004,20 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateScheduledTask(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+
+			// handleListScheduledTasks lists all scheduled tasks for a workspace
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
-// handleListScheduledTasks lists all scheduled tasks for a workspace
 func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -970,27 +1055,39 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.Name == "" {
-		orihttp.RespondBadRequest(w, "name is required")
+		if err := orihttp.RespondBadRequest(w, "name is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.Prompt == "" {
-		orihttp.RespondBadRequest(w, "prompt is required")
+		if err := orihttp.RespondBadRequest(w, "prompt is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.From == "" {
-		orihttp.RespondBadRequest(w, "from is required")
+		if err := orihttp.RespondBadRequest(w, "from is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	if req.To == "" {
-		orihttp.RespondBadRequest(w, "to is required")
+		if err := orihttp.RespondBadRequest(w, "to is required"); err != nil {
+			logger.
+
+				// Get workspace
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get workspace
 	ws, err := th.workspaceStore.Get(req.WorkspaceID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"err": err, "workspace_id": req.WorkspaceID})
@@ -1060,13 +1157,20 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 
 	// Minimum parts: ["", "api", "orchestration", "scheduled-tasks", "{id}"] = 5
 	if len(parts) < 5 {
-		orihttp.RespondBadRequest(w, "Invalid URL: missing task ID")
+		if err := orihttp.RespondBadRequest(w, "Invalid URL: missing task ID"); err != nil {
+			logger.Error("Failed to write response",
+
+				// The ID is always at index 4
+				logger.Fields{
+
+					// Handle special actions (e.g., /api/orchestration/scheduled-tasks/{id}/enable)
+					"error": err})
+		}
 		return
 	}
 
-	id := parts[4] // The ID is always at index 4
+	id := parts[4]
 
-	// Handle special actions (e.g., /api/orchestration/scheduled-tasks/{id}/enable)
 	if len(parts) >= 6 {
 		action := parts[5]
 
@@ -1081,7 +1185,9 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 			th.handleTriggerScheduledTask(w, r, id)
 			return
 		default:
-			orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action))
+			if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action)); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 	}
@@ -1094,11 +1200,14 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteScheduledTask(w, r, id)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+
+			// handleGetScheduledTask retrieves a specific scheduled task
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
-// handleGetScheduledTask retrieves a specific scheduled task
 func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	// Find the scheduled task across all workspaces
 	workspaceIDs, err := th.workspaceStore.List()
@@ -1122,11 +1231,14 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err !=
 
-	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
+		// handleUpdateScheduledTask updates a scheduled task
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// handleUpdateScheduledTask updates a scheduled task
 func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
 		Name        *string                     `json:"name,omitempty"`
@@ -1219,11 +1331,14 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
+	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err !=
 
-	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
+		// handleDeleteScheduledTask deletes a scheduled task
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// handleDeleteScheduledTask deletes a scheduled task
 func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
@@ -1253,14 +1368,19 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 			return
 		}
 	}
+	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err !=
 
-	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
+		// handleEnableScheduledTask enables or disables a scheduled task
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// handleEnableScheduledTask enables or disables a scheduled task
 func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Request, id string, enable bool) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1324,14 +1444,19 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
+	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err !=
 
-	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
+		// handleTriggerScheduledTask manually triggers a scheduled task
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// handleTriggerScheduledTask manually triggers a scheduled task
 func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1390,11 +1515,14 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		})
 		return
 	}
+	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err !=
 
-	orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
+		// calculateInitialNextRun calculates the initial next run time for a schedule
+		nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }
 
-// calculateInitialNextRun calculates the initial next run time for a schedule
 func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *time.Time {
 	switch config.Type {
 	case agentstudio.ScheduleOnce:
@@ -1601,17 +1729,22 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateSchedulerNode(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+
+			// handleListSchedulerNodes lists all scheduler nodes (scheduled tasks) for a workspace
+			// This includes both canvas-created schedulers (with CanvasNodeID) and dashboard-created schedulers (without CanvasNodeID)
+			// Dashboard-created schedulers are automatically assigned a canvas_node_id when loaded
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
-// handleListSchedulerNodes lists all scheduler nodes (scheduled tasks) for a workspace
-// This includes both canvas-created schedulers (with CanvasNodeID) and dashboard-created schedulers (without CanvasNodeID)
-// Dashboard-created schedulers are automatically assigned a canvas_node_id when loaded
 func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "studio_id parameter is required")
+		if err := orihttp.RespondBadRequest(w, "studio_id parameter is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1714,7 +1847,9 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "workspace_id is required in URL path")
+		if err := orihttp.RespondBadRequest(w, "workspace_id is required in URL path"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1738,11 +1873,15 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Validate required fields
 	if req.Name == "" {
-		orihttp.RespondBadRequest(w, "name is required")
+		if err := orihttp.RespondBadRequest(w, "name is required"); err != nil {
+			logger.
+
+				// Defaults for scheduler nodes
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Defaults for scheduler nodes
 	if req.From == "" {
 		req.From = "scheduler"
 	}
@@ -1769,11 +1908,15 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 		}
 	}
 	if schedulerNodeCount >= 50 {
-		orihttp.RespondBadRequest(w, "Maximum of 50 scheduler nodes per workspace reached")
+		if err := orihttp.RespondBadRequest(w, "Maximum of 50 scheduler nodes per workspace reached"); err != nil {
+			logger.
+
+				// Generate unique CanvasNodeID
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Generate unique CanvasNodeID
 	nodeID := "scheduler-" + generateNodeID()
 
 	// Create scheduled task
@@ -1863,14 +2006,17 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 
 	// Find node_id in path (should be last part)
 	if len(parts) < 2 {
-		orihttp.RespondBadRequest(w, "Invalid URL: missing node ID")
+		if err := orihttp.RespondBadRequest(w, "Invalid URL: missing node ID"); err != nil {
+			logger.Error("Failed to write response",
+
+				// Note: Special actions like /trigger would be handled here if needed
+				// Example: /scheduler-nodes/{node_id}/trigger
+				// Currently only supporting direct node operations (GET, PUT, DELETE)
+				logger.Fields{"error": err})
+		}
 		return
 	}
 	nodeID := parts[len(parts)-1]
-
-	// Note: Special actions like /trigger would be handled here if needed
-	// Example: /scheduler-nodes/{node_id}/trigger
-	// Currently only supporting direct node operations (GET, PUT, DELETE)
 
 	switch r.Method {
 	case http.MethodGet:
@@ -1880,15 +2026,20 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteSchedulerNode(w, r, nodeID)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+
+			// handleGetSchedulerNode retrieves a specific scheduler node
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 	}
 }
 
-// handleGetSchedulerNode retrieves a specific scheduler node
 func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "studio_id parameter is required")
+		if err := orihttp.RespondBadRequest(w, "studio_id parameter is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1909,11 +2060,15 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	if foundTask == nil {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); err != nil {
+			logger.
+
+				// Get position from layout
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Get position from layout
 	var position *agentstudio.Position
 	if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
 		if pos, exists := ws.Layout.SchedulerPositions[nodeID]; exists {
@@ -1956,11 +2111,15 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "studio_id is required")
+		if err := orihttp.RespondBadRequest(w, "studio_id is required"); err != nil {
+			logger.
+
+				// Validate schedule configuration if provided
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Validate schedule configuration if provided
 	if req.Schedule != nil {
 		if err := validateScheduleConfig(*req.Schedule); err != nil {
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid schedule configuration", err)
@@ -1987,11 +2146,15 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if st == nil {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); err != nil {
+			logger.
+
+				// Update fields if provided
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Update fields if provided
 	if req.To != nil {
 		st.To = *req.To
 	}
@@ -2077,7 +2240,9 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "studio_id parameter is required")
+		if err := orihttp.RespondBadRequest(w, "studio_id parameter is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -2104,11 +2269,15 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if !found {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); err != nil {
+			logger.
+
+				// Remove position from layout
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Remove position from layout
 	if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
 		delete(ws.Layout.SchedulerPositions, nodeID)
 	}
@@ -2132,21 +2301,32 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 // SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
 func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract node ID from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract node ID from URL path
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	if len(parts) < 2 {
-		orihttp.RespondBadRequest(w, "Invalid URL: missing node ID")
+		if err := orihttp.RespondBadRequest(w, "Invalid URL: missing node ID"); err != nil {
+			logger.Error("Failed to write response",
+
+				// node ID is before "trigger"
+				logger.Fields{"error": err})
+		}
 		return
 	}
-	nodeID := parts[len(parts)-2] // node ID is before "trigger"
+	nodeID := parts[len(parts)-2]
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		orihttp.RespondBadRequest(w, "studio_id parameter is required")
+		if err := orihttp.RespondBadRequest(w, "studio_id parameter is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -2167,7 +2347,9 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	if foundTask == nil {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 

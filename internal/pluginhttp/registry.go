@@ -78,7 +78,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 	case http.MethodGet:
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -121,17 +123,23 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			Name string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			orihttp.RespondBadRequest(w, err.Error())
+			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		if strings.TrimSpace(req.Name) == "" {
-			orihttp.RespondBadRequest(w, "name required")
+			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -145,7 +153,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 				var wasCached bool
 				entryPath, wasCached, err = h.pluginDownloader.GetPlugin(e)
 				if err != nil {
-					orihttp.RespondInternalError(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err))
+					if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err)); err != nil {
+						logger.Error("Failed to write response", logger.Fields{"error": err})
+					}
 					return
 				}
 
@@ -180,7 +190,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			}
 		}
 		if !found {
-			orihttp.RespondBadRequest(w, "plugin not found in registry")
+			if err := orihttp.RespondBadRequest(w, "plugin not found in registry"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -189,7 +201,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		if err != nil {
 			// SECURITY: Log full path internally but don't expose to client
 			logger.Error("Failed to load plugin", logger.Fields{"path": entryPath, "error": err})
-			orihttp.RespondInternalError(w, fmt.Sprintf("failed to load plugin %s", req.Name))
+			if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to load plugin %s", req.Name)); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		def := tool.Definition()
@@ -209,7 +223,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			orihttp.RespondInternalError(w, "current agent not found")
+			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 		if ag.Plugins == nil {
@@ -226,7 +242,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			AcceptedFileTypes: acceptedFileTypes,
 		}
 		if err := h.store.SetAgent(current, ag); err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -273,14 +291,18 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if strings.TrimSpace(name) == "" {
-			orihttp.RespondBadRequest(w, "name required")
+			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
 		// Only delete from local registry (user uploaded plugins)
 		localReg, err := h.registryManager.LoadLocal()
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
 			return
 		}
 
@@ -296,7 +318,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 
 		if foundIndex == -1 {
-			orihttp.RespondNotFound(w, "plugin not found in local registry (only user uploaded plugins can be deleted)")
+			if err := orihttp.RespondNotFound(w, "plugin not found in local registry (only user uploaded plugins can be deleted)"); err != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -305,7 +329,9 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 		// Save updated local registry
 		if err := h.registryManager.SaveLocal(localReg); err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -345,13 +371,17 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 		// Check for available updates
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
 		updates, err := h.pluginDownloader.CheckForUpdates(reg)
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -366,13 +396,17 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			PluginNames []string `json:"plugin_names,omitempty"` // Empty = update all
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			orihttp.RespondBadRequest(w, err.Error())
+			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			orihttp.RespondInternalError(w, err.Error())
+			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
@@ -665,11 +699,15 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	_, currentAgent := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(currentAgent)
 	if !ok {
-		orihttp.RespondInternalError(w, "current agent not found")
+		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+			logger.
+
+				// Check for updates
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Check for updates
 	var updates []map[string]any
 	for name, installedPlugin := range ag.Plugins {
 		// Find plugin in registry

@@ -761,16 +761,22 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		Files     []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, err.Error())
+		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
-		orihttp.RespondBadRequest(w, "empty question")
+		if err := orihttp.RespondBadRequest(w, "empty question"); err != nil {
+			logger.
+
+				// Debug: Log received files
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Debug: Log received files
 	logger.Info("Chat request received", logger.Fields{
 		"question":   q[:min(50, len(q))],
 		"file_count": len(req.Files),
@@ -867,11 +873,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			orihttp.RespondInternalError(w, "current agent not found")
+			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+				logger.Error(
+
+					// Execute the tool directly
+					"Failed to write response", logger.Fields{"error": err})
+			}
 			return
 		}
 
-		// Execute the tool directly
 		result := h.executeDirectTool(r.Context(), ag, cmd)
 
 		// Add to conversation history for context
@@ -906,7 +916,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current))
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -1178,11 +1190,15 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			tool, found := h.findTool(ag, name)
 
 			if !found {
-				orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name))
+				if err := orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name)); err != nil {
+					logger.Error(
+
+						// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
+						"Failed to write response", logger.Fields{"error": err})
+				}
 				return
 			}
 
-			// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
 			toolCtx, toolCancel := context.WithTimeout(base, ToolExecutionTimeout)
 			defer toolCancel()
 

@@ -32,32 +32,46 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(path, "/pages/", 2)
 
 	if len(parts) != 2 {
-		orihttp.RespondBadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}")
+		if err := orihttp.RespondBadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{
+
+				// Get current agent
+				"error": err})
+		}
 		return
 	}
 
 	pluginName := parts[0]
 	pagePath := parts[1]
 
-	// Get current agent
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		orihttp.RespondInternalError(w, "Current agent not found")
+		if err := orihttp.RespondInternalError(w, "Current agent not found"); err != nil {
+			logger.
+
+				// Find the plugin
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the plugin
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName)); err != nil {
+			logger.
+
+				// Check if plugin implements WebPageProvider
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Check if plugin implements WebPageProvider
 	webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
 	if !ok {
-		orihttp.RespondNotImplemented(w, fmt.Sprintf("Plugin '%s' does not support web pages", pluginName))
+		if err := orihttp.RespondNotImplemented(w, fmt.Sprintf("Plugin '%s' does not support web pages", pluginName)); err != nil {
+			logger.Error("Failed to write not implemented response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -72,11 +86,15 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Serve the page
 	content, contentType, err := webProvider.ServeWebPage(pagePath, queryParams)
 	if err != nil {
-		orihttp.RespondInternalError(w, fmt.Sprintf("Error serving page: %v", err))
+		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Error serving page: %v", err)); err != nil {
+			logger.
+
+				// Set content type
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set content type
 	if contentType == "" {
 		contentType = "text/html; charset=utf-8"
 	}
@@ -100,18 +118,26 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		orihttp.RespondInternalError(w, "Current agent not found")
+		if err := orihttp.RespondInternalError(w, "Current agent not found"); err != nil {
+			logger.
+
+				// Find the plugin
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Find the plugin
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
-		orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName)); err != nil {
+			logger.
+
+				// Check if plugin implements WebPageProvider
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Check if plugin implements WebPageProvider
 	webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
 	if !ok {
 		// Plugin doesn't provide web pages, return empty list

@@ -26,7 +26,9 @@ func NewHandler(manager *location.Manager) *Handler {
 // GetCurrentLocation handles GET /api/location/current
 func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -47,7 +49,9 @@ func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 // GetZones handles GET /api/location/zones
 func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -62,7 +66,9 @@ func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
 // CreateZone handles POST /api/location/zones
 func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -74,12 +80,16 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Validate zone
 	if zone.Name == "" {
-		orihttp.RespondBadRequest(w, "zone name is required")
+		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
 	if len(zone.DetectionRules) == 0 {
-		orihttp.RespondBadRequest(w, "at least one detection rule is required")
+		if err := orihttp.RespondBadRequest(w, "at least one detection rule is required"); err != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -99,17 +109,23 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 // UpdateZone handles PUT /api/location/zones/:id
 func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract zone ID from URL path
+				// URL format: /api/location/zones/{id}
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract zone ID from URL path
-	// URL format: /api/location/zones/{id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		orihttp.RespondBadRequest(w, "zone ID is required")
+		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -124,14 +140,20 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Validate zone
 	if zone.Name == "" {
-		orihttp.RespondBadRequest(w, "zone name is required")
+		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
+			logger.
+
+				// Update zone
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Update zone
 	if err := h.manager.UpdateZone(zone); err != nil {
 		if err.Error() == "zone not found" {
-			orihttp.RespondNotFound(w, err.Error())
+			if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
+			}
 		} else {
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to update zone", err)
 		}
@@ -147,23 +169,33 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 // DeleteZone handles DELETE /api/location/zones/:id
 func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.
+
+				// Extract zone ID from URL path
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Extract zone ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		orihttp.RespondBadRequest(w, "zone ID is required")
+		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
+			logger.
+
+				// Delete zone
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Delete zone
 	if err := h.manager.RemoveZone(zoneID); err != nil {
 		if err.Error() == "zone not found" {
-			orihttp.RespondNotFound(w, err.Error())
+			if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
+			}
 		} else {
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "failed to delete zone", err)
 		}
@@ -176,7 +208,9 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 // SetManualLocation handles POST /api/location/override
 func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
@@ -190,11 +224,15 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if request.Location == "" {
-		orihttp.RespondBadRequest(w, "location is required")
+		if err := orihttp.RespondBadRequest(w, "location is required"); err != nil {
+			logger.
+
+				// Set manual location
+				Error("Failed to write response", logger.Fields{"error": err})
+		}
 		return
 	}
 
-	// Set manual location
 	h.manager.SetManualLocation(request.Location)
 
 	response := struct {
