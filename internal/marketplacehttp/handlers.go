@@ -293,14 +293,28 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 	resp := TestMarketplaceResponse{}
 
 	source := strings.TrimSpace(req.Source)
+
+	// Create a temporary marketplace to leverage ResolveURL logic
+	tempMarketplace := types.Marketplace{
+		Source: source,
+	}
+	resp.ResolvedURL = tempMarketplace.ResolveURL()
+
+	// Detect source type for response
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		resp.SourceType = "url"
-		resp.ResolvedURL = source
+		if strings.Contains(source, "gitlab.com") || strings.Contains(source, "gitlab.") {
+			resp.SourceType = "gitlab"
+		} else if strings.Contains(source, "bitbucket.org") || strings.Contains(source, "bitbucket.") {
+			resp.SourceType = "bitbucket"
+		} else if strings.Contains(source, "github.com") {
+			resp.SourceType = "github"
+		} else {
+			resp.SourceType = "url"
+		}
 	} else {
 		parts := strings.Split(source, "/")
 		if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
 			resp.SourceType = "github"
-			resp.ResolvedURL = fmt.Sprintf("https://raw.githubusercontent.com/%s/main/plugin_registry.json", source)
 		} else {
 			resp.Valid = false
 			resp.Error = "Invalid source format. Use a URL or GitHub repo (user/repo)"
