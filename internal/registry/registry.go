@@ -942,8 +942,7 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		// 6) Embedded fallback (last resort)
 		if len(onlineReg.Plugins) == 0 {
 			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
-				if err := json.Unmarshal(b, &onlineReg); err == nil {
-				}
+				_ = json.Unmarshal(b, &onlineReg)
 			}
 		}
 	} else if len(onlineReg.Plugins) == 0 && m.marketplaceStore != nil {
