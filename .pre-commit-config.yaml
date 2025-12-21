@@ -1,6 +1,8 @@
 # Pre-commit hooks configuration for Ori project
 # See https://pre-commit.com for more information
 
+exclude: '^\.gomodcache/'
+
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks

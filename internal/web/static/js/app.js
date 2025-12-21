@@ -128,6 +128,25 @@ function clearChatHistory() {
 
 // ---- Agent Display Functionality ----
 
+// Setup click handler for agent display in navbar
+function setupAgentDisplayClick() {
+  const agentDisplay = document.getElementById('currentAgentDisplay');
+  if (!agentDisplay) return;
+
+  // Make it look clickable
+  agentDisplay.style.cursor = 'pointer';
+  agentDisplay.title = 'Click to view agent details';
+
+  agentDisplay.addEventListener('click', function() {
+    const agentNameSpan = this.querySelector('.fw-medium');
+    const agentName = agentNameSpan?.textContent?.trim();
+
+    if (agentName) {
+      window.location.href = `/agents-detail.html?name=${encodeURIComponent(agentName)}`;
+    }
+  });
+}
+
 // Refresh agent display in navbar
 async function refreshAgentDisplay() {
   try {
@@ -970,6 +989,9 @@ async function initializeApp() {
 
   // Set up sidebar toggle functionality
   setupSidebarToggle();
+
+  // Set up agent display click handler (navigate to agent details)
+  setupAgentDisplayClick();
 
   // Load current agent and restore chat history
   await refreshAgentDisplay();

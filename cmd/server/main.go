@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/server"
+	"github.com/johnjallday/ori-agent/internal/version"
 )
 
 func main() {
@@ -24,7 +25,22 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser on startup")
 	allowNetwork := flag.Bool("allow-network", false, "Allow connections from network (default: localhost only)")
+	versionOverride := flag.String("version", "", "Override version for testing (e.g., v0.0.24)")
 	flag.Parse()
+
+	// Check for version as positional argument (e.g., go run ./cmd/server v0.0.24)
+	if *versionOverride == "" && flag.NArg() > 0 {
+		arg := flag.Arg(0)
+		if strings.HasPrefix(arg, "v") || strings.Contains(arg, ".") {
+			*versionOverride = arg
+		}
+	}
+
+	// Apply version override if specified
+	if *versionOverride != "" {
+		version.Version = *versionOverride
+		logger.Info("Version override applied", logger.Fields{"version": *versionOverride})
+	}
 
 	// Set verbose mode globally
 	_ = os.Setenv("ORI_VERBOSE", fmt.Sprintf("%t", *verbose))

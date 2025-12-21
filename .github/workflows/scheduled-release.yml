@@ -104,6 +104,12 @@ jobs:
               RELEASE_DATE=$(git show "origin/$BRANCH_NAME:RELEASE_DATE" | tr -d '[:space:]')
               echo "Found $BRANCH_NAME with RELEASE_DATE=$RELEASE_DATE"
 
+              # Validate RELEASE_DATE format (YYYY-MM-DD)
+              if [[ ! "$RELEASE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                echo "Invalid RELEASE_DATE format in $BRANCH_NAME: '$RELEASE_DATE' - skipping"
+                continue
+              fi
+
               # Check if release date has arrived
               if [[ "$TODAY" >= "$RELEASE_DATE" ]]; then
                 echo "Release date reached for $BRANCH_NAME"

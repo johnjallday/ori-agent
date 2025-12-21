@@ -1,0 +1,159 @@
+{
+  "plugins": [
+    {
+      "name": "ori-reaper",
+      "description": "REAPER DAW integration - manage scripts, actions, and workflows for music production",
+      "version": "0.0.7",
+      "github_repo": "https://github.com/johnjallday/ori-reaper",
+      "download_url": "https://github.com/johnjallday/ori-reaper/releases/latest/download/ori-reaper-{os}-{arch}{ext}",
+      "supported_os": [
+        "darwin"
+      ],
+      "supported_arch": [
+        "amd64",
+        "arm64"
+      ],
+      "platforms": [
+        "darwin-amd64",
+        "darwin-arm64"
+      ],
+      "metadata": {
+        "name": "ori-reaper",
+        "version": "0.0.7",
+        "description": "REAPER DAW integration - manage scripts, actions, and workflows for music production",
+        "maintainers": [
+          {
+            "name": "Ori Agent Team",
+            "email": "noreply@ori-agent.dev",
+            "role": ""
+          }
+        ],
+        "license": "MIT",
+        "repository": "https://github.com/johnjallday/ori-reaper",
+        "platforms": [
+          {
+            "os": "darwin",
+            "architectures": [
+              "amd64",
+              "arm64"
+            ]
+          }
+        ],
+        "requirements": {
+          "min_ori_version": "0.0.9"
+        }
+      },
+      "source_marketplace": "official"
+    },
+    {
+      "name": "ori-music-project-manager",
+      "description": "Manage music projects with REAPER integration - create, list, open, and organize music production projects",
+      "version": "0.0.8",
+      "github_repo": "https://github.com/johnjallday/ori-music-project-manager",
+      "download_url": "https://github.com/johnjallday/ori-music-project-manager/releases/latest/download/ori-music-project-manager-{os}-{arch}{ext}",
+      "supported_os": [
+        "darwin"
+      ],
+      "supported_arch": [
+        "amd64",
+        "arm64"
+      ],
+      "platforms": [
+        "darwin-amd64",
+        "darwin-arm64"
+      ],
+      "metadata": {
+        "name": "ori-music-project-manager",
+        "version": "0.0.8",
+        "description": "Manage music projects with REAPER integration - create, list, open, and organize music production projects",
+        "maintainers": [
+          {
+            "name": "Ori Agent Team",
+            "email": "johnj.alldayok@ori-agent.dev",
+            "role": ""
+          }
+        ],
+        "license": "MIT",
+        "repository": "https://github.com/johnjallday/ori-music-project-manager",
+        "platforms": [
+          {
+            "os": "darwin",
+            "architectures": [
+              "amd64",
+              "arm64"
+            ]
+          }
+        ],
+        "requirements": {
+          "min_ori_version": "0.0.9"
+        }
+      },
+      "source_marketplace": "official"
+    },
+    {
+      "name": "ori-shell-executor",
+      "description": "Execute shell commands with safety controls. Supports allowlists, blocklists, working directory restrictions, and command timeouts.",
+      "version": "0.0.3",
+      "github_repo": "https://github.com/johnjallday/ori-shell-executor",
+      "download_url": "https://github.com/johnjallday/ori-shell-executor/releases/latest/download/ori-shell-executor-{os}-{arch}{ext}",
+      "supported_os": [
+        "darwin",
+        "linux",
+        "windows"
+      ],
+      "supported_arch": [
+        "amd64",
+        "arm64"
+      ],
+      "platforms": [
+        "darwin-amd64",
+        "darwin-arm64",
+        "linux-amd64",
+        "linux-arm64",
+        "windows-amd64",
+        "windows-arm64"
+      ],
+      "metadata": {
+        "name": "ori-shell-executor",
+        "version": "0.0.3",
+        "description": "Execute shell commands with safety controls. Supports allowlists, blocklists, working directory restrictions, and command timeouts.",
+        "maintainers": [
+          {
+            "name": "Ori Agent Team",
+            "email": "noreply@ori-agent.dev",
+            "role": ""
+          }
+        ],
+        "license": "MIT",
+        "repository": "https://github.com/johnjallday/ori-shell-executor",
+        "platforms": [
+          {
+            "os": "darwin",
+            "architectures": [
+              "amd64",
+              "arm64"
+            ]
+          },
+          {
+            "os": "linux",
+            "architectures": [
+              "amd64",
+              "arm64"
+            ]
+          },
+          {
+            "os": "windows",
+            "architectures": [
+              "amd64",
+              "arm64"
+            ]
+          }
+        ],
+        "requirements": {
+          "min_ori_version": "0.0.20"
+        }
+      },
+      "source_marketplace": "official"
+    }
+  ]
+}

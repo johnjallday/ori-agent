@@ -749,7 +749,6 @@ func (m *Manager) RefreshLocalRegistry() error {
 		return fmt.Errorf("failed to save refreshed local registry: %w", err)
 	}
 
-	fmt.Printf("✅ Refreshed local plugin registry with %d plugin(s) from uploaded_plugins/\n", len(newReg.Plugins))
 	return nil
 }
 
@@ -894,13 +893,12 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 
 	// 2) Multi-marketplace support - if marketplace store is set, use it
 	if m.marketplaceStore != nil {
-		if m.shouldFetchFromGitHub() {
-			if mpReg, err := m.FetchAllMarketplaces(); err == nil && len(mpReg.Plugins) > 0 {
-				onlineReg = mpReg
-				fmt.Printf("plugin registry loaded from %d marketplace(s)\n", len(m.marketplaceStore.GetEnabled()))
-			} else if err != nil {
-				fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
-			}
+		// Always fetch from marketplaces to respect enabled/disabled status
+		// The caching inside FetchAllMarketplaces handles per-marketplace caching
+		if mpReg, err := m.FetchAllMarketplaces(); err == nil && len(mpReg.Plugins) > 0 {
+			onlineReg = mpReg
+		} else if err != nil {
+			fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
 		}
 	} else {
 		// 3) Fallback: Try to fetch from single GitHub source (legacy behavior)
@@ -911,7 +909,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 					_ = os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
 				}
 				onlineReg = githubReg
-				fmt.Println("plugin registry loaded from GitHub")
 			} else {
 				fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
 			}
@@ -919,7 +916,8 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 	}
 
 	// If fetch was skipped or failed, try other fallback sources
-	if len(onlineReg.Plugins) == 0 {
+	// But skip fallbacks if marketplaceStore is configured (respect marketplace enabled/disabled)
+	if len(onlineReg.Plugins) == 0 && m.marketplaceStore == nil {
 		// 4) Try cached version (use if fresh enough or as offline fallback)
 		if b, err := os.ReadFile(m.cachePath); err == nil {
 			if err := json.Unmarshal(b, &onlineReg); err != nil {
@@ -935,7 +933,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 			} {
 				if b, err := os.ReadFile(p); err == nil {
 					if err := json.Unmarshal(b, &onlineReg); err == nil {
-						fmt.Printf("plugin registry loaded from local file: %s\n", p)
 						break
 					}
 				}
@@ -945,8 +942,25 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		// 6) Embedded fallback (last resort)
 		if len(onlineReg.Plugins) == 0 {
 			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
-				if err := json.Unmarshal(b, &onlineReg); err == nil {
-					fmt.Println("plugin registry loaded from embedded file")
+				_ = json.Unmarshal(b, &onlineReg)
+			}
+		}
+	} else if len(onlineReg.Plugins) == 0 && m.marketplaceStore != nil {
+		// When marketplace store is configured but no plugins found,
+		// try per-marketplace caches only for enabled marketplaces
+		enabledMarketplaces := m.marketplaceStore.GetEnabled()
+		for _, mp := range enabledMarketplaces {
+			cacheFile := fmt.Sprintf("marketplace_cache_%s.json", mp.ID)
+			if b, err := os.ReadFile(cacheFile); err == nil {
+				var cachedReg types.PluginRegistry
+				if err := json.Unmarshal(b, &cachedReg); err == nil {
+					// Tag plugins with source marketplace if not already set
+					for i := range cachedReg.Plugins {
+						if cachedReg.Plugins[i].SourceMarketplace == "" {
+							cachedReg.Plugins[i].SourceMarketplace = mp.ID
+						}
+					}
+					onlineReg.Plugins = append(onlineReg.Plugins, cachedReg.Plugins...)
 				}
 			}
 		}

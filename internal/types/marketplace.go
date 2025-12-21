@@ -11,7 +11,7 @@ type Marketplace struct {
 	ID          string     `json:"id"`                     // Unique identifier (UUID or slug)
 	Name        string     `json:"name"`                   // Display name
 	Source      string     `json:"source"`                 // URL or GitHub user/repo format
-	SourceType  string     `json:"source_type"`            // "url" or "github"
+	SourceType  string     `json:"source_type"`            // "url", "github", "gitlab", or "bitbucket"
 	Enabled     bool       `json:"enabled"`                // Whether marketplace is active
 	Order       int        `json:"order"`                  // Priority order (lower = higher priority)
 	IsOfficial  bool       `json:"is_official"`            // True for the default official marketplace
@@ -47,18 +47,73 @@ func (m *Marketplace) detectSourceType() string {
 
 // ResolveURL converts the source to a fetchable URL
 // For GitHub repos, converts user/repo to raw.githubusercontent.com URL
-// For URLs, returns the source as-is
+// For GitLab/Bitbucket project URLs, converts to raw file URLs
+// For other URLs, returns the source as-is
 func (m *Marketplace) ResolveURL() string {
 	sourceType := m.SourceType
 	if sourceType == "" {
 		sourceType = m.detectSourceType()
 	}
 
+	source := strings.TrimSpace(m.Source)
+	source = strings.TrimSuffix(source, "/") // Remove trailing slash
+
 	if sourceType == "github" {
 		// Convert user/repo to raw GitHub URL
-		return fmt.Sprintf("https://raw.githubusercontent.com/%s/main/plugin_registry.json", m.Source)
+		return fmt.Sprintf("https://raw.githubusercontent.com/%s/main/plugin_registry.json", source)
 	}
-	return m.Source
+
+	// Handle GitLab project URLs
+	// e.g., https://gitlab.com/user/repo -> https://gitlab.com/user/repo/-/raw/main/plugin_registry.json
+	if strings.Contains(source, "gitlab.com") || strings.Contains(source, "gitlab.") {
+		// Check if it's already a raw URL
+		if strings.Contains(source, "/-/raw/") {
+			return source
+		}
+		// Check if it already points to a file (has file extension)
+		if strings.HasSuffix(source, ".json") {
+			return source
+		}
+		// Convert project URL to raw file URL
+		return fmt.Sprintf("%s/-/raw/main/plugin_registry.json", source)
+	}
+
+	// Handle Bitbucket project URLs
+	// e.g., https://bitbucket.org/user/repo -> https://bitbucket.org/user/repo/raw/main/plugin_registry.json
+	if strings.Contains(source, "bitbucket.org") || strings.Contains(source, "bitbucket.") {
+		// Check if it's already a raw URL
+		if strings.Contains(source, "/raw/") {
+			return source
+		}
+		// Check if it already points to a file
+		if strings.HasSuffix(source, ".json") {
+			return source
+		}
+		// Convert project URL to raw file URL
+		return fmt.Sprintf("%s/raw/main/plugin_registry.json", source)
+	}
+
+	// Handle GitHub web URLs (not shorthand)
+	// e.g., https://github.com/user/repo -> https://raw.githubusercontent.com/user/repo/main/plugin_registry.json
+	if strings.Contains(source, "github.com") {
+		// Check if it's already a raw URL
+		if strings.Contains(source, "raw.githubusercontent.com") {
+			return source
+		}
+		// Check if it already points to a file
+		if strings.HasSuffix(source, ".json") {
+			return source
+		}
+		// Extract user/repo from GitHub URL
+		// Format: https://github.com/user/repo or https://github.com/user/repo/...
+		parts := strings.Split(strings.TrimPrefix(strings.TrimPrefix(source, "https://"), "http://"), "/")
+		if len(parts) >= 3 && parts[0] == "github.com" {
+			userRepo := parts[1] + "/" + parts[2]
+			return fmt.Sprintf("https://raw.githubusercontent.com/%s/main/plugin_registry.json", userRepo)
+		}
+	}
+
+	return source
 }
 
 // Validate checks if the marketplace configuration is valid

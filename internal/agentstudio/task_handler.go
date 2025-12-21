@@ -109,7 +109,11 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 
 		resultBuilder.WriteString("Tool Results:\n")
 		for _, tr := range toolResults {
-			resultBuilder.WriteString(fmt.Sprintf("- %s: %s\n", tr.Name, tr.Result))
+			if tr.Error != nil {
+				resultBuilder.WriteString(fmt.Sprintf("- %s: ERROR: %s\n", tr.Name, tr.Error.Error()))
+			} else {
+				resultBuilder.WriteString(fmt.Sprintf("- %s: %s\n", tr.Name, tr.Result))
+			}
 		}
 
 		return resultBuilder.String(), nil

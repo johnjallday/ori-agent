@@ -198,31 +198,127 @@
     </div>
   </div>
 
-  <!-- Add Agent Modal -->
-  <div class="modal fade" id="addAgentModal" tabindex="-1" aria-hidden="true">
+  <!-- Create New Agent Modal -->
+  <div class="modal fade" id="createAgentModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
           <h5 class="modal-title" style="color: var(--text-primary);">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M1,10V12H9V10M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12Z"/>
+              <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1L13.5 2.5L16.17 5.17L11.83 9.51C11.25 9.19 10.61 9 10 9C8.61 9 7.22 9.39 6 10.17L3 7.17L1.59 8.59L4.17 11.17C3.39 12.39 3 13.78 3 15.17C3 16.56 3.39 17.94 4.17 19.17L1.59 21.75L3 23.16L6 20.16C7.22 20.94 8.61 21.33 10 21.33C10.61 21.33 11.25 21.13 11.83 20.82L16.17 16.48L13.5 19.15L15 20.65L21 14.65V12.65L17.83 15.82L12.41 10.41C12.61 10.25 12.8 10.08 13 9.83L17.83 5L21 8.17V9Z"/>
             </svg>
-            Add Agent to Workspace
+            Create New Agent
           </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
         </div>
         <div class="modal-body">
-          <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select an agent to add to this workspace:</p>
-          <div id="available-agents-list" style="max-height: 400px; overflow-y: auto;">
-            <div class="text-center py-3">
-              <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+          <form id="canvasCreateAgentForm">
+            <div class="mb-3">
+              <label for="canvasAgentName" class="form-label" style="color: var(--text-primary);">Agent Name</label>
+              <input type="text" id="canvasAgentName" class="modern-input w-100" placeholder="Enter agent name..." required>
+            </div>
+            <div class="mb-3">
+              <label for="canvasAgentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
+              <select id="canvasAgentType" class="modern-input w-100">
+                <option value="tool-calling">Tool Calling (Cheapest - Optimized for tool use)</option>
+                <option value="general">General Purpose (Mid-tier - Balanced capability)</option>
+                <option value="orchestration">Orchestration (Advanced - Multi-agent coordination)</option>
+                <option value="research">Research (Expensive - Complex thinking)</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="canvasAgentModel" class="form-label" style="color: var(--text-primary);">Model</label>
+              <select id="canvasAgentModel" class="modern-input w-100">
+                <option value="">Loading models...</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="canvasAgentTemperature" class="form-label" style="color: var(--text-primary);">
+                Temperature: <span id="canvasTemperatureValue">1.0</span>
+              </label>
+              <input type="range" id="canvasAgentTemperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
+                     style="cursor: pointer;">
+              <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
+                <span>Focused (0)</span>
+                <span>Balanced (1)</span>
+                <span>Creative (2)</span>
               </div>
             </div>
-          </div>
+            <div class="mb-3">
+              <label for="canvasAgentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
+              <textarea id="canvasAgentSystemPrompt" class="form-control" rows="4"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                        placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+            </div>
+          </form>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="canvasCreateAgentBtn" class="modern-btn modern-btn-primary" onclick="createNewAgentFromCanvas()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Agent
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plugin Upload Modal -->
+  <div class="modal fade" id="pluginUploadModal" tabindex="-1" aria-labelledby="pluginUploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" id="pluginUploadModalLabel" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+            </svg>
+            Upload Plugin
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <p style="color: var(--text-secondary);">Upload a plugin binary by dragging and dropping it below or clicking to browse.</p>
+          </div>
+
+          <!-- Drag and Drop Area -->
+          <div id="uploadDropZone" class="upload-drop-zone mb-3" style="border: 2px dashed var(--border-color); border-radius: 8px; background: var(--bg-secondary); cursor: pointer; transition: all 0.3s ease;">
+            <div class="text-center py-5">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-3" style="color: var(--text-secondary);">
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+              </svg>
+              <h6 style="color: var(--text-primary);">Drag & Drop Plugin File</h6>
+              <p class="text-muted mb-3">Or click to browse for files</p>
+              <button type="button" class="modern-btn modern-btn-secondary" onclick="event.stopPropagation(); document.getElementById('pluginFileInput').click()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M16,13H15V18H13V13H8L12,9L16,13M15,4H9V6H15V4Z"/>
+                </svg>
+                Browse Files
+              </button>
+            </div>
+          </div>
+
+          <!-- Hidden File Input -->
+          <input type="file" id="pluginFileInput" style="display: none;">
+
+          <!-- Upload Progress -->
+          <div id="uploadProgress" class="d-none mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span style="color: var(--text-primary);">Uploading...</span>
+              <span id="uploadPercent" style="color: var(--text-secondary);">0%</span>
+            </div>
+            <div class="progress">
+              <div id="uploadProgressBar" class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+          </div>
+
+          <!-- Upload Result -->
+          <div id="uploadResult" class="d-none"></div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -784,109 +880,165 @@
       showSaveWorkflowModal(selection);
     }
 
-    // Show add agent modal with available agents
+    // Show create agent modal
     async function showAddAgentModal() {
-      const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
-      const agentsList = document.getElementById('available-agents-list');
+      const modal = new bootstrap.Modal(document.getElementById('createAgentModal'));
+      const agentNameInput = document.getElementById('canvasAgentName');
+      const agentTypeInput = document.getElementById('canvasAgentType');
+      const agentModelInput = document.getElementById('canvasAgentModel');
+      const agentTemperatureInput = document.getElementById('canvasAgentTemperature');
+      const temperatureValueSpan = document.getElementById('canvasTemperatureValue');
+      const agentSystemPromptInput = document.getElementById('canvasAgentSystemPrompt');
 
-      // Show modal
-      modal.show();
-      agentsList.innerHTML = `
-        <div class="text-center py-3">
-          <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Loading...</span>
-          </div>
-        </div>
-      `;
+      // Clear previous inputs
+      if (agentNameInput) agentNameInput.value = '';
+      if (agentTypeInput) agentTypeInput.value = 'tool-calling';
+      if (agentSystemPromptInput) agentSystemPromptInput.value = '';
+      if (agentTemperatureInput) {
+        agentTemperatureInput.value = '1.0';
+        if (temperatureValueSpan) temperatureValueSpan.textContent = '1.0';
+      }
 
-      // Load available agents
-      try {
-        const parseJson = async (resp) => {
-          const text = await resp.text();
-          try {
-            return JSON.parse(text);
-          } catch (err) {
-            throw new Error(text || err.message || 'Invalid response');
+      // Load available models
+      if (agentModelInput) {
+        try {
+          const response = await fetch('/api/providers');
+          const data = await response.json();
+          const providers = data.providers || [];
+
+          agentModelInput.innerHTML = '';
+          providers.forEach(provider => {
+            const providerGroup = document.createElement('optgroup');
+            providerGroup.label = provider.display_name;
+
+            provider.models.forEach(model => {
+              const option = document.createElement('option');
+              option.value = model.value;
+              option.textContent = model.label;
+              option.setAttribute('data-type', model.type);
+              // Only show tool-calling models by default
+              if (model.type !== 'tool-calling') {
+                option.style.display = 'none';
+                option.disabled = true;
+              }
+              providerGroup.appendChild(option);
+            });
+            agentModelInput.appendChild(providerGroup);
+          });
+
+          // Select first available option
+          for (let i = 0; i < agentModelInput.options.length; i++) {
+            if (!agentModelInput.options[i].disabled) {
+              agentModelInput.selectedIndex = i;
+              break;
+            }
+          }
+        } catch (error) {
+          console.error('Failed to load models:', error);
+        }
+      }
+
+      // Setup temperature slider
+      if (agentTemperatureInput && temperatureValueSpan) {
+        agentTemperatureInput.oninput = (e) => {
+          temperatureValueSpan.textContent = e.target.value;
+        };
+      }
+
+      // Setup agent type change to filter models
+      if (agentTypeInput && agentModelInput) {
+        agentTypeInput.onchange = (e) => {
+          const selectedType = e.target.value;
+          const options = agentModelInput.querySelectorAll('option');
+          options.forEach(option => {
+            if (option.getAttribute('data-type') === selectedType) {
+              option.style.display = '';
+              option.disabled = false;
+            } else {
+              option.style.display = 'none';
+              option.disabled = true;
+            }
+          });
+          // Select first visible option
+          for (let i = 0; i < agentModelInput.options.length; i++) {
+            if (!agentModelInput.options[i].disabled) {
+              agentModelInput.selectedIndex = i;
+              break;
+            }
           }
         };
+      }
 
-        // Get all system agents
-        const agentsResponse = await fetch('/api/agents');
-        if (!agentsResponse.ok) {
-          const msg = await agentsResponse.text();
-          throw new Error(msg || 'Failed to load agents');
+      modal.show();
+
+      // Focus on input after modal is shown
+      setTimeout(() => {
+        if (agentNameInput) agentNameInput.focus();
+      }, 500);
+    }
+
+    // Create new agent from canvas modal
+    async function createNewAgentFromCanvas() {
+      const agentNameInput = document.getElementById('canvasAgentName');
+      const agentTypeInput = document.getElementById('canvasAgentType');
+      const agentModelInput = document.getElementById('canvasAgentModel');
+      const agentTemperatureInput = document.getElementById('canvasAgentTemperature');
+      const agentSystemPromptInput = document.getElementById('canvasAgentSystemPrompt');
+      const createBtn = document.getElementById('canvasCreateAgentBtn');
+
+      if (!agentNameInput) return;
+
+      const agentName = agentNameInput.value.trim();
+      if (!agentName) {
+        alert('Please enter an agent name');
+        agentNameInput.focus();
+        return;
+      }
+
+      // Set loading state
+      const originalText = createBtn.innerHTML;
+      createBtn.disabled = true;
+      createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+
+      try {
+        const requestBody = { name: agentName };
+        if (agentTypeInput && agentTypeInput.value) requestBody.type = agentTypeInput.value;
+        if (agentModelInput && agentModelInput.value) requestBody.model = agentModelInput.value;
+        if (agentTemperatureInput && agentTemperatureInput.value) requestBody.temperature = parseFloat(agentTemperatureInput.value);
+        if (agentSystemPromptInput && agentSystemPromptInput.value.trim()) requestBody.system_prompt = agentSystemPromptInput.value.trim();
+
+        const createResponse = await fetch('/api/agents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!createResponse.ok) {
+          const errorText = await createResponse.text();
+          throw new Error(errorText || `HTTP ${createResponse.status}`);
         }
-        const agentsData = await parseJson(agentsResponse);
-        const allAgents = agentsData.agents || []; // Array of {name, type} objects
 
-        // Get workspace to see which agents are already added
-        const workspaceResponse = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
-        if (!workspaceResponse.ok) {
-          const msg = await workspaceResponse.text();
-          throw new Error(msg || 'Failed to load workspace');
+        console.log('Agent created successfully:', agentName);
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('createAgentModal'));
+        if (modal) modal.hide();
+
+        // Refresh sidebar agents list
+        if (typeof loadAgentsForSidebar === 'function') {
+          await loadAgentsForSidebar();
         }
-        const workspace = await parseJson(workspaceResponse);
-        const workspaceAgents = workspace.agents || [];
-
-        // Track how many instances of each agent are already on the canvas
-        const agentCounts = workspaceAgents.reduce((acc, name) => {
-          acc[name] = (acc[name] || 0) + 1;
-          return acc;
-        }, {});
-
-        if (allAgents.length === 0) {
-          agentsList.innerHTML = `
-            <div class="text-center py-4">
-              <p style="color: var(--text-muted);">No agents available. Create one to get started.</p>
-              <a href="/agents" class="modern-btn modern-btn-primary mt-2">Create New Agent</a>
-            </div>
-          `;
-          return;
-        }
-
-        // Display all agents as clickable cards so users can add additional instances
-        agentsList.innerHTML = allAgents.map(agent => {
-          const count = agentCounts[agent.name] || 0;
-          const badgeText = count > 0 ? `${count} in workspace` : 'Not in workspace yet';
-          const badgeColor = count > 0 ? 'rgba(46, 204, 113, 0.15)' : 'rgba(52, 152, 219, 0.15)';
-
-          return `
-            <div class="modern-card p-3 mb-2" style="cursor: pointer; border-left: 3px solid var(--primary-color);"
-                 onclick="addAgentToWorkspace('${agent.name}')">
-              <div class="d-flex align-items-center justify-content-between">
-                <div class="d-flex align-items-center gap-2">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color);">
-                    <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                  </svg>
-                  <div>
-                    <strong style="color: var(--text-primary);">${agent.name}</strong>
-                    ${count > 0 ? '<div class="text-muted small">Add another instance to the canvas</div>' : ''}
-                  </div>
-                </div>
-                <div class="text-end">
-                  <span class="badge rounded-pill" style="background:${badgeColor}; color: var(--text-primary);">
-                    ${badgeText}
-                  </span>
-                  <div style="color: var(--success-color);">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                    </svg>
-                  </div>
-                </div>
-              </div>
-            </div>
-          `;
-        }).join('');
 
       } catch (error) {
-        console.error('Error loading agents:', error);
-        agentsList.innerHTML = `
-          <div class="alert alert-danger">Failed to load agents: ${error.message || error}</div>
-        `;
+        console.error('Error creating agent:', error);
+        alert(`Failed to create agent: ${error.message}`);
+      } finally {
+        createBtn.disabled = false;
+        createBtn.innerHTML = originalText;
       }
     }
 
-    // Add agent to workspace
+    // Add agent to workspace (for existing agents)
     async function addAgentToWorkspace(agentName) {
       try {
         const response = await fetch('/api/orchestration/workspace/agents', {
@@ -902,10 +1054,6 @@
           const error = await response.text();
           throw new Error(error);
         }
-
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
-        modal.hide();
 
         // Reload canvas to show new agent
         window.location.reload();
