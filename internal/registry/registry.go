@@ -749,7 +749,6 @@ func (m *Manager) RefreshLocalRegistry() error {
 		return fmt.Errorf("failed to save refreshed local registry: %w", err)
 	}
 
-	fmt.Printf("✅ Refreshed local plugin registry with %d plugin(s) from uploaded_plugins/\n", len(newReg.Plugins))
 	return nil
 }
 
@@ -898,7 +897,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		// The caching inside FetchAllMarketplaces handles per-marketplace caching
 		if mpReg, err := m.FetchAllMarketplaces(); err == nil && len(mpReg.Plugins) > 0 {
 			onlineReg = mpReg
-			fmt.Printf("plugin registry loaded from %d marketplace(s)\n", len(m.marketplaceStore.GetEnabled()))
 		} else if err != nil {
 			fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
 		}
@@ -911,7 +909,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 					_ = os.WriteFile(m.cachePath, data, 0644) // Ignore error - caching is optional
 				}
 				onlineReg = githubReg
-				fmt.Println("plugin registry loaded from GitHub")
 			} else {
 				fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
 			}
@@ -936,7 +933,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 			} {
 				if b, err := os.ReadFile(p); err == nil {
 					if err := json.Unmarshal(b, &onlineReg); err == nil {
-						fmt.Printf("plugin registry loaded from local file: %s\n", p)
 						break
 					}
 				}
@@ -947,7 +943,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 		if len(onlineReg.Plugins) == 0 {
 			if b, err := web.Static.ReadFile("static/plugin_registry.json"); err == nil {
 				if err := json.Unmarshal(b, &onlineReg); err == nil {
-					fmt.Println("plugin registry loaded from embedded file")
 				}
 			}
 		}
@@ -967,7 +962,6 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 						}
 					}
 					onlineReg.Plugins = append(onlineReg.Plugins, cachedReg.Plugins...)
-					fmt.Printf("loaded %d plugins from cache for marketplace %s\n", len(cachedReg.Plugins), mp.Name)
 				}
 			}
 		}

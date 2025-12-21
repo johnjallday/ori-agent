@@ -3,9 +3,14 @@
     {
       "name": "ori-reaper",
       "description": "REAPER DAW integration - manage scripts, actions, and workflows for music production",
-      "version": "0.0.7",
-      "github_repo": "https://gitlab.com/johnjallday/ori-reaper",
-      "download_url": "https://gitlab.com/johnjallday/ori-reaper/releases/latest/download/ori-reaper",
+      "tags": [
+        "audio",
+        "daw",
+        "automation"
+      ],
+      "version": "0.0.8",
+      "github_repo": "https://github.com/johnjallday/ori-reaper",
+      "download_url": "https://github.com/johnjallday/ori-reaper/releases/latest/download/ori-reaper-{os}-{arch}{ext}",
       "supported_os": [
         "darwin"
       ],
@@ -19,8 +24,13 @@
       ],
       "metadata": {
         "name": "ori-reaper",
-        "version": "0.0.7",
+        "version": "0.0.8",
         "description": "REAPER DAW integration - manage scripts, actions, and workflows for music production",
+        "tags": [
+          "audio",
+          "daw",
+          "automation"
+        ],
         "maintainers": [
           {
             "name": "Ori Agent Team",
@@ -29,7 +39,7 @@
           }
         ],
         "license": "MIT",
-        "repository": "https://gitlab.com/johnjallday/ori-reaper",
+        "repository": "https://github.com/johnjallday/ori-reaper",
         "platforms": [
           {
             "os": "darwin",
@@ -46,11 +56,16 @@
       "source_marketplace": "1074f872"
     },
     {
-      "name": "ori-music-project-manager",
+      "name": "ori_music_project_manager",
       "description": "Manage music projects with REAPER integration - create, list, open, and organize music production projects",
-      "version": "0.0.8",
-      "github_repo": "https://gitlab.com/johnjallday/ori-music-project-manager",
-      "download_url": "https://gitlab.com/johnjallday/ori-music-project-manager/releases/latest/download/ori-music-project-manager",
+      "tags": [
+        "audio",
+        "daw",
+        "project-management"
+      ],
+      "version": "0.0.9",
+      "github_repo": "https://github.com/johnjallday/ori-music-project-manager",
+      "download_url": "https://github.com/johnjallday/ori-music-project-manager/releases/latest/download/ori-music-project-manager-{os}-{arch}{ext}",
       "supported_os": [
         "darwin"
       ],
@@ -63,9 +78,14 @@
         "darwin-arm64"
       ],
       "metadata": {
-        "name": "ori-music-project-manager",
-        "version": "0.0.8",
+        "name": "ori_music_project_manager",
+        "version": "0.0.9",
         "description": "Manage music projects with REAPER integration - create, list, open, and organize music production projects",
+        "tags": [
+          "audio",
+          "daw",
+          "project-management"
+        ],
         "maintainers": [
           {
             "name": "Ori Agent Team",
@@ -74,7 +94,7 @@
           }
         ],
         "license": "MIT",
-        "repository": "https://gitlab.com/johnjallday/ori-music-project-manager",
+        "repository": "https://github.com/johnjallday/ori-music-project-manager",
         "platforms": [
           {
             "os": "darwin",
