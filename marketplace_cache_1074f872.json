@@ -70,8 +70,8 @@
         "darwin"
       ],
       "supported_arch": [
-        "amd64",
-        "arm64"
+        "arm64",
+        "amd64"
       ],
       "platforms": [
         "darwin-amd64",
