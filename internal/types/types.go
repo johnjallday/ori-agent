@@ -113,7 +113,8 @@ type PluginRegistryEntry struct {
 	Metadata      *PluginMetadata `json:"metadata,omitempty"`       // Plugin metadata (maintainers, license, repository)
 
 	// Plugin Management Fields (added for dedicated plugins page)
-	SourceMarketplace   string                 `json:"source_marketplace,omitempty"`   // ID of the marketplace this plugin came from
+	SourceMarketplace   string                 `json:"source_marketplace,omitempty"`   // ID of the marketplace this plugin came from (first/primary)
+	SourceMarketplaces  []string               `json:"source_marketplaces,omitempty"`  // All marketplaces this plugin appears in
 	Category            string                 `json:"category,omitempty"`             // Plugin category (e.g., "System Tools", "AI/ML")
 	Permissions         map[string]interface{} `json:"permissions,omitempty"`          // Required permissions (file_access, network_access, system_commands)
 	PermissionsApproved bool                   `json:"permissions_approved,omitempty"` // Whether permissions have been approved

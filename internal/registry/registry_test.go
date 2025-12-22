@@ -21,7 +21,6 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	manager := NewManager()
 	// Override paths to use temp directory
 	manager.localRegistryPath = tmpDir + "/local_plugin_registry.json"
-	manager.cachePath = tmpDir + "/plugin_registry_cache.json"
 	manager.uploadedPluginsDir = tmpDir + "/uploaded_plugins"
 
 	return manager, tmpDir
