@@ -199,11 +199,20 @@ class PluginMarketplace {
             const result = await response.json();
 
             if (result.valid) {
+                const typeLabel = result.source_type === 'github'
+                    ? 'GitHub'
+                    : result.source_type === 'gitlab'
+                    ? 'GitLab'
+                    : result.source_type === 'bitbucket'
+                    ? 'Bitbucket'
+                    : result.source_type === 'file'
+                    ? 'Local File'
+                    : 'Direct URL';
                 resultDiv.innerHTML = `
                     <div class="alert alert-success mb-0">
                         <strong>Valid source!</strong><br>
                         <small>Found ${result.plugin_count} plugin(s)</small><br>
-                        <small class="text-muted">Type: ${result.source_type === 'github' ? 'GitHub' : result.source_type === 'gitlab' ? 'GitLab' : 'Direct URL'}</small>
+                        <small class="text-muted">Type: ${typeLabel}</small>
                     </div>`;
                 saveBtn.disabled = false;
             } else {
@@ -251,6 +260,16 @@ class PluginMarketplace {
 
             // Show success message
             alert('Marketplace added! Refreshing plugins...');
+
+            const marketplacesResp = await fetch('/api/marketplaces');
+            if (marketplacesResp.ok) {
+                const marketplacesData = await marketplacesResp.json();
+                const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
+                if (matches.length > 0) {
+                    const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
+                    await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
+                }
+            }
 
             // Reload marketplace data
             await this.loadMarketplaceData();
@@ -389,21 +408,26 @@ class PluginMarketplace {
         return this.marketplaces.get(marketplaceId) || null;
     }
 
-    // Get source marketplace badge for a plugin
+    // Get source marketplace badges for a plugin (supports multiple marketplaces)
     getSourceBadge(plugin) {
-        const marketplaceId = plugin.source_marketplace;
-        if (!marketplaceId) return '';
+        // Use backend-provided source_marketplaces array, fall back to single source_marketplace
+        const marketplaceIds = plugin.source_marketplaces && plugin.source_marketplaces.length > 0
+            ? plugin.source_marketplaces
+            : (plugin.source_marketplace ? [plugin.source_marketplace] : []);
+        if (marketplaceIds.length === 0) return '';
 
-        const marketplaceName = this.getMarketplaceName(marketplaceId);
-        // Use marketplace name if available, otherwise show the ID
-        const displayName = marketplaceName || marketplaceId;
+        return marketplaceIds.map(marketplaceId => {
+            const marketplaceName = this.getMarketplaceName(marketplaceId);
+            // Use marketplace name if available, otherwise show the ID
+            const displayName = marketplaceName || marketplaceId;
 
-        // Use different colors for official vs custom marketplaces
-        const isOfficial = marketplaceId === 'official';
-        const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
-        const icon = isOfficial ? '🏠' : '📦';
+            // Use different colors for official vs custom marketplaces
+            const isOfficial = marketplaceId === 'official';
+            const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
+            const icon = isOfficial ? '🏠' : '📦';
 
-        return `<span class="badge ${badgeClass} me-1" title="Source marketplace: ${displayName}">${icon} ${displayName}</span>`;
+            return `<span class="badge ${badgeClass} me-1" title="Source marketplace: ${displayName}">${icon} ${displayName}</span>`;
+        }).join('');
     }
 
     render() {
@@ -732,6 +756,8 @@ class PluginMarketplace {
     }
 
     normalizePluginList(plugins) {
+        // Backend now provides source_marketplaces array for each plugin
+        // Just deduplicate by canonical key, keeping the better plugin data
         const map = new Map();
         plugins.forEach(plugin => {
             const key = this.getCanonicalPluginKey(plugin);

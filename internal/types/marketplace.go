@@ -2,6 +2,8 @@ package types
 
 import (
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -11,7 +13,7 @@ type Marketplace struct {
 	ID          string     `json:"id"`                     // Unique identifier (UUID or slug)
 	Name        string     `json:"name"`                   // Display name
 	Source      string     `json:"source"`                 // URL or GitHub user/repo format
-	SourceType  string     `json:"source_type"`            // "url", "github", "gitlab", or "bitbucket"
+	SourceType  string     `json:"source_type"`            // "url", "github", "gitlab", "bitbucket", or "file"
 	Enabled     bool       `json:"enabled"`                // Whether marketplace is active
 	Order       int        `json:"order"`                  // Priority order (lower = higher priority)
 	IsOfficial  bool       `json:"is_official"`            // True for the default official marketplace
@@ -32,6 +34,9 @@ func (m *Marketplace) IsGitHub() bool {
 // detectSourceType determines whether the source is a URL or GitHub repo
 func (m *Marketplace) detectSourceType() string {
 	source := strings.TrimSpace(m.Source)
+	if strings.HasPrefix(source, "file://") || filepath.IsAbs(source) {
+		return "file"
+	}
 	// If it starts with http:// or https://, it's a URL
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		return "url"
@@ -43,6 +48,38 @@ func (m *Marketplace) detectSourceType() string {
 	}
 	// Default to URL
 	return "url"
+}
+
+// DetectMarketplaceSourceType detects the marketplace source type for a raw source string.
+func DetectMarketplaceSourceType(source string) string {
+	return (&Marketplace{Source: source}).detectSourceType()
+}
+
+// ResolveLocalMarketplacePath resolves a local marketplace source to an absolute filesystem path.
+// Accepts absolute paths or file:// URLs and rejects relative paths.
+func ResolveLocalMarketplacePath(source string) (string, error) {
+	trimmed := strings.TrimSpace(source)
+	if strings.HasPrefix(trimmed, "file://") {
+		parsed, err := url.Parse(trimmed)
+		if err != nil {
+			return "", fmt.Errorf("invalid file URL: %w", err)
+		}
+		path := parsed.Path
+		if parsed.Host != "" && parsed.Host != "localhost" {
+			path = filepath.Join(string(filepath.Separator)+parsed.Host, path)
+		}
+		unescaped, err := url.PathUnescape(path)
+		if err != nil {
+			return "", fmt.Errorf("invalid file URL path: %w", err)
+		}
+		trimmed = unescaped
+	}
+
+	if !filepath.IsAbs(trimmed) {
+		return "", fmt.Errorf("local marketplace path must be absolute")
+	}
+
+	return filepath.Clean(trimmed), nil
 }
 
 // ResolveURL converts the source to a fetchable URL
@@ -57,6 +94,12 @@ func (m *Marketplace) ResolveURL() string {
 
 	source := strings.TrimSpace(m.Source)
 	source = strings.TrimSuffix(source, "/") // Remove trailing slash
+
+	if sourceType == "file" {
+		if path, err := ResolveLocalMarketplacePath(source); err == nil {
+			return path
+		}
+	}
 
 	if sourceType == "github" {
 		// Convert user/repo to raw GitHub URL
@@ -123,6 +166,11 @@ func (m *Marketplace) Validate() error {
 	}
 	if strings.TrimSpace(m.Source) == "" {
 		return fmt.Errorf("marketplace source is required")
+	}
+	if m.detectSourceType() == "file" {
+		if _, err := ResolveLocalMarketplacePath(m.Source); err != nil {
+			return err
+		}
 	}
 	return nil
 }

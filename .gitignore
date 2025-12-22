@@ -43,6 +43,7 @@ Thumbs.db
 plugin_cache/
 plugin_registry_cache.json
 local_plugin_registry.json
+marketplace_cache_*.json
 cache/
 tmp/
 temp/

@@ -52,7 +52,7 @@ func (ts *TaskScheduler) Start() {
 
 // Stop gracefully stops the scheduler
 func (ts *TaskScheduler) Stop() {
-	logger.Debug("⏹️ Stopping task scheduler...", logger.Fields{})
+	logger.Debug("Stopping task scheduler", logger.Fields{})
 	close(ts.stopChan)
 	ts.wg.Wait()
 	logger.Info("Task scheduler stopped", logger.Fields{})

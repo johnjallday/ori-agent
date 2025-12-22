@@ -665,106 +665,45 @@ function hideCombinerDetails() {
 /**
  * Show add task modal
  */
-async function showAddTaskModal() {
-  const description = prompt('Enter task description:');
+function showAddTaskModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addTaskNodeModal'));
+  const descriptionInput = document.getElementById('taskDescription');
+  const priorityInput = document.getElementById('taskPriority');
 
-  if (!description || !description.trim()) {
-    return;
-  }
+  // Reset form
+  if (descriptionInput) descriptionInput.value = '';
+  if (priorityInput) priorityInput.value = 'medium';
 
-  // Get studio ID from currentStudioId or from AgentCanvas instance
-  const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+  modal.show();
 
-  if (!studioId) {
-    alert('No studio loaded');
-    return;
-  }
-
-  const task = {
-    description: description.trim(),
-    from: null,
-    to: null,
-    status: 'pending',
-    x: 100,  // Default position - top left area
-    y: 100
-  };
-
-  try {
-    const response = await fetch(`/api/studios/${studioId}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(task)
-    });
-
-    if (response.ok) {
-      console.log('Task created successfully');
-      // Reload the page to show the new task
-      window.location.reload();
-    } else {
-      const error = await response.text();
-      alert(`Failed to create task: ${error}`);
-    }
-  } catch (error) {
-    console.error('Error creating task:', error);
-    alert(`Error creating task: ${error.message}`);
-  }
+  // Focus on description after modal is shown
+  setTimeout(() => {
+    if (descriptionInput) descriptionInput.focus();
+  }, 500);
 }
 
 /**
- * Show add attachment prompt (quick create)
+ * Show add attachment modal
  */
-async function showAddAttachmentModal() {
-  const title = prompt('Enter attachment title:');
-  if (!title || !title.trim()) {
-    return;
-  }
+function showAddAttachmentModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addAttachmentNodeModal'));
+  const titleInput = document.getElementById('attachmentTitle');
+  const bodyInput = document.getElementById('attachmentBody');
+  const linkInput = document.getElementById('attachmentLink');
+  const filePathInput = document.getElementById('attachmentFilePath');
 
-  const body = prompt('Add a note/body (optional):', '') || '';
-  const link = prompt('Link URL (optional):', '') || '';
-  const filePath = prompt('File path to reference (optional):', '') || '';
+  // Reset form
+  if (titleInput) titleInput.value = '';
+  if (bodyInput) bodyInput.value = '';
+  if (linkInput) linkInput.value = '';
+  if (filePathInput) filePathInput.value = '';
 
-  const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
-  if (!studioId) {
-    alert('No studio loaded');
-    return;
-  }
+  modal.show();
 
-  const fileMeta = filePath
-    ? {
-        name: getFileNameFromPath(filePath),
-        url: filePath
-      }
-    : null;
-
-  const attachment = {
-    title: title.trim(),
-    body: body,
-    type: guessAttachmentType(body, link, fileMeta),
-    color: '',
-    link_url: link || '',
-    file_meta: fileMeta,
-    x: 140,
-    y: 140
-  };
-
-  try {
-    const response = await fetch(`/api/studios/${studioId}/attachments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(attachment)
-    });
-
-    if (response.ok) {
-      console.log('Attachment created successfully');
-      window.location.reload();
-    } else {
-      const error = await response.text();
-      alert(`Failed to create attachment: ${error}`);
-    }
-  } catch (error) {
-    console.error('Error creating attachment:', error);
-    alert(`Error creating attachment: ${error.message}`);
-  }
+  // Focus on title after modal is shown
+  setTimeout(() => {
+    if (titleInput) titleInput.focus();
+  }, 500);
 }
 
 function guessAttachmentType(body, link, fileMeta) {

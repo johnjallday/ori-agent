@@ -76,7 +76,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(status)
+	orihttp.WriteJSON(w, status)
 }
 
 func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Request) {
@@ -308,14 +308,21 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
-			logger.
-
-				// Set headers for SSE
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
 
+	// Validate workspace exists before setting up SSE stream
+	if _, err := sh.workspaceStore.Get(workspaceID); err != nil {
+		logger.Debug("Workspace not found for progress stream (may be stale browser session)", logger.Fields{"workspace_id": workspaceID})
+		if err := orihttp.RespondNotFound(w, "workspace not found"); err != nil {
+			logger.Error("Failed to write not found response", logger.Fields{"error": err})
+		}
+		return
+	}
+
+	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -325,10 +332,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		if err := orihttp.RespondInternalError(w, "streaming not supported"); err != nil {
-			logger.Error("Failed to write response",
-
-				// If no event bus, return error
-				logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -429,7 +433,8 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	ws, err := sh.workspaceStore.Get(workspaceID)
 	if err != nil {
-		logger.Error("Failed to get workspace for initial progress", logger.Fields{"error": err})
+		// Workspace may have been deleted after validation - this is not critical
+		logger.Debug("Workspace not found for initial progress (may have been deleted)", logger.Fields{"workspace_id": workspaceID})
 		return
 	}
 

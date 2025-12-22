@@ -3,11 +3,10 @@ package agentstudio
 import (
 	"context"
 	"encoding/json"
-	"log"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // EventType represents the type of workspace event
@@ -282,7 +281,7 @@ func (eb *EventBus) Shutdown() {
 
 	// Clear all subscriptions
 	eb.subscriptions = make(map[string]*subscription)
-	log.Println("✅ Event bus shutdown complete")
+	logger.Info("Event bus shutdown complete", logger.Fields{})
 }
 
 // addToHistory adds an event to the ring buffer history

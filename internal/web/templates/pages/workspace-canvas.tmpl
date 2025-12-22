@@ -198,6 +198,48 @@
     </div>
   </div>
 
+  <!-- Add Agent Node Modal -->
+  <div class="modal fade" id="addAgentNodeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12M5,8V10H3V12H5V14H7V12H9V10H7V8H5Z"/>
+            </svg>
+            Add Agent to Canvas
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select an existing agent to add to this workspace:</p>
+          <div id="canvasAgentList" style="max-height: 300px; overflow-y: auto;">
+            <div class="text-center py-3">
+              <div class="spinner-border spinner-border-sm" role="status"></div>
+              <span class="ms-2" style="color: var(--text-secondary);">Loading agents...</span>
+            </div>
+          </div>
+          <hr style="border-color: var(--border-color); margin: 1rem 0;">
+          <div class="text-center">
+            <small style="color: var(--text-secondary);">Don't see the agent you need?</small>
+            <button type="button" class="btn btn-link btn-sm p-0 ms-1" onclick="switchToCreateAgentModal()">
+              Create a new agent
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="canvasAddAgentBtn" class="modern-btn modern-btn-primary" onclick="addSelectedAgentToCanvas()" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add Agent
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Create New Agent Modal -->
   <div class="modal fade" id="createAgentModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -319,6 +361,104 @@
         </div>
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Attachment Node Modal -->
+  <div class="modal fade" id="addAttachmentNodeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M16.5,6.5V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V8A3.5,3.5 0 0,1 11,4.5A3.5,3.5 0 0,1 14.5,8V16.5A2.5,2.5 0 0,1 12,19A2.5,2.5 0 0,1 9.5,16.5V7.5H11V16.5A1,1 0 0,0 12,17.5A1,1 0 0,0 13,16.5V8A2,2 0 0,0 11,6A2,2 0 0,0 9,8V17.5A3.5,3.5 0 0,0 12.5,21A3.5,3.5 0 0,0 16,17.5V6.5H16.5Z"/>
+            </svg>
+            Add Attachment
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <form id="addAttachmentNodeForm">
+            <div class="mb-3">
+              <label for="attachmentTitle" class="form-label" style="color: var(--text-primary); font-weight: 500;">Title <span class="text-danger">*</span></label>
+              <input type="text" id="attachmentTitle" class="form-control"
+                     style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
+                     placeholder="Enter attachment title..." required>
+            </div>
+            <div class="mb-3">
+              <label for="attachmentBody" class="form-label" style="color: var(--text-primary); font-weight: 500;">Notes</label>
+              <textarea id="attachmentBody" class="form-control" rows="3"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
+                        placeholder="Add notes or description (optional)..."></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="attachmentLink" class="form-label" style="color: var(--text-primary); font-weight: 500;">Link URL</label>
+              <input type="url" id="attachmentLink" class="form-control"
+                     style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
+                     placeholder="https://example.com (optional)">
+            </div>
+            <div class="mb-3">
+              <label for="attachmentFilePath" class="form-label" style="color: var(--text-primary); font-weight: 500;">File Path</label>
+              <input type="text" id="attachmentFilePath" class="form-control"
+                     style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
+                     placeholder="/path/to/file (optional)">
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="addAttachmentNodeBtn" class="modern-btn modern-btn-primary" onclick="submitAttachmentNode()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add Attachment
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Task Node Modal -->
+  <div class="modal fade" id="addTaskNodeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add Task
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <form id="addTaskNodeForm">
+            <div class="mb-3">
+              <label for="taskDescription" class="form-label" style="color: var(--text-primary); font-weight: 500;">Task Description <span class="text-danger">*</span></label>
+              <textarea id="taskDescription" class="form-control" rows="3"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
+                        placeholder="Describe what this task should accomplish..." required></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="taskPriority" class="form-label" style="color: var(--text-primary); font-weight: 500;">Priority</label>
+              <select id="taskPriority" class="form-select" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="addTaskNodeBtn" class="modern-btn modern-btn-primary" onclick="submitTaskNode()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Add Task
+          </button>
         </div>
       </div>
     </div>
@@ -880,8 +1020,308 @@
       showSaveWorkflowModal(selection);
     }
 
-    // Show create agent modal
+    // State for selected agent in the add modal
+    let selectedAgentToAdd = null;
+
+    // Show add agent modal (for adding existing agents to canvas)
     async function showAddAgentModal() {
+      const modal = new bootstrap.Modal(document.getElementById('addAgentNodeModal'));
+      const agentListContainer = document.getElementById('canvasAgentList');
+      const addBtn = document.getElementById('canvasAddAgentBtn');
+
+      // Reset state
+      selectedAgentToAdd = null;
+      if (addBtn) addBtn.disabled = true;
+
+      // Show loading state
+      agentListContainer.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+          <span class="ms-2" style="color: var(--text-secondary);">Loading agents...</span>
+        </div>
+      `;
+
+      modal.show();
+
+      // Load available agents
+      try {
+        const response = await fetch('/api/agents');
+        const data = await response.json();
+        const agents = data.agents || data || [];
+
+        if (agents.length === 0) {
+          agentListContainer.innerHTML = `
+            <div class="text-center py-4">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.5;" class="mb-2">
+                <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+              </svg>
+              <p style="color: var(--text-secondary);">No agents available</p>
+              <p class="small" style="color: var(--text-muted);">Create a new agent to get started</p>
+            </div>
+          `;
+          return;
+        }
+
+        // Render agent list
+        agentListContainer.innerHTML = agents.map(agent => `
+          <div class="agent-select-item p-3 mb-2"
+               style="border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s;"
+               data-agent-name="${escapeHtml(agent.name)}"
+               onclick="selectAgentToAdd('${escapeHtml(agent.name)}', this)">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width: 36px; height: 36px; border-radius: 50%; background: var(--primary-color); display: flex; align-items: center; justify-content: center;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                  <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                </svg>
+              </div>
+              <div class="flex-grow-1">
+                <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
+                <div style="color: var(--text-secondary); font-size: 0.8rem;">${escapeHtml(agent.type || 'tool-calling')} ${agent.model ? '• ' + escapeHtml(agent.model) : ''}</div>
+              </div>
+              <div class="agent-check-icon" style="display: none;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--primary-color)">
+                  <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        `).join('');
+
+      } catch (error) {
+        console.error('Failed to load agents:', error);
+        agentListContainer.innerHTML = `
+          <div class="alert alert-danger">Failed to load agents: ${escapeHtml(error.message)}</div>
+        `;
+      }
+    }
+
+    // Helper to escape HTML
+    function escapeHtml(text) {
+      if (text == null) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Select an agent from the list
+    function selectAgentToAdd(agentName, element) {
+      selectedAgentToAdd = agentName;
+
+      // Update UI - remove selection from all items
+      document.querySelectorAll('.agent-select-item').forEach(item => {
+        item.style.borderColor = 'var(--border-color)';
+        item.style.background = '';
+        item.querySelector('.agent-check-icon').style.display = 'none';
+      });
+
+      // Highlight selected item
+      element.style.borderColor = 'var(--primary-color)';
+      element.style.background = 'rgba(59, 130, 246, 0.1)';
+      element.querySelector('.agent-check-icon').style.display = 'block';
+
+      // Enable add button
+      document.getElementById('canvasAddAgentBtn').disabled = false;
+    }
+
+    // Add selected agent to canvas
+    async function addSelectedAgentToCanvas() {
+      if (!selectedAgentToAdd) {
+        alert('Please select an agent to add');
+        return;
+      }
+
+      const addBtn = document.getElementById('canvasAddAgentBtn');
+      const originalText = addBtn.innerHTML;
+      addBtn.disabled = true;
+      addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
+
+      try {
+        const response = await fetch(`/api/studios/${workspaceId}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: selectedAgentToAdd })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to add agent');
+        }
+
+        console.log('Agent added to canvas:', selectedAgentToAdd);
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentNodeModal'));
+        if (modal) modal.hide();
+
+        // Reload canvas to show new agent
+        if (window.agentCanvas) {
+          await window.agentCanvas.init();
+        }
+
+      } catch (error) {
+        console.error('Error adding agent to canvas:', error);
+        alert(`Failed to add agent: ${error.message}`);
+      } finally {
+        addBtn.disabled = false;
+        addBtn.innerHTML = originalText;
+      }
+    }
+
+    // Submit attachment node from modal
+    async function submitAttachmentNode() {
+      const titleInput = document.getElementById('attachmentTitle');
+      const bodyInput = document.getElementById('attachmentBody');
+      const linkInput = document.getElementById('attachmentLink');
+      const filePathInput = document.getElementById('attachmentFilePath');
+      const addBtn = document.getElementById('addAttachmentNodeBtn');
+
+      const title = titleInput?.value?.trim();
+      if (!title) {
+        alert('Please enter an attachment title');
+        titleInput?.focus();
+        return;
+      }
+
+      const originalText = addBtn.innerHTML;
+      addBtn.disabled = true;
+      addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
+
+      const body = bodyInput?.value || '';
+      const link = linkInput?.value || '';
+      const filePath = filePathInput?.value || '';
+
+      const fileMeta = filePath ? {
+        name: filePath.split('/').pop() || filePath,
+        url: filePath
+      } : null;
+
+      // Guess attachment type
+      let type = 'note';
+      const lowerLink = link.toLowerCase();
+      const lowerName = (fileMeta?.name || '').toLowerCase();
+      if (lowerLink.includes('github.com')) type = 'github';
+      else if (lowerLink.includes('notion.so')) type = 'notion';
+      else if (lowerLink.includes('figma.com')) type = 'figma';
+      else if (lowerLink) type = 'link';
+      else if (lowerName.endsWith('.pdf')) type = 'pdf';
+      else if (/\.(png|jpg|jpeg|gif|webp|svg)$/i.test(lowerName)) type = 'image';
+      else if (/\.(doc|docx|txt|md)$/i.test(lowerName)) type = 'document';
+      else if (fileMeta) type = 'file';
+
+      const attachment = {
+        title: title,
+        body: body,
+        type: type,
+        color: '',
+        link_url: link,
+        file_meta: fileMeta,
+        x: 140,
+        y: 140
+      };
+
+      try {
+        const response = await fetch(`/api/studios/${workspaceId}/attachments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(attachment)
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to create attachment');
+        }
+
+        console.log('Attachment created successfully');
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addAttachmentNodeModal'));
+        if (modal) modal.hide();
+
+        // Reload canvas to show new attachment
+        if (window.agentCanvas) {
+          await window.agentCanvas.init();
+        }
+
+      } catch (error) {
+        console.error('Error creating attachment:', error);
+        alert(`Failed to create attachment: ${error.message}`);
+      } finally {
+        addBtn.disabled = false;
+        addBtn.innerHTML = originalText;
+      }
+    }
+
+    // Submit task node from modal
+    async function submitTaskNode() {
+      const descriptionInput = document.getElementById('taskDescription');
+      const priorityInput = document.getElementById('taskPriority');
+      const addBtn = document.getElementById('addTaskNodeBtn');
+
+      const description = descriptionInput?.value?.trim();
+      if (!description) {
+        alert('Please enter a task description');
+        descriptionInput?.focus();
+        return;
+      }
+
+      const originalText = addBtn.innerHTML;
+      addBtn.disabled = true;
+      addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
+
+      const task = {
+        description: description,
+        priority: priorityInput?.value || 'medium',
+        status: 'pending',
+        x: 100,
+        y: 100
+      };
+
+      try {
+        const response = await fetch(`/api/studios/${workspaceId}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(task)
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to create task');
+        }
+
+        console.log('Task created successfully');
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addTaskNodeModal'));
+        if (modal) modal.hide();
+
+        // Reload canvas to show new task
+        if (window.agentCanvas) {
+          await window.agentCanvas.init();
+        }
+
+      } catch (error) {
+        console.error('Error creating task:', error);
+        alert(`Failed to create task: ${error.message}`);
+      } finally {
+        addBtn.disabled = false;
+        addBtn.innerHTML = originalText;
+      }
+    }
+
+    // Switch to create agent modal
+    function switchToCreateAgentModal() {
+      // Hide add agent modal
+      const addModal = bootstrap.Modal.getInstance(document.getElementById('addAgentNodeModal'));
+      if (addModal) addModal.hide();
+
+      // Show create agent modal
+      setTimeout(() => {
+        showCreateAgentModal();
+      }, 300);
+    }
+
+    // Show create agent modal (for creating new agents)
+    async function showCreateAgentModal() {
       const modal = new bootstrap.Modal(document.getElementById('createAgentModal'));
       const agentNameInput = document.getElementById('canvasAgentName');
       const agentTypeInput = document.getElementById('canvasAgentType');
@@ -1020,6 +1460,17 @@
 
         console.log('Agent created successfully:', agentName);
 
+        // Also add the new agent to the canvas
+        const addResponse = await fetch(`/api/studios/${workspaceId}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
+        });
+
+        if (!addResponse.ok) {
+          console.warn('Agent created but failed to add to canvas:', await addResponse.text());
+        }
+
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('createAgentModal'));
         if (modal) modal.hide();
@@ -1027,6 +1478,11 @@
         // Refresh sidebar agents list
         if (typeof loadAgentsForSidebar === 'function') {
           await loadAgentsForSidebar();
+        }
+
+        // Reload canvas to show new agent
+        if (window.agentCanvas) {
+          await window.agentCanvas.init();
         }
 
       } catch (error) {

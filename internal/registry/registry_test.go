@@ -2,6 +2,7 @@ package registry
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,7 +21,6 @@ func setupTestManager(t *testing.T) (*Manager, string) {
 	manager := NewManager()
 	// Override paths to use temp directory
 	manager.localRegistryPath = tmpDir + "/local_plugin_registry.json"
-	manager.cachePath = tmpDir + "/plugin_registry_cache.json"
 	manager.uploadedPluginsDir = tmpDir + "/uploaded_plugins"
 
 	return manager, tmpDir
@@ -593,6 +593,39 @@ func TestManager_MigrateExistingPlugins_NoRegistryFile(t *testing.T) {
 	// Should NOT error - LoadLocal returns empty registry when file doesn't exist
 	if err != nil {
 		t.Errorf("MigrateExistingPlugins() should not error when no registry file exists, got: %v", err)
+	}
+}
+
+func TestManager_FetchFromMarketplace_LocalFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "registry-local-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	registryPath := filepath.Join(tmpDir, "plugin_registry.json")
+	registryData := []byte(`{"plugins":[{"name":"local-plugin","description":"Local plugin"}]}`)
+	if err := os.WriteFile(registryPath, registryData, 0644); err != nil {
+		t.Fatalf("Failed to write registry file: %v", err)
+	}
+
+	manager := &Manager{}
+	mp := types.Marketplace{
+		ID:         "local",
+		Name:       "Local Marketplace",
+		Source:     registryPath,
+		SourceType: "file",
+	}
+
+	reg, err := manager.FetchFromMarketplace(mp)
+	if err != nil {
+		t.Fatalf("FetchFromMarketplace() error = %v", err)
+	}
+	if len(reg.Plugins) != 1 {
+		t.Fatalf("expected 1 plugin, got %d", len(reg.Plugins))
+	}
+	if reg.Plugins[0].Name != "local-plugin" {
+		t.Fatalf("expected plugin name %q, got %q", "local-plugin", reg.Plugins[0].Name)
 	}
 }
 

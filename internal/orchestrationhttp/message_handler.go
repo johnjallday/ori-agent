@@ -85,7 +85,7 @@ func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Reque
 		messages = ws.GetMessagesSince(time.Time{}) // epoch time returns all messages
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"messages": messages,
 		"count":    len(messages),
 	})
@@ -138,7 +138,7 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 	logger.Info("Added message from agent to workspace", logger.Fields{"from": msg.From, "workspace_id": ws.ID})
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success":    true,
 		"message_id": msg.ID,
 		"timestamp":  msg.Timestamp,

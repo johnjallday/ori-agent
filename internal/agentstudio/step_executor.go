@@ -61,7 +61,7 @@ func (se *StepExecutor) Start() {
 
 // Stop gracefully stops the step executor
 func (se *StepExecutor) Stop() {
-	logger.Debug("⏹️ Stopping step executor...", logger.Fields{})
+	logger.Debug("Stopping step executor", logger.Fields{})
 	close(se.stopChan)
 
 	// Cancel all running steps

@@ -157,6 +157,26 @@ body::before {
     color: var(--primary-color) !important;
 }
 
+.nav-badge {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--warning-color);
+    color: #1f2937;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
 /* Modern Button Styles */
 .modern-btn {
     border-radius: var(--radius-md);

@@ -90,8 +90,10 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		if r.URL.Query().Get("online_only") == "true" {
 			filtered := make([]types.PluginRegistryEntry, 0, len(reg.Plugins))
 			for _, p := range reg.Plugins {
-				// Include plugin if it has marketplace indicators (DownloadURL or GitHubRepo)
-				isOnlinePlugin := strings.TrimSpace(p.DownloadURL) != "" || strings.TrimSpace(p.GitHubRepo) != ""
+				// Include plugin if it has marketplace indicators or came from a marketplace source.
+				isOnlinePlugin := strings.TrimSpace(p.DownloadURL) != "" ||
+					strings.TrimSpace(p.GitHubRepo) != "" ||
+					strings.TrimSpace(p.SourceMarketplace) != ""
 				if isOnlinePlugin {
 					filtered = append(filtered, p)
 				}
@@ -116,7 +118,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			reg.Plugins = compatiblePlugins
 		}
 
-		_ = json.NewEncoder(w).Encode(reg)
+		orihttp.WriteJSON(w, reg)
 
 	case http.MethodPost:
 		var req struct {
@@ -275,7 +277,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 			if settingsErr != nil {
 				// If no settings operation works, just log the basic load message
-				logger.Info("🔌 Plugin '' loaded successfully!", logger.Fields{"plugin": def.Name})
+				logger.Info("Plugin loaded successfully", logger.Fields{"plugin": def.Name})
 				return
 			}
 
@@ -385,7 +387,7 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"available_updates": updates,
 			"count":             len(updates),
 		})
@@ -439,7 +441,7 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"updated": updated,
 			"errors":  errors,
 		})

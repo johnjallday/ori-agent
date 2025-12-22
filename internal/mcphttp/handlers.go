@@ -572,14 +572,13 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-
-				// For now, return a curated list of well-known MCP servers
-				// TODO: Fetch from external registry in the future
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// For now, return a curated list of well-known MCP servers
+	// TODO: Fetch from external registry in the future
 
 	marketplaceServers := []map[string]interface{}{
 		{

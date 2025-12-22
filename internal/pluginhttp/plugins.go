@@ -132,7 +132,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 				})
 			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
+		orihttp.WriteJSON(w, map[string]any{"plugins": plist})
 		return
 	}
 
@@ -223,7 +223,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plist})
+	orihttp.WriteJSON(w, map[string]any{"plugins": plist})
 }
 
 func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {

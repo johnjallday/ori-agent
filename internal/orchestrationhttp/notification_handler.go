@@ -61,7 +61,7 @@ func (nh *NotificationHandler) handleGetNotifications(w http.ResponseWriter, r *
 	if agentName != "" && unreadOnly {
 		// Get unread notifications for agent
 		notifications := nh.notificationService.GetUnreadForAgent(agentName)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"notifications": notifications,
 			"count":         len(notifications),
 		})
@@ -72,7 +72,7 @@ func (nh *NotificationHandler) handleGetNotifications(w http.ResponseWriter, r *
 	limit := 50
 	notifications := nh.notificationService.GetHistory(limit)
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"notifications": notifications,
 		"count":         len(notifications),
 	})
@@ -99,7 +99,7 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	if req.MarkAll && req.AgentName != "" {
 
 		nh.notificationService.MarkAllAsRead(req.AgentName)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
 			"message": "All notifications marked as read",
 		})
@@ -109,7 +109,7 @@ func (nh *NotificationHandler) handleMarkNotificationsRead(w http.ResponseWriter
 	if req.NotificationID != "" {
 		// Mark specific notification as read
 		nh.notificationService.MarkAsRead(req.NotificationID)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
 			"message": "Notification marked as read",
 		})
@@ -261,7 +261,7 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 		events = nh.eventBus.GetHistory(nil, limit)
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"events": events,
 		"count":  len(events),
 	})

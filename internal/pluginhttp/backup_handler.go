@@ -110,7 +110,7 @@ func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success":        true,
 		"message":        fmt.Sprintf("Successfully imported %d plugin configuration(s)", importedCount),
 		"imported_count": importedCount,

@@ -3,8 +3,6 @@ package chathttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-
 	"net/http"
 	"os"
 	"strings"
@@ -49,19 +47,10 @@ func (ch *CommandHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current agent information
-	names, current := ch.store.ListAgents()
-	if current == "" && len(names) > 0 {
-		current = names[0] // fallback to first available agent
-	}
-
-	ag, ok := ch.store.GetAgent(current)
+	ag, current, ok := store.GetCurrentAgent(ch.store)
 	if !ok {
 		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-			logger.
-
-				// Get API key status - this would need to be passed in or accessed differently
-				// For now, we'll simplify this
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -118,18 +107,10 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 
 	// Get current agent information
-	names, current := ch.store.ListAgents()
-	if current == "" && len(names) > 0 {
-		current = names[0] // fallback to first available agent
-	}
-
-	ag, ok := ch.store.GetAgent(current)
+	ag, _, ok := store.GetCurrentAgent(ch.store)
 	if !ok {
 		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-			logger.
-
-				// Build tools list response
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -651,10 +632,10 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 
 		if ch.shutdownFunc != nil {
-			log.Println("Executing shutdown via /exit command...")
+			logger.Info("Executing shutdown via /exit command", logger.Fields{})
 			ch.shutdownFunc()
 		} else {
-			log.Println("Shutdown function not set, exiting immediately...")
+			logger.Warn("Shutdown function not set, exiting immediately", logger.Fields{})
 			os.Exit(0)
 		}
 	}()

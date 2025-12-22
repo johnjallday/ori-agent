@@ -1,19 +1,17 @@
 package pluginhttp
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 )
-import
 
 // PermissionsHandler handles plugin permission management operations
-"github.com/johnjallday/ori-agent/internal/logger"
 
 type PermissionsHandler struct {
 	PermissionManager *pluginmanager.PermissionManager
@@ -61,7 +59,7 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(permissionEntry)
+	orihttp.WriteJSON(w, permissionEntry)
 }
 
 // HandleApprovePermissions approves requested permissions for a plugin
@@ -106,7 +104,7 @@ func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Permissions approved for plugin %s", pluginName),
 	})

@@ -3,7 +3,6 @@ package pluginhttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,17 +11,17 @@ import (
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
-import
 
 // PluginsPageHandler handles endpoints for the dedicated plugins management page
-"github.com/johnjallday/ori-agent/internal/logger"
 
 type PluginsPageHandler struct {
 	Store             store.Store
@@ -30,6 +29,7 @@ type PluginsPageHandler struct {
 	CategoryManager   *pluginmanager.CategoryManager
 	PermissionManager *pluginmanager.PermissionManager
 	Loader            ToolLoader
+	UpdateService     *pluginupdateservice.Service
 }
 
 // NewPluginsPageHandler creates a new handler for the plugins page
@@ -47,6 +47,11 @@ func NewPluginsPageHandler(
 		PermissionManager: permMgr,
 		Loader:            loader,
 	}
+}
+
+// SetUpdateService injects the plugin update service.
+func (h *PluginsPageHandler) SetUpdateService(svc *pluginupdateservice.Service) {
+	h.UpdateService = svc
 }
 
 // HandleListPlugins returns a list of all plugins with their status, categories, and permissions
@@ -128,6 +133,11 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			"agents":               agents,
 			"metadata":             plugin.Metadata,
 		}
+		if h.UpdateService != nil {
+			pluginInfo["needs_update"] = h.UpdateService.HasUpdateForPlugin(plugin.Name)
+		} else {
+			pluginInfo["needs_update"] = false
+		}
 
 		plugins = append(plugins, pluginInfo)
 	}
@@ -137,7 +147,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	orihttp.WriteJSON(w, response)
 }
 
 // HandleListPluginTags lists all unique tags across plugins.
@@ -176,7 +186,7 @@ func (h *PluginsPageHandler) HandleListPluginTags(w http.ResponseWriter, r *http
 	sort.Strings(out)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tags": out})
+	orihttp.WriteJSON(w, map[string]interface{}{"tags": out})
 }
 
 // HandleListPluginsByTag returns plugins filtered by tag.
@@ -213,7 +223,7 @@ func (h *PluginsPageHandler) HandleListPluginsByTag(w http.ResponseWriter, r *ht
 func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			log.Printf("Failed to write method not allowed response: %v", err)
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -222,7 +232,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	pluginName := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	if pluginName == "" || pluginName == "/api/plugins/" {
 		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
-			log.Printf("Failed to write bad request response: %v", err)
+			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -234,7 +244,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	plugin, err := h.RegistryManager.GetPluginByName(pluginName)
 	if err != nil {
 		if encodeErr := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin not found: %v", err)); encodeErr != nil {
-			log.Printf("Failed to write not found response: %v", encodeErr)
+			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
 		}
 		return
 	}
@@ -279,7 +289,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(details)
+	orihttp.WriteJSON(w, details)
 }
 
 func pluginAllTags(plugin *types.PluginRegistryEntry) []string {
@@ -622,14 +632,13 @@ func (h *PluginsPageHandler) HandleGetPluginLogs(w http.ResponseWriter, r *http.
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
 		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
-			logger.
-
-				// For now, return placeholder logs
-				// TODO: Implement actual log collection from plugin execution
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// For now, return placeholder logs
+	// TODO: Implement actual log collection from plugin execution
 
 	logs := []map[string]interface{}{
 		{
@@ -796,7 +805,7 @@ func (h *PluginsPageHandler) HandleReloadPlugin(w http.ResponseWriter, r *http.R
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s reloaded successfully", pluginName),
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"error": err})
 	}
 }
 
@@ -813,10 +822,7 @@ func (h *PluginsPageHandler) HandleGetPluginAgents(w http.ResponseWriter, r *htt
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
 		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
-			logger.
-
-				// Get plugin from registry
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -848,7 +854,7 @@ func (h *PluginsPageHandler) HandleGetPluginAgents(w http.ResponseWriter, r *htt
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"agents": agents,
 	}); err != nil {
-		log.Printf("Failed to encode response: %v", err)
+		logger.Error("Failed to encode response", logger.Fields{"error": err})
 	}
 }
 

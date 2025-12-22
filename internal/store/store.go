@@ -26,3 +26,25 @@ type Store interface {
 	// Persistence
 	Save() error
 }
+
+// GetCurrentAgent returns the current agent and its name from the store.
+// If no current agent is set, it falls back to the first available agent.
+// Returns nil, "", false if no agents exist.
+func GetCurrentAgent(s Store) (*agent.Agent, string, bool) {
+	names, current := s.ListAgents()
+	if len(names) == 0 {
+		return nil, "", false
+	}
+
+	// Fall back to first agent if no current is set
+	if current == "" {
+		current = names[0]
+	}
+
+	ag, found := s.GetAgent(current)
+	if !found || ag == nil {
+		return nil, "", false
+	}
+
+	return ag, current, true
+}

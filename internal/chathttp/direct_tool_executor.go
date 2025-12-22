@@ -139,26 +139,7 @@ func (h *Handler) executeDirectTool(ctx context.Context, ag *agent.Agent, cmd *D
 	var toolResult string
 	var err error
 
-	// Check if the plugin supports file attachments and files are provided
-	if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(cmd.Files) > 0 {
-		// Filter files to only those accepted by the plugin
-		acceptedTypes := fileHandler.AcceptsFiles()
-		filteredFiles := pluginapi.FilterFilesByAcceptedTypes(cmd.Files, acceptedTypes)
-
-		if len(filteredFiles) > 0 {
-			logger.Debug("Direct tool execution with files", logger.Fields{
-				"tool":       cmd.ToolName,
-				"file_count": len(filteredFiles),
-			})
-			toolResult, err = fileHandler.CallWithFiles(toolCtx, cmd.Args, filteredFiles)
-		} else {
-			// No matching files, fall back to regular call
-			toolResult, err = tool.Call(toolCtx, cmd.Args)
-		}
-	} else {
-		// Regular call without files
-		toolResult, err = tool.Call(toolCtx, cmd.Args)
-	}
+	toolResult, err = ExecuteToolWithFilesDebug(toolCtx, tool, cmd.ToolName, cmd.Args, cmd.Files)
 	duration := time.Since(startTime)
 
 	// Record call stats in health manager

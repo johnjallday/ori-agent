@@ -1,18 +1,16 @@
 package pluginhttp
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
-import
 
 // NotificationsHandler handles plugin notification operations
-"github.com/johnjallday/ori-agent/internal/logger"
 
 type NotificationsHandler struct {
 	NotificationManager *pluginmanager.NotificationManager
@@ -44,7 +42,7 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	orihttp.WriteJSON(w, response)
 }
 
 // HandleDismissNotification dismisses a specific notification
@@ -73,7 +71,7 @@ func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Notification dismissed successfully",
 	})

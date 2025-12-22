@@ -242,12 +242,19 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 	}
 
 	// Always check for existing settings file first, regardless of plugin load status
+	// Try multiple name variations (underscores vs hyphens) to handle naming inconsistencies
+	normalizedName := registry.NormalizePluginName(pluginName)
 	settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
 	var currentValues map[string]interface{}
 	isInitialized := false
 
 	if fileData, err := os.ReadFile(settingsFilePath); err == nil {
 		// File exists, parse current values
+		if err := json.Unmarshal(fileData, &currentValues); err == nil {
+			isInitialized = true
+		}
+	} else if fileData, err := os.ReadFile(fmt.Sprintf("agents/%s/%s_settings.json", current, normalizedName)); err == nil {
+		// Try normalized name (hyphens)
 		if err := json.Unmarshal(fileData, &currentValues); err == nil {
 			isInitialized = true
 		}

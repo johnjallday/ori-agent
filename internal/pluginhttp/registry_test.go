@@ -69,18 +69,18 @@ func setupTestRegistry(t *testing.T, plugins []types.PluginRegistryEntry) *regis
 		_ = os.Chdir(originalWd)
 	})
 
-	// Write test registry to cache file (this is what the Manager will load)
+	// Write test registry to local registry file (this is what LoadLocal() reads)
 	reg := types.PluginRegistry{Plugins: plugins}
 	data, err := json.Marshal(reg)
 	if err != nil {
 		t.Fatalf("Failed to marshal test registry: %v", err)
 	}
 
-	if err := os.WriteFile("plugin_registry_cache.json", data, 0644); err != nil {
-		t.Fatalf("Failed to write test cache file: %v", err)
+	if err := os.WriteFile("local_plugin_registry.json", data, 0644); err != nil {
+		t.Fatalf("Failed to write test local registry file: %v", err)
 	}
 
-	// Create registry manager (it will load from the cache file we just created)
+	// Create registry manager (it will load from the local registry file we just created)
 	return registry.NewManager()
 }
 

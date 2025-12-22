@@ -300,7 +300,9 @@ jobs:
       - name: Create MSI
         shell: pwsh
         run: |
-          $VERSION = (Get-Content VERSION).Trim() + "-next"
+          # WiX requires numeric versions like x.x.x.x (no 'v' prefix or text suffixes)
+          $VERSION = (Get-Content VERSION).Trim() -replace '^v', ''
+          $VERSION = "$VERSION.0"  # Add fourth component for WiX compatibility
           .\build\windows\create-msi.ps1 -Version $VERSION -Arch "amd64"
 
       - name: Install MSI
