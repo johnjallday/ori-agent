@@ -3,10 +3,8 @@ package agenthttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-	"regexp"
-
 	"net/http"
+	"regexp"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -147,8 +145,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		log.Printf("📝 CreateAgent request: name=%q, type=%q, model=%q, temperature=%v",
-			req.Name, req.Type, req.Model, req.Temperature)
+		logger.Debug("CreateAgent request", logger.Fields{
+			"name": req.Name, "type": req.Type, "model": req.Model, "temperature": req.Temperature,
+		})
 
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
@@ -169,7 +168,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			MaxOutputTokens: req.MaxOutputTokens,
 		}
 
-		logger.Debug("🔄 Creating agent", logger.Fields{"agent": req.Name})
+		logger.Debug("Creating agent", logger.Fields{"agent": req.Name})
 		if err := h.State.CreateAgent(req.Name, config); err != nil {
 			logger.Error("CreateAgent error", logger.Fields{"error": err})
 			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {

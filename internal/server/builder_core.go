@@ -156,7 +156,7 @@ func (b *ServerBuilder) initializeCostTracker() error {
 	usageDataDir := resolveCostTrackerDir()
 	b.server.costTracker = llm.NewCostTracker(usageDataDir)
 	if verbose {
-		logger.Debug("💰 Cost tracker initialized", logger.Fields{"cost": usageDataDir})
+		logger.Debug("Cost tracker initialized", logger.Fields{"dir": usageDataDir})
 	}
 	return nil
 }

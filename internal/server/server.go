@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"log"
-
 	"net/http"
 	"os"
 	"path/filepath"
@@ -151,7 +149,7 @@ func (s *Server) Shutdown() {
 
 // cleanupPlugins closes all RPC plugin connections for all agents
 func (s *Server) cleanupPlugins() {
-	log.Println("Cleaning up plugins...")
+	logger.Debug("Cleaning up plugins", logger.Fields{})
 
 	agentNames, _ := s.Storage.ListAgents()
 	cleanedCount := 0

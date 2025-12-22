@@ -110,7 +110,7 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 				logger.Error("Failed to save workspace after orphaned task cleanup", logger.Fields{"workspace_id": wsID, "err": err})
 			} else {
 				totalReset += resetCount
-				logger.Debug("🔄 Reset orphaned task(s) in workspace", logger.Fields{"task_id": resetCount, "wsID": wsID})
+				logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": wsID})
 			}
 		}
 	}
@@ -122,7 +122,7 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 
 // Stop gracefully stops the task executor
 func (te *TaskExecutor) Stop() {
-	logger.Debug("⏹️ Stopping task executor...", logger.Fields{})
+	logger.Debug("Stopping task executor", logger.Fields{})
 	close(te.stopChan)
 
 	// Cancel all running tasks

@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // NotificationType represents the type of notification
@@ -193,7 +192,7 @@ func (n *Notifier) Enable() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.enabled = true
-	log.Println("Notifications enabled")
+	logger.Info("Notifications enabled", logger.Fields{})
 }
 
 // Disable disables notifications
@@ -201,7 +200,7 @@ func (n *Notifier) Disable() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.enabled = false
-	log.Println("Notifications disabled")
+	logger.Info("Notifications disabled", logger.Fields{})
 }
 
 // Stop stops the notifier

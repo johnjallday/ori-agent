@@ -3,11 +3,10 @@ package agentstudio
 import (
 	"context"
 	"fmt"
-	"log"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // NotificationPriority represents the priority of a notification
@@ -179,7 +178,7 @@ func (ns *NotificationService) Subscribe(agentName string) NotificationChannel {
 	ch := make(NotificationChannel, 100)
 	ns.channels[agentName] = ch
 
-	logger.Debug("📬 Agent subscribed to notifications", logger.Fields{"agent": agentName})
+	logger.Debug("Agent subscribed to notifications", logger.Fields{"agent": agentName})
 	return ch
 }
 
@@ -191,7 +190,7 @@ func (ns *NotificationService) Unsubscribe(agentName string) {
 	if ch, exists := ns.channels[agentName]; exists {
 		close(ch)
 		delete(ns.channels, agentName)
-		logger.Debug("📪 Agent unsubscribed from notifications", logger.Fields{"agent": agentName})
+		logger.Debug("Agent unsubscribed from notifications", logger.Fields{"agent": agentName})
 	}
 }
 
@@ -349,11 +348,11 @@ func (ns *NotificationService) Shutdown() {
 
 	for agentName, ch := range ns.channels {
 		close(ch)
-		logger.Debug("📪 Closed notification channel for agent", logger.Fields{"agent": agentName})
+		logger.Debug("Closed notification channel for agent", logger.Fields{"agent": agentName})
 	}
 	ns.channels = make(map[string]NotificationChannel)
 
-	log.Println("✅ Notification service shutdown complete")
+	logger.Info("Notification service shutdown complete", logger.Fields{})
 }
 
 // addToHistory adds a notification to the ring buffer history

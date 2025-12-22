@@ -275,7 +275,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 			if settingsErr != nil {
 				// If no settings operation works, just log the basic load message
-				logger.Info("🔌 Plugin '' loaded successfully!", logger.Fields{"plugin": def.Name})
+				logger.Info("Plugin loaded successfully", logger.Fields{"plugin": def.Name})
 				return
 			}
 

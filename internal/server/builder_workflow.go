@@ -3,7 +3,6 @@
 package server
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,12 +37,12 @@ func (b *ServerBuilder) initializeEventSystem() error {
 
 	b.server.eventBus = agentstudio.DefaultEventBus()
 	if verbose {
-		log.Println("✅ Event bus initialized")
+		logger.Info("Event bus initialized", logger.Fields{})
 	}
 
 	b.server.notificationService = agentstudio.NewNotificationService(b.server.eventBus, 500)
 	if verbose {
-		log.Println("✅ Notification service initialized")
+		logger.Info("Notification service initialized", logger.Fields{})
 	}
 
 	return nil
@@ -102,12 +101,12 @@ func (b *ServerBuilder) initializeStudioOrchestrator() error {
 	llmAdapter := agentstudio.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
 	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, llmAdapter, b.server.eventBus)
 	if verbose {
-		log.Println("✅ Agent Studio orchestrator initialized")
+		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
 	}
 
 	b.server.studioHandler = agentstudio.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
 	if verbose {
-		log.Println("✅ Agent Studio HTTP handler initialized")
+		logger.Info("Agent Studio HTTP handler initialized", logger.Fields{})
 	}
 
 	return nil

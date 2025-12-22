@@ -74,7 +74,7 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 							logger.Error("Error", logger.Fields{"error": err})
 						}
 						if healthResult.Health.Recommendation != "" {
-							logger.Debug("💡 Recommendation", logger.Fields{"recommendation": healthResult.Health.Recommendation})
+							logger.Debug("Recommendation", logger.Fields{"recommendation": healthResult.Health.Recommendation})
 						}
 					}
 					unhealthySummary = append(unhealthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))

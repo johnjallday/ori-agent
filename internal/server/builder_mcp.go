@@ -39,7 +39,7 @@ func (b *ServerBuilder) initializeMCP() error {
 	}
 
 	if verbose {
-		logger.Debug("🔌 MCP system initialized with configured servers", logger.Fields{"server": len(mcpGlobalConfig.Servers)})
+		logger.Debug("MCP system initialized", logger.Fields{"server_count": len(mcpGlobalConfig.Servers)})
 	}
 
 	return nil

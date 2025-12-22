@@ -3,13 +3,13 @@
 package server
 
 import (
-	"log"
 	"os"
 
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
@@ -35,9 +35,9 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.chatHandler.SetMCPRegistry(s.mcpRegistry)
 	s.chatHandler.SetWorkspaceStore(s.workspaceStore) // Will be set later
 	s.chatHandler.SetShutdownFunc(func() {
-		log.Println("🛑 Shutting down ori-agent server...")
+		logger.Info("Shutting down ori-agent server", logger.Fields{})
 		s.Shutdown()
-		log.Println("✅ Server shut down complete. Exiting...")
+		logger.Info("Server shut down complete, exiting", logger.Fields{})
 		os.Exit(0)
 	})
 

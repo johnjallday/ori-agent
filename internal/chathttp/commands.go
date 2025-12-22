@@ -3,8 +3,6 @@ package chathttp
 import (
 	"encoding/json"
 	"fmt"
-	"log"
-
 	"net/http"
 	"os"
 	"strings"
@@ -634,10 +632,10 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 
 		if ch.shutdownFunc != nil {
-			log.Println("Executing shutdown via /exit command...")
+			logger.Info("Executing shutdown via /exit command", logger.Fields{})
 			ch.shutdownFunc()
 		} else {
-			log.Println("Shutdown function not set, exiting immediately...")
+			logger.Warn("Shutdown function not set, exiting immediately", logger.Fields{})
 			os.Exit(0)
 		}
 	}()
