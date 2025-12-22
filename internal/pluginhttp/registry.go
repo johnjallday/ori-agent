@@ -90,8 +90,10 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		if r.URL.Query().Get("online_only") == "true" {
 			filtered := make([]types.PluginRegistryEntry, 0, len(reg.Plugins))
 			for _, p := range reg.Plugins {
-				// Include plugin if it has marketplace indicators (DownloadURL or GitHubRepo)
-				isOnlinePlugin := strings.TrimSpace(p.DownloadURL) != "" || strings.TrimSpace(p.GitHubRepo) != ""
+				// Include plugin if it has marketplace indicators or came from a marketplace source.
+				isOnlinePlugin := strings.TrimSpace(p.DownloadURL) != "" ||
+					strings.TrimSpace(p.GitHubRepo) != "" ||
+					strings.TrimSpace(p.SourceMarketplace) != ""
 				if isOnlinePlugin {
 					filtered = append(filtered, p)
 				}

@@ -199,11 +199,20 @@ class PluginMarketplace {
             const result = await response.json();
 
             if (result.valid) {
+                const typeLabel = result.source_type === 'github'
+                    ? 'GitHub'
+                    : result.source_type === 'gitlab'
+                    ? 'GitLab'
+                    : result.source_type === 'bitbucket'
+                    ? 'Bitbucket'
+                    : result.source_type === 'file'
+                    ? 'Local File'
+                    : 'Direct URL';
                 resultDiv.innerHTML = `
                     <div class="alert alert-success mb-0">
                         <strong>Valid source!</strong><br>
                         <small>Found ${result.plugin_count} plugin(s)</small><br>
-                        <small class="text-muted">Type: ${result.source_type === 'github' ? 'GitHub' : result.source_type === 'gitlab' ? 'GitLab' : 'Direct URL'}</small>
+                        <small class="text-muted">Type: ${typeLabel}</small>
                     </div>`;
                 saveBtn.disabled = false;
             } else {
@@ -251,6 +260,16 @@ class PluginMarketplace {
 
             // Show success message
             alert('Marketplace added! Refreshing plugins...');
+
+            const marketplacesResp = await fetch('/api/marketplaces');
+            if (marketplacesResp.ok) {
+                const marketplacesData = await marketplacesResp.json();
+                const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
+                if (matches.length > 0) {
+                    const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
+                    await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
+                }
+            }
 
             // Reload marketplace data
             await this.loadMarketplaceData();

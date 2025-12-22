@@ -87,7 +87,7 @@ class MarketplaceSettings {
                     </div>
                     <small style="color: var(--text-secondary);">
                         ${this.escapeHtml(mp.source)}
-                        ${mp.source_type === 'github' ? ' <span class="badge bg-dark">GitHub</span>' : ''}
+                        ${mp.source_type === 'github' ? ' <span class="badge bg-dark">GitHub</span>' : mp.source_type === 'file' ? ' <span class="badge bg-info text-dark">Local File</span>' : ''}
                     </small>
                 </div>
                 <div class="form-check form-switch me-3">
@@ -224,11 +224,20 @@ class MarketplaceSettings {
             const result = await response.json();
 
             if (result.valid) {
+                const typeLabel = result.source_type === 'github'
+                    ? 'GitHub Repository'
+                    : result.source_type === 'gitlab'
+                    ? 'GitLab URL'
+                    : result.source_type === 'bitbucket'
+                    ? 'Bitbucket URL'
+                    : result.source_type === 'file'
+                    ? 'Local File'
+                    : 'Direct URL';
                 resultDiv.innerHTML = `
                     <div class="alert alert-success mb-0 mt-3">
                         <strong>Valid marketplace!</strong><br>
                         <small>Found ${result.plugin_count} plugin(s)</small><br>
-                        <small class="text-muted">Type: ${result.source_type === 'github' ? 'GitHub Repository' : 'Direct URL'}</small>
+                        <small class="text-muted">Type: ${typeLabel}</small>
                     </div>`;
                 saveBtn.disabled = false;
             } else {
@@ -272,6 +281,15 @@ class MarketplaceSettings {
 
             this.modal.hide();
             this.showAlert('success', 'Marketplace added successfully');
+            const marketplacesResp = await fetch('/api/marketplaces');
+            if (marketplacesResp.ok) {
+                const marketplacesData = await marketplacesResp.json();
+                const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
+                if (matches.length > 0) {
+                    const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
+                    await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
+                }
+            }
             await this.loadMarketplaces();
             this.render();
         } catch (error) {

@@ -125,11 +125,7 @@ func (s *Store) Add(m types.Marketplace) error {
 
 	// Auto-detect source type if not set
 	if m.SourceType == "" {
-		if m.IsGitHub() {
-			m.SourceType = "github"
-		} else {
-			m.SourceType = "url"
-		}
+		m.SourceType = types.DetectMarketplaceSourceType(m.Source)
 	}
 
 	// Set order to be last

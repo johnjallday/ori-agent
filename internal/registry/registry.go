@@ -246,19 +246,31 @@ func (m *Manager) FetchFromMarketplace(mp types.Marketplace) (types.PluginRegist
 	var reg types.PluginRegistry
 
 	url := mp.ResolveURL()
-	resp, err := http.Get(url)
-	if err != nil {
-		return reg, fmt.Errorf("failed to fetch from %s: %w", mp.Name, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	var data []byte
+	if mp.SourceType == "file" || types.DetectMarketplaceSourceType(mp.Source) == "file" {
+		path, err := types.ResolveLocalMarketplacePath(mp.Source)
+		if err != nil {
+			return reg, fmt.Errorf("failed to resolve local marketplace %s: %w", mp.Name, err)
+		}
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return reg, fmt.Errorf("failed to read local marketplace %s: %w", mp.Name, err)
+		}
+	} else {
+		resp, err := http.Get(url)
+		if err != nil {
+			return reg, fmt.Errorf("failed to fetch from %s: %w", mp.Name, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return reg, fmt.Errorf("marketplace %s returned status %d", mp.Name, resp.StatusCode)
-	}
+		if resp.StatusCode != http.StatusOK {
+			return reg, fmt.Errorf("marketplace %s returned status %d", mp.Name, resp.StatusCode)
+		}
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return reg, fmt.Errorf("failed to read response from %s: %w", mp.Name, err)
+		data, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return reg, fmt.Errorf("failed to read response from %s: %w", mp.Name, err)
+		}
 	}
 
 	// Try to parse as the new metadata format first

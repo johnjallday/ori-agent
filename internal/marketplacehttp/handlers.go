@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -99,14 +100,7 @@ func (h *Handler) AddMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Detect source type
-	sourceType := "url"
-	source := strings.TrimSpace(req.Source)
-	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
-		parts := strings.Split(source, "/")
-		if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
-			sourceType = "github"
-		}
-	}
+	sourceType := types.DetectMarketplaceSourceType(strings.TrimSpace(req.Source))
 
 	mp := types.Marketplace{
 		Name:       req.Name,
@@ -293,36 +287,74 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 	resp := TestMarketplaceResponse{}
 
 	source := strings.TrimSpace(req.Source)
-
-	// Create a temporary marketplace to leverage ResolveURL logic
-	tempMarketplace := types.Marketplace{
-		Source: source,
-	}
-	resp.ResolvedURL = tempMarketplace.ResolveURL()
-
-	// Detect source type for response
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+	sourceType := types.DetectMarketplaceSourceType(source)
+	resp.SourceType = sourceType
+	if sourceType == "url" && (strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://")) {
 		if strings.Contains(source, "gitlab.com") || strings.Contains(source, "gitlab.") {
 			resp.SourceType = "gitlab"
 		} else if strings.Contains(source, "bitbucket.org") || strings.Contains(source, "bitbucket.") {
 			resp.SourceType = "bitbucket"
 		} else if strings.Contains(source, "github.com") {
 			resp.SourceType = "github"
-		} else {
-			resp.SourceType = "url"
 		}
-	} else {
-		parts := strings.Split(source, "/")
-		if len(parts) == 2 && len(parts[0]) > 0 && len(parts[1]) > 0 {
-			resp.SourceType = "github"
-		} else {
+	}
+
+	if sourceType == "file" {
+		path, err := types.ResolveLocalMarketplacePath(source)
+		if err != nil {
 			resp.Valid = false
-			resp.Error = "Invalid source format. Use a URL or GitHub repo (user/repo)"
+			resp.Error = err.Error()
 			w.Header().Set("Content-Type", "application/json")
 			orihttp.WriteJSON(w, resp)
 			return
 		}
+		resp.ResolvedURL = path
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			resp.Valid = false
+			resp.Error = fmt.Sprintf("Failed to read file: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			orihttp.WriteJSON(w, resp)
+			return
+		}
+
+		var reg types.PluginRegistry
+		if err := json.Unmarshal(data, &reg); err != nil {
+			var metaReg struct {
+				Plugins []types.PluginMetadata `json:"plugins"`
+			}
+			if err := json.Unmarshal(data, &metaReg); err != nil {
+				resp.Valid = false
+				resp.Error = "Invalid plugin registry format"
+				w.Header().Set("Content-Type", "application/json")
+				orihttp.WriteJSON(w, resp)
+				return
+			}
+			resp.PluginCount = len(metaReg.Plugins)
+		} else {
+			resp.PluginCount = len(reg.Plugins)
+		}
+
+		resp.Valid = true
+		w.Header().Set("Content-Type", "application/json")
+		orihttp.WriteJSON(w, resp)
+		return
 	}
+
+	if sourceType == "url" && !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
+		resp.Valid = false
+		resp.Error = "Invalid source format. Use a URL, GitHub repo (user/repo), or absolute file path"
+		w.Header().Set("Content-Type", "application/json")
+		orihttp.WriteJSON(w, resp)
+		return
+	}
+
+	// Create a temporary marketplace to leverage ResolveURL logic
+	tempMarketplace := types.Marketplace{
+		Source: source,
+	}
+	resp.ResolvedURL = tempMarketplace.ResolveURL()
 
 	// Try to fetch and parse the registry
 	httpResp, err := http.Get(resp.ResolvedURL)
