@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
@@ -161,6 +162,11 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		return nil, fmt.Errorf("facade creation phase failed: %w", err)
 	}
 
+	// Phase 25: Start Plugin Update Service
+	if err := b.startPluginUpdateService(); err != nil {
+		return nil, fmt.Errorf("plugin update service phase failed: %w", err)
+	}
+
 	// Log success
 	if !verbose {
 		logger.Info("Server initialized successfully", logger.Fields{})
@@ -221,6 +227,25 @@ func (b *ServerBuilder) createDomainFacades() error {
 	b.server.UI = NewUISystemFacade(
 		b.server.templateRenderer,
 	)
+
+	return nil
+}
+
+// startPluginUpdateService initializes and starts the plugin update service.
+func (b *ServerBuilder) startPluginUpdateService() error {
+	if b.server.st == nil {
+		return fmt.Errorf("store not initialized for plugin update service")
+	}
+
+	b.server.pluginUpdateService = pluginupdateservice.NewService(b.server.st, &b.server.pluginReg)
+	b.server.pluginUpdateService.Start()
+
+	if b.server.pluginUpdateHandler != nil {
+		b.server.pluginUpdateHandler.SetUpdateService(b.server.pluginUpdateService)
+	}
+	if b.server.pluginsPageHandler != nil {
+		b.server.pluginsPageHandler.SetUpdateService(b.server.pluginUpdateService)
+	}
 
 	return nil
 }

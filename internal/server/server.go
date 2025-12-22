@@ -33,6 +33,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -83,6 +84,7 @@ type Server struct {
 	versionManager      *pluginmanager.VersionManager
 	notificationManager *pluginmanager.NotificationManager
 	backupManager       *pluginmanager.BackupManager
+	pluginUpdateService *pluginupdateservice.Service
 
 	// HTTP Handlers (kept separate as they're endpoints, not core logic)
 	healthManager         *healthhttp.Manager
@@ -141,6 +143,9 @@ func (s *Server) Shutdown() {
 	// Stop background services
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
+	}
+	if s.pluginUpdateService != nil {
+		s.pluginUpdateService.Stop()
 	}
 
 	// Clean up all loaded plugins

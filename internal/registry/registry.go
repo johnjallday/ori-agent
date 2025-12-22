@@ -370,7 +370,7 @@ func (m *Manager) FetchAllMarketplaces() (types.PluginRegistry, error) {
 
 // normalizePluginName normalizes a plugin name for comparison
 // Converts underscores to hyphens and lowercases the name
-func normalizePluginName(name string) string {
+func NormalizePluginName(name string) string {
 	return strings.ToLower(strings.ReplaceAll(name, "_", "-"))
 }
 
@@ -394,7 +394,7 @@ func (m *Manager) MergeWithPriority(registries []types.PluginRegistry, marketpla
 			}
 
 			// Normalize name for comparison (handles underscore vs hyphen variations)
-			normalizedName := normalizePluginName(plugin.Name)
+			normalizedName := NormalizePluginName(plugin.Name)
 
 			if idx, exists := seen[normalizedName]; exists {
 				// Plugin already exists - add this marketplace to SourceMarketplaces if not already present
@@ -769,23 +769,24 @@ func (m *Manager) RefreshLocalRegistry() error {
 func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry {
 	merged := types.PluginRegistry{}
 
-	// Create maps to track plugins
+	// Create maps to track plugins using normalized names
 	onlineMap := make(map[string]types.PluginRegistryEntry)
 	localMap := make(map[string]types.PluginRegistryEntry)
 
-	// Index online plugins
+	// Index online plugins by normalized name
 	for _, plugin := range online.Plugins {
-		onlineMap[plugin.Name] = plugin
+		onlineMap[NormalizePluginName(plugin.Name)] = plugin
 	}
 
-	// Index local plugins
+	// Index local plugins by normalized name
 	for _, plugin := range local.Plugins {
-		localMap[plugin.Name] = plugin
+		localMap[NormalizePluginName(plugin.Name)] = plugin
 	}
 
 	// Add online plugins, merging with local path if installed
 	for _, plugin := range online.Plugins {
-		if localPlugin, existsLocal := localMap[plugin.Name]; existsLocal {
+		normalizedName := NormalizePluginName(plugin.Name)
+		if localPlugin, existsLocal := localMap[normalizedName]; existsLocal {
 			// Plugin exists locally - copy the path so it shows as installed
 			plugin.Path = localPlugin.Path
 		}
@@ -793,8 +794,9 @@ func (m *Manager) Merge(online, local types.PluginRegistry) types.PluginRegistry
 	}
 
 	// Add local-only plugins (user uploads that aren't in the online registry)
-	for name, plugin := range localMap {
-		if _, existsOnline := onlineMap[name]; !existsOnline {
+	for _, plugin := range local.Plugins {
+		normalizedName := NormalizePluginName(plugin.Name)
+		if _, existsOnline := onlineMap[normalizedName]; !existsOnline {
 			merged.Plugins = append(merged.Plugins, plugin)
 		}
 	}
@@ -903,10 +905,21 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 	// 2) Multi-marketplace support - if marketplace store is set, use it
 	if m.marketplaceStore != nil {
 		// Fetch from marketplaces dynamically - no file caching
-		if mpReg, err := m.FetchAllMarketplaces(); err == nil && len(mpReg.Plugins) > 0 {
+		mpReg, err := m.FetchAllMarketplaces()
+		if err == nil && len(mpReg.Plugins) > 0 {
 			onlineReg = mpReg
-		} else if err != nil {
-			fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
+		} else {
+			if err != nil {
+				fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
+			}
+			// Fallback to GitHub if marketplaces are empty or failed.
+			if m.shouldFetchFromGitHub() {
+				if githubReg, ghErr := m.fetchGitHubPluginRegistry(); ghErr == nil && len(githubReg.Plugins) > 0 {
+					onlineReg = githubReg
+				} else if ghErr != nil {
+					fmt.Printf("Failed to load plugin registry from GitHub: %v\n", ghErr)
+				}
+			}
 		}
 	} else {
 		// Fallback: Try to fetch from single GitHub source (legacy behavior)

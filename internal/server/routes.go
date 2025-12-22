@@ -129,6 +129,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Plugin health check endpoints (must be before catch-all /api/plugins/ pattern)
 	mux.HandleFunc("/api/plugins/health", s.healthHandler.HandleAllPluginsHealth)
 	mux.HandleFunc("/api/plugins/check-updates", s.pluginUpdateHandler.HandleCheckUpdates)
+	mux.HandleFunc("/api/plugins/updates/status", s.pluginUpdateHandler.HandleGetUpdateStatus)
 	mux.HandleFunc("/api/plugins/backups", s.pluginUpdateHandler.HandleListBackups)
 	mux.HandleFunc("/api/plugins/backups/clean", s.pluginUpdateHandler.HandleCleanBackups)
 

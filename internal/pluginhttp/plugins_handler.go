@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
@@ -28,6 +29,7 @@ type PluginsPageHandler struct {
 	CategoryManager   *pluginmanager.CategoryManager
 	PermissionManager *pluginmanager.PermissionManager
 	Loader            ToolLoader
+	UpdateService     *pluginupdateservice.Service
 }
 
 // NewPluginsPageHandler creates a new handler for the plugins page
@@ -45,6 +47,11 @@ func NewPluginsPageHandler(
 		PermissionManager: permMgr,
 		Loader:            loader,
 	}
+}
+
+// SetUpdateService injects the plugin update service.
+func (h *PluginsPageHandler) SetUpdateService(svc *pluginupdateservice.Service) {
+	h.UpdateService = svc
 }
 
 // HandleListPlugins returns a list of all plugins with their status, categories, and permissions
@@ -125,6 +132,11 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 			"last_used":            plugin.LastUsed,
 			"agents":               agents,
 			"metadata":             plugin.Metadata,
+		}
+		if h.UpdateService != nil {
+			pluginInfo["needs_update"] = h.UpdateService.HasUpdateForPlugin(plugin.Name)
+		} else {
+			pluginInfo["needs_update"] = false
 		}
 
 		plugins = append(plugins, pluginInfo)

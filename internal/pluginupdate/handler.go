@@ -11,6 +11,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/health"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
+	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -22,6 +24,7 @@ type Handler struct {
 	updater       *Updater
 	pluginReg     *types.PluginRegistry
 	healthChecker *health.Checker
+	updateService *pluginupdateservice.Service
 }
 
 // NewHandler creates a new plugin update handler
@@ -36,6 +39,11 @@ func NewHandler(st store.Store, healthChecker *health.Checker) *Handler {
 // SetPluginRegistry sets the plugin registry for update lookups
 func (h *Handler) SetPluginRegistry(reg *types.PluginRegistry) {
 	h.pluginReg = reg
+}
+
+// SetUpdateService sets the plugin update service.
+func (h *Handler) SetUpdateService(svc *pluginupdateservice.Service) {
+	h.updateService = svc
 }
 
 // HandleUpdatePlugin handles requests to update a specific plugin
@@ -117,8 +125,9 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var registryEntry *types.PluginRegistryEntry
+	normalizedName := registry.NormalizePluginName(pluginName)
 	for i, p := range h.pluginReg.Plugins {
-		if p.Name == pluginName {
+		if registry.NormalizePluginName(p.Name) == normalizedName {
 			registryEntry = &h.pluginReg.Plugins[i]
 			break
 		}
@@ -146,6 +155,11 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 
 	// Perform update
 	result := h.updater.UpdatePlugin(pluginName, currentPath, *registryEntry, currentVersion)
+	if result.Success && h.updateService != nil {
+		if err := h.updateService.CheckNow(); err != nil {
+			logger.Warn("Failed to refresh plugin update cache after update", logger.Fields{"error": err})
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if result.Success {
@@ -353,6 +367,10 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 
 	// Track which plugins we've checked (to avoid duplicates)
 	checkedPlugins := make(map[string]bool)
+	registryIndex := make(map[string]types.PluginRegistryEntry, len(h.pluginReg.Plugins))
+	for _, entry := range h.pluginReg.Plugins {
+		registryIndex[registry.NormalizePluginName(entry.Name)] = entry
+	}
 
 	for _, agentName := range agentNames {
 		agent, ok := h.store.GetAgent(agentName)
@@ -375,21 +393,21 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Find in registry
-			for _, registryEntry := range h.pluginReg.Plugins {
-				if registryEntry.Name == pluginName {
-					if currentVersion != registryEntry.Version {
-						isOlder, _ := health.IsVersionOlder(currentVersion, registryEntry.Version)
-						if isOlder {
-							updates = append(updates, map[string]interface{}{
-								"plugin_name":     pluginName,
-								"current_version": currentVersion,
-								"latest_version":  registryEntry.Version,
-								"auto_update":     registryEntry.AutoUpdate,
-								"download_url":    registryEntry.DownloadURL,
-							})
-						}
-					}
-					break
+			registryEntry, exists := registryIndex[registry.NormalizePluginName(pluginName)]
+			if !exists {
+				continue
+			}
+
+			if currentVersion != registryEntry.Version {
+				isOlder, _ := health.IsVersionOlder(currentVersion, registryEntry.Version)
+				if isOlder {
+					updates = append(updates, map[string]interface{}{
+						"plugin_name":     pluginName,
+						"current_version": currentVersion,
+						"latest_version":  registryEntry.Version,
+						"auto_update":     registryEntry.AutoUpdate,
+						"download_url":    registryEntry.DownloadURL,
+					})
 				}
 			}
 		}
@@ -399,6 +417,37 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"updates": updates,
 		"count":   len(updates),
+	}); err != nil {
+		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}
+}
+
+// HandleGetUpdateStatus returns cached plugin update status
+// GET /api/plugins/updates/status
+func (h *Handler) HandleGetUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
+		return
+	}
+
+	if h.updateService == nil {
+		if err := orihttp.RespondInternalError(w, "Plugin update service not initialized"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
+		return
+	}
+
+	updates := h.updateService.GetAvailableUpdates()
+	lastChecked := h.updateService.LastChecked()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"updates":     updates,
+		"count":       len(updates),
+		"lastChecked": lastChecked,
 	}); err != nil {
 		logger.Error("Failed to encode response", logger.Fields{"response": err})
 	}

@@ -2,6 +2,7 @@
 // Checks for available updates (core app + plugins) and shows notification in navbar
 
 let updateCheckInterval = null;
+let pluginBadgeInterval = null;
 let cachedUpdateInfo = null;
 let cachedPluginUpdates = null;
 let updateMessageShown = false; // Track if we've shown the update message this session
@@ -10,15 +11,20 @@ let updateMessageShown = false; // Track if we've shown the update message this 
 async function initUpdateChecker() {
   // Check immediately on load
   const updateInfo = await checkForUpdates();
+  await updatePluginNavBadge();
 
   // If update is available on first load, show a chat message (only once per session)
-  if (updateInfo && updateInfo.updateAvailable && !updateMessageShown) {
+  const hasPluginUpdates = cachedPluginUpdates && cachedPluginUpdates.length > 0;
+  if (updateInfo && (updateInfo.updateAvailable || hasPluginUpdates) && !updateMessageShown) {
     showUpdateChatMessage(updateInfo);
     updateMessageShown = true;
   }
 
   // Check every 30 minutes
   updateCheckInterval = setInterval(checkForUpdates, 30 * 60 * 1000);
+
+  // Check plugin update badge every 5 minutes
+  pluginBadgeInterval = setInterval(updatePluginNavBadge, 5 * 60 * 1000);
 }
 
 // Check for available updates (core app + plugins)
@@ -72,6 +78,35 @@ async function checkPluginUpdates() {
   } catch (error) {
     console.error('Error checking plugin updates:', error);
     return [];
+  }
+}
+
+// Update plugins nav badge count
+async function updatePluginNavBadge() {
+  const badge = document.getElementById('pluginUpdateCount');
+  if (!badge) return;
+
+  try {
+    const response = await fetch('/api/plugins/updates/status');
+    if (!response.ok) {
+      console.error('Failed to fetch plugin update status:', response.status);
+      badge.style.display = 'none';
+      return;
+    }
+
+    const data = await response.json();
+    const count = data && typeof data.count === 'number' ? data.count : 0;
+
+    if (count > 0) {
+      badge.textContent = String(count);
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Error updating plugin nav badge:', error);
+    badge.style.display = 'none';
   }
 }
 
@@ -347,6 +382,7 @@ async function updatePlugin(pluginName) {
 
       // Refresh the cached plugin updates
       cachedPluginUpdates = cachedPluginUpdates.filter(p => p.plugin_name !== pluginName);
+      updatePluginNavBadge();
 
       // Show success toast if available
       if (typeof showToast === 'function') {
@@ -650,12 +686,22 @@ function showUpdateChatMessage(updateInfo) {
   // Wait a bit for the chat area to be ready
   setTimeout(() => {
     if (typeof addMessageToChat === 'function') {
+      const hasCoreUpdate = updateInfo && updateInfo.updateAvailable;
+      const pluginNames = (cachedPluginUpdates || [])
+        .map((plugin) => plugin.plugin_name)
+        .filter(Boolean);
+      const pluginSection = pluginNames.length > 0 ? `
+**Plugin Updates (${pluginNames.length}):**
+${pluginNames.map((name) => `- ${name}`).join('\n')}
+` : '';
+
       const message = `🎉 **Update Available!**
 
-A new version of Ori Agent is available!
+${hasCoreUpdate ? `A new version of Ori Agent is available!
 
 **Current Version:** ${updateInfo.currentVersion}
-**Latest Version:** ${updateInfo.latestVersion}
+**Latest Version:** ${updateInfo.latestVersion}` : 'Plugin updates are available for your installed tools.'}
+${pluginSection}
 
 Click the **Update** button in the top navigation bar to download and install the latest version.
 
@@ -672,6 +718,7 @@ Click the **Update** button in the top navigation bar to download and install th
 window.initUpdateChecker = initUpdateChecker;
 window.checkForUpdates = checkForUpdates;
 window.checkPluginUpdates = checkPluginUpdates;
+window.updatePluginNavBadge = updatePluginNavBadge;
 window.showUpdateModal = showUpdateModal;
 window.updatePlugin = updatePlugin;
 window.updateAllPlugins = updateAllPlugins;
