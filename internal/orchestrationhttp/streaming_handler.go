@@ -76,7 +76,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(status)
+	orihttp.WriteJSON(w, status)
 }
 
 func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Request) {

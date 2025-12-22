@@ -319,7 +319,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 			resp.Valid = false
 			resp.Error = "Invalid source format. Use a URL or GitHub repo (user/repo)"
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
+			orihttp.WriteJSON(w, resp)
 			return
 		}
 	}
@@ -330,7 +330,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 		resp.Valid = false
 		resp.Error = fmt.Sprintf("Failed to fetch: %v", err)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		orihttp.WriteJSON(w, resp)
 		return
 	}
 	defer func() { _ = httpResp.Body.Close() }()
@@ -339,7 +339,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 		resp.Valid = false
 		resp.Error = fmt.Sprintf("HTTP error: %d", httpResp.StatusCode)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		orihttp.WriteJSON(w, resp)
 		return
 	}
 
@@ -348,7 +348,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 		resp.Valid = false
 		resp.Error = fmt.Sprintf("Failed to read response: %v", err)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		orihttp.WriteJSON(w, resp)
 		return
 	}
 
@@ -363,7 +363,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 			resp.Valid = false
 			resp.Error = "Invalid plugin registry format"
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
+			orihttp.WriteJSON(w, resp)
 			return
 		}
 		resp.PluginCount = len(metaReg.Plugins)
@@ -373,7 +373,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 
 	resp.Valid = true
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	orihttp.WriteJSON(w, resp)
 }
 
 // RefreshMarketplace forces a refresh of a specific marketplace

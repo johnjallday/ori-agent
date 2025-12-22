@@ -76,7 +76,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		_ = json.NewEncoder(w).Encode(task)
+		orihttp.WriteJSON(w, task)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		tasks := th.communicator.ListTasks(workspaceID)
 		stats := th.communicator.GetTaskStats(workspaceID)
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"tasks": tasks,
 			"stats": stats,
 			"count": len(tasks),
@@ -96,7 +96,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	if agentName != "" {
 		// List tasks for agent
 		tasks := th.communicator.ListTasksForAgent(agentName)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"tasks": tasks,
 			"count": len(tasks),
 		})
@@ -221,7 +221,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"task":    createdTask,
 	})
@@ -349,7 +349,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		// Return updated task
 		updatedTask, _ := th.communicator.GetTask(req.TaskID)
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(updatedTask)
+		orihttp.WriteJSON(w, updatedTask)
 		return
 	}
 
@@ -398,7 +398,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		// Return updated task
 		updatedTask, _ := th.communicator.GetTask(req.TaskID)
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(updatedTask)
+		orihttp.WriteJSON(w, updatedTask)
 		return
 	}
 
@@ -429,7 +429,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"task_id": req.TaskID,
 		"status":  req.Status,
@@ -471,7 +471,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 
 		logger.Info("Deleted task", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
 			"message": "Task deleted successfully",
 			"task_id": taskID,
@@ -490,7 +490,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 
 	logger.Info("Deleted task", logger.Fields{"task_id": taskID})
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Task deleted successfully",
 		"task_id": taskID,
@@ -574,7 +574,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"results": allResults,
 	})
@@ -852,7 +852,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	logger.Info("Started manual execution of task", logger.Fields{"task_id": req.TaskID})
 
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Task execution started",
 		"task_id": req.TaskID,
@@ -1028,7 +1028,7 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"scheduled_tasks": ws.ScheduledTasks,
 		"count":           len(ws.ScheduledTasks),
 	})
@@ -1143,7 +1143,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	logger.Info("Created scheduled task in workspace", logger.Fields{"workspace_id": createdTask.ID, "workspaceid": req.WorkspaceID, "name": req.Name})
 
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success":        true,
 		"scheduled_task": createdTask,
 	})
@@ -1225,7 +1225,7 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 
 		st, err := ws.GetScheduledTask(id)
 		if err == nil {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			orihttp.WriteJSON(w, map[string]interface{}{
 				"scheduled_task": st,
 			})
 			return
@@ -1325,7 +1325,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 
 		logger.Info("Updated scheduled task", logger.Fields{"task_id": id})
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success":        true,
 			"scheduled_task": st,
 		})
@@ -1362,7 +1362,7 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 
 			logger.Info("Deleted scheduled task", logger.Fields{"task_id": id})
 
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			orihttp.WriteJSON(w, map[string]interface{}{
 				"success": true,
 			})
 			return
@@ -1437,7 +1437,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		}
 		logger.Info("scheduled task", logger.Fields{"task_id": capitalizedAction, "id": id})
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success":        true,
 			"enabled":        enable,
 			"scheduled_task": st,
@@ -1509,7 +1509,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 
 		logger.Info("Manually triggered scheduled task , created task", logger.Fields{"task_id": id, "taskID": taskID})
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
 			"task_id": taskID,
 		})
@@ -1820,7 +1820,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"scheduler_nodes": schedulerNodes,
 		"count":           len(schedulerNodes),
 	})
@@ -1987,7 +1987,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	})
 
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success":           true,
 		"node_id":           nodeID,
 		"scheduled_task_id": createdTask.ID,
@@ -2076,7 +2076,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"node_id":        nodeID,
 		"scheduled_task": foundTask,
 		"position":       position,
@@ -2229,7 +2229,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 
 	logger.Info("Updated scheduler node", logger.Fields{"node_id": nodeID})
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success":        true,
 		"node_id":        nodeID,
 		"scheduled_task": st,
@@ -2291,7 +2291,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 
 	logger.Info("Deleted scheduler node", logger.Fields{"node_id": nodeID})
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Scheduler node deleted successfully",
 		"node_id": nodeID,
@@ -2485,7 +2485,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	logger.Info("Manually triggered scheduler node", logger.Fields{"node_id": nodeID, "task_id": taskID, "target_task_id": foundTask.TargetTaskID})
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"task_id": taskID,
 		"message": "Scheduler node triggered successfully - task execution started",

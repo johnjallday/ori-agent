@@ -83,6 +83,23 @@ func RespondNoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// WriteJSON writes a JSON response and logs any encoding errors internally.
+// This is a fire-and-forget version of RespondJSON for cases where
+// the caller cannot meaningfully handle encoding errors (e.g., response already committed).
+//
+// This replaces the common anti-pattern of `_ = json.NewEncoder(w).Encode(data)`
+// by ensuring errors are at least logged for debugging purposes.
+//
+// Usage:
+//
+//	http.WriteJSON(w, data)
+func WriteJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger.Error("Failed to encode JSON response", logger.Fields{"error": err})
+	}
+}
+
 // RespondErrorWithErr sends a standardized JSON error response.
 // It automatically sets Content-Type and status code.
 // If err is not nil, it will be appended to the message.

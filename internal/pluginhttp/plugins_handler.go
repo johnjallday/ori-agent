@@ -137,7 +137,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	orihttp.WriteJSON(w, response)
 }
 
 // HandleListPluginTags lists all unique tags across plugins.
@@ -176,7 +176,7 @@ func (h *PluginsPageHandler) HandleListPluginTags(w http.ResponseWriter, r *http
 	sort.Strings(out)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tags": out})
+	orihttp.WriteJSON(w, map[string]interface{}{"tags": out})
 }
 
 // HandleListPluginsByTag returns plugins filtered by tag.
@@ -279,7 +279,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(details)
+	orihttp.WriteJSON(w, details)
 }
 
 func pluginAllTags(plugin *types.PluginRegistryEntry) []string {

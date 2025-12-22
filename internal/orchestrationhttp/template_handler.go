@@ -80,7 +80,7 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 			}
 			return
 		}
-		_ = json.NewEncoder(w).Encode(template)
+		orihttp.WriteJSON(w, template)
 		return
 	}
 
@@ -91,7 +91,7 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 		templateList = th.templateManager.ListTemplates()
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"templates": templateList,
 		"count":     len(templateList),
 	})
@@ -120,7 +120,7 @@ func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.R
 
 	logger.Info("Created workflow template", logger.Fields{"id": template.ID})
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(template)
+	orihttp.WriteJSON(w, template)
 }
 
 // handleDeleteTemplate deletes a custom workflow template
@@ -208,7 +208,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	logger.Info("Instantiated and executed workflow from template", logger.Fields{"templateid": req.TemplateID})
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"instance": instance,
 		"result":   result,
 	})

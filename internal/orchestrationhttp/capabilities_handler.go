@@ -57,7 +57,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 	switch r.Method {
 	case http.MethodGet:
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"agent":        agentName,
 			"role":         agent.Role,
 			"capabilities": agent.Capabilities,
@@ -95,7 +95,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 		logger.Info("Updated agent capabilities and role", logger.Fields{"agent": agentName})
 
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"success": true,
 			"agent":   agentName,
 		})
@@ -193,7 +193,7 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(agentcomm.DelegationResponse{
+	orihttp.WriteJSON(w, agentcomm.DelegationResponse{
 		TaskID:    task.ID,
 		Status:    string(task.Status),
 		CreatedAt: task.CreatedAt,

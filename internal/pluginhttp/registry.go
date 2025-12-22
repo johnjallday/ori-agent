@@ -116,7 +116,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			reg.Plugins = compatiblePlugins
 		}
 
-		_ = json.NewEncoder(w).Encode(reg)
+		orihttp.WriteJSON(w, reg)
 
 	case http.MethodPost:
 		var req struct {
@@ -385,7 +385,7 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"available_updates": updates,
 			"count":             len(updates),
 		})
@@ -439,7 +439,7 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			}
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"updated": updated,
 			"errors":  errors,
 		})

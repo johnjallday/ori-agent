@@ -133,7 +133,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	orihttp.WriteJSON(w, map[string]any{
 		"agents": agents,
 		"total":  len(agents),
 	})
@@ -216,7 +216,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	orihttp.WriteJSON(w, response)
 }
 
 // Helper functions
@@ -304,7 +304,7 @@ func (h *DashboardHandler) GetDashboardStats(w http.ResponseWriter, r *http.Requ
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(stats)
+	orihttp.WriteJSON(w, stats)
 }
 
 // UpdateAgentStatus handles POST /api/agents/:id/status
@@ -397,7 +397,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	orihttp.WriteJSON(w, map[string]any{
 		"success": true,
 		"message": "Agent status updated successfully",
 		"status":  req.Status,
@@ -490,7 +490,7 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 
 	// Return response
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	orihttp.WriteJSON(w, map[string]any{
 		"logs":   formattedLogs,
 		"total":  total,
 		"limit":  limit,

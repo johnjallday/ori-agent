@@ -55,7 +55,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 		}{
 			Settings: ag.Settings,
 		}
-		_ = json.NewEncoder(w).Encode(response)
+		orihttp.WriteJSON(w, response)
 
 	case http.MethodPost:
 		var s types.Settings
@@ -110,7 +110,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			HasOpenAI:       h.configManager.GetAPIKey() != "",
 			HasAnthropic:    h.configManager.GetAnthropicAPIKey() != "",
 		}
-		_ = json.NewEncoder(w).Encode(response)
+		orihttp.WriteJSON(w, response)
 
 	case http.MethodPost:
 		var req struct {

@@ -70,7 +70,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(ws)
+		orihttp.WriteJSON(w, ws)
 		return
 	}
 
@@ -85,7 +85,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		orihttp.WriteJSON(w, map[string]interface{}{
 			"workspaces": workspaces,
 			"count":      len(workspaces),
 		})
@@ -114,7 +114,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		summaries = append(summaries, ws.GetSummary())
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"workspaces": summaries,
 		"count":      len(summaries),
 	})
@@ -197,7 +197,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"studio_id":  ws.ID,
 		"status":     ws.Status,
 		"created_at": ws.CreatedAt,
@@ -224,7 +224,7 @@ func (wh *WorkspaceHandler) handleDeleteWorkspace(w http.ResponseWriter, r *http
 
 	logger.Info("Deleted workspace", logger.Fields{"workspace_id": wsID})
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Workspace deleted successfully",
 	})
@@ -338,7 +338,7 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Agent added successfully",
 		"agent":   req.AgentName,
@@ -415,7 +415,7 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Agent removed successfully",
 		"agent":   agentName,

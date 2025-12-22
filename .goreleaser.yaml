@@ -86,7 +86,7 @@ builds:
 # Linux and Windows get .tar.gz/.zip archives
 archives:
   - id: default
-    ids:
+    builds:
       - server
     name_template: >-
       {{ .ProjectName }}_

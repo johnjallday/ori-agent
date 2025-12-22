@@ -279,39 +279,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 					"files_available": len(files),
 				})
 
-				// Check if the plugin supports file attachments and files are provided
-				if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
-					// Filter files to only those accepted by the plugin
-					acceptedTypes := fileHandler.AcceptsFiles()
-					filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
-
-					logger.Info("Tool supports file attachments", logger.Fields{
-						"tool":           name,
-						"accepted_types": len(acceptedTypes),
-						"filtered_files": len(filteredFiles),
-					})
-
-					if len(filteredFiles) > 0 {
-						logger.Info("Calling tool with files", logger.Fields{
-							"tool":       name,
-							"file_count": len(filteredFiles),
-						})
-						result, err = fileHandler.CallWithFiles(toolCtx, args, filteredFiles)
-					} else {
-						// No matching files, fall back to regular call
-						logger.Info("No matching files, using regular call", logger.Fields{"tool": name})
-						result, err = tool.Call(toolCtx, args)
-					}
-				} else {
-					// Regular call without files
-					_, isFileHandler := tool.(pluginapi.FileAttachmentHandler)
-					logger.Info("Tool call (no file support or no files)", logger.Fields{
-						"tool":            name,
-						"is_file_handler": isFileHandler,
-						"files_available": len(files),
-					})
-					result, err = tool.Call(toolCtx, args)
-				}
+				result, err = ExecuteToolWithFiles(toolCtx, tool, name, args, files)
 				duration := time.Since(startTime)
 
 				// Record call stats in health manager
@@ -412,7 +380,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 		if err != nil || resp2 == nil {
 			// If second turn fails, return the tool results as best-effort reply
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			orihttp.WriteJSON(w, map[string]any{
 				"response":  combinedResult,
 				"toolCalls": toolResults,
 			})
@@ -431,7 +399,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 		logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(agentName, ag)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"response":  resp2.Content,
 			"toolCalls": toolResults,
 		})
@@ -460,7 +428,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Get Ollama provider
 	provider, err := h.llmFactory.GetProvider("ollama")
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: Ollama provider not available: %v", err),
 		})
 		return
@@ -532,26 +500,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 				startTime := time.Now()
 
-				// Check if the plugin supports file attachments and files are provided
-				if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(files) > 0 {
-					// Filter files to only those accepted by the plugin
-					acceptedTypes := fileHandler.AcceptsFiles()
-					filteredFiles := pluginapi.FilterFilesByAcceptedTypes(files, acceptedTypes)
-
-					if len(filteredFiles) > 0 {
-						logger.Debug("Tool execution with files", logger.Fields{
-							"tool":       tc.Name,
-							"file_count": len(filteredFiles),
-						})
-						result, err = fileHandler.CallWithFiles(toolCtx, tc.Arguments, filteredFiles)
-					} else {
-						// No matching files, fall back to regular call
-						result, err = tool.Call(toolCtx, tc.Arguments)
-					}
-				} else {
-					// Regular call without files
-					result, err = tool.Call(toolCtx, tc.Arguments)
-				}
+				result, err = ExecuteToolWithFilesDebug(toolCtx, tool, tc.Name, tc.Arguments, files)
 				duration := time.Since(startTime)
 
 				if h.healthManager != nil {
@@ -593,7 +542,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		})
 		if err != nil {
 			logger.Error("Error getting final response from LLM", logger.Fields{"error": err})
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			orihttp.WriteJSON(w, map[string]any{
 				"response": fmt.Sprintf("❌ **Error**: %v", err),
 			})
 			return
@@ -616,7 +565,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 		_ = h.store.SetAgent(agentName, ag)
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"response":  finalText,
 			"toolCalls": toolResults,
 		})
@@ -853,7 +802,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		cmd, err := parseDirectToolCommand(q)
 		if err != nil {
 			// Return parsing error as response
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			orihttp.WriteJSON(w, map[string]any{
 				"response":         fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/tool <tool_name> {\"key\": \"value\"}`\nExample: `/tool math {\"operation\": \"add\", \"a\": 5, \"b\": 3}`", err),
 				"direct_tool_call": true,
 				"success":          false,
@@ -928,7 +877,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	uninitializedPlugins := h.checkUninitializedPlugins(ag)
 	if len(uninitializedPlugins) > 0 {
 		initPrompt := h.generateInitializationPrompt(uninitializedPlugins)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"response":                initPrompt,
 			"requires_initialization": true,
 			"uninitialized_plugins":   uninitializedPlugins,
@@ -959,7 +908,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Return orchestration result
 			logger.Info("Orchestration completed successfully", logger.Fields{})
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			orihttp.WriteJSON(w, map[string]any{
 				"response":     result.FinalOutput,
 				"orchestrated": true,
 				"studio_id":    result.WorkspaceID,
@@ -1090,302 +1039,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert llm.Tool to OpenAI format
-	var openaiTools []openai.ChatCompletionToolUnionParam
-	for _, tool := range tools {
-		funcDef := openai.FunctionDefinitionParam{
-			Name:        tool.Name,
-			Description: openai.String(tool.Description),
-			Parameters:  openai.FunctionParameters(tool.Parameters),
-		}
-		openaiTools = append(openaiTools, openai.ChatCompletionFunctionTool(funcDef))
-	}
-
-	params := openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
-		Temperature: openai.Float(ag.Settings.Temperature),
-		Messages:    ag.Messages,
-		Tools:       openaiTools,
-	}
-
-	start := time.Now()
-	resp, err := agentClient.Chat.Completions.New(ctx, params)
-	if err != nil {
-		// Return error as a chat message instead of HTTP error
-		errorResponse := map[string]any{
-			"response": fmt.Sprintf("❌ **Error**: %v", err),
-		}
-		writeJSONResponse(w, errorResponse)
-		return
-	}
-	if resp == nil || len(resp.Choices) == 0 {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"response": "I couldn't generate a reply just now. Please try again.",
-		})
-		return
-	}
-
-	// Track usage and cost for OpenAI
-	if h.costTracker != nil && resp.Usage.TotalTokens > 0 {
-		usage := llm.Usage{
-			PromptTokens:     int(resp.Usage.PromptTokens),
-			CompletionTokens: int(resp.Usage.CompletionTokens),
-			TotalTokens:      int(resp.Usage.TotalTokens),
-		}
-		if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-			logger.Warn("Failed to track usage", logger.Fields{"error": err})
-		}
-
-		// Track statistics in agent
-		h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
-	}
-
-	choice := resp.Choices[0].Message
-
-	// Fallback if model answered with an empty assistant message and no tool calls
-	if len(choice.ToolCalls) == 0 && strings.TrimSpace(choice.Content) == "" {
-		// fresh timeout for fallback, so we don't reuse a nearly-expired ctx
-		fbCtx, fbCancel := context.WithTimeout(base, 20*time.Second)
-		defer fbCancel()
-
-		respFB, errFB := agentClient.Chat.Completions.New(fbCtx, openai.ChatCompletionNewParams{
-			Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
-			Temperature: openai.Float(ag.Settings.Temperature),
-			Messages: append(ag.Messages,
-				openai.SystemMessage("Answer directly in plain text. Do not call any tools."),
-			),
-		})
-		if errFB == nil && respFB != nil && len(respFB.Choices) > 0 {
-			choice = respFB.Choices[0].Message
-
-			// Track usage for fallback call
-			if h.costTracker != nil && respFB.Usage.TotalTokens > 0 {
-				usage := llm.Usage{
-					PromptTokens:     int(respFB.Usage.PromptTokens),
-					CompletionTokens: int(respFB.Usage.CompletionTokens),
-					TotalTokens:      int(respFB.Usage.TotalTokens),
-				}
-				if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-					logger.Warn("Failed to track fallback usage", logger.Fields{"error": err})
-				}
-
-				// Track statistics in agent
-				h.trackAgentStatistics(ag, usage.TotalTokens, "openai", string(ag.Settings.Model))
-			}
-		}
-	}
-
-	// Tool-call branch
-	if len(choice.ToolCalls) > 0 {
-		// Append the assistant message with tool calls first
-		ag.Messages = append(ag.Messages, choice.ToParam())
-
-		// Process ALL tool calls, not just the first one
-		var toolResults []map[string]string
-		for _, tc := range choice.ToolCalls {
-			name := tc.Function.Name
-			args := tc.Function.Arguments
-
-			// Find tool by name (searches both plugins and MCP tools)
-			tool, found := h.findTool(ag, name)
-
-			if !found {
-				if err := orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name)); err != nil {
-					logger.Error(
-
-						// Execute tool with its own reasonable timeout (30s for operations like GitHub API calls)
-						"Failed to write response", logger.Fields{"error": err})
-				}
-				return
-			}
-
-			toolCtx, toolCancel := context.WithTimeout(base, ToolExecutionTimeout)
-			defer toolCancel()
-
-			// Track tool call stats
-			startTime := time.Now()
-
-			var result string
-			var err error
-
-			logger.Info("OpenAI tool execution starting", logger.Fields{
-				"tool":            name,
-				"files_available": len(fileAttachments),
-			})
-
-			// Check if the plugin supports file attachments and files are provided
-			if fileHandler, ok := tool.(pluginapi.FileAttachmentHandler); ok && len(fileAttachments) > 0 {
-				// Filter files to only those accepted by the plugin
-				acceptedTypes := fileHandler.AcceptsFiles()
-				filteredFiles := pluginapi.FilterFilesByAcceptedTypes(fileAttachments, acceptedTypes)
-
-				logger.Info("Tool supports file attachments", logger.Fields{
-					"tool":           name,
-					"accepted_types": len(acceptedTypes),
-					"filtered_files": len(filteredFiles),
-				})
-
-				if len(filteredFiles) > 0 {
-					logger.Info("Calling tool with files", logger.Fields{
-						"tool":       name,
-						"file_count": len(filteredFiles),
-					})
-					result, err = fileHandler.CallWithFiles(toolCtx, args, filteredFiles)
-				} else {
-					// No matching files, fall back to regular call
-					logger.Info("No matching files, using regular call", logger.Fields{"tool": name})
-					result, err = tool.Call(toolCtx, args)
-				}
-			} else {
-				// Regular call without files
-				_, isFileHandler := tool.(pluginapi.FileAttachmentHandler)
-				logger.Info("Tool call (no file support or no files)", logger.Fields{
-					"tool":            name,
-					"is_file_handler": isFileHandler,
-					"files_available": len(fileAttachments),
-				})
-				result, err = tool.Call(toolCtx, args)
-			}
-			duration := time.Since(startTime)
-
-			// Record call stats in health manager
-			if h.healthManager != nil {
-				if err != nil {
-					h.healthManager.RecordCallFailure(name, duration, err)
-				} else {
-					h.healthManager.RecordCallSuccess(name, duration)
-				}
-			}
-
-			// IMPORTANT: Always add a tool response message, even on error
-			// This prevents conversation history corruption when tool calls fail
-			if err != nil {
-				errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
-				result = errorMsg
-				logger.Error("Tool failed", logger.Fields{"tool": name, "error": err})
-			} else {
-				logger.Info("Tool execution completed", logger.Fields{"tool": name})
-			}
-
-			// Add tool message response for this specific tool call ID
-			ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
-
-			// Store result for final response
-			toolResults = append(toolResults, map[string]string{
-				"function": name,
-				"args":     args,
-				"result":   result,
-			})
-		}
-
-		// Check if any tool result is a structured result or legacy JSON - if so, return it directly without LLM processing
-		var combinedResult string
-		hasStructuredResult := false
-		var structuredResultData *pluginapi.StructuredResult
-
-		for i, tr := range toolResults {
-			result := tr["result"]
-
-			// First, check if this is a structured result
-			if sr, err := pluginapi.ParseStructuredResult(result); err == nil {
-				hasStructuredResult = true
-				structuredResultData = sr
-				// For structured results, we'll use the raw result as-is
-				if i > 0 {
-					combinedResult += "\n\n"
-				}
-				combinedResult += result
-				continue
-			}
-
-			// Legacy: Check if result is valid JSON array
-			if strings.HasPrefix(strings.TrimSpace(result), "[") && strings.HasSuffix(strings.TrimSpace(result), "]") {
-				var testJSON []interface{}
-				if json.Unmarshal([]byte(result), &testJSON) == nil && len(testJSON) > 0 {
-					hasStructuredResult = true
-				}
-			}
-			if i > 0 {
-				combinedResult += "\n\n"
-			}
-			combinedResult += result
-		}
-
-		// If we have structured or JSON results, return them directly for frontend rendering
-		if hasStructuredResult {
-			// Add assistant message with the raw result for conversation history
-			ag.Messages = append(ag.Messages, openai.AssistantMessage(combinedResult))
-			logger.Debug("Chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
-			_ = h.store.SetAgent(current, ag)
-
-			response := map[string]any{
-				"response":  combinedResult,
-				"toolCalls": toolResults,
-			}
-
-			// Add structured result metadata if available
-			if structuredResultData != nil {
-				response["structured"] = true
-				response["displayType"] = string(structuredResultData.DisplayType)
-				response["title"] = structuredResultData.Title
-				response["description"] = structuredResultData.Description
-			}
-
-			writeJSONResponse(w, response)
-			return
-		}
-
-		// Ask model again with tool output, with guidance to focus on the tool result
-		resp2, err := agentClient.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			Model:       openai.ChatModel(ag.Settings.Model), // Convert string to ChatModel type
-			Temperature: openai.Float(ag.Settings.Temperature),
-			Messages: append(ag.Messages,
-				openai.SystemMessage("The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."),
-			),
-		})
-		if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-			// If second turn fails, still return the tool results as a best-effort reply
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"response":  combinedResult,
-				"toolCalls": toolResults,
-			})
-			return
-		}
-
-		// Track usage for second OpenAI call (after tool execution)
-		if h.costTracker != nil && resp2.Usage.TotalTokens > 0 {
-			usage := llm.Usage{
-				PromptTokens:     int(resp2.Usage.PromptTokens),
-				CompletionTokens: int(resp2.Usage.CompletionTokens),
-				TotalTokens:      int(resp2.Usage.TotalTokens),
-			}
-			if err := h.costTracker.TrackUsage("openai", string(ag.Settings.Model), current, usage, ""); err != nil {
-				logger.Warn("Failed to track usage for tool response", logger.Fields{"error": err})
-			}
-		}
-
-		final := resp2.Choices[0].Message
-		ag.Messages = append(ag.Messages, final.ToParam())
-
-		logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
-		_ = h.store.SetAgent(current, ag) // persists settings/plugins only
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"response":  final.Content,
-			"toolCalls": toolResults,
-		})
-		return
-	}
-
-	// Plain answer path
-	text := strings.TrimSpace(choice.Content)
-	if text == "" {
-		text = "I couldn't generate a reply just now. Please try again."
-	}
-	ag.Messages = append(ag.Messages, choice.ToParam())
-
-	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
-	_ = h.store.SetAgent(current, ag) // persists settings/plugins only
-	writeJSONResponse(w, map[string]any{"response": text})
+	// Handle OpenAI models
+	h.handleOpenAIChat(w, ag, q, tools, current, base, fileAttachments, agentClient)
 }
 
 // trackAgentStatistics records message and token usage in agent statistics

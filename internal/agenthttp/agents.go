@@ -80,7 +80,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			orihttp.WriteJSON(w, map[string]any{
 				"name":              agentName,
 				"type":              agent.Type,
 				"role":              agent.Role,
@@ -121,7 +121,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		orihttp.WriteJSON(w, map[string]any{
 			"agents":  agentInfos,
 			"current": current,
 		})
