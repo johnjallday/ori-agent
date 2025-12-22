@@ -601,7 +601,7 @@ func TestManager_FetchFromMarketplace_LocalFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	registryPath := filepath.Join(tmpDir, "plugin_registry.json")
 	registryData := []byte(`{"plugins":[{"name":"local-plugin","description":"Local plugin"}]}`)
