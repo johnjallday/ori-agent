@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -624,10 +625,18 @@ func (h *Handler) checkUninitializedPlugins(ag *agent.Agent) []map[string]any {
 		}
 
 		// Check if plugin is initialized by checking if settings file exists
+		// Try multiple name variations (underscores vs hyphens) to handle naming inconsistencies
 		_, currentAgent := h.store.ListAgents()
+		normalizedName := registry.NormalizePluginName(name)
 		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, name)
 		_, err := os.Stat(settingsFilePath)
-		isInitialized := err == nil // If file exists, plugin is initialized
+		isInitialized := err == nil
+		if !isInitialized {
+			// Try normalized name (hyphens)
+			settingsFilePath = fmt.Sprintf("agents/%s/%s_settings.json", currentAgent, normalizedName)
+			_, err = os.Stat(settingsFilePath)
+			isInitialized = err == nil
+		}
 
 		if !isInitialized {
 			// Get required config for this plugin
