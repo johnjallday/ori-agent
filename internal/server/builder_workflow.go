@@ -1,0 +1,150 @@
+// Package server provides workflow initialization methods for the ServerBuilder.
+// This file contains methods for workspace, events, task execution, orchestration, and studio.
+package server
+
+import (
+	"log"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
+	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/workflowhttp"
+)
+
+// initializeWorkspaceStore creates the workspace storage system.
+func (b *ServerBuilder) initializeWorkspaceStore() error {
+	workspaceDir := resolveWorkspaceDir()
+	ws, err := createWorkspaceStore(workspaceDir)
+	if err != nil {
+		return err
+	}
+	b.server.workspaceStore = ws
+
+	// Now update chat handler with workspace store
+	b.server.chatHandler.SetWorkspaceStore(ws)
+
+	return nil
+}
+
+// initializeEventSystem creates the event bus and notification service.
+func (b *ServerBuilder) initializeEventSystem() error {
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
+
+	b.server.eventBus = agentstudio.DefaultEventBus()
+	if verbose {
+		log.Println("✅ Event bus initialized")
+	}
+
+	b.server.notificationService = agentstudio.NewNotificationService(b.server.eventBus, 500)
+	if verbose {
+		log.Println("✅ Notification service initialized")
+	}
+
+	return nil
+}
+
+// initializeTaskExecution creates task handler, executor, step executor, and scheduler.
+func (b *ServerBuilder) initializeTaskExecution() error {
+	s := b.server
+
+	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
+	taskHandler.SetEventBus(s.eventBus)
+
+	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
+		PollInterval:  10 * time.Second,
+		MaxConcurrent: 5,
+	})
+	s.taskExecutor.SetEventBus(s.eventBus)
+
+	s.stepExecutor = agentstudio.NewStepExecutor(s.workspaceStore, taskHandler, agentstudio.StepExecutorConfig{
+		PollInterval: 5 * time.Second,
+	})
+
+	s.taskScheduler = agentstudio.NewTaskScheduler(s.workspaceStore, agentstudio.SchedulerConfig{
+		PollInterval: 1 * time.Minute,
+	})
+	s.taskScheduler.SetEventBus(s.eventBus)
+
+	return nil
+}
+
+// initializeOrchestration creates orchestrators and handlers.
+func (b *ServerBuilder) initializeOrchestration() error {
+	s := b.server
+
+	communicator := agentcomm.NewCommunicator(s.workspaceStore)
+	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
+
+	s.orchestrationHandler = orchestrationhttp.NewHandler(s.st, s.workspaceStore)
+	s.orchestrationHandler.SetOrchestrator(orch)
+
+	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
+	s.orchestrationHandler.SetTaskHandler(taskHandler)
+	s.orchestrationHandler.SetEventBus(s.eventBus)
+	s.orchestrationHandler.SetNotificationService(s.notificationService)
+
+	// Store orchestrator for chat handler injection
+	b.server.chatHandler.SetOrchestrator(orch)
+
+	return nil
+}
+
+// initializeStudioOrchestrator creates the autonomous agent studio orchestrator.
+func (b *ServerBuilder) initializeStudioOrchestrator() error {
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
+
+	llmAdapter := agentstudio.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
+	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, llmAdapter, b.server.eventBus)
+	if verbose {
+		log.Println("✅ Agent Studio orchestrator initialized")
+	}
+
+	b.server.studioHandler = agentstudio.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
+	if verbose {
+		log.Println("✅ Agent Studio HTTP handler initialized")
+	}
+
+	return nil
+}
+
+// initializeTemplateManager loads workflow templates and injects into orchestration handler.
+func (b *ServerBuilder) initializeTemplateManager() error {
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
+	templatesDir := resolveWorkflowTemplatesDir()
+
+	templateManager := templates.NewTemplateManager(templatesDir)
+	if err := templateManager.LoadTemplates(); err != nil {
+		if verbose {
+			logger.Error("Warning: failed to load workflow templates", logger.Fields{"err": err})
+		}
+		return nil // Non-critical
+	}
+
+	if verbose {
+		logger.Info("Loaded workflow templates", logger.Fields{"listtemplates())": len(templateManager.ListTemplates())})
+	}
+
+	b.server.orchestrationHandler.SetTemplateManager(templateManager)
+
+	// Initialize custom workflow manager
+	customWorkflowsDir := filepath.Join(templatesDir, "custom")
+	customWorkflowManager := templates.NewCustomWorkflowManager(customWorkflowsDir)
+	if err := customWorkflowManager.LoadWorkflows(); err != nil {
+		if verbose {
+			logger.Error("Warning: failed to load custom workflows", logger.Fields{"err": err})
+		}
+	} else if verbose {
+		logger.Info("Loaded custom workflows", logger.Fields{"count": len(customWorkflowManager.ListWorkflows())})
+	}
+
+	// Initialize workflow HTTP handler
+	b.server.workflowHandler = workflowhttp.NewHandler(customWorkflowManager, b.server.workspaceStore)
+
+	return nil
+}

@@ -97,9 +97,9 @@
       "github_repo": "https://github.com/johnjallday/ori-shell-executor",
       "download_url": "https://github.com/johnjallday/ori-shell-executor/releases/latest/download/ori-shell-executor-{os}-{arch}{ext}",
       "supported_os": [
-        "darwin",
         "linux",
-        "windows"
+        "windows",
+        "darwin"
       ],
       "supported_arch": [
         "amd64",
