@@ -816,17 +816,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Load agent
-		names, current := h.store.ListAgents()
-		if current == "" && len(names) > 0 {
-			current = names[0]
-		}
-		ag, ok := h.store.GetAgent(current)
+		ag, current, ok := store.GetCurrentAgent(h.store)
 		if !ok {
 			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-				logger.Error(
-
-					// Execute the tool directly
-					"Failed to write response", logger.Fields{"error": err})
+				logger.Error("Failed to write response", logger.Fields{"error": err})
 			}
 			return
 		}

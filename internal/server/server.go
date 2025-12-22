@@ -263,24 +263,7 @@ func (s *Server) serveAgentsEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.CurrentPage = "settings"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
+	data := s.prepareBasePageData("settings")
 
 	// Add platform information for system info display
 	currentPlatform := platform.DetectPlatform()
@@ -290,71 +273,17 @@ func (s *Server) serveSettings(w http.ResponseWriter, r *http.Request) {
 		"CurrentPlatformDisplay": currentPlatformDisplay,
 	}
 
-	html, err := s.templateRenderer.RenderTemplate("settings", data)
-	if err != nil {
-		logger.Error("Failed to render settings template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	s.renderAndWritePage(w, "settings", data)
 }
 
 func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.CurrentPage = "mcp"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("mcp", data)
-	if err != nil {
-		logger.Error("Failed to render mcp template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data := s.prepareBasePageData("mcp")
+	s.renderAndWritePage(w, "mcp", data)
 }
 
 func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.CurrentPage = "marketplace"
-	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		data.CurrentAgent = currentAgentName
-	}
+	data := s.prepareBasePageData("marketplace")
+	data.ShowSidebarToggle = true
 
 	// Add platform information for compatibility checking
 	currentPlatform := platform.DetectPlatform()
@@ -364,143 +293,32 @@ func (s *Server) serveMarketplace(w http.ResponseWriter, r *http.Request) {
 		"CurrentPlatformDisplay": currentPlatformDisplay,
 	}
 
-	html, err := s.templateRenderer.RenderTemplate("marketplace", data)
-	if err != nil {
-		logger.Error("Failed to render marketplace template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	s.renderAndWritePage(w, "marketplace", data)
 }
 
 func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.CurrentPage = "plugins"
-	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		data.CurrentAgent = currentAgentName
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("plugins", data)
-	if err != nil {
-		logger.Error("Failed to render plugins template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data := s.prepareBasePageData("plugins")
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "plugins", data)
 }
 
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.Title = "Ori Agent"
-	data.CurrentPage = "models"
-	data.ShowSidebarToggle = true // Enable sidebar toggle
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		data.CurrentAgent = currentAgentName
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("models", data)
-	if err != nil {
-		logger.Error("Failed to render models template", logger.Fields{"model": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data := s.prepareBasePageData("models")
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "models", data)
 }
 
 func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("workflows")
 	data.Title = "Workflow Templates - Ori Agent"
-	data.BrandText = "Ori Agent" // Keep navbar brand simple
-	data.CurrentPage = "workflows"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("workflows", data)
-	if err != nil {
-		logger.Error("Failed to render workflows template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "workflows", data)
 }
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
-	data.Title = "Ori Agent"
-	data.CurrentPage = "workspaces"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("studios", data)
+	data := s.prepareBasePageData("workspaces")
+	// Note: uses "studios" template
+	html, err := s.UI.TemplateRenderer.RenderTemplate("studios", data)
 	if err != nil {
 		logger.Error("Failed to render studios template", logger.Fields{"error": err})
 		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
@@ -540,126 +358,32 @@ func (s *Server) handleStudiosRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request, workspaceID string) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Dashboard - Ori Agent"
-	data.BrandText = "Ori Agent" // Keep navbar brand simple
-	data.CurrentPage = "workspaces"
-	data.ShowSidebarToggle = true // Workspace dashboard has a sidebar
-
-	// Add workspace ID to template data
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
 	data.Extra = map[string]interface{}{
 		"WorkspaceID": workspaceID,
 	}
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("workspace-dashboard", data)
-	if err != nil {
-		logger.Error("Failed to render workspace dashboard template", logger.Fields{"error": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	s.renderAndWritePage(w, "workspace-dashboard", data)
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Canvas - Ori Agent"
-	data.BrandText = "Ori Agent" // Keep navbar brand simple
-	data.CurrentPage = "workspaces"
+	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
-
-	// Add workspace ID to template data
 	data.Extra = map[string]interface{}{
 		"WorkspaceID": workspaceID,
 	}
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("workspace-canvas", data)
-	if err != nil {
-		logger.Error("Failed to render workspace canvas template", logger.Fields{"error": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
-	data := web.GetDefaultData()
+	data := s.prepareBasePageData("usage")
 	data.Title = "Usage & Cost Tracking - Ori Agent"
-	data.BrandText = "Ori Agent" // Keep navbar brand simple
-	data.CurrentPage = "usage"
-
-	// Get theme from app state
-	data.Theme = s.onboardingMgr.GetTheme()
-
-	if agents, current := s.st.ListAgents(); len(agents) > 0 {
-		currentAgentName := current
-		if currentAgentName == "" {
-			currentAgentName = agents[0]
-		}
-		if agent, found := s.st.GetAgent(currentAgentName); found && agent != nil {
-			data.CurrentAgent = currentAgentName
-			if agent.Settings.Model != "" {
-				data.Model = agent.Settings.Model
-			}
-		}
-	}
-
-	html, err := s.templateRenderer.RenderTemplate("usage", data)
-	if err != nil {
-		logger.Error("Failed to render usage template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-	}
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "usage", data)
 }
 
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
