@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/openai/openai-go/v3"
 )
 
@@ -24,7 +25,7 @@ func NewLLMFactoryAdapter(factory *llm.Factory, providerName string) *LLMFactory
 	}
 }
 
-// ChatCompletion implements the LLMProvider interface
+// ChatCompletion implements the LLMProvider interface (legacy, for mission analysis)
 func (a *LLMFactoryAdapter) ChatCompletion(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolUnionParam) (*openai.ChatCompletion, error) {
 	// Get the provider from the factory
 	provider, err := a.factory.GetProvider(a.providerName)
@@ -65,7 +66,7 @@ func (a *LLMFactoryAdapter) ChatCompletion(ctx context.Context, messages []opena
 	chatReq := llm.ChatRequest{
 		Model:    a.model,
 		Messages: llmMessages,
-		Tools:    []llm.Tool{}, // Empty tools for now
+		Tools:    []llm.Tool{}, // Empty tools for mission analysis
 	}
 
 	// Call provider
@@ -96,4 +97,62 @@ func (a *LLMFactoryAdapter) ChatCompletion(ctx context.Context, messages []opena
 	}
 
 	return completion, nil
+}
+
+// ChatWithTools implements tool-calling support for task execution
+func (a *LLMFactoryAdapter) ChatWithTools(ctx context.Context, systemPrompt, userPrompt string, tools []llm.Tool) (*llm.ChatResponse, error) {
+	// Build messages
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+	}
+
+	if userPrompt != "" {
+		messages = append(messages, llm.Message{Role: "user", Content: userPrompt})
+	}
+
+	return a.ChatWithMessages(ctx, messages, tools)
+}
+
+// ChatWithMessages implements tool-calling support with full message history
+func (a *LLMFactoryAdapter) ChatWithMessages(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.ChatResponse, error) {
+	// Get the provider from the factory
+	provider, err := a.factory.GetProvider(a.providerName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get provider %s: %w", a.providerName, err)
+	}
+
+	logger.Debug("[LLMAdapter] ChatWithMessages", logger.Fields{
+		"provider":   a.providerName,
+		"model":      a.model,
+		"tool_count": len(tools),
+		"msg_count":  len(messages),
+	})
+
+	// Create ChatRequest with tools
+	chatReq := llm.ChatRequest{
+		Model:    a.model,
+		Messages: messages,
+		Tools:    tools,
+	}
+
+	// Call provider
+	resp, err := provider.Chat(ctx, chatReq)
+	if err != nil {
+		return nil, fmt.Errorf("provider chat failed: %w", err)
+	}
+
+	logger.Debug("[LLMAdapter] ChatWithMessages response", logger.Fields{
+		"content_length": len(resp.Content),
+		"tool_calls":     len(resp.ToolCalls),
+	})
+
+	return resp, nil
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

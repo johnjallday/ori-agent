@@ -99,7 +99,7 @@ func (b *ServerBuilder) initializeStudioOrchestrator() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	llmAdapter := agentstudio.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
-	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, llmAdapter, b.server.eventBus)
+	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, b.server.st, llmAdapter, b.server.eventBus)
 	if verbose {
 		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
 	}
