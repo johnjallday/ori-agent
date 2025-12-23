@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -195,7 +196,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 		localReg.Plugins = append(localReg.Plugins, newPlugin)
 		newPluginsAdded = true
 
-		fmt.Printf("Auto-registered plugin: %s (%s) from %s\n", pluginName, version, pluginPath)
+		logger.Info("Auto-registered plugin", logger.Fields{"plugin": pluginName, "version": version, "path": pluginPath})
 	}
 
 	// Save updated registry if changes were made
@@ -203,7 +204,7 @@ func (m *Manager) ScanUploadedPlugins() error {
 		if err := m.SaveLocal(localReg); err != nil {
 			return fmt.Errorf("failed to save updated local registry: %w", err)
 		}
-		fmt.Printf("Updated local plugin registry with new plugins from uploaded_plugins/\n")
+		logger.Info("Updated local plugin registry with new plugins from uploaded_plugins/")
 	}
 
 	return nil
@@ -405,12 +406,12 @@ func (m *Manager) ValidateAndUpdateLocal() error {
 		}
 
 		if found {
-			fmt.Printf("Updated plugin path: %s -> %s\n", plugin.Path, newPath)
+			logger.Info("Updated plugin path", logger.Fields{"old": plugin.Path, "new": newPath})
 			plugin.Path = newPath
 			validPlugins = append(validPlugins, plugin)
 			updated = true
 		} else {
-			fmt.Printf("Plugin not found, removing from registry: %s (was at %s)\n", plugin.Name, plugin.Path)
+			logger.Warn("Plugin not found, removing from registry", logger.Fields{"plugin": plugin.Name, "path": plugin.Path})
 			updated = true
 		}
 	}
@@ -421,7 +422,7 @@ func (m *Manager) ValidateAndUpdateLocal() error {
 		if err := m.SaveLocal(localReg); err != nil {
 			return fmt.Errorf("failed to save updated local registry: %w", err)
 		}
-		fmt.Printf("Updated local plugin registry (validated %d plugins, %d valid)\n", len(localReg.Plugins), len(validPlugins))
+		logger.Info("Updated local plugin registry", logger.Fields{"total": len(localReg.Plugins), "valid": len(validPlugins)})
 	}
 
 	return nil

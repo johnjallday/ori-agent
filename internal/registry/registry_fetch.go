@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -263,7 +264,7 @@ func (m *Manager) FetchAllMarketplaces() (types.PluginRegistry, error) {
 	for _, mp := range enabledMarketplaces {
 		reg, err := m.FetchFromMarketplace(mp)
 		if err != nil {
-			fmt.Printf("Warning: failed to fetch from marketplace %s: %v\n", mp.Name, err)
+			logger.Warn("Failed to fetch from marketplace", logger.Fields{"marketplace": mp.Name, "error": err})
 			// Update marketplace with error
 			now := time.Now()
 			mp.LastFetched = &now
