@@ -428,11 +428,21 @@ func (m *Manager) downloadFile(url, filename, version string) (string, error) {
 
 	_, err = file.Write(fileContent)
 	if err != nil {
-		_ = file.Close()
-		_ = os.Remove(tempFilePath)
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Verbosef("Warning: failed to close file after write error: %v", closeErr)
+		}
+		if removeErr := os.Remove(tempFilePath); removeErr != nil {
+			logger.Verbosef("Warning: failed to remove temp file after write error: %v", removeErr)
+		}
 		return "", fmt.Errorf("failed to save download: %w", err)
 	}
-	_ = file.Close()
+	if err := file.Close(); err != nil {
+		// Close error after successful write could mean data wasn't flushed
+		if removeErr := os.Remove(tempFilePath); removeErr != nil {
+			logger.Verbosef("Warning: failed to remove temp file after close error: %v", removeErr)
+		}
+		return "", fmt.Errorf("failed to close download file: %w", err)
+	}
 
 	// Determine the final filename - use "ori-agent" or "ori-agent.exe"
 	var finalName string

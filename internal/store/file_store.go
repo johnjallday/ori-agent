@@ -27,8 +27,10 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 		agents:          make(map[string]*agent.Agent),
 		defaultSettings: defaultSettings,
 	}
-	// try load
-	_ = fs.load()
+	// try load (non-fatal if file doesn't exist yet)
+	if err := fs.load(); err != nil && !os.IsNotExist(err) {
+		logger.Verbosef("Warning: failed to load store from %s: %v", path, err)
+	}
 
 	// ensure at least one agent exists
 	fs.mu.Lock()
@@ -47,10 +49,14 @@ func NewFileStore(path string, defaultSettings types.Settings) (Store, error) {
 	// Migrate existing agents to have types
 	fs.migrateAgentTypesUnlocked()
 
-	_ = fs.saveUnlocked()
+	if err := fs.saveUnlocked(); err != nil {
+		logger.Verbosef("Warning: failed to save store during initialization: %v", err)
+	}
 
 	// Write agents.json for plugins on startup
-	_ = fs.writeAgentsJSON()
+	if err := fs.writeAgentsJSON(); err != nil {
+		logger.Verbosef("Warning: failed to write agents.json during initialization: %v", err)
+	}
 
 	return fs, nil
 }
@@ -176,8 +182,7 @@ func (s *fileStore) DeleteAgent(name string) error {
 	agentFolder := filepath.Join(agentsDir, name)
 	if err := os.RemoveAll(agentFolder); err != nil && !os.IsNotExist(err) {
 		// Log error but don't fail the operation since agent is already removed from memory
-		// In a production app, you might want to handle this differently
-		_ = err
+		logger.Verbosef("Warning: failed to remove agent folder %s: %v", agentFolder, err)
 	}
 
 	return s.saveUnlocked()

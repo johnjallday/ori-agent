@@ -317,7 +317,10 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("ollama API error (status %d): failed to read error body: %w", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -328,8 +331,9 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Debug: Log the response from Ollama
-	respJSON, _ := json.Marshal(ollamaResp)
-	fmt.Printf("🐛 Ollama Response: %s\n", string(respJSON))
+	if respJSON, err := json.Marshal(ollamaResp); err == nil {
+		fmt.Printf("🐛 Ollama Response: %s\n", string(respJSON))
+	}
 
 	// Convert to common format
 	chatResp := &ChatResponse{
@@ -495,8 +499,14 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log but continue with the primary error
+			fmt.Printf("Warning: failed to close response body: %v\n", closeErr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("ollama API error (status %d): failed to read error body: %w", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("ollama API error (status %d): %s", resp.StatusCode, string(body))
 	}
 

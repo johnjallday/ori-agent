@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/device"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/version"
 )
@@ -39,8 +40,10 @@ func NewManager(statePath string) *Manager {
 		},
 	}
 
-	// Try to load existing state
-	_ = m.load()
+	// Try to load existing state (non-fatal if it fails)
+	if err := m.load(); err != nil {
+		logger.Verbosef("Warning: failed to load onboarding state from %s: %v", statePath, err)
+	}
 
 	return m
 }
