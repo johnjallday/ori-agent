@@ -45,7 +45,9 @@ async function handleFileSelect(event) {
           'ogg': 'audio/ogg',
           'mid': 'audio/midi',
           'midi': 'audio/midi',
-          'zip': 'application/zip'
+          'zip': 'application/zip',
+          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         };
         mimeType = mimeMap[ext] || 'application/octet-stream';
       }
@@ -73,13 +75,13 @@ async function handleFileSelect(event) {
 // Check if file is binary (PDF, DOCX, DOC, audio, etc.)
 function isBinaryFile(filename) {
   const ext = filename.split('.').pop().toLowerCase();
-  return ['pdf', 'docx', 'doc', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip'].includes(ext);
+  return ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip'].includes(ext);
 }
 
 // Check if file should be parsed for text (for LLM consumption)
 function shouldParseForText(filename) {
   const ext = filename.split('.').pop().toLowerCase();
-  return ['pdf', 'docx', 'doc'].includes(ext);
+  return ['pdf', 'docx', 'doc', 'pptx', 'xlsx'].includes(ext);
 }
 
 // Read file content - returns { content, binaryContent } for binary files
@@ -212,10 +214,17 @@ function getFileIcon(filename) {
     'pdf': '📕',
     'doc': '📘',
     'docx': '📘',
+    'pptx': '📙',
+    'xlsx': '📊',
     'csv': '📊',
     'json': '📋',
     'xml': '📋',
-    'html': '🌐'
+    'html': '🌐',
+    'mp3': '🎵',
+    'wav': '🎵',
+    'flac': '🎵',
+    'ogg': '🎵',
+    'zip': '📦'
   };
   return iconMap[ext] || '📎';
 }
