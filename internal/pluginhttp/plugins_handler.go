@@ -557,11 +557,32 @@ func (h *PluginsPageHandler) HandleUpdatePluginConfig(w http.ResponseWriter, r *
 		return
 	}
 
+	// Reload the plugin to pick up new config without server restart
+	reloaded := false
+	agent, ok := h.Store.GetAgent(currentAgent)
+	if ok {
+		if plugin, exists := agent.Plugins[pluginName]; exists {
+			// Kill old plugin process if it's an RPC plugin
+			if rpcPlugin, ok := plugin.Tool.(interface{ Kill() }); ok {
+				rpcPlugin.Kill()
+			}
+			// Reload plugin from disk
+			if newTool, err := h.Loader.Load(plugin.Path); err == nil {
+				plugin.Tool = newTool
+				plugin.Definition = newTool.Definition()
+				agent.Plugins[pluginName] = plugin
+				_ = h.Store.SetAgent(currentAgent, agent)
+				reloaded = true
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Configuration updated for plugin %s", pluginName),
-		"path":    settingsPath,
+		"success":  true,
+		"message":  fmt.Sprintf("Configuration updated for plugin %s", pluginName),
+		"path":     settingsPath,
+		"reloaded": reloaded,
 	}); err != nil {
 		fmt.Printf("Warning: Failed to encode response: %v\n", err)
 	}
