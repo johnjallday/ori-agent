@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -372,6 +373,28 @@ func (m *Manager) FetchAllMarketplaces() (types.PluginRegistry, error) {
 // Converts underscores to hyphens and lowercases the name
 func NormalizePluginName(name string) string {
 	return strings.ToLower(strings.ReplaceAll(name, "_", "-"))
+}
+
+var pluginVersionSuffixPattern = regexp.MustCompile(`^(.+)-v?\d+\.\d+\.\d+(?:[-+].+)?$`)
+
+// NormalizePluginNameForLookup normalizes and strips version suffixes for name matching.
+func NormalizePluginNameForLookup(name string) string {
+	normalized := NormalizePluginName(name)
+	matches := pluginVersionSuffixPattern.FindStringSubmatch(normalized)
+	if len(matches) == 2 && matches[1] != "" {
+		return matches[1]
+	}
+	return normalized
+}
+
+func findPluginIndexByName(plugins []types.PluginRegistryEntry, pluginName string) int {
+	needle := NormalizePluginNameForLookup(pluginName)
+	for i := range plugins {
+		if NormalizePluginNameForLookup(plugins[i].Name) == needle {
+			return i
+		}
+	}
+	return -1
 }
 
 // MergeWithPriority merges multiple registries respecting marketplace priority
@@ -954,10 +977,8 @@ func (m *Manager) GetPluginByName(pluginName string) (*types.PluginRegistryEntry
 		return nil, fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			return &localReg.Plugins[i], nil
-		}
+	if idx := findPluginIndexByName(localReg.Plugins, pluginName); idx >= 0 {
+		return &localReg.Plugins[idx], nil
 	}
 
 	return nil, fmt.Errorf("plugin not found: %s", pluginName)
@@ -970,19 +991,12 @@ func (m *Manager) UpdatePluginCategory(pluginName, category string) error {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	found := false
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			localReg.Plugins[i].Category = category
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	idx := findPluginIndexByName(localReg.Plugins, pluginName)
+	if idx < 0 {
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
+	localReg.Plugins[idx].Category = category
 	return m.SaveLocal(localReg)
 }
 
@@ -993,20 +1007,13 @@ func (m *Manager) UpdatePluginPermissions(pluginName string, perms map[string]in
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	found := false
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			localReg.Plugins[i].Permissions = perms
-			localReg.Plugins[i].PermissionsApproved = approved
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	idx := findPluginIndexByName(localReg.Plugins, pluginName)
+	if idx < 0 {
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
+	localReg.Plugins[idx].Permissions = perms
+	localReg.Plugins[idx].PermissionsApproved = approved
 	return m.SaveLocal(localReg)
 }
 
@@ -1020,20 +1027,13 @@ func (m *Manager) UpdatePluginStatus(pluginName string, enabled bool, healthStat
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	found := false
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			localReg.Plugins[i].Enabled = enabled
-			localReg.Plugins[i].HealthStatus = healthStatus
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	idx := findPluginIndexByName(localReg.Plugins, pluginName)
+	if idx < 0 {
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
+	localReg.Plugins[idx].Enabled = enabled
+	localReg.Plugins[idx].HealthStatus = healthStatus
 	return m.saveLocalUnlocked(localReg)
 }
 
@@ -1047,19 +1047,12 @@ func (m *Manager) UpdatePluginLastUsed(pluginName string, lastUsed time.Time) er
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	found := false
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			localReg.Plugins[i].LastUsed = &lastUsed
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	idx := findPluginIndexByName(localReg.Plugins, pluginName)
+	if idx < 0 {
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
+	localReg.Plugins[idx].LastUsed = &lastUsed
 	return m.saveLocalUnlocked(localReg)
 }
 
@@ -1073,19 +1066,12 @@ func (m *Manager) AddVersionToHistory(pluginName string, versionEntry types.Vers
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
-	found := false
-	for i := range localReg.Plugins {
-		if localReg.Plugins[i].Name == pluginName {
-			localReg.Plugins[i].VersionHistory = append(localReg.Plugins[i].VersionHistory, versionEntry)
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	idx := findPluginIndexByName(localReg.Plugins, pluginName)
+	if idx < 0 {
 		return fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
+	localReg.Plugins[idx].VersionHistory = append(localReg.Plugins[idx].VersionHistory, versionEntry)
 	return m.saveLocalUnlocked(localReg)
 }
 
@@ -1099,10 +1085,11 @@ func (m *Manager) RemovePlugin(pluginName string) error {
 		return fmt.Errorf("failed to load local registry: %w", err)
 	}
 
+	normalized := NormalizePluginNameForLookup(pluginName)
 	var updatedPlugins []types.PluginRegistryEntry
 	found := false
 	for _, plugin := range localReg.Plugins {
-		if plugin.Name != pluginName {
+		if NormalizePluginNameForLookup(plugin.Name) != normalized {
 			updatedPlugins = append(updatedPlugins, plugin)
 		} else {
 			found = true

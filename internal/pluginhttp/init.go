@@ -149,6 +149,17 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	plugin, exists := ag.Plugins[pluginName]
+	if !exists {
+		normalized := registry.NormalizePluginNameForLookup(pluginName)
+		for key, entry := range ag.Plugins {
+			if registry.NormalizePluginNameForLookup(key) == normalized {
+				pluginName = key
+				plugin = entry
+				exists = true
+				break
+			}
+		}
+	}
 
 	// For default-settings and config, also check local registry if plugin not loaded in agent
 	// OR if plugin exists but tool is nil (failed to load)
@@ -158,8 +169,9 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		localReg, err := h.registryManager.LoadLocal()
 		if err == nil {
 			fmt.Printf("✓ Local registry has %d plugins\n", len(localReg.Plugins))
+			normalizedName := registry.NormalizePluginNameForLookup(pluginName)
 			for _, regPlugin := range localReg.Plugins {
-				if regPlugin.Name == pluginName {
+				if registry.NormalizePluginNameForLookup(regPlugin.Name) == normalizedName {
 					fmt.Printf("✓ Found '%s' in local registry at: %s\n", pluginName, regPlugin.Path)
 					// For config action, try to load plugin to check InitializationProvider
 					if action == "config" {

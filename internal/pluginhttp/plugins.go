@@ -15,6 +15,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -98,9 +99,12 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 
 	// Create map of enabled plugins (empty if agent doesn't exist yet)
 	enabledPlugins := make(map[string]bool)
+	loadedPlugins := make(map[string]types.LoadedPlugin)
 	if ag, ok := h.State.GetAgent(current); ok {
-		for name := range ag.Plugins {
-			enabledPlugins[name] = true
+		for name, plugin := range ag.Plugins {
+			normalized := registry.NormalizePluginNameForLookup(name)
+			enabledPlugins[normalized] = true
+			loadedPlugins[normalized] = plugin
 		}
 	}
 
@@ -140,7 +144,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 	plist := make([]map[string]any, 0, len(localReg.Plugins))
 
 	// Get current agent for checking loaded plugins
-	ag, agentExists := h.State.GetAgent(current)
+	_, agentExists := h.State.GetAgent(current)
 
 	for _, registryPlugin := range localReg.Plugins {
 		// Check if plugin binary is installed (exists in uploaded_plugins/)
@@ -150,8 +154,11 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 		var loadedPlugin *types.LoadedPlugin
 		isEnabled := false
 		if agentExists {
-			if lp, exists := ag.Plugins[registryPlugin.Name]; exists {
-				loadedPlugin = &lp
+			normalized := registry.NormalizePluginNameForLookup(registryPlugin.Name)
+			if enabledPlugins[normalized] {
+				if lp, exists := loadedPlugins[normalized]; exists {
+					loadedPlugin = &lp
+				}
 				isEnabled = true
 			}
 		}

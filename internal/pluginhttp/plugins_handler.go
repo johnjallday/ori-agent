@@ -343,6 +343,7 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
+	pluginKey := plugin.Name
 
 	tool, err := h.Loader.Load(plugin.Path)
 	if err != nil {
@@ -367,12 +368,18 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	agentSpecificStorePath := filepath.Join("agents", currentAgent, "config.json")
+	if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
+		agentSpecificStorePath = abs
+	}
+	pluginloader.SetAgentContext(tool, currentAgent, agentSpecificStorePath, "")
+
 	if agent.Plugins == nil {
 		agent.Plugins = make(map[string]types.LoadedPlugin)
 	}
 
 	supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
-	agent.Plugins[pluginName] = types.LoadedPlugin{
+	agent.Plugins[pluginKey] = types.LoadedPlugin{
 		Tool:              tool,
 		Definition:        tool.Definition(),
 		Path:              plugin.Path,
@@ -392,20 +399,20 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := h.RegistryManager.UpdatePluginStatus(pluginName, true, "healthy"); err != nil {
+	if err := h.RegistryManager.UpdatePluginStatus(pluginKey, true, "healthy"); err != nil {
 		// Log error but don't fail the request
 		fmt.Printf("Warning: Failed to update plugin status: %v\n", err)
 	}
 
 	// Update last used timestamp
-	if err := h.RegistryManager.UpdatePluginLastUsed(pluginName, time.Now()); err != nil {
+	if err := h.RegistryManager.UpdatePluginLastUsed(pluginKey, time.Now()); err != nil {
 		fmt.Printf("Warning: Failed to update last used: %v\n", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": fmt.Sprintf("Plugin %s enabled successfully", pluginName),
+		"message": fmt.Sprintf("Plugin %s enabled successfully", pluginKey),
 	}); err != nil {
 		fmt.Printf("Warning: Failed to encode response: %v\n", err)
 	}
@@ -444,7 +451,20 @@ func (h *PluginsPageHandler) HandleDisablePlugin(w http.ResponseWriter, r *http.
 		return
 	}
 
-	delete(agent.Plugins, pluginName)
+	pluginKey := pluginName
+	if entry, err := h.RegistryManager.GetPluginByName(pluginName); err == nil && entry != nil {
+		pluginKey = entry.Name
+	} else {
+		normalized := registry.NormalizePluginNameForLookup(pluginName)
+		for key := range agent.Plugins {
+			if registry.NormalizePluginNameForLookup(key) == normalized {
+				pluginKey = key
+				break
+			}
+		}
+	}
+
+	delete(agent.Plugins, pluginKey)
 
 	// Save agent
 	if err := h.Store.SetAgent(currentAgent, agent); err != nil {
@@ -457,14 +477,14 @@ func (h *PluginsPageHandler) HandleDisablePlugin(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := h.RegistryManager.UpdatePluginStatus(pluginName, false, "inactive"); err != nil {
+	if err := h.RegistryManager.UpdatePluginStatus(pluginKey, false, "inactive"); err != nil {
 		fmt.Printf("Warning: Failed to update plugin status: %v\n", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": fmt.Sprintf("Plugin %s disabled successfully", pluginName),
+		"message": fmt.Sprintf("Plugin %s disabled successfully", pluginKey),
 	}); err != nil {
 		fmt.Printf("Warning: Failed to encode response: %v\n", err)
 	}
