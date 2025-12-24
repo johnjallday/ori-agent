@@ -134,7 +134,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           install-only: true
-          version: '~> v2.6'  # Use v2.6+ which supports 'ids' in archives
+          version: latest  # Use latest for 'ids' field support in archives
 
       - name: Build packages
         run: |
@@ -211,8 +211,8 @@ jobs:
       - name: Install GoReleaser
         run: |
           dnf install -y curl git tar
-          # Install goreleaser v2.6+ directly (yum repo may have older version)
-          curl -Lo goreleaser.tar.gz https://github.com/goreleaser/goreleaser/releases/download/v2.6.1/goreleaser_Linux_x86_64.tar.gz
+          # Install latest goreleaser (for 'ids' field support in archives)
+          curl -Lo goreleaser.tar.gz https://github.com/goreleaser/goreleaser/releases/latest/download/goreleaser_Linux_x86_64.tar.gz
           tar xzf goreleaser.tar.gz -C /usr/local/bin goreleaser
 
       - name: Build packages
@@ -339,12 +339,12 @@ jobs:
           $process = Start-Process -FilePath $exePath -ArgumentList "--port=$port" -RedirectStandardOutput "server-out.log" -RedirectStandardError "server-err.log" -PassThru -NoNewWindow
           Write-Host "✓ Server started (PID: $($process.Id))"
 
-          # Wait for server
+          # Wait for server (use 127.0.0.1 to avoid IPv6 resolution issues on Windows)
           Write-Host "⏳ Waiting for server to start..."
           $started = $false
           for ($i = 0; $i -lt 30; $i++) {
             try {
-              $response = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing -TimeoutSec 1
+              $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 1
               if ($response.StatusCode -eq 200) {
                 Write-Host "✓ Server responded to HTTP"
                 $started = $true
@@ -365,7 +365,7 @@ jobs:
 
           # Test health endpoint
           try {
-            $health = Invoke-WebRequest -Uri "http://localhost:$port/health" -UseBasicParsing
+            $health = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing
             $content = $health.Content
             if ($content -like "*ok*") {
               Write-Host "✓ Health check passed"

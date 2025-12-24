@@ -577,9 +577,11 @@ func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// For now, return a curated list of well-known MCP servers
-	// TODO: Fetch from external registry in the future
-
+	// Return a curated list of well-known MCP servers.
+	// For external registry integration, would need to:
+	// - Define a registry API endpoint (e.g., GitHub raw JSON or custom API)
+	// - Add caching with TTL to avoid excessive fetches
+	// - Handle network errors gracefully with fallback to this static list
 	marketplaceServers := []map[string]interface{}{
 		{
 			"name":        "filesystem",

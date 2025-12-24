@@ -48,6 +48,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.healthHandler = healthhttp.NewHandler(s.healthManager, s.st)
 	s.pluginUpdateHandler = pluginupdate.NewHandler(s.st, s.healthManager.GetChecker())
 	s.pluginUpdateHandler.SetPluginRegistry(&s.pluginReg)
+	s.pluginUpdateHandler.SetRegistryManager(s.registryManager)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)

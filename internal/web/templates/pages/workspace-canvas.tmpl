@@ -1268,9 +1268,13 @@
       addBtn.disabled = true;
       addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
 
+      // Convert priority string to integer (low=0, medium=1, high=2)
+      const priorityMap = { 'low': 0, 'medium': 1, 'high': 2 };
+      const priorityValue = priorityMap[priorityInput?.value] ?? 1;
+
       const task = {
         description: description,
-        priority: priorityInput?.value || 'medium',
+        priority: priorityValue,
         status: 'pending',
         x: 100,
         y: 100

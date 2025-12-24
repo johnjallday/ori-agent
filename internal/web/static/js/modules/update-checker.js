@@ -324,6 +324,9 @@ function displayUpdateInfo(updateInfo, pluginUpdates = []) {
     `;
 
     pluginUpdates.forEach((plugin, index) => {
+      const downloadLink = plugin.download_url
+        ? `<a class="modern-btn modern-btn-secondary btn-sm ms-2" href="${plugin.download_url}" target="_blank" rel="noopener noreferrer">Download</a>`
+        : '';
       html += `
         <div class="d-flex justify-content-between align-items-center p-3 mb-2" style="background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
           <div>
@@ -336,9 +339,12 @@ function displayUpdateInfo(updateInfo, pluginUpdates = []) {
               <span class="badge bg-success">${plugin.latest_version}</span>
             </div>
           </div>
-          <button class="modern-btn modern-btn-primary btn-sm" onclick="updatePlugin('${plugin.plugin_name}')" id="updateBtn-${index}">
-            Update
-          </button>
+          <div class="d-flex align-items-center gap-2">
+            <button class="modern-btn modern-btn-primary btn-sm" data-plugin-name="${plugin.plugin_name}" onclick="updatePlugin('${plugin.plugin_name}', this)" id="updateBtn-${index}">
+              Update
+            </button>
+            ${downloadLink}
+          </div>
         </div>
       `;
     });
@@ -361,15 +367,17 @@ function displayUpdateInfo(updateInfo, pluginUpdates = []) {
 }
 
 // Update a single plugin
-async function updatePlugin(pluginName) {
-  const btn = event.target;
-  const originalText = btn.textContent;
+async function updatePlugin(pluginName, buttonEl = null) {
+  const btn = resolveUpdateButton(pluginName, buttonEl);
+  const originalText = btn ? btn.textContent : 'Update';
 
   try {
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status"></span>`;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status"></span>`;
+    }
 
-    const response = await fetch(`/api/plugins/${pluginName}/update`, {
+    const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/update`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
@@ -377,8 +385,10 @@ async function updatePlugin(pluginName) {
     const result = await response.json();
 
     if (result.success) {
-      btn.className = 'modern-btn modern-btn-secondary btn-sm';
-      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg> Updated`;
+      if (btn) {
+        btn.className = 'modern-btn modern-btn-secondary btn-sm';
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg> Updated`;
+      }
 
       // Refresh the cached plugin updates
       cachedPluginUpdates = cachedPluginUpdates.filter(p => p.plugin_name !== pluginName);
@@ -393,8 +403,10 @@ async function updatePlugin(pluginName) {
     }
   } catch (error) {
     console.error('Plugin update error:', error);
-    btn.disabled = false;
-    btn.textContent = originalText;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
 
     if (typeof showToast === 'function') {
       showToast(`Failed to update ${pluginName}: ${error.message}`, 'error');
@@ -408,8 +420,30 @@ async function updatePlugin(pluginName) {
 async function updateAllPlugins() {
   const plugins = cachedPluginUpdates || [];
   for (const plugin of plugins) {
-    await updatePlugin(plugin.plugin_name);
+    const btn = resolveUpdateButton(plugin.plugin_name);
+    await updatePlugin(plugin.plugin_name, btn);
   }
+}
+
+function resolveUpdateButton(pluginName, buttonEl = null) {
+  if (buttonEl) {
+    return buttonEl;
+  }
+  if (typeof event !== 'undefined' && event?.target) {
+    return event.target;
+  }
+  const escapedName = escapeForSelector(pluginName);
+  return document.querySelector(`button[data-plugin-name="${escapedName}"]`);
+}
+
+function escapeForSelector(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  if (window.CSS && typeof window.CSS.escape === 'function') {
+    return window.CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, '\\$&');
 }
 
 // Download update using the API

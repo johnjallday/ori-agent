@@ -124,7 +124,11 @@ func (m *LaunchAgentManager) unload() error {
 
 // generatePlist creates the LaunchAgent plist XML content
 func (m *LaunchAgentManager) generatePlist() string {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Fall back to a reasonable default if we can't get home dir
+		homeDir = "/tmp"
+	}
 	logDir := filepath.Join(homeDir, "Library", "Logs")
 
 	// Build PATH with common locations for development tools

@@ -79,14 +79,23 @@ func (b *ServerBuilder) initializeOrchestration() error {
 
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
 	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
-
-	s.orchestrationHandler = orchestrationhttp.NewHandler(s.st, s.workspaceStore)
-	s.orchestrationHandler.SetOrchestrator(orch)
-
 	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
-	s.orchestrationHandler.SetTaskHandler(taskHandler)
-	s.orchestrationHandler.SetEventBus(s.eventBus)
-	s.orchestrationHandler.SetNotificationService(s.notificationService)
+
+	// Create orchestration handler with all available dependencies
+	// Note: TemplateManager is added later via SetTemplateManager in initializeTemplateManager
+	handler, err := orchestrationhttp.NewHandler(orchestrationhttp.HandlerConfig{
+		AgentStore:          s.st,
+		WorkspaceStore:      s.workspaceStore,
+		EventBus:            s.eventBus,
+		Orchestrator:        orch,
+		NotificationService: s.notificationService,
+		TaskHandler:         taskHandler,
+		// TemplateManager: nil - loaded later in initializeTemplateManager
+	})
+	if err != nil {
+		return err
+	}
+	s.orchestrationHandler = handler
 
 	// Store orchestrator for chat handler injection
 	b.server.chatHandler.SetOrchestrator(orch)
@@ -99,7 +108,7 @@ func (b *ServerBuilder) initializeStudioOrchestrator() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	llmAdapter := agentstudio.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
-	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, llmAdapter, b.server.eventBus)
+	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, b.server.st, llmAdapter, b.server.eventBus)
 	if verbose {
 		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
 	}

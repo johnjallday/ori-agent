@@ -23,6 +23,7 @@ type Handler struct {
 	store         store.Store
 	updater       *Updater
 	pluginReg     *types.PluginRegistry
+	registryMgr   *registry.Manager
 	healthChecker *health.Checker
 	updateService *pluginupdateservice.Service
 }
@@ -39,6 +40,11 @@ func NewHandler(st store.Store, healthChecker *health.Checker) *Handler {
 // SetPluginRegistry sets the plugin registry for update lookups
 func (h *Handler) SetPluginRegistry(reg *types.PluginRegistry) {
 	h.pluginReg = reg
+}
+
+// SetRegistryManager sets the registry manager for refreshing registry data.
+func (h *Handler) SetRegistryManager(mgr *registry.Manager) {
+	h.registryMgr = mgr
 }
 
 // SetUpdateService sets the plugin update service.
@@ -117,6 +123,14 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.registryMgr != nil && h.pluginReg != nil {
+		if reg, _, err := h.registryMgr.Load(); err == nil {
+			*h.pluginReg = reg
+		} else {
+			logger.Warn("Failed to refresh plugin registry for update request", logger.Fields{"error": err})
+		}
+	}
+
 	if h.pluginReg == nil {
 		if err := orihttp.RespondInternalError(w, "Plugin registry not loaded"); err != nil {
 			logger.Error("Failed to write response", logger.Fields{"error": err})
@@ -125,9 +139,9 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var registryEntry *types.PluginRegistryEntry
-	normalizedName := registry.NormalizePluginName(pluginName)
+	normalizedName := registry.NormalizePluginNameForLookup(pluginName)
 	for i, p := range h.pluginReg.Plugins {
-		if registry.NormalizePluginName(p.Name) == normalizedName {
+		if registry.NormalizePluginNameForLookup(p.Name) == normalizedName {
 			registryEntry = &h.pluginReg.Plugins[i]
 			break
 		}
@@ -351,6 +365,14 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.registryMgr != nil && h.pluginReg != nil {
+		if reg, _, err := h.registryMgr.Load(); err == nil {
+			*h.pluginReg = reg
+		} else {
+			logger.Warn("Failed to refresh plugin registry for update check", logger.Fields{"error": err})
+		}
+	}
+
 	if h.pluginReg == nil {
 		if err := orihttp.RespondInternalError(w, "Plugin registry not loaded"); err != nil {
 			logger.Error("Failed to write response", logger.
@@ -369,7 +391,7 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	checkedPlugins := make(map[string]bool)
 	registryIndex := make(map[string]types.PluginRegistryEntry, len(h.pluginReg.Plugins))
 	for _, entry := range h.pluginReg.Plugins {
-		registryIndex[registry.NormalizePluginName(entry.Name)] = entry
+		registryIndex[registry.NormalizePluginNameForLookup(entry.Name)] = entry
 	}
 
 	for _, agentName := range agentNames {
@@ -393,7 +415,7 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Find in registry
-			registryEntry, exists := registryIndex[registry.NormalizePluginName(pluginName)]
+			registryEntry, exists := registryIndex[registry.NormalizePluginNameForLookup(pluginName)]
 			if !exists {
 				continue
 			}

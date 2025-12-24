@@ -87,7 +87,7 @@ func (s *Service) CheckNow() error {
 
 	registryIndex := make(map[string]types.PluginRegistryEntry, len(s.registry.Plugins))
 	for _, entry := range s.registry.Plugins {
-		registryIndex[registry.NormalizePluginName(entry.Name)] = entry
+		registryIndex[registry.NormalizePluginNameForLookup(entry.Name)] = entry
 	}
 
 	agentNames, _ := s.store.ListAgents()
@@ -107,7 +107,7 @@ func (s *Service) CheckNow() error {
 			}
 			checkedPlugins[pluginName] = true
 
-			entry, exists := registryIndex[registry.NormalizePluginName(pluginName)]
+			entry, exists := registryIndex[registry.NormalizePluginNameForLookup(pluginName)]
 			if !exists {
 				continue
 			}

@@ -41,12 +41,14 @@ func New(readmePath string, dryRun, verbose bool) *Updater {
 	return u
 }
 
-// registerUpdaters registers all available section updaters
+// registerUpdaters registers all available section updaters.
+// This is currently a placeholder. To implement:
+// - Create updater types that implement SectionUpdater interface
+// - Each updater generates content for its section (e.g., version info, plugin list)
+// - Register updaters here: u.sections["SECTION_NAME"] = &SectionUpdater{}
 func (u *Updater) registerUpdaters() {
-	// TODO: Implement updater types
-	// u.sections["VERSION"] = &VersionUpdater{}
-	// u.sections["GO_VERSION"] = &GoVersionUpdater{}
-	// u.sections["PLUGINS"] = &PluginsUpdater{}
+	// No updaters registered yet. This package is a placeholder for future
+	// automation of README.md section updates.
 }
 
 // Update processes the README and updates all AUTO sections

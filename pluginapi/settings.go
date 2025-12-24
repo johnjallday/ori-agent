@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -52,7 +53,7 @@ type settingsManager struct {
 }
 
 // NewSettingsManager creates a new settings manager for a plugin.
-// The settings file will be stored at: agentDir/plugins/pluginName/settings.json
+// The settings file is stored at: agentDir/{plugin}_settings.json (UI-consistent path).
 func NewSettingsManager(agentDir, pluginName string) (SettingsManager, error) {
 	if agentDir == "" {
 		return nil, fmt.Errorf("agentDir cannot be empty")
@@ -61,13 +62,8 @@ func NewSettingsManager(agentDir, pluginName string) (SettingsManager, error) {
 		return nil, fmt.Errorf("pluginName cannot be empty")
 	}
 
-	// Create plugin-specific directory structure
-	pluginDir := filepath.Join(agentDir, "plugins", pluginName)
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create plugin directory: %w", err)
-	}
-
-	filePath := filepath.Join(pluginDir, "settings.json")
+	normalizedName := normalizePluginNameForSettings(pluginName)
+	filePath := filepath.Join(agentDir, fmt.Sprintf("%s_settings.json", normalizedName))
 	sm := &settingsManager{
 		cache:    make(map[string]interface{}),
 		filePath: filePath,
@@ -79,9 +75,26 @@ func NewSettingsManager(agentDir, pluginName string) (SettingsManager, error) {
 		if err := sm.Load(); err != nil {
 			return nil, fmt.Errorf("failed to load existing settings: %w", err)
 		}
+		return sm, nil
+	}
+
+	// Legacy fallback: agentDir/plugins/pluginName/settings.json
+	legacyPath := filepath.Join(agentDir, "plugins", pluginName, "settings.json")
+	if _, err := os.Stat(legacyPath); err == nil {
+		sm.filePath = legacyPath
+		if err := sm.Load(); err != nil {
+			return nil, fmt.Errorf("failed to load legacy settings: %w", err)
+		}
+		// Switch to UI path for future writes.
+		sm.filePath = filePath
 	}
 
 	return sm, nil
+}
+
+func normalizePluginNameForSettings(name string) string {
+	normalized := strings.ToLower(strings.ReplaceAll(name, "_", "-"))
+	return strings.TrimSpace(normalized)
 }
 
 // Get retrieves a setting value by key.

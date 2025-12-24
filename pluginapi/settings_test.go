@@ -258,8 +258,8 @@ func TestSettingsManager_AtomicWrite(t *testing.T) {
 	// Set a value (triggers save)
 	_ = sm.Set("key1", "value1")
 
-	// Check that the file exists
-	filePath := filepath.Join(tempDir, "plugins", "test-plugin", "settings.json")
+	// Check that the file exists (uses new UI-consistent path format)
+	filePath := filepath.Join(tempDir, "test-plugin_settings.json")
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		t.Error("settings file should exist after Set")
 	}

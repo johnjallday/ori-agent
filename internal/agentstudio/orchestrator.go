@@ -8,13 +8,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/pluginapi"
 	"github.com/openai/openai-go/v3"
 )
 
 // Orchestrator manages autonomous task delegation and agent coordination
 type Orchestrator struct {
 	studioStore Store
+	agentStore  store.Store // For loading agents and their tools
 	llmProvider LLMProvider // For intelligent task breakdown
 	eventBus    *EventBus   // For real-time updates
 }
@@ -22,12 +27,17 @@ type Orchestrator struct {
 // LLMProvider interface for calling AI models
 type LLMProvider interface {
 	ChatCompletion(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolUnionParam) (*openai.ChatCompletion, error)
+	// ChatWithTools provides tool-calling support using llm.Tool type
+	ChatWithTools(ctx context.Context, systemPrompt, userPrompt string, tools []llm.Tool) (*llm.ChatResponse, error)
+	// ChatWithMessages continues a conversation with full message history
+	ChatWithMessages(ctx context.Context, messages []llm.Message, tools []llm.Tool) (*llm.ChatResponse, error)
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(store Store, llmProvider LLMProvider, eventBus *EventBus) *Orchestrator {
+func NewOrchestrator(studioStore Store, agentStore store.Store, llmProvider LLMProvider, eventBus *EventBus) *Orchestrator {
 	return &Orchestrator{
-		studioStore: store,
+		studioStore: studioStore,
+		agentStore:  agentStore,
 		llmProvider: llmProvider,
 		eventBus:    eventBus,
 	}
@@ -314,20 +324,57 @@ func (o *Orchestrator) ExecuteTask(ctx context.Context, studioID string, task Ta
 	return nil
 }
 
-// executeTaskWithLLM executes a task using the LLM provider
+// executeTaskWithLLM executes a task using the LLM provider with tool support
 func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (string, error) {
 	if o.llmProvider == nil {
 		return "", fmt.Errorf("LLM provider not configured")
 	}
 
-	logger.Debug("[Orchestrator] Executing task with LLM", logger.Fields{"task_id": task.ID, "description": task.Description})
+	logger.Debug("[Orchestrator] Executing task with LLM", logger.Fields{"task_id": task.ID, "description": task.Description, "assigned_to": task.To})
 
-	// Create system message with agent role
-	systemMsg := openai.SystemMessage(fmt.Sprintf(
+	// Load the agent to get its tools
+	var tools []llm.Tool
+	var ag *agent.Agent
+	if o.agentStore != nil && task.To != "" {
+		var ok bool
+		ag, ok = o.agentStore.GetAgent(task.To)
+		if ok && ag != nil {
+			// Build tools from agent's plugins
+			for _, pl := range ag.Plugins {
+				var def pluginapi.Tool
+				if pl.Tool != nil {
+					def = pl.Tool.Definition()
+				} else {
+					def = pl.Definition
+				}
+				tools = append(tools, llm.Tool{
+					Name:        def.Name,
+					Description: def.Description,
+					Parameters:  def.Parameters,
+				})
+			}
+			logger.Debug("[Orchestrator] Loaded agent tools", logger.Fields{"agent": task.To, "tool_count": len(tools)})
+		} else {
+			logger.Warn("[Orchestrator] Agent not found, executing without tools", logger.Fields{"agent": task.To})
+		}
+	}
+
+	// Create system prompt with agent role and tool guidance
+	systemPrompt := fmt.Sprintf(
 		"You are %s, an AI agent in a multi-agent workspace. You have been assigned a task. "+
 			"Please complete the task to the best of your ability and provide a clear result.",
 		task.To,
-	))
+	)
+
+	// Add tool guidance if tools are available
+	if len(tools) > 0 {
+		var toolNames []string
+		for _, t := range tools {
+			toolNames = append(toolNames, t.Name)
+		}
+		systemPrompt += fmt.Sprintf(" You have access to the following tools: %s. Use them when appropriate to complete your task.",
+			fmt.Sprintf("%v", toolNames))
+	}
 
 	// Build user message with task description and formatted context
 	taskPrompt := fmt.Sprintf("# Task Assignment\n\n%s\n\n", task.Description)
@@ -361,39 +408,109 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 		taskPrompt += "\n"
 	}
 
-	taskPrompt += "Please complete this task to the best of your ability. Provide a clear, concise response with your findings or results."
+	taskPrompt += "Please complete this task. If you have tools available, use them to accomplish the task rather than providing general information."
 
-	userMsg := openai.UserMessage(taskPrompt)
-
-	messages := []openai.ChatCompletionMessageParamUnion{
-		systemMsg,
-		userMsg,
-	}
-
-	// Call LLM with timeout
-	llmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Call LLM with timeout and tools
+	llmCtx, cancel := context.WithTimeout(ctx, 60*time.Second) // Longer timeout for tool execution
 	defer cancel()
 
-	resp, err := o.llmProvider.ChatCompletion(llmCtx, messages, nil)
+	resp, err := o.llmProvider.ChatWithTools(llmCtx, systemPrompt, taskPrompt, tools)
 	if err != nil {
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	// Extract response content
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no response from LLM")
+	// Check if LLM wants to call tools
+	if len(resp.ToolCalls) > 0 && ag != nil {
+		logger.Debug("[Orchestrator] LLM requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
+		return o.executeToolCallsAndContinue(llmCtx, ag, systemPrompt, taskPrompt, tools, resp)
 	}
 
-	result := resp.Choices[0].Message.Content
-	logger.Info("[Orchestrator] Task completed with result", logger.Fields{"result": result})
+	result := resp.Content
+	logger.Info("[Orchestrator] Task completed with result", logger.Fields{"result_length": len(result)})
 
 	return result, nil
 }
 
-// formatAgentCapabilities formats agent list with capabilities
+// executeToolCallsAndContinue executes tool calls and continues the conversation
+func (o *Orchestrator) executeToolCallsAndContinue(ctx context.Context, ag *agent.Agent, systemPrompt, taskPrompt string, tools []llm.Tool, resp *llm.ChatResponse) (string, error) {
+	maxIterations := 5 // Prevent infinite loops
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: taskPrompt},
+		{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls},
+	}
+
+	for iteration := 0; iteration < maxIterations && len(resp.ToolCalls) > 0; iteration++ {
+		logger.Debug("[Orchestrator] Executing tool calls", logger.Fields{"iteration": iteration, "tool_count": len(resp.ToolCalls)})
+
+		// Execute each tool call
+		for _, toolCall := range resp.ToolCalls {
+			toolResult := o.executeToolCall(ctx, ag, toolCall)
+			messages = append(messages, llm.Message{
+				Role:       "tool",
+				Content:    toolResult,
+				ToolCallID: toolCall.ID,
+			})
+			logger.Debug("[Orchestrator] Tool call executed", logger.Fields{"tool": toolCall.Name, "result_length": len(toolResult)})
+		}
+
+		// Continue conversation with tool results using full message history
+		var err error
+		resp, err = o.llmProvider.ChatWithMessages(ctx, messages, tools)
+		if err != nil {
+			return "", fmt.Errorf("LLM continuation failed: %w", err)
+		}
+
+		// Add assistant response to messages
+		messages = append(messages, llm.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+	}
+
+	return resp.Content, nil
+}
+
+// executeToolCall executes a single tool call and returns the result
+func (o *Orchestrator) executeToolCall(ctx context.Context, ag *agent.Agent, toolCall llm.ToolCall) string {
+	// Find the tool in the agent's plugins
+	for _, pl := range ag.Plugins {
+		var toolName string
+		if pl.Tool != nil {
+			toolName = pl.Tool.Definition().Name
+		} else {
+			toolName = pl.Definition.Name
+		}
+
+		if toolName == toolCall.Name {
+			if pl.Tool == nil {
+				return fmt.Sprintf("Error: Tool '%s' is not loaded", toolCall.Name)
+			}
+
+			// Execute the tool
+			toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			result, err := pl.Tool.Call(toolCtx, toolCall.Arguments)
+			if err != nil {
+				logger.Error("[Orchestrator] Tool execution failed", logger.Fields{"tool": toolCall.Name, "error": err})
+				return fmt.Sprintf("Error executing tool '%s': %v", toolCall.Name, err)
+			}
+
+			return result
+		}
+	}
+
+	return fmt.Sprintf("Error: Tool '%s' not found", toolCall.Name)
+}
+
+// formatAgentCapabilities formats agent list with capabilities.
+// Note: Currently shows generic capabilities. To show real capabilities:
+// - Load agent config from store using o.agentStore.GetAgent(agent)
+// - Extract capabilities from agent.Capabilities slice
+// - Include agent role (agent.Role) in the output
 func (o *Orchestrator) formatAgentCapabilities(agents []string) string {
-	// TODO: Get actual agent capabilities from agent registry
-	// For now, return basic format
 	result := ""
 	for _, agent := range agents {
 		result += fmt.Sprintf("- %s: General purpose agent\n", agent)

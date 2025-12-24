@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
@@ -9,6 +10,46 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
+
+// HandlerConfig holds all dependencies for the orchestration handler.
+// This provides clear, upfront dependency declaration and validation.
+//
+// Required fields:
+//   - AgentStore: Agent storage backend
+//   - WorkspaceStore: Workspace storage backend
+//   - EventBus: Event bus for inter-component communication
+//
+// Optional fields (enable additional functionality):
+//   - Orchestrator: Enables workflow orchestration endpoints
+//   - TemplateManager: Enables template-based workflow creation
+//   - NotificationService: Enables notification endpoints
+//   - TaskHandler: Enables task execution endpoints
+type HandlerConfig struct {
+	// Required dependencies
+	AgentStore     store.Store
+	WorkspaceStore agentstudio.Store
+	EventBus       *agentstudio.EventBus
+
+	// Optional dependencies (enable additional features)
+	Orchestrator        *orchestration.Orchestrator
+	TemplateManager     *templates.TemplateManager
+	NotificationService *agentstudio.NotificationService
+	TaskHandler         agentstudio.TaskHandler
+}
+
+// Validate checks that all required dependencies are present
+func (c *HandlerConfig) Validate() error {
+	if c.AgentStore == nil {
+		return fmt.Errorf("AgentStore is required")
+	}
+	if c.WorkspaceStore == nil {
+		return fmt.Errorf("WorkspaceStore is required")
+	}
+	if c.EventBus == nil {
+		return fmt.Errorf("EventBus is required")
+	}
+	return nil
+}
 
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
@@ -31,8 +72,68 @@ type Handler struct {
 	taskHandlerSub      *TaskHandler
 }
 
-// NewHandler creates a new orchestration handler
-func NewHandler(agentStore store.Store, workspaceStore agentstudio.Store) *Handler {
+// NewHandler creates a new orchestration handler with all dependencies.
+// Returns an error if required dependencies are missing.
+//
+// Example usage:
+//
+//	handler, err := orchestrationhttp.NewHandler(orchestrationhttp.HandlerConfig{
+//	    AgentStore:     store,
+//	    WorkspaceStore: wsStore,
+//	    EventBus:       eventBus,
+//	    Orchestrator:   orch,        // optional
+//	    TaskHandler:    taskHandler, // optional
+//	})
+func NewHandler(cfg HandlerConfig) (*Handler, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid handler config: %w", err)
+	}
+
+	h := &Handler{
+		agentStore:          cfg.AgentStore,
+		workspaceStore:      cfg.WorkspaceStore,
+		eventBus:            cfg.EventBus,
+		communicator:        agentcomm.NewCommunicator(cfg.WorkspaceStore),
+		orchestrator:        cfg.Orchestrator,
+		templateManager:     cfg.TemplateManager,
+		notificationService: cfg.NotificationService,
+		taskHandler:         cfg.TaskHandler,
+	}
+
+	// Initialize all sub-handlers
+	h.initializeSubHandlers()
+
+	return h, nil
+}
+
+// initializeSubHandlers creates all sub-handlers based on available dependencies
+func (h *Handler) initializeSubHandlers() {
+	// Core sub-handlers (always created - depend only on required fields)
+	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, h.eventBus)
+	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
+	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)
+
+	// Optional sub-handlers (created if dependencies are available)
+	if h.orchestrator != nil {
+		h.streamingHandler = NewStreamingHandler(h.workspaceStore, h.orchestrator, h.eventBus)
+	}
+
+	if h.templateManager != nil && h.orchestrator != nil {
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+	}
+
+	if h.notificationService != nil {
+		h.notificationHandler = NewNotificationHandler(h.workspaceStore, h.notificationService, h.eventBus)
+	}
+
+	if h.taskHandler != nil {
+		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
+	}
+}
+
+// NewHandlerLegacy creates a new orchestration handler using the legacy pattern.
+// Deprecated: Use NewHandler with HandlerConfig instead for better dependency validation.
+func NewHandlerLegacy(agentStore store.Store, workspaceStore agentstudio.Store) *Handler {
 	return &Handler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -40,7 +141,22 @@ func NewHandler(agentStore store.Store, workspaceStore agentstudio.Store) *Handl
 	}
 }
 
-// SetEventBus sets the event bus instance
+// SetTemplateManager sets the template manager after construction.
+// This is needed because template loading happens after handler construction.
+func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
+	h.templateManager = tm
+	// Initialize template handler if all dependencies are now available
+	if h.orchestrator != nil && h.eventBus != nil && h.templateHandler == nil {
+		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
+	}
+}
+
+// --- Legacy setter methods (deprecated) ---
+// These are kept for backward compatibility with NewHandlerLegacy.
+// Use NewHandler with HandlerConfig instead for new code.
+
+// SetEventBus sets the event bus instance.
+// Deprecated: Use NewHandler with HandlerConfig instead.
 func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	h.eventBus = eb
 
@@ -48,9 +164,9 @@ func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb)
 	h.messageHandler = NewMessageHandler(h.workspaceStore, eb)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, eb)
-	h.initializeTemplateHandler()
-	h.initializeStreamingHandler()
-	h.initializeTaskHandler()
+	h.initializeTemplateHandlerLegacy()
+	h.initializeStreamingHandlerLegacy()
+	h.initializeTaskHandlerLegacy()
 
 	// Initialize notification handler if notificationService is available
 	if h.notificationService != nil {
@@ -58,7 +174,8 @@ func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	}
 }
 
-// SetNotificationService sets the notification service instance
+// SetNotificationService sets the notification service instance.
+// Deprecated: Use NewHandler with HandlerConfig instead.
 func (h *Handler) SetNotificationService(ns *agentstudio.NotificationService) {
 	h.notificationService = ns
 	// Initialize notification handler if eventBus is available
@@ -67,41 +184,37 @@ func (h *Handler) SetNotificationService(ns *agentstudio.NotificationService) {
 	}
 }
 
-// SetTaskHandler sets the task handler instance
+// SetTaskHandler sets the task handler instance.
+// Deprecated: Use NewHandler with HandlerConfig instead.
 func (h *Handler) SetTaskHandler(th agentstudio.TaskHandler) {
 	h.taskHandler = th
-	h.initializeTaskHandler()
+	h.initializeTaskHandlerLegacy()
 }
 
-// SetOrchestrator sets the orchestrator instance
+// SetOrchestrator sets the orchestrator instance.
+// Deprecated: Use NewHandler with HandlerConfig instead.
 func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
 	h.orchestrator = orch
-	h.initializeTemplateHandler()
-	h.initializeStreamingHandler()
+	h.initializeTemplateHandlerLegacy()
+	h.initializeStreamingHandlerLegacy()
 }
 
-// SetTemplateManager sets the template manager instance
-func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
-	h.templateManager = tm
-	h.initializeTemplateHandler()
-}
-
-// initializeTemplateHandler initializes the template handler if all dependencies are available
-func (h *Handler) initializeTemplateHandler() {
+// initializeTemplateHandlerLegacy initializes the template handler if all dependencies are available (legacy)
+func (h *Handler) initializeTemplateHandlerLegacy() {
 	if h.templateManager != nil && h.orchestrator != nil && h.eventBus != nil && h.templateHandler == nil {
 		h.templateHandler = NewTemplateHandler(h.agentStore, h.workspaceStore, h.templateManager, h.orchestrator, h.eventBus)
 	}
 }
 
-// initializeStreamingHandler initializes the streaming handler if all dependencies are available
-func (h *Handler) initializeStreamingHandler() {
+// initializeStreamingHandlerLegacy initializes the streaming handler if all dependencies are available (legacy)
+func (h *Handler) initializeStreamingHandlerLegacy() {
 	if h.orchestrator != nil && h.eventBus != nil && h.streamingHandler == nil {
 		h.streamingHandler = NewStreamingHandler(h.workspaceStore, h.orchestrator, h.eventBus)
 	}
 }
 
-// initializeTaskHandler initializes the task handler if all dependencies are available
-func (h *Handler) initializeTaskHandler() {
+// initializeTaskHandlerLegacy initializes the task handler if all dependencies are available (legacy)
+func (h *Handler) initializeTaskHandlerLegacy() {
 	if h.eventBus != nil && h.taskHandler != nil && h.taskHandlerSub == nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
 	}

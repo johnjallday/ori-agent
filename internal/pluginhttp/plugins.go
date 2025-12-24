@@ -15,6 +15,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
+	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -98,9 +99,12 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 
 	// Create map of enabled plugins (empty if agent doesn't exist yet)
 	enabledPlugins := make(map[string]bool)
+	loadedPlugins := make(map[string]types.LoadedPlugin)
 	if ag, ok := h.State.GetAgent(current); ok {
-		for name := range ag.Plugins {
-			enabledPlugins[name] = true
+		for name, plugin := range ag.Plugins {
+			normalized := registry.NormalizePluginNameForLookup(name)
+			enabledPlugins[normalized] = true
+			loadedPlugins[normalized] = plugin
 		}
 	}
 
@@ -140,7 +144,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 	plist := make([]map[string]any, 0, len(localReg.Plugins))
 
 	// Get current agent for checking loaded plugins
-	ag, agentExists := h.State.GetAgent(current)
+	_, agentExists := h.State.GetAgent(current)
 
 	for _, registryPlugin := range localReg.Plugins {
 		// Check if plugin binary is installed (exists in uploaded_plugins/)
@@ -150,8 +154,11 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 		var loadedPlugin *types.LoadedPlugin
 		isEnabled := false
 		if agentExists {
-			if lp, exists := ag.Plugins[registryPlugin.Name]; exists {
-				loadedPlugin = &lp
+			normalized := registry.NormalizePluginNameForLookup(registryPlugin.Name)
+			if enabledPlugins[normalized] {
+				if lp, exists := loadedPlugins[normalized]; exists {
+					loadedPlugin = &lp
+				}
 				isEnabled = true
 			}
 		}
@@ -358,10 +365,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		"version":     version,
 		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
@@ -465,10 +469,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		"message":           "Plugin loaded successfully from registry",
 		"show_config_modal": showConfigModal,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +524,7 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 
 // GetPluginConfig gets configuration requirements from a specific plugin
 func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
-	fmt.Printf("🔍 GetPluginConfig called for plugin: %s\n", pluginName)
+	logger.Debugf("🔍 GetPluginConfig called for plugin: %s", pluginName)
 
 	names, current := h.State.ListAgents()
 	logger.Verbosef("📋 Available agents: %v, current: %s", names, current)
@@ -794,11 +795,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Settings saved for plugin %s", pluginName),
 		"path":    settingsPath,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
@@ -905,11 +902,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		"saved_path": configPath,
 		"filename":   req.Filename,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 // isPluginInstalled checks if a plugin binary exists in the uploaded_plugins directory

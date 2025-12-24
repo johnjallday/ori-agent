@@ -8,6 +8,10 @@ function stripVersionSuffix(name = '') {
   return name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
 }
 
+function normalizePluginName(name = '') {
+  return stripVersionSuffix(name.toLowerCase().replace(/_/g, '-').trim());
+}
+
 // Check plugin configuration status - automatically detect by checking default-settings endpoint
 async function checkPluginConfigurationStatus(activePluginNames) {
   const configStatus = new Map();
@@ -64,7 +68,7 @@ async function loadPluginsForSidebar() {
     const activePluginNames = new Set(
       activePlugins.plugins
         .filter(p => p.enabled === true)
-        .map(p => p.name)
+        .map(p => normalizePluginName(p.name))
     );
 
     // Filter to only show installed plugins in sidebar (those with a local path in uploaded_plugins)
@@ -115,10 +119,11 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
   const hasMore = plugins.length > SIDEBAR_INITIAL_LIMIT;
 
   pluginsList.innerHTML = pluginsToShow.map(plugin => {
-    const isActive = activePluginNames.has(plugin.name);
+    const normalizedName = normalizePluginName(plugin.name);
+    const isActive = activePluginNames.has(normalizedName);
     const pluginPath = plugin.path || '';
     const isUploaded = pluginPath.includes('uploaded_plugins') && !plugin.github_repo;
-    const configStatus = pluginConfigStatus.get(plugin.name);
+    const configStatus = pluginConfigStatus.get(normalizedName);
     const needsConfig = isActive && configStatus && configStatus.needsInit;
     const hasConfig = isActive && configStatus && configStatus.hasConfig;
 
