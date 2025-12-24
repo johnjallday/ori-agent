@@ -5,14 +5,34 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// Sentinel errors for category operations
+var (
+	ErrCategoryNotFound      = errors.New("category not found")
+	ErrCategoryNameRequired  = errors.New("category name is required")
+	ErrCategoryNameTooLong   = fmt.Errorf("category name exceeds maximum length of %d characters", MaxCategoryNameLength)
+	ErrCategoryNameExists    = errors.New("category name already exists")
+	ErrMaxCategoriesReached  = errors.New("maximum number of custom categories reached")
+	ErrCannotDeleteDefault   = errors.New("cannot delete default categories")
+	ErrInvalidViewPreference = errors.New("invalid view preference: must be 'provider' or 'category'")
+	ErrInvalidCategoryID     = errors.New("invalid category ID")
+	ErrInvalidColorFormat    = errors.New("invalid color format: must be hex color (e.g., #3b82f6)")
+	ErrInvalidIconName       = errors.New("invalid icon name: must contain only letters, numbers, and hyphens")
+)
+
+// MaxCategoryNameLength is the maximum allowed length for category names
+const MaxCategoryNameLength = 50
 
 // ModelCategoryStore defines the interface for managing model categories
 type ModelCategoryStore interface {
@@ -210,13 +230,16 @@ func (s *fileModelCategoryStore) CreateCategory(name, color, icon string) (*type
 	// Validate name
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, errors.New("category name is required")
+		return nil, ErrCategoryNameRequired
+	}
+	if len(name) > MaxCategoryNameLength {
+		return nil, ErrCategoryNameTooLong
 	}
 
 	// Check for duplicate name (case-insensitive)
 	for _, cat := range s.config.Categories {
 		if strings.EqualFold(cat.Name, name) {
-			return nil, errors.New("category name already exists")
+			return nil, ErrCategoryNameExists
 		}
 	}
 
@@ -229,15 +252,21 @@ func (s *fileModelCategoryStore) CreateCategory(name, color, icon string) (*type
 	}
 
 	if customCount >= types.MaxCustomCategories {
-		return nil, errors.New("maximum number of custom categories reached")
+		return nil, ErrMaxCategoriesReached
 	}
 
-	// Validate and set defaults
+	// Validate and set defaults for color
 	if color == "" {
 		color = types.PredefinedColors[0]
+	} else if !isValidHexColor(color) {
+		return nil, ErrInvalidColorFormat
 	}
+
+	// Validate and set defaults for icon
 	if icon == "" {
 		icon = types.PredefinedIcons[0]
+	} else if !isValidIconName(icon) {
+		return nil, ErrInvalidIconName
 	}
 
 	// Generate unique ID
@@ -278,7 +307,10 @@ func (s *fileModelCategoryStore) UpdateCategory(id, name, color, icon string) er
 	// Validate name
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return errors.New("category name is required")
+		return ErrCategoryNameRequired
+	}
+	if len(name) > MaxCategoryNameLength {
+		return ErrCategoryNameTooLong
 	}
 
 	// Find category
@@ -291,22 +323,28 @@ func (s *fileModelCategoryStore) UpdateCategory(id, name, color, icon string) er
 	}
 
 	if idx == -1 {
-		return errors.New("category not found")
+		return ErrCategoryNotFound
 	}
 
 	// Check for duplicate name (case-insensitive, excluding current)
 	for i, cat := range s.config.Categories {
 		if i != idx && strings.EqualFold(cat.Name, name) {
-			return errors.New("category name already exists")
+			return ErrCategoryNameExists
 		}
 	}
 
 	// Update fields
 	s.config.Categories[idx].Name = name
 	if color != "" {
+		if !isValidHexColor(color) {
+			return ErrInvalidColorFormat
+		}
 		s.config.Categories[idx].Color = color
 	}
 	if icon != "" {
+		if !isValidIconName(icon) {
+			return ErrInvalidIconName
+		}
 		s.config.Categories[idx].Icon = icon
 	}
 
@@ -328,12 +366,12 @@ func (s *fileModelCategoryStore) DeleteCategory(id string) error {
 	}
 
 	if idx == -1 {
-		return errors.New("category not found")
+		return ErrCategoryNotFound
 	}
 
 	// Cannot delete default categories
 	if s.config.Categories[idx].IsDefault {
-		return errors.New("cannot delete default categories")
+		return ErrCannotDeleteDefault
 	}
 
 	// Remove category
@@ -396,7 +434,7 @@ func (s *fileModelCategoryStore) SetCategoryVisibility(id string, hidden bool) e
 		}
 	}
 
-	return errors.New("category not found")
+	return ErrCategoryNotFound
 }
 
 // GetModelAssignments returns the category IDs assigned to a model
@@ -425,7 +463,7 @@ func (s *fileModelCategoryStore) SetModelAssignments(modelID string, categoryIDs
 
 	for _, catID := range categoryIDs {
 		if !validCatIDs[catID] {
-			return errors.New("invalid category ID: " + catID)
+			return fmt.Errorf("%w: %s", ErrInvalidCategoryID, catID)
 		}
 	}
 
@@ -469,7 +507,7 @@ func (s *fileModelCategoryStore) SetViewPreference(preference string) error {
 	defer s.mu.Unlock()
 
 	if preference != "provider" && preference != "category" {
-		return errors.New("invalid view preference: must be 'provider' or 'category'")
+		return ErrInvalidViewPreference
 	}
 
 	s.config.ViewPreference = preference
@@ -503,8 +541,34 @@ func (s *fileModelCategoryStore) GetConfig() *types.ModelCategoryConfig {
 func generateCategoryID() string {
 	bytes := make([]byte, 8)
 	if _, err := rand.Read(bytes); err != nil {
-		// Fallback to less random but still unique
-		return "cat_" + string(rune(os.Getpid()))
+		// Fallback: use timestamp + PID for uniqueness
+		return "cat_" + strconv.FormatInt(time.Now().UnixNano(), 36) + "_" + strconv.Itoa(os.Getpid())
 	}
 	return "cat_" + hex.EncodeToString(bytes)
+}
+
+// isValidHexColor validates a hex color string (e.g., #3b82f6)
+func isValidHexColor(color string) bool {
+	if len(color) != 7 || color[0] != '#' {
+		return false
+	}
+	for _, c := range color[1:] {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// isValidIconName validates an icon name (alphanumeric and hyphens only)
+func isValidIconName(icon string) bool {
+	if len(icon) == 0 || len(icon) > 50 {
+		return false
+	}
+	for _, c := range icon {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
 }

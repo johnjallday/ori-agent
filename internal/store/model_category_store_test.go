@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,7 +92,7 @@ func TestCreateCategoryMaxLimit(t *testing.T) {
 
 	// Create max number of custom categories
 	for i := 0; i < types.MaxCustomCategories; i++ {
-		_, err := store.CreateCategory("Category"+string(rune('A'+i)), "#3b82f6", "code-slash")
+		_, err := store.CreateCategory(fmt.Sprintf("Category%d", i), "#3b82f6", "code-slash")
 		if err != nil {
 			t.Fatalf("Failed to create category %d: %v", i, err)
 		}

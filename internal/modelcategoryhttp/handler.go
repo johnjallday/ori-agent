@@ -2,6 +2,7 @@ package modelcategoryhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
+
+// maxRequestBodySize limits request body to 1MB to prevent memory exhaustion
+const maxRequestBodySize = 1 << 20
 
 // Handler handles model category HTTP requests
 type Handler struct {
@@ -65,23 +69,20 @@ func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 		Icon  string `json:"icon"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
-	if strings.TrimSpace(req.Name) == "" {
-		orihttp.RespondBadRequest(w, "name is required")
-		return
-	}
-
 	category, err := h.store.CreateCategory(req.Name, req.Color, req.Icon)
 	if err != nil {
-		if strings.Contains(err.Error(), "already exists") {
-			orihttp.RespondBadRequest(w, err.Error())
-			return
-		}
-		if strings.Contains(err.Error(), "maximum") {
+		if errors.Is(err, store.ErrCategoryNameRequired) ||
+			errors.Is(err, store.ErrCategoryNameTooLong) ||
+			errors.Is(err, store.ErrCategoryNameExists) ||
+			errors.Is(err, store.ErrMaxCategoriesReached) ||
+			errors.Is(err, store.ErrInvalidColorFormat) ||
+			errors.Is(err, store.ErrInvalidIconName) {
 			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
@@ -102,7 +103,7 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Extract category ID from path
-	id := extractIDFromPath(r.URL.Path, "/api/model-categories/")
+	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "")
 	if id == "" {
 		orihttp.RespondBadRequest(w, "category ID is required")
 		return
@@ -114,17 +115,22 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 		Icon  string `json:"icon"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.UpdateCategory(id, req.Name, req.Color, req.Icon); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrCategoryNotFound) {
 			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, store.ErrCategoryNameRequired) ||
+			errors.Is(err, store.ErrCategoryNameTooLong) ||
+			errors.Is(err, store.ErrCategoryNameExists) ||
+			errors.Is(err, store.ErrInvalidColorFormat) ||
+			errors.Is(err, store.ErrInvalidIconName) {
 			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
@@ -146,18 +152,18 @@ func (h *Handler) DeleteCategoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Extract category ID from path
-	id := extractIDFromPath(r.URL.Path, "/api/model-categories/")
+	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "")
 	if id == "" {
 		orihttp.RespondBadRequest(w, "category ID is required")
 		return
 	}
 
 	if err := h.store.DeleteCategory(id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrCategoryNotFound) {
 			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
-		if strings.Contains(err.Error(), "cannot delete default") {
+		if errors.Is(err, store.ErrCannotDeleteDefault) {
 			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
@@ -180,6 +186,7 @@ func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Reques
 		CategoryIDs []string `json:"category_ids"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
@@ -206,8 +213,7 @@ func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract category ID from path
-	path := strings.TrimSuffix(r.URL.Path, "/visibility")
-	id := extractIDFromPath(path, "/api/model-categories/")
+	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "/visibility")
 	if id == "" {
 		orihttp.RespondBadRequest(w, "category ID is required")
 		return
@@ -217,13 +223,14 @@ func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 		Hidden bool `json:"hidden"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetCategoryVisibility(id, req.Hidden); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrCategoryNotFound) {
 			orihttp.RespondNotFound(w, err.Error())
 			return
 		}
@@ -245,7 +252,7 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Extract model ID from path
-	modelID := extractModelIDFromPath(r.URL.Path)
+	modelID := extractPathSegment(r.URL.Path, "/api/models/", "/categories")
 	if modelID == "" {
 		orihttp.RespondBadRequest(w, "model ID is required")
 		return
@@ -255,13 +262,14 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 		CategoryIDs []string `json:"category_ids"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetModelAssignments(modelID, req.CategoryIDs); err != nil {
-		if strings.Contains(err.Error(), "invalid category") {
+		if errors.Is(err, store.ErrInvalidCategoryID) {
 			orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
@@ -289,13 +297,18 @@ func (h *Handler) SetViewPreferenceHandler(w http.ResponseWriter, r *http.Reques
 		Preference string `json:"preference"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetViewPreference(req.Preference); err != nil {
-		orihttp.RespondBadRequest(w, err.Error())
+		if errors.Is(err, store.ErrInvalidViewPreference) {
+			orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -334,21 +347,19 @@ func (h *Handler) CategoryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// extractIDFromPath extracts the ID from a URL path
-func extractIDFromPath(path, prefix string) string {
+// extractPathSegment extracts a segment from a URL path given a prefix and optional suffix.
+// For example:
+//   - extractPathSegment("/api/model-categories/abc123", "/api/model-categories/", "") returns "abc123"
+//   - extractPathSegment("/api/model-categories/abc123/visibility", "/api/model-categories/", "/visibility") returns "abc123"
+//   - extractPathSegment("/api/models/gpt-4/categories", "/api/models/", "/categories") returns "gpt-4"
+func extractPathSegment(path, prefix, suffix string) string {
 	path = strings.TrimPrefix(path, prefix)
-	// Remove any trailing slashes or additional path segments
-	if idx := strings.Index(path, "/"); idx != -1 {
+	if suffix != "" {
+		if idx := strings.Index(path, suffix); idx != -1 {
+			path = path[:idx]
+		}
+	} else if idx := strings.Index(path, "/"); idx != -1 {
 		path = path[:idx]
 	}
 	return strings.TrimSpace(path)
-}
-
-// extractModelIDFromPath extracts the model ID from /api/models/{modelId}/categories
-func extractModelIDFromPath(path string) string {
-	path = strings.TrimPrefix(path, "/api/models/")
-	if idx := strings.Index(path, "/categories"); idx != -1 {
-		return strings.TrimSpace(path[:idx])
-	}
-	return ""
 }

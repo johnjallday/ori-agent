@@ -9,6 +9,15 @@
 
 **Ori Agent** is a local AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents call plugins (gRPC tools) to act—everything stays on your machine unless you opt into cloud LLMs.
 
+If you want to keep your information local, this is a way to go.
+
+Honestly, everybody is chasing for the AGI, and this is a budget friendly version of "smarter" - AI agent that may or may not lead to AGI.
+
+I don't plan on promoting this until Q426 or Q127 (This date may change).
+If you are here early, then welcome! Hope you enjoy this. 
+Let me know, how this is.
+
+
 ## 🤖 Supported Providers
 
 Ori Agent supports multiple AI providers, giving you flexibility in choosing your preferred AI model:
