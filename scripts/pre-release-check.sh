@@ -260,29 +260,124 @@ echo "2. TESTS (Unit + Integration + E2E + User)"
 echo "════════════════════════════════════════════"
 echo ""
 
-run_check "All Tests" "go test -p 1 ./..." || {
-  # Tests failed - offer diagnostic tool
-  echo -e "${YELLOW}💡 Tip: Test diagnostic tool is available${NC}"
+# Run tests and capture output for potential Claude fix
+TEST_OUTPUT_FILE=$(mktemp)
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Running: All Tests${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+  echo -e "${GREEN}✅ All Tests: PASSED${NC}"
   echo ""
-  read -p "Run test diagnostics and auto-fix? [y/N]: " -n 1 -r
+  rm -f "$TEST_OUTPUT_FILE"
+else
+  echo -e "${RED}❌ All Tests: FAILED${NC}"
+  echo ""
+  FAILED_CHECKS+=("All Tests")
+
+  # Tests failed - offer Claude auto-fix
+  echo -e "${YELLOW}💡 Tip: Claude can automatically fix test errors${NC}"
+  echo ""
+  read -p "Use Claude to fix test errors? [y/N]: " -n 1 -r
   echo ""
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
-    if [ -f "./scripts/diagnose-test-failures.sh" ]; then
-      ./scripts/diagnose-test-failures.sh
-      echo ""
-      echo -e "${BLUE}Re-running tests after fixes...${NC}"
-      echo ""
-      # Re-run tests after fixes
-      if run_check "All Tests (after fixes)" "go test -p 1 ./..."; then
-        # Remove the original failure from FAILED_CHECKS
-        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
+
+    # Check if claude CLI is available
+    if command -v claude &> /dev/null; then
+      # Feedback loop: keep fixing until tests pass or max iterations
+      MAX_ITERATIONS=3
+      ITERATION=1
+      TESTS_PASSED=false
+
+      while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$TESTS_PASSED" = false ]; do
+        echo ""
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║     CLAUDE FIX ITERATION $ITERATION/$MAX_ITERATIONS              ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+
+        # Extract the failing test output
+        TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -100)
+
+        echo -e "${BLUE}Invoking Claude to fix test errors...${NC}"
+        echo ""
+
+        # Call Claude with the test errors
+        claude --print "The following Go tests are failing. Please fix the test errors by modifying the appropriate source files or test files. Here is the test output:
+
+$TEST_ERRORS
+
+Please fix these test failures."
+
+        echo ""
+        echo -e "${BLUE}Re-running tests after Claude fixes...${NC}"
+        echo ""
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+        if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+          echo -e "${GREEN}✅ All Tests (iteration $ITERATION): PASSED${NC}"
+          echo ""
+          TESTS_PASSED=true
+          # Remove the original failure from FAILED_CHECKS
+          FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
+        else
+          echo -e "${RED}❌ All Tests (iteration $ITERATION): FAILED${NC}"
+          echo ""
+
+          if [ $ITERATION -lt $MAX_ITERATIONS ]; then
+            echo -e "${YELLOW}⚠️  Still have test failures. Attempting fix again...${NC}"
+            echo ""
+          else
+            echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
+            echo ""
+          fi
+        fi
+
+        ITERATION=$((ITERATION + 1))
+      done
+
+      if [ "$TESTS_PASSED" = true ]; then
+        echo ""
+        echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║         TESTS FIXED BY CLAUDE              ║${NC}"
+        echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${GREEN}✅ All test errors fixed successfully!${NC}"
+        echo ""
+      else
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${RED}❌ Claude could not resolve all test errors.${NC}"
+        echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
+        echo ""
       fi
     else
-      echo -e "${RED}❌ diagnose-test-failures.sh not found in ./scripts/${NC}"
+      echo -e "${RED}❌ Claude CLI not found. Install from: https://claude.ai/code${NC}"
+      echo ""
+      echo -e "${YELLOW}Falling back to diagnostic tool...${NC}"
+      echo ""
+      if [ -f "./scripts/diagnose-test-failures.sh" ]; then
+        ./scripts/diagnose-test-failures.sh
+        echo ""
+        echo -e "${BLUE}Re-running tests after diagnostics...${NC}"
+        echo ""
+        # Re-run tests after diagnostics
+        if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+          echo -e "${GREEN}✅ All Tests (after diagnostics): PASSED${NC}"
+          # Remove the original failure from FAILED_CHECKS
+          FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
+        fi
+      fi
     fi
   fi
-}
+  rm -f "$TEST_OUTPUT_FILE"
+fi
 
 # 3. BUILD VERIFICATION
 echo ""

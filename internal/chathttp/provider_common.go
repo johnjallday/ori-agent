@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/pluginapi"
@@ -170,18 +169,6 @@ func writeToolCallResponse(w http.ResponseWriter, result ExecuteToolCallsResult)
 	}
 
 	writeJSONResponse(w, response)
-}
-
-// writeFinalResponse writes a final chat response with optional tool calls
-func writeFinalResponse(w http.ResponseWriter, content string, toolResults []ToolCallResult) {
-	if len(toolResults) > 0 {
-		orihttp.WriteJSON(w, map[string]any{
-			"response":  content,
-			"toolCalls": toolResults,
-		})
-	} else {
-		writeJSONResponse(w, map[string]any{"response": content})
-	}
 }
 
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
