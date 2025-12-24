@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
@@ -113,6 +114,8 @@ type Server struct {
 	workflowHandler       *workflowhttp.Handler
 	marketplaceStore      *marketplace.Store
 	marketplaceHandler    *marketplacehttp.Handler
+	modelCategoryStore    store.ModelCategoryStore
+	modelCategoryHandler  *modelcategoryhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
