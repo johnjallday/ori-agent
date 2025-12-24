@@ -48,7 +48,8 @@ jobs:
         run: |
           VERSION=$(cat VERSION)-next
           ARCH=$(uname -m)
-          ./build/macos/create-dmg.sh "$VERSION" "$ARCH" dist
+          # Script expects: <version> <os> <architecture> <dist-dir>
+          ./build/macos/create-dmg.sh "$VERSION" "darwin" "$ARCH" dist
 
       - name: Run smoke test
         run: |
@@ -146,7 +147,10 @@ jobs:
         run: |
           set -e
           echo "📦 Installing .deb package..."
-          sudo dpkg -i dist/ori-agent_*_linux_amd64.deb || sudo apt-get install -f -y
+          # nfpm creates: ori-agent_<version>_amd64.deb (no 'linux_' in name)
+          echo "Available .deb packages:"
+          ls -la dist/*.deb || true
+          sudo dpkg -i dist/ori-agent_*_amd64.deb || sudo apt-get install -f -y
 
       - name: Run smoke test
         run: |
@@ -225,7 +229,10 @@ jobs:
         run: |
           set -e
           echo "📦 Installing .rpm package..."
-          dnf install -y dist/ori-agent-*-linux-amd64.rpm
+          # nfpm creates: ori-agent-<version>.x86_64.rpm (uses x86_64, not amd64)
+          echo "Available .rpm packages:"
+          ls -la dist/*.rpm || true
+          dnf install -y dist/ori-agent-*.x86_64.rpm
 
       - name: Run smoke test
         run: |
