@@ -77,7 +77,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				enabledPlugins = append(enabledPlugins, pluginName)
 			}
 
-			w.Header().Set("Content-Type", "application/json")
 			orihttp.WriteJSON(w, map[string]any{
 				"name":              agentName,
 				"type":              agent.Type,
@@ -118,7 +117,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		orihttp.WriteJSON(w, map[string]any{
 			"agents":  agentInfos,
 			"current": current,
@@ -207,13 +205,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if err := orihttp.RespondSuccess(w, map[string]any{
 			"success": true,
 			"message": "Agent '" + req.Name + "' created successfully",
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": err})
 		}
 
 	case http.MethodPut:
@@ -419,13 +415,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if err := orihttp.RespondSuccess(w, map[string]any{
 			"success": true,
 			"name":    newName,
 			"message": "Agent updated successfully",
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": err})
 		}
 
 	case http.MethodDelete:

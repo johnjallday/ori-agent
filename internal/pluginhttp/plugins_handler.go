@@ -678,9 +678,11 @@ func (h *PluginsPageHandler) HandleGetPluginLogs(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// For now, return placeholder logs
-	// TODO: Implement actual log collection from plugin execution
-
+	// Placeholder logs - plugins currently don't emit structured logs.
+	// To implement real log collection:
+	// - Plugins would need to implement a LogProvider interface
+	// - Server would capture plugin stdout/stderr during execution
+	// - Logs would be stored with timestamps and aggregated here
 	logs := []map[string]interface{}{
 		{
 			"timestamp": time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
@@ -929,8 +931,9 @@ func (h *PluginsPageHandler) getPluginStatus(plugin *types.PluginRegistryEntry, 
 	return "inactive"
 }
 
+// getPluginAgents returns the list of agents that have this plugin enabled.
+// Currently returns empty - would require iterating through all agents
+// and checking their Plugins map for a matching plugin name.
 func (h *PluginsPageHandler) getPluginAgents(plugin *types.PluginRegistryEntry, loadedPlugin *types.LoadedPlugin) []string {
-	// For now, return empty array
-	// TODO: Implement agent discovery from plugin metadata or interfaces
 	return []string{}
 }

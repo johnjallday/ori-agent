@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/marketplace"
 	internaltags "github.com/johnjallday/ori-agent/internal/tags"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -29,10 +30,10 @@ func normalizeTagsWithWarnings(pluginName string, rawTags []string) []string {
 	}
 
 	if _, errs := internaltags.ValidateTags(rawTags); len(errs) > 0 {
-		fmt.Printf("Warning: plugin %q has invalid tags: %v\n", pluginName, errs)
+		logger.Warn("Plugin has invalid tags", logger.Fields{"plugin": pluginName, "errors": errs})
 	}
 	if len(rawTags) > 5 {
-		fmt.Printf("Warning: plugin %q has more than 5 tags; truncating to 5\n", pluginName)
+		logger.Warn("Plugin has more than 5 tags; truncating to 5", logger.Fields{"plugin": pluginName})
 	}
 
 	return internaltags.NormalizeTags(rawTags)
@@ -150,14 +151,14 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 			onlineReg = mpReg
 		} else {
 			if err != nil {
-				fmt.Printf("Failed to load plugin registry from marketplaces: %v\n", err)
+				logger.Warn("Failed to load plugin registry from marketplaces", logger.Fields{"error": err})
 			}
 			// Fallback to GitHub if marketplaces are empty or failed.
 			if m.shouldFetchFromGitHub() {
 				if githubReg, ghErr := m.fetchGitHubPluginRegistry(); ghErr == nil && len(githubReg.Plugins) > 0 {
 					onlineReg = githubReg
 				} else if ghErr != nil {
-					fmt.Printf("Failed to load plugin registry from GitHub: %v\n", ghErr)
+					logger.Warn("Failed to load plugin registry from GitHub", logger.Fields{"error": ghErr})
 				}
 			}
 		}
@@ -167,7 +168,7 @@ func (m *Manager) Load() (types.PluginRegistry, string, error) {
 			if githubReg, err := m.fetchGitHubPluginRegistry(); err == nil {
 				onlineReg = githubReg
 			} else {
-				fmt.Printf("Failed to load plugin registry from GitHub: %v\n", err)
+				logger.Warn("Failed to load plugin registry from GitHub", logger.Fields{"error": err})
 			}
 		}
 	}

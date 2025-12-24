@@ -307,12 +307,9 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"providers": providers,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	})
 }
 
 // getModelCategories returns all categories a model should appear in

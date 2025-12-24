@@ -239,9 +239,10 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 	// Create event channel
 	events := make(chan Event, 10)
 
-	// Subscribe to events
-	// TODO: Implement event subscription filtering by studio ID
-	// For now, just send a test event
+	// Subscribe to events for this studio.
+	// Note: Currently sends a test event. To implement real event filtering:
+	// - Subscribe to EventBus with a filter for workspace ID matching studioID
+	// - Forward matching events to this channel
 	go func() {
 		time.Sleep(1 * time.Second)
 		events <- Event{

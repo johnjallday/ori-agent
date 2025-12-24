@@ -365,10 +365,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		"version":     version,
 		"message":     "Plugin uploaded and registered successfully. You can now load it from the registry.",
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
@@ -472,10 +469,7 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 		"message":           "Plugin loaded successfully from registry",
 		"show_config_modal": showConfigModal,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
@@ -530,7 +524,7 @@ func (h *Handler) GetPluginEnums(pluginName string) (map[string][]string, error)
 
 // GetPluginConfig gets configuration requirements from a specific plugin
 func (h *Handler) GetPluginConfig(pluginName string) ([]pluginapi.ConfigVariable, bool, error) {
-	fmt.Printf("🔍 GetPluginConfig called for plugin: %s\n", pluginName)
+	logger.Debugf("🔍 GetPluginConfig called for plugin: %s", pluginName)
 
 	names, current := h.State.ListAgents()
 	logger.Verbosef("📋 Available agents: %v, current: %s", names, current)
@@ -801,11 +795,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Settings saved for plugin %s", pluginName),
 		"path":    settingsPath,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
@@ -912,11 +902,7 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 		"saved_path": configPath,
 		"filename":   req.Filename,
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 // isPluginInstalled checks if a plugin binary exists in the uploaded_plugins directory

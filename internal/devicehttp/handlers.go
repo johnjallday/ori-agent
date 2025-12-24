@@ -1,14 +1,12 @@
 package devicehttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 )
 
@@ -32,10 +30,7 @@ type SetDeviceTypeRequest struct {
 // GetDeviceInfo returns device information
 // GET /api/device/info
 func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -45,69 +40,41 @@ func (h *Handler) GetDeviceInfo(w http.ResponseWriter, r *http.Request) {
 	// If device hasn't been detected yet, detect it now
 	if !deviceInfo.Detected {
 		if err := h.onboardingManager.DetectAndStoreDevice(); err != nil {
-			if encodeErr := orihttp.RespondInternalError(w, "Failed to detect device"); encodeErr != nil {
-				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to detect device", err)
 			return
 		}
 		// Get the updated device info
 		deviceInfo = h.onboardingManager.GetDeviceInfo()
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(deviceInfo); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to encode response"); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
-		return
-	}
+	orihttp.WriteJSON(w, deviceInfo)
 }
 
 // SetDeviceType allows user to manually set/override the device type
 // POST /api/device/type
 func (h *Handler) SetDeviceType(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
 	var req SetDeviceTypeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, "Invalid request body"); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	// Update device type via onboarding manager
 	if err := h.onboardingManager.SetDeviceType(req.DeviceType); err != nil {
 		if err == onboarding.ErrInvalidDeviceType {
-			if encodeErr := orihttp.RespondBadRequest(w, "Invalid device type"); encodeErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid device type", err)
 			return
 		}
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to update device type"); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update device type", err)
 		return
 	}
 
 	// Return updated device info
 	deviceInfo := h.onboardingManager.GetDeviceInfo()
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(deviceInfo); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to encode response"); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
-		return
-	}
+	orihttp.WriteJSON(w, deviceInfo)
 }
 
 // WiFiInfo represents the current WiFi connection information
@@ -118,23 +85,12 @@ type WiFiInfo struct {
 // GetCurrentWiFi returns the current WiFi SSID
 // GET /api/device/wifi/current
 func (h *Handler) GetCurrentWiFi(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
 	ssid := detectCurrentWiFiSSID()
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(WiFiInfo{SSID: ssid}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to encode response"); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
-		return
-	}
+	orihttp.WriteJSON(w, WiFiInfo{SSID: ssid})
 }
 
 // detectCurrentWiFiSSID detects the current WiFi SSID based on the operating system

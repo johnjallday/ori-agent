@@ -295,9 +295,13 @@ func (c *FileChannel) Name() string {
 	return fmt.Sprintf("file:%s", c.filePath)
 }
 
-// Send writes a notification to the file
+// Send writes a notification to the file.
+// Currently a no-op placeholder. To implement:
+// - File locking for concurrent writes
+// - Log rotation when file exceeds size limit
+// - JSON line format for structured logging
 func (c *FileChannel) Send(notification Notification) error {
-	// TODO: Implement file writing with proper locking and rotation
-	// For now, this is a placeholder
+	// FileChannel is not yet implemented - notifications are only
+	// sent through other channel types (e.g., webhook, SSE).
 	return nil
 }
