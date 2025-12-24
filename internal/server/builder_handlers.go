@@ -11,11 +11,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 )
 
@@ -80,6 +82,16 @@ func (b *ServerBuilder) initializeHandlers() error {
 	)
 	s.backupHandler = pluginhttp.NewBackupHandler(s.backupManager)
 	s.notificationsHandler = pluginhttp.NewNotificationsHandler(s.notificationManager)
+
+	// Initialize model category store and handler
+	modelCategoryStore, err := store.NewFileModelCategoryStore("model_categories.json")
+	if err != nil {
+		logger.Error("Failed to create model category store", logger.Fields{"error": err})
+		// Non-fatal: continue without model categories
+	} else {
+		s.modelCategoryStore = modelCategoryStore
+		s.modelCategoryHandler = modelcategoryhttp.NewHandler(modelCategoryStore)
+	}
 
 	return nil
 }

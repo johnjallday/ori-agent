@@ -363,6 +363,27 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
 
 	// =============================================================================
+	// Model Category Endpoints
+	// =============================================================================
+	if s.modelCategoryHandler != nil {
+		mux.HandleFunc("/api/model-categories", s.modelCategoryHandler.CategoriesHandler)
+		mux.HandleFunc("/api/model-categories/reorder", s.modelCategoryHandler.ReorderCategoriesHandler)
+		mux.HandleFunc("/api/model-categories/view-preference", s.modelCategoryHandler.SetViewPreferenceHandler)
+		mux.HandleFunc("/api/model-categories/", s.modelCategoryHandler.CategoryHandler)
+		mux.HandleFunc("/api/models/", func(w http.ResponseWriter, r *http.Request) {
+			// Handle model category assignments
+			if strings.HasSuffix(r.URL.Path, "/categories") {
+				s.modelCategoryHandler.SetModelAssignmentsHandler(w, r)
+				return
+			}
+			// Otherwise, 404
+			if err := orihttp.RespondNotFound(w, "Not found"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
+		})
+	}
+
+	// =============================================================================
 	// Location Management Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/location/current", s.locationHandler.GetCurrentLocation)
