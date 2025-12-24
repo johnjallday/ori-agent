@@ -505,10 +505,12 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, ag *agent.Agent, too
 	return fmt.Sprintf("Error: Tool '%s' not found", toolCall.Name)
 }
 
-// formatAgentCapabilities formats agent list with capabilities
+// formatAgentCapabilities formats agent list with capabilities.
+// Note: Currently shows generic capabilities. To show real capabilities:
+// - Load agent config from store using o.agentStore.GetAgent(agent)
+// - Extract capabilities from agent.Capabilities slice
+// - Include agent role (agent.Role) in the output
 func (o *Orchestrator) formatAgentCapabilities(agents []string) string {
-	// TODO: Get actual agent capabilities from agent registry
-	// For now, return basic format
 	result := ""
 	for _, agent := range agents {
 		result += fmt.Sprintf("- %s: General purpose agent\n", agent)
