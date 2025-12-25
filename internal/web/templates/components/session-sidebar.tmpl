@@ -90,6 +90,7 @@
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
           <span>Folders</span>
+          <span id="folderDragHint" class="folder-drag-hint" style="display: none;"></span>
           <button id="addFolderBtn" class="folder-add-btn" title="Add Folder">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -135,6 +136,12 @@
 
 <!-- Session Context Menu -->
 <div id="sessionContextMenu" class="session-context-menu" style="display: none;">
+  <button class="session-context-item" data-action="info">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M11,17H13V11H11V17M12,9.5A1,1 0 0,0 13,8.5A1,1 0 0,0 12,7.5A1,1 0 0,0 11,8.5A1,1 0 0,0 12,9.5M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+    </svg>
+    Info
+  </button>
   <button class="session-context-item" data-action="rename">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
       <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -253,6 +260,23 @@
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
         <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Session Info Modal -->
+<div class="modal fade" id="sessionInfoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Session Info</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="sessionInfoBody" class="session-info-list">
+          <!-- Session info will be populated dynamically -->
+        </div>
       </div>
     </div>
   </div>

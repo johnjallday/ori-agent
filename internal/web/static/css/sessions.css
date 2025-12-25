@@ -301,6 +301,23 @@
   padding: 4px 8px 8px 8px;
 }
 
+.folder-tree-section.dragging .folder-tree-header {
+  background: rgba(29, 78, 216, 0.12);
+  border-radius: 6px;
+}
+
+.folder-drag-hint {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 /* Folder Item */
 .folder-item {
   display: flex;
@@ -313,6 +330,10 @@
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
+}
+
+.folder-item.collapsed .folder-icon {
+  opacity: 0.8;
 }
 
 .folder-item:hover {
@@ -357,6 +378,40 @@
   color: rgba(255, 255, 255, 0.9);
 }
 
+.folder-collapse-btn {
+  margin-left: 6px;
+  margin-right: 2px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  padding: 0;
+}
+
+.folder-collapse-btn svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+
+.folder-item.collapsed .folder-collapse-btn svg {
+  transform: rotate(-90deg);
+}
+
+.folder-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}
+
+.folder-sessions.collapsed {
+  display: none;
+}
+
 /* Nested folders */
 .folder-children {
   margin-left: 20px;
@@ -365,6 +420,49 @@
 /* Sessions List */
 .sessions-list {
   padding: 0 8px;
+}
+
+/* Session Grouping */
+.session-folder-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 4px 4px 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.session-folder-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.session-folder-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.folder-sessions {
+  margin: 4px 0 8px 0;
+}
+
+.folder-sessions .session-item {
+  margin-left: 8px;
+}
+
+.folder-sessions[data-has-accent="true"] .session-item:not(.active):not(.selected) {
+  background: var(--folder-accent-bg);
+  border-color: var(--folder-accent-border);
+}
+
+.folder-sessions[data-has-accent="true"] .session-item:not(.active):not(.selected):hover {
+  background: var(--folder-accent-bg-hover);
+  border-color: var(--folder-accent-border);
 }
 
 /* Session Item */
@@ -389,6 +487,11 @@
 .session-item.active {
   background: rgba(29, 78, 216, 0.15);
   border-color: var(--primary-color);
+}
+
+.session-item.selected:not(.active) {
+  background: rgba(29, 78, 216, 0.1);
+  border-color: rgba(29, 78, 216, 0.5);
 }
 
 .session-item.active::before {
@@ -796,9 +899,43 @@
   border: 1px dashed var(--primary-color);
 }
 
+.folder-item.drop-success {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.6);
+}
+
 /* Search Highlight */
 .session-highlight {
   background: rgba(245, 158, 11, 0.3);
   padding: 0 2px;
   border-radius: 2px;
+}
+
+/* Session Info Modal */
+.session-info-list {
+  display: grid;
+  gap: 10px;
+}
+
+.session-info-row {
+  display: grid;
+  gap: 4px;
+}
+
+.session-info-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.session-info-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.session-info-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
 }

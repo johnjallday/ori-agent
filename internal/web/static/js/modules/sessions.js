@@ -13,7 +13,12 @@ const sessionManager = {
   filterAgent: null,
   filterTags: [],
   isLoading: false,
+  selectedSessionIds: [],
+  lastSelectedIndex: null,
   folderTreeWasCollapsedOnDrag: false,
+  dragHintTimer: null,
+  sessionsByFolder: new Map(),
+  collapsedFolderIds: new Set(),
 
   // Tab ID for multi-tab support
   tabId: null,
@@ -65,6 +70,7 @@ const sessionManager = {
     // Generate unique tab ID for multi-tab support
     this.generateTabId();
 
+    this.loadCollapsedFolders();
     this.bindEvents();
     this.setupKeyboardShortcuts();
     await this.loadSessions();
@@ -228,10 +234,12 @@ const sessionManager = {
 
       const data = await response.json();
       this.sessions = data.sessions || [];
+      this.reconcileSelection();
       this.renderSessions();
     } catch (error) {
       console.error('Failed to load sessions:', error);
       this.sessions = [];
+      this.clearSelection();
       this.renderEmptyState();
     } finally {
       this.isLoading = false;
@@ -286,38 +294,44 @@ const sessionManager = {
 
     if (emptyState) emptyState.style.display = 'none';
 
-    // Render sessions
-    container.innerHTML = this.sessions.map(session => this.renderSessionItem(session)).join('');
-
-    // Bind session item events
-    container.querySelectorAll('.session-item').forEach(item => {
-      const sessionId = item.dataset.sessionId;
-
-      // Click to switch session
-      item.addEventListener('click', () => this.switchToSession(sessionId));
-
-      // Right-click context menu
-      item.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        this.showSessionContextMenu(e, sessionId);
-      });
-
-      // Drag and drop
-      item.setAttribute('draggable', 'true');
-      item.addEventListener('dragstart', (e) => this.handleDragStart(e, sessionId));
-      item.addEventListener('dragend', () => this.handleDragEnd());
+    const folderGroups = new Map();
+    this.sessions.forEach(session => {
+      const folderId = session.folder_id || '';
+      if (!folderGroups.has(folderId)) {
+        folderGroups.set(folderId, []);
+      }
+      folderGroups.get(folderId).push(session);
     });
+    this.sessionsByFolder = folderGroups;
+
+    const rootSessions = folderGroups.get('') || [];
+
+    // Render root sessions with "No Folder" header
+    container.innerHTML = `
+      ${rootSessions.length > 0 ? this.renderRootHeader() : ''}
+      ${rootSessions.map(session => this.renderSessionItem(session)).join('')}
+    `;
+
+    container.onclick = (e) => {
+      if (e.target === container) {
+        this.clearSelection();
+      }
+    };
+
+    this.bindSessionItemEvents(container);
+    this.renderFolderTree();
   },
 
   // Render a single session item
   renderSessionItem(session) {
     const isActive = session.id === this.activeSessionId;
+    const isSelected = this.selectedSessionIds.includes(session.id);
     const timeAgo = this.formatTimeAgo(session.updated_at);
     const preview = session.preview || 'No messages yet';
     const tags = session.tags || [];
 
     return `
-      <div class="session-item ${isActive ? 'active' : ''}" data-session-id="${session.id}">
+      <div class="session-item ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}" data-session-id="${session.id}">
         <div class="session-item-header">
           <div class="session-agent-icon" title="${this.escapeHtml(session.agent_name || 'Unknown')}">
             <svg viewBox="0 0 24 24" fill="currentColor">
@@ -377,20 +391,41 @@ const sessionManager = {
         item.classList.add('drag-over');
       });
 
+      item.addEventListener('dragenter', () => {
+        item.classList.add('drag-over');
+      });
+
       item.addEventListener('dragleave', () => {
         item.classList.remove('drag-over');
       });
 
-      item.addEventListener('drop', (e) => {
+      item.addEventListener('drop', async (e) => {
         e.preventDefault();
         e.stopPropagation();
         item.classList.remove('drag-over');
-        const sessionId = e.dataTransfer.getData('text/plain');
-        if (sessionId) {
-          this.moveSessionToFolder(sessionId, folderId);
+        const sessionIds = this.getDraggedSessionIds(e);
+        if (sessionIds.length > 0) {
+          const moved = await this.moveSessionsToFolder(sessionIds, folderId);
+          if (moved) {
+            item.classList.add('drop-success');
+            setTimeout(() => item.classList.remove('drop-success'), 700);
+            const folderName = item.querySelector('.folder-name')?.textContent?.trim();
+            this.flashDragHint(this.formatMoveHint(sessionIds.length, folderName));
+          }
         }
       });
     });
+
+    // Toggle nested sessions visibility
+    container.querySelectorAll('.folder-collapse-btn').forEach(button => {
+      const folderId = button.dataset.folderId;
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleFolderSessions(folderId);
+      });
+    });
+
+    this.bindSessionItemEvents(container);
   },
 
   // Render folder items recursively
@@ -399,19 +434,109 @@ const sessionManager = {
       const isActive = folder.id === this.activeFolder;
       const colorStyle = folder.color ? `color: ${folder.color};` : '';
       const children = folder.children || [];
+      const folderSessions = this.sessionsByFolder?.get(folder.id) || [];
+      const isCollapsed = this.collapsedFolderIds.has(folder.id);
+      const hasNestedSessions = folderSessions.length > 0;
+      const hasAccent = Boolean(folder.color);
+      const accentStyles = hasAccent
+        ? `data-has-accent="true" style="padding-left: ${16 + depth * 16}px; --folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
+        : `style="padding-left: ${16 + depth * 16}px;"`;
+      const sessionsHtml = folderSessions.length > 0
+        ? `
+          <div class="folder-sessions ${isCollapsed ? 'collapsed' : ''}" ${accentStyles}>
+            ${folderSessions.map(session => this.renderSessionItem(session)).join('')}
+          </div>
+        `
+        : '';
 
       return `
-        <div class="folder-item ${isActive ? 'active' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;">
+        <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;">
           <svg class="folder-icon" viewBox="0 0 24 24" fill="currentColor" style="${colorStyle}">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
           <span class="folder-name">${this.escapeHtml(folder.name)}</span>
           ${folder.session_count > 0 ? `<span class="folder-count">${folder.session_count}</span>` : ''}
+          ${hasNestedSessions ? `
+            <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show sessions' : 'Hide sessions'}">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M7,10L12,15L17,10H7Z"/>
+              </svg>
+            </button>
+          ` : ''}
         </div>
+        ${sessionsHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
     }).join('');
   },
+
+  // Bind events for session items in a container
+  bindSessionItemEvents(container) {
+    container.querySelectorAll('.session-item').forEach(item => {
+      const sessionId = item.dataset.sessionId;
+
+      // Click to switch session or multi-select
+      item.addEventListener('click', (e) => this.handleSessionClick(e, sessionId));
+
+      // Right-click context menu
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (!this.selectedSessionIds.includes(sessionId)) {
+          this.setSelection([sessionId], this.getSessionIndex(sessionId));
+        }
+        this.showSessionContextMenu(e, sessionId);
+      });
+
+      // Drag and drop
+      item.setAttribute('draggable', 'true');
+      item.addEventListener('dragstart', (e) => this.handleDragStart(e, sessionId));
+      item.addEventListener('dragend', () => this.handleDragEnd());
+    });
+  },
+
+  // Render "No Folder" header for root sessions
+  renderRootHeader() {
+    return `
+      <div class="session-folder-header">
+        <svg class="session-folder-icon" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19,20H5A2,2 0 0,1 3,18V6A2,2 0 0,1 5,4H9L11,6H19A2,2 0 0,1 21,8V18A2,2 0 0,1 19,20M5,18H19V10H5V18M5,8H9L7,6H5V8Z"/>
+        </svg>
+        <span class="session-folder-name">No Folder</span>
+      </div>
+    `;
+  },
+
+  // Toggle visibility of sessions under a folder
+  toggleFolderSessions(folderId) {
+    if (!folderId) return;
+    if (this.collapsedFolderIds.has(folderId)) {
+      this.collapsedFolderIds.delete(folderId);
+    } else {
+      this.collapsedFolderIds.add(folderId);
+    }
+    this.saveCollapsedFolders();
+    this.renderFolderTree();
+  },
+
+  // Load collapsed folder state from localStorage
+  loadCollapsedFolders() {
+    const raw = localStorage.getItem('sessionFolderCollapsed');
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        this.collapsedFolderIds = new Set(parsed);
+      }
+    } catch (error) {
+      console.warn('Failed to load collapsed folders', error);
+    }
+  },
+
+  // Persist collapsed folder state
+  saveCollapsedFolders() {
+    localStorage.setItem('sessionFolderCollapsed', JSON.stringify(Array.from(this.collapsedFolderIds)));
+  },
+
 
   // Render loading state
   renderLoadingState() {
@@ -583,20 +708,33 @@ const sessionManager = {
 
   // Move session to folder
   async moveSessionToFolder(sessionId, folderId) {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_id: folderId })
-      });
+    return this.moveSessionsToFolder([sessionId], folderId);
+  },
 
-      if (!response.ok) throw new Error('Failed to move session');
+  // Move multiple sessions to folder
+  async moveSessionsToFolder(sessionIds, folderId) {
+    const ids = Array.from(new Set(sessionIds)).filter(Boolean);
+    if (ids.length === 0) return;
+
+    try {
+      await Promise.all(ids.map(async (id) => {
+        const response = await fetch(`/api/sessions/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folder_id: folderId })
+        });
+
+        if (!response.ok) throw new Error('Failed to move session');
+      }));
 
       // Refresh sessions and folders
       await this.loadSessions();
       await this.loadFolders();
+      return true;
     } catch (error) {
-      console.error('Failed to move session:', error);
+      console.error('Failed to move sessions:', error);
+      this.flashDragHint('Failed to move sessions');
+      return false;
     }
   },
 
@@ -878,6 +1016,9 @@ const sessionManager = {
     this.hideContextMenus();
 
     switch (action) {
+      case 'info':
+        this.showSessionInfoModal(sessionId);
+        break;
       case 'rename':
         this.startInlineRename(sessionId);
         break;
@@ -1087,6 +1228,85 @@ const sessionManager = {
     modal.show();
   },
 
+  // Show session info modal
+  showSessionInfoModal(sessionId) {
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const infoBody = document.getElementById('sessionInfoBody');
+    if (!infoBody) return;
+
+    const folderName = this.getFolderName(session.folder_id);
+    const tags = session.tags || [];
+    const createdAt = this.formatDateTime(session.created_at);
+    const updatedAt = this.formatDateTime(session.updated_at);
+
+    infoBody.innerHTML = `
+      <div class="session-info-row">
+        <span class="session-info-label">Title</span>
+        <span class="session-info-value">${this.escapeHtml(session.title || 'New Session')}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Agent</span>
+        <span class="session-info-value">${this.escapeHtml(session.agent_name || 'Unknown')}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Folder</span>
+        <span class="session-info-value">${this.escapeHtml(folderName)}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Messages</span>
+        <span class="session-info-value">${session.message_count ?? 0}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Created</span>
+        <span class="session-info-value">${this.escapeHtml(createdAt)}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Updated</span>
+        <span class="session-info-value">${this.escapeHtml(updatedAt)}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">Tags</span>
+        <span class="session-info-value">${tags.length > 0 ? tags.map(tag => this.escapeHtml(tag)).join(', ') : 'None'}</span>
+      </div>
+      <div class="session-info-row">
+        <span class="session-info-label">ID</span>
+        <span class="session-info-value session-info-mono">${this.escapeHtml(session.id)}</span>
+      </div>
+    `;
+
+    const modal = new bootstrap.Modal(document.getElementById('sessionInfoModal'));
+    modal.show();
+  },
+
+  // Update folder drag hint text
+  setDragHint(text) {
+    const hint = document.getElementById('folderDragHint');
+    if (!hint) return;
+    if (!text) {
+      hint.style.display = 'none';
+      hint.textContent = '';
+      return;
+    }
+    hint.textContent = text;
+    hint.style.display = 'inline-flex';
+  },
+
+  // Flash drag hint for a short duration
+  flashDragHint(text) {
+    this.setDragHint(text);
+    clearTimeout(this.dragHintTimer);
+    this.dragHintTimer = setTimeout(() => this.setDragHint(''), 1600);
+  },
+
+  // Build hint text for a move action
+  formatMoveHint(count, folderName = null) {
+    const label = count === 1 ? 'session' : 'sessions';
+    if (!folderName) return `Drop to move ${count} ${label}`;
+    return `Moved ${count} ${label} to ${folderName}`;
+  },
+
   // Setup resize handle
   setupResizeHandle() {
     const handle = document.getElementById('sessionSidebarResizeHandle');
@@ -1134,9 +1354,15 @@ const sessionManager = {
 
   // Handle drag start
   handleDragStart(e, sessionId) {
+    if (!this.selectedSessionIds.includes(sessionId)) {
+      this.setSelection([sessionId], this.getSessionIndex(sessionId));
+    }
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-ori-session-ids', JSON.stringify(this.selectedSessionIds));
     e.dataTransfer.setData('text/plain', String(sessionId));
     e.currentTarget.classList.add('dragging');
+    document.getElementById('folderTreeSection')?.classList.add('dragging');
+    this.setDragHint(this.formatMoveHint(this.selectedSessionIds.length));
     const tree = document.getElementById('folderTree');
     const isCollapsed = tree && tree.style.display === 'none';
     this.folderTreeWasCollapsedOnDrag = isCollapsed;
@@ -1153,10 +1379,115 @@ const sessionManager = {
     document.querySelectorAll('.folder-item').forEach(item => {
       item.classList.remove('drag-over');
     });
+    document.getElementById('folderTreeSection')?.classList.remove('dragging');
+    this.setDragHint('');
     if (this.folderTreeWasCollapsedOnDrag) {
       this.toggleFolderTree(false);
       this.folderTreeWasCollapsedOnDrag = false;
     }
+  },
+
+  // Handle session click with multi-select support
+  handleSessionClick(e, sessionId) {
+    const clickedIndex = this.getSessionIndex(sessionId);
+
+    if (e.shiftKey && this.lastSelectedIndex !== null && clickedIndex !== -1) {
+      this.selectRange(this.lastSelectedIndex, clickedIndex, e.ctrlKey || e.metaKey);
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      this.toggleSelection(sessionId, clickedIndex);
+      return;
+    }
+
+    this.setSelection([sessionId], clickedIndex);
+    this.switchToSession(sessionId);
+  },
+
+  // Keep selection aligned to current session list
+  reconcileSelection() {
+    const sessionIds = new Set(this.sessions.map(session => session.id));
+    this.selectedSessionIds = this.selectedSessionIds.filter(id => sessionIds.has(id));
+    if (this.selectedSessionIds.length === 0) {
+      this.lastSelectedIndex = null;
+      return;
+    }
+    const lastId = this.selectedSessionIds[this.selectedSessionIds.length - 1];
+    this.lastSelectedIndex = this.getSessionIndex(lastId);
+  },
+
+  // Update selection UI
+  updateSelectionUI() {
+    const selected = new Set(this.selectedSessionIds);
+    document.querySelectorAll('.session-item').forEach(item => {
+      item.classList.toggle('selected', selected.has(item.dataset.sessionId));
+    });
+  },
+
+  // Clear selection
+  clearSelection() {
+    this.selectedSessionIds = [];
+    this.lastSelectedIndex = null;
+    this.updateSelectionUI();
+  },
+
+  // Set selection explicitly
+  setSelection(sessionIds, lastIndex) {
+    this.selectedSessionIds = Array.from(new Set(sessionIds));
+    this.lastSelectedIndex = Number.isInteger(lastIndex) ? lastIndex : null;
+    this.updateSelectionUI();
+  },
+
+  // Toggle a single session in selection
+  toggleSelection(sessionId, index) {
+    const existingIndex = this.selectedSessionIds.indexOf(sessionId);
+    if (existingIndex >= 0) {
+      this.selectedSessionIds.splice(existingIndex, 1);
+      if (this.selectedSessionIds.length === 0) {
+        this.lastSelectedIndex = null;
+      }
+    } else {
+      this.selectedSessionIds.push(sessionId);
+      this.lastSelectedIndex = Number.isInteger(index) ? index : this.lastSelectedIndex;
+    }
+    this.updateSelectionUI();
+  },
+
+  // Select a range between two indices
+  selectRange(fromIndex, toIndex, additive) {
+    if (fromIndex === null || toIndex === null) return;
+    const start = Math.min(fromIndex, toIndex);
+    const end = Math.max(fromIndex, toIndex);
+    const rangeIds = this.sessions.slice(start, end + 1).map(session => session.id);
+    if (additive) {
+      const combined = new Set([...this.selectedSessionIds, ...rangeIds]);
+      this.setSelection(Array.from(combined), toIndex);
+      return;
+    }
+    this.setSelection(rangeIds, toIndex);
+  },
+
+  // Get session index by id
+  getSessionIndex(sessionId) {
+    return this.sessions.findIndex(session => session.id === sessionId);
+  },
+
+  // Get dragged session IDs from data transfer
+  getDraggedSessionIds(e) {
+    const payload = e.dataTransfer.getData('application/x-ori-session-ids');
+    if (payload) {
+      try {
+        const parsed = JSON.parse(payload);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch (error) {
+        console.warn('Failed to parse dragged session ids', error);
+      }
+    }
+    const single = e.dataTransfer.getData('text/plain');
+    return single ? [single] : [];
   },
 
   // Handle scroll (for virtual scrolling)
@@ -1285,6 +1616,47 @@ const sessionManager = {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  },
+
+  // Convert hex color to rgba string
+  hexToRgba(hex, alpha) {
+    if (!hex || typeof hex !== 'string') return '';
+    const cleaned = hex.replace('#', '').trim();
+    if (cleaned.length !== 6) return '';
+    const r = parseInt(cleaned.slice(0, 2), 16);
+    const g = parseInt(cleaned.slice(2, 4), 16);
+    const b = parseInt(cleaned.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  },
+
+  // Format a readable date/time
+  formatDateTime(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  },
+
+  // Find folder name by id
+  getFolderName(folderId) {
+    if (!folderId) return 'No Folder';
+    const folder = this.findFolderById(folderId, this.folders);
+    return folder?.name || 'Unknown';
+  },
+
+  // Recursive folder lookup
+  findFolderById(folderId, folders) {
+    for (const folder of folders || []) {
+      if (folder.id === folderId) return folder;
+      const match = this.findFolderById(folderId, folder.children || []);
+      if (match) return match;
+    }
+    return null;
   }
 };
 
