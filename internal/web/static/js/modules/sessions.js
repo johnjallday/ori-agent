@@ -73,6 +73,7 @@ const sessionManager = {
     this.loadCollapsedFolders();
     this.bindEvents();
     this.setupKeyboardShortcuts();
+    this.initChatAgentBar();
     await this.loadSessions();
     await this.loadFolders();
     await this.loadTags();
@@ -369,10 +370,10 @@ const sessionManager = {
     container.querySelectorAll('.folder-item').forEach(item => {
       const folderId = item.dataset.folderId;
 
-      // Click to filter by folder
+      // Click to collapse/expand folder sessions
       item.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.filterByFolder(folderId);
+        this.toggleFolderSessions(folderId);
       });
 
       // Right-click context menu
@@ -448,18 +449,18 @@ const sessionManager = {
 
       return `
         <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;">
+          ${hasNestedSessions ? `
+            <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show sessions' : 'Hide sessions'}">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+              </svg>
+            </button>
+          ` : ''}
           <svg class="folder-icon" viewBox="0 0 24 24" fill="currentColor" style="${colorStyle}">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
           <span class="folder-name">${this.escapeHtml(folder.name)}</span>
           ${folder.session_count > 0 ? `<span class="folder-count">${folder.session_count}</span>` : ''}
-          ${hasNestedSessions ? `
-            <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show sessions' : 'Hide sessions'}">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M7,10L12,15L17,10H7Z"/>
-              </svg>
-            </button>
-          ` : ''}
         </div>
         ${sessionsHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
@@ -703,6 +704,8 @@ const sessionManager = {
         this.saveActiveSession();
         this.renderSessions();
 
+        this.updateChatSessionTitle(data.session.title || 'New Session');
+
         // Update the current agent display
         this.updateCurrentAgent(agentName);
 
@@ -731,6 +734,8 @@ const sessionManager = {
       this.saveActiveSession();
       this.renderSessions();
 
+      this.updateChatSessionTitle(session.title || 'New Session');
+
       // Update the current agent to match the session's agent
       if (session.agent_name) {
         this.updateCurrentAgent(session.agent_name);
@@ -743,7 +748,7 @@ const sessionManager = {
     }
   },
 
-  // Update the current agent display in navbar
+  // Update the current agent display (chat area bar and navbar)
   updateCurrentAgent(agentName) {
     if (!agentName) return;
 
@@ -752,7 +757,10 @@ const sessionManager = {
       window.currentAgent = agentName;
     }
 
-    // Update the navbar display
+    // Update the chat agent bar (primary location)
+    this.updateChatAgentBar(agentName);
+
+    // Update the navbar display (secondary/legacy)
     const agentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
     if (agentElement) {
       agentElement.textContent = agentName;
@@ -762,6 +770,67 @@ const sessionManager = {
     const agentHeader = document.querySelector('.agent-name');
     if (agentHeader) {
       agentHeader.textContent = agentName;
+    }
+
+    if (typeof loadAgentsForSidebar === 'function') {
+      loadAgentsForSidebar();
+    }
+  },
+
+  // Update the chat agent bar in the chat area
+  updateChatAgentBar(agentName) {
+    const agentBar = document.getElementById('chatAgentBar');
+    const agentNameEl = document.getElementById('chatAgentName');
+    const navbarAgentDisplay = document.getElementById('currentAgentDisplay');
+
+    if (!agentBar || !agentNameEl) return;
+
+    if (agentName) {
+      agentNameEl.textContent = agentName;
+      agentBar.style.display = 'block';
+      // Hide navbar agent display when chat agent bar is visible
+      if (navbarAgentDisplay) {
+        navbarAgentDisplay.style.display = 'none';
+      }
+    } else {
+      agentBar.style.display = 'none';
+      // Show navbar agent display as fallback
+      if (navbarAgentDisplay) {
+        navbarAgentDisplay.style.display = '';
+      }
+    }
+  },
+
+  updateChatSessionTitle(title) {
+    const sessionBar = document.getElementById('chatSessionBar');
+    const sessionTitle = document.getElementById('chatSessionTitle');
+    if (!sessionBar || !sessionTitle) return;
+
+    if (!title) {
+      sessionBar.style.display = 'none';
+      return;
+    }
+
+    sessionTitle.textContent = title;
+    sessionBar.style.display = 'flex';
+  },
+
+  // Initialize chat agent bar button handler
+  initChatAgentBar() {
+    // Hide navbar agent display - it's replaced by the chat agent bar
+    const navbarAgentDisplay = document.getElementById('currentAgentDisplay');
+    if (navbarAgentDisplay) {
+      navbarAgentDisplay.style.display = 'none';
+    }
+
+    const changeBtn = document.getElementById('chatChangeAgentBtn');
+    if (changeBtn && !changeBtn.dataset.bound) {
+      changeBtn.dataset.bound = 'true';
+      changeBtn.addEventListener('click', async () => {
+        if (this.activeSessionId) {
+          await this.showChangeAgentDialog(this.activeSessionId);
+        }
+      });
     }
   },
 
@@ -805,6 +874,7 @@ const sessionManager = {
           if (typeof clearChatHistory === 'function') {
             clearChatHistory();
           }
+          this.updateChatSessionTitle('');
         }
       }
 
@@ -830,6 +900,9 @@ const sessionManager = {
       if (session) {
         session.title = newTitle;
         this.renderSessions();
+        if (sessionId === this.activeSessionId) {
+          this.updateChatSessionTitle(newTitle);
+        }
       }
     } catch (error) {
       console.error('Failed to rename session:', error);
@@ -1787,6 +1860,8 @@ const sessionManager = {
     if (session) {
       this.activeSessionId = savedId;
       this.renderSessions();
+
+      this.updateChatSessionTitle(session.title || 'New Session');
 
       // Update the current agent to match the session's agent
       if (session.agent_name) {

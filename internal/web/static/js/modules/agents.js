@@ -253,7 +253,7 @@ async function loadAgentsForSidebar() {
     const data = await response.json();
     console.log(`📦 Received agents:`, data);
     console.log(`👥 Agent count: ${data.agents?.length || 0}, Current: ${data.current}`);
-    displayAgents(data.agents, data.current);
+    displayAgents(data.agents, resolveSidebarCurrentAgent(data.current));
     console.log('✅ Agents displayed');
 
   } catch (error) {
@@ -280,6 +280,11 @@ function displayAgents(agents, currentAgent) {
   console.log(`📋 Stored agents: ${allAgents?.length || 0}, current: ${currentAgentName}`);
 
   renderAgents();
+}
+
+function resolveSidebarCurrentAgent(fallbackAgent) {
+  const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
+  return sessionAgent || fallbackAgent;
 }
 
 function renderAgents() {
@@ -501,12 +506,17 @@ function createAgentElement(agentName, agentType, currentAgent) {
 // Switch to agent
 async function switchToAgent(agentName) {
   try {
-    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-      method: 'PUT'
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const activeSession = window.sessionManager?.getActiveSession?.();
+    if (activeSession && window.sessionManager?.changeSessionAgent) {
+      await window.sessionManager.changeSessionAgent(activeSession.id, agentName);
+    } else {
+      const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+        method: 'PUT'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
     }
     
     // Show success notification
