@@ -18,9 +18,20 @@ const modelOptions = [
     'codellama',
 ];
 
-document.addEventListener('DOMContentLoaded', () => {
+// Get agent name from URL - supports both path and query parameter
+function getAgentNameFromURL() {
+    // First try query parameter (agents-edit.html?name=xxx)
     const params = new URLSearchParams(window.location.search);
-    agentName = params.get('name');
+    const queryName = params.get('name');
+    if (queryName) return queryName;
+    // Fall back to path-based URL if ever needed
+    const pathMatch = window.location.pathname.match(/\/agents\/([^\/]+)\/edit/);
+    if (pathMatch) return decodeURIComponent(pathMatch[1]);
+    return null;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    agentName = getAgentNameFromURL();
 
     if (!agentName) {
         showError('No agent specified');
@@ -30,11 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('saveBtn').addEventListener('click', updateAgent);
     document.getElementById('cancelBtn').addEventListener('click', () => {
-        window.location.href = `/agents-detail.html?name=${encodeURIComponent(agentName)}`;
+        window.location.href = `/agents/${encodeURIComponent(agentName)}`;
     });
 
     const backLink = document.getElementById('backLink');
-    backLink.href = `/agents-detail.html?name=${encodeURIComponent(agentName)}`;
+    backLink.href = `/agents/${encodeURIComponent(agentName)}`;
 
     setupTagsInput();
     populateModelDatalist();
@@ -132,7 +143,7 @@ async function updateAgent() {
         agentName = updatedName;
         showSuccess('Agent updated successfully.');
         setTimeout(() => {
-            window.location.href = `/agents-detail.html?name=${encodeURIComponent(updatedName)}`;
+            window.location.href = `/agents/${encodeURIComponent(updatedName)}`;
         }, 800);
     } catch (error) {
         console.error('Error updating agent:', error);

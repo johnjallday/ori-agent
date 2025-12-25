@@ -114,9 +114,26 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
     return;
   }
 
+  // Sort plugins: enabled/active first, then alphabetically
+  const sortedPlugins = [...plugins].sort((a, b) => {
+    const nameA = normalizePluginName(a.name);
+    const nameB = normalizePluginName(b.name);
+    const isActiveA = activePluginNames.has(nameA);
+    const isActiveB = activePluginNames.has(nameB);
+
+    // Active plugins come first
+    if (isActiveA && !isActiveB) return -1;
+    if (!isActiveA && isActiveB) return 1;
+
+    // Then sort alphabetically by display name
+    const displayA = a.displayName || a.name;
+    const displayB = b.displayName || b.name;
+    return displayA.localeCompare(displayB);
+  });
+
   // Determine how many plugins to show
-  const pluginsToShow = sidebarShowAll ? plugins : plugins.slice(0, SIDEBAR_INITIAL_LIMIT);
-  const hasMore = plugins.length > SIDEBAR_INITIAL_LIMIT;
+  const pluginsToShow = sidebarShowAll ? sortedPlugins : sortedPlugins.slice(0, SIDEBAR_INITIAL_LIMIT);
+  const hasMore = sortedPlugins.length > SIDEBAR_INITIAL_LIMIT;
 
   pluginsList.innerHTML = pluginsToShow.map(plugin => {
     const normalizedName = normalizePluginName(plugin.name);

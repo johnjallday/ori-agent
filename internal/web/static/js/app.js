@@ -142,7 +142,7 @@ function setupAgentDisplayClick() {
     const agentName = agentNameSpan?.textContent?.trim();
 
     if (agentName) {
-      window.location.href = `/agents-detail.html?name=${encodeURIComponent(agentName)}`;
+      window.location.href = `/agents/${encodeURIComponent(agentName)}`;
     }
   });
 }

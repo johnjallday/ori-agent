@@ -467,6 +467,15 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if this is a clean agent detail URL: /agents/{agent-name}
+	// (not a file request like /agents/{agent-name}/config.json)
+	pathAfterAgents := strings.TrimPrefix(r.URL.Path, "/agents/")
+	if !strings.Contains(pathAfterAgents, "/") && !strings.Contains(pathAfterAgents, ".") && pathAfterAgents != "" {
+		// This is a request for /agents/{agent-name} - serve the agent detail page
+		s.serveAgentsDetail(w, r)
+		return
+	}
+
 	// Serve files from the agents directory
 	// URL format: /agents/<agent-name>/agent_settings.json
 	path := strings.TrimPrefix(r.URL.Path, "/")

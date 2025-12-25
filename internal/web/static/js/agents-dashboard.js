@@ -326,7 +326,7 @@ function createAgent() {
 
 // View agent details
 function viewAgent(name) {
-    window.location.href = `/agents-detail.html?name=${encodeURIComponent(name)}`;
+    window.location.href = `/agents/${encodeURIComponent(name)}`;
 }
 
 // Load agent for chat (sets current agent then redirects to chat view)

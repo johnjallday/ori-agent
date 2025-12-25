@@ -5,16 +5,27 @@ let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
 
+// Get agent name from URL - supports both /agents/{name} and ?name={name}
+function getAgentNameFromURL() {
+    // First try path-based URL: /agents/{agent-name}
+    const pathMatch = window.location.pathname.match(/^\/agents\/([^\/]+)$/);
+    if (pathMatch) {
+        return decodeURIComponent(pathMatch[1]);
+    }
+    // Fall back to query parameter for backward compatibility
+    const params = new URLSearchParams(window.location.search);
+    return params.get('name');
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
     // Get agent name from URL
-    const params = new URLSearchParams(window.location.search);
-    agentName = params.get('name');
+    agentName = getAgentNameFromURL();
 
     if (!agentName) {
         showError('No agent specified');
         setTimeout(() => {
-            window.location.href = '/agents-dashboard';
+            window.location.href = '/agents';
         }, 2000);
         return;
     }
@@ -45,7 +56,7 @@ async function loadAgentDetails() {
         console.error('Error loading agent details:', error);
         showError(error.message || 'Failed to load agent details');
         setTimeout(() => {
-            window.location.href = '/agents-dashboard';
+            window.location.href = '/agents';
         }, 3000);
     } finally {
         showLoading(false);
@@ -819,7 +830,7 @@ async function confirmDelete() {
         }
 
         alert(`Agent "${agentName}" deleted successfully`);
-        window.location.href = '/agents-dashboard';
+        window.location.href = '/agents';
 
     } catch (error) {
         console.error('Error deleting agent:', error);

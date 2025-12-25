@@ -274,8 +274,21 @@ function displayAgents(agents, currentAgent) {
     return;
   }
 
+  // Sort agents: current/active agent first, then alphabetically
+  const sortedAgents = [...agents].sort((a, b) => {
+    const nameA = typeof a === 'string' ? a : a.name;
+    const nameB = typeof b === 'string' ? b : b.name;
+
+    // Current agent comes first
+    if (nameA === currentAgent) return -1;
+    if (nameB === currentAgent) return 1;
+
+    // Then sort alphabetically
+    return nameA.localeCompare(nameB);
+  });
+
   // Store the data for pagination
-  allAgents = agents;
+  allAgents = sortedAgents;
   currentAgentName = currentAgent;
   console.log(`📋 Stored agents: ${allAgents?.length || 0}, current: ${currentAgentName}`);
 

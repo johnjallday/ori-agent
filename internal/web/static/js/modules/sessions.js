@@ -704,9 +704,10 @@ const sessionManager = {
         this.saveActiveSession();
         this.renderSessions();
 
-        this.updateChatSessionTitle(data.session.title || 'New Session');
+        // Update the combined chat info bar with session title and agent
+        this.updateChatInfoBar(data.session.title || 'New Session', agentName);
 
-        // Update the current agent display
+        // Update the current agent globally
         this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
@@ -734,9 +735,10 @@ const sessionManager = {
       this.saveActiveSession();
       this.renderSessions();
 
-      this.updateChatSessionTitle(session.title || 'New Session');
+      // Update the combined chat info bar with session title and agent
+      this.updateChatInfoBar(session.title || 'New Session', session.agent_name);
 
-      // Update the current agent to match the session's agent
+      // Update the current agent globally
       if (session.agent_name) {
         this.updateCurrentAgent(session.agent_name);
       }
@@ -777,23 +779,40 @@ const sessionManager = {
     }
   },
 
-  // Update the chat agent bar in the chat area
-  updateChatAgentBar(agentName) {
-    const agentBar = document.getElementById('chatAgentBar');
+  // Update the combined chat info bar (session + agent)
+  updateChatInfoBar(sessionTitle, agentName) {
+    const infoBar = document.getElementById('chatInfoBar');
+    const sessionTitleEl = document.getElementById('chatSessionTitle');
     const agentNameEl = document.getElementById('chatAgentName');
+    const editAgentBtn = document.getElementById('chatEditAgentBtn');
     const navbarAgentDisplay = document.getElementById('currentAgentDisplay');
 
-    if (!agentBar || !agentNameEl) return;
+    if (!infoBar) return;
 
-    if (agentName) {
+    // Update session title
+    if (sessionTitleEl && sessionTitle) {
+      sessionTitleEl.textContent = sessionTitle;
+    }
+
+    // Update agent name
+    if (agentNameEl && agentName) {
       agentNameEl.textContent = agentName;
-      agentBar.style.display = 'block';
-      // Hide navbar agent display when chat agent bar is visible
+    }
+
+    // Update Edit Agent button href
+    if (editAgentBtn && agentName) {
+      editAgentBtn.href = `/agents/${encodeURIComponent(agentName)}`;
+    }
+
+    // Show bar if we have either session or agent
+    if (sessionTitle || agentName) {
+      infoBar.style.display = 'block';
+      // Hide navbar agent display when chat info bar is visible
       if (navbarAgentDisplay) {
         navbarAgentDisplay.style.display = 'none';
       }
     } else {
-      agentBar.style.display = 'none';
+      infoBar.style.display = 'none';
       // Show navbar agent display as fallback
       if (navbarAgentDisplay) {
         navbarAgentDisplay.style.display = '';
@@ -801,18 +820,15 @@ const sessionManager = {
     }
   },
 
+  // Legacy methods for backward compatibility
+  updateChatAgentBar(agentName) {
+    const session = this.getActiveSession();
+    this.updateChatInfoBar(session?.title, agentName);
+  },
+
   updateChatSessionTitle(title) {
-    const sessionBar = document.getElementById('chatSessionBar');
-    const sessionTitle = document.getElementById('chatSessionTitle');
-    if (!sessionBar || !sessionTitle) return;
-
-    if (!title) {
-      sessionBar.style.display = 'none';
-      return;
-    }
-
-    sessionTitle.textContent = title;
-    sessionBar.style.display = 'flex';
+    const session = this.getActiveSession();
+    this.updateChatInfoBar(title, session?.agent_name);
   },
 
   // Initialize chat agent bar button handler
@@ -1054,10 +1070,10 @@ const sessionManager = {
   focusSearch() {
     const input = document.getElementById('sessionSearchInput');
     if (input) {
-      // Show sidebar if hidden
+      // On mobile, show sidebar if hidden
       const sidebar = document.getElementById('sessionSidebar');
-      if (sidebar?.classList.contains('d-none')) {
-        sidebar.classList.remove('d-none');
+      if (sidebar && window.innerWidth < 992 && !sidebar.classList.contains('mobile-open')) {
+        sidebar.classList.add('mobile-open');
       }
       input.focus();
     }
@@ -1158,11 +1174,23 @@ const sessionManager = {
     });
   },
 
-  // Toggle sidebar
+  // Toggle sidebar (for mobile only - desktop sidebar is always visible)
   toggleSidebar() {
     const sidebar = document.getElementById('sessionSidebar');
     if (sidebar) {
-      sidebar.classList.toggle('d-none');
+      // On mobile (< 992px), toggle the mobile-open class
+      if (window.innerWidth < 992) {
+        sidebar.classList.toggle('mobile-open');
+      }
+      // On desktop, sidebar is always visible - no toggle needed
+    }
+  },
+
+  // Close sidebar on mobile
+  closeSidebarMobile() {
+    const sidebar = document.getElementById('sessionSidebar');
+    if (sidebar && window.innerWidth < 992) {
+      sidebar.classList.remove('mobile-open');
     }
   },
 
@@ -1861,9 +1889,10 @@ const sessionManager = {
       this.activeSessionId = savedId;
       this.renderSessions();
 
-      this.updateChatSessionTitle(session.title || 'New Session');
+      // Update the combined chat info bar with session title and agent
+      this.updateChatInfoBar(session.title || 'New Session', session.agent_name);
 
-      // Update the current agent to match the session's agent
+      // Update the current agent globally
       if (session.agent_name) {
         this.updateCurrentAgent(session.agent_name);
       }
