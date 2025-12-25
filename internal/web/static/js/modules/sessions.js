@@ -447,8 +447,9 @@ const sessionManager = {
         `
         : '';
 
+      const folderTitle = folder.description ? this.escapeHtml(folder.description) : folder.name;
       return `
-        <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;">
+        <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;" title="${folderTitle}">
           ${hasNestedSessions ? `
             <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show sessions' : 'Hide sessions'}">
               <svg viewBox="0 0 24 24" fill="currentColor">
@@ -985,18 +986,20 @@ const sessionManager = {
   // Create folder
   async createFolder() {
     const nameInput = document.getElementById('folderNameInput');
+    const descriptionInput = document.getElementById('folderDescriptionInput');
     const colorBtn = document.querySelector('.folder-color-btn.active');
 
     const name = nameInput?.value.trim();
     if (!name) return;
 
+    const description = descriptionInput?.value.trim() || '';
     const color = colorBtn?.dataset.color || '';
 
     try {
       const response = await fetch('/api/folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, color })
+        body: JSON.stringify({ name, description, color })
       });
 
       if (!response.ok) throw new Error('Failed to create folder');
@@ -1005,8 +1008,9 @@ const sessionManager = {
       const modal = bootstrap.Modal.getInstance(document.getElementById('addFolderModal'));
       modal?.hide();
 
-      // Clear input
+      // Clear inputs
       if (nameInput) nameInput.value = '';
+      if (descriptionInput) descriptionInput.value = '';
 
       // Refresh folders
       await this.loadFolders();

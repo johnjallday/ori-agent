@@ -107,6 +107,9 @@ type Folder struct {
 	// Name is the display name of the folder.
 	Name string `json:"name"`
 
+	// Description is an optional short description of the folder's purpose.
+	Description string `json:"description,omitempty"`
+
 	// ParentID is the ID of the parent folder, or empty for root-level folders.
 	ParentID string `json:"parent_id,omitempty"`
 

@@ -52,9 +52,10 @@ func (h *Handler) handleFolder(w http.ResponseWriter, r *http.Request, id string
 // createFolder handles POST /api/folders.
 func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name     string `json:"name"`
-		ParentID string `json:"parent_id,omitempty"`
-		Color    string `json:"color,omitempty"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+		ParentID    string `json:"parent_id,omitempty"`
+		Color       string `json:"color,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -68,9 +69,10 @@ func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	folder := &session.Folder{
-		Name:     req.Name,
-		ParentID: req.ParentID,
-		Color:    req.Color,
+		Name:        req.Name,
+		Description: req.Description,
+		ParentID:    req.ParentID,
+		Color:       req.Color,
 	}
 
 	if err := h.store.CreateFolder(r.Context(), folder); err != nil {
@@ -116,9 +118,10 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 	}
 
 	var req struct {
-		Name     *string `json:"name,omitempty"`
-		ParentID *string `json:"parent_id,omitempty"`
-		Color    *string `json:"color,omitempty"`
+		Name        *string `json:"name,omitempty"`
+		Description *string `json:"description,omitempty"`
+		ParentID    *string `json:"parent_id,omitempty"`
+		Color       *string `json:"color,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,6 +132,9 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 	// Apply partial updates
 	if req.Name != nil {
 		folder.Name = *req.Name
+	}
+	if req.Description != nil {
+		folder.Description = *req.Description
 	}
 	if req.ParentID != nil {
 		// Check for circular reference

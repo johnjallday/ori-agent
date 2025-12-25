@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -62,6 +62,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 	switch version {
 	case 1:
 		return db.migration001InitialSchema(ctx)
+	case 2:
+		return db.migration002AddFolderDescription(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -206,6 +208,15 @@ func (db *DB) migration001InitialSchema(ctx context.Context) error {
 		return fmt.Errorf("failed to create tag_counts view: %w", err)
 	}
 
+	return nil
+}
+
+// migration002AddFolderDescription adds description field to folders table.
+func (db *DB) migration002AddFolderDescription(ctx context.Context) error {
+	_, err := db.ExecContext(ctx, `ALTER TABLE folders ADD COLUMN description TEXT DEFAULT ''`)
+	if err != nil {
+		return fmt.Errorf("failed to add description column to folders: %w", err)
+	}
 	return nil
 }
 

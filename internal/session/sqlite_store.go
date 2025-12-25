@@ -399,9 +399,9 @@ func (s *SQLiteStore) CreateFolder(ctx context.Context, folder *Folder) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO folders (id, name, parent_id, color, session_count, created_at, updated_at)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?)
-	`, folder.ID, folder.Name, folder.ParentID, folder.Color,
+		INSERT INTO folders (id, name, description, parent_id, color, session_count, created_at, updated_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
+	`, folder.ID, folder.Name, folder.Description, folder.ParentID, folder.Color,
 		folder.SessionCount, folder.CreatedAt, folder.UpdatedAt)
 
 	if err != nil {
@@ -420,10 +420,11 @@ func (s *SQLiteStore) GetFolder(ctx context.Context, id string) (*Folder, error)
 
 	var parentID sql.NullString
 	var color sql.NullString
+	var description sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, parent_id, color, session_count, created_at, updated_at
+		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at
 		FROM folders WHERE id = ?
-	`, id).Scan(&folder.ID, &folder.Name, &parentID, &color,
+	`, id).Scan(&folder.ID, &folder.Name, &description, &parentID, &color,
 		&folder.SessionCount, &folder.CreatedAt, &folder.UpdatedAt)
 
 	if err == sql.ErrNoRows {
@@ -433,6 +434,7 @@ func (s *SQLiteStore) GetFolder(ctx context.Context, id string) (*Folder, error)
 		return nil, fmt.Errorf("failed to get folder: %w", err)
 	}
 
+	folder.Description = description.String
 	folder.ParentID = parentID.String
 	folder.Color = color.String
 
@@ -443,9 +445,9 @@ func (s *SQLiteStore) GetFolder(ctx context.Context, id string) (*Folder, error)
 func (s *SQLiteStore) UpdateFolder(ctx context.Context, folder *Folder) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE folders
-		SET name = ?, parent_id = NULLIF(?, ''), color = ?, updated_at = ?
+		SET name = ?, description = ?, parent_id = NULLIF(?, ''), color = ?, updated_at = ?
 		WHERE id = ?
-	`, folder.Name, folder.ParentID, folder.Color, folder.UpdatedAt, folder.ID)
+	`, folder.Name, folder.Description, folder.ParentID, folder.Color, folder.UpdatedAt, folder.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update folder: %w", err)
@@ -497,7 +499,7 @@ func (s *SQLiteStore) DeleteFolder(ctx context.Context, id string) error {
 // ListFolders returns all folders as a flat list.
 func (s *SQLiteStore) ListFolders(ctx context.Context) ([]Folder, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, parent_id, color, session_count, created_at, updated_at
+		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at
 		FROM folders
 		ORDER BY name ASC
 	`)
@@ -509,13 +511,14 @@ func (s *SQLiteStore) ListFolders(ctx context.Context) ([]Folder, error) {
 	folders := make([]Folder, 0)
 	for rows.Next() {
 		var folder Folder
-		var parentID, color sql.NullString
+		var parentID, color, description sql.NullString
 
-		if err := rows.Scan(&folder.ID, &folder.Name, &parentID, &color,
+		if err := rows.Scan(&folder.ID, &folder.Name, &description, &parentID, &color,
 			&folder.SessionCount, &folder.CreatedAt, &folder.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan folder: %w", err)
 		}
 
+		folder.Description = description.String
 		folder.ParentID = parentID.String
 		folder.Color = color.String
 		folders = append(folders, folder)
