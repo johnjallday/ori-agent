@@ -71,6 +71,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/base.tmpl",
 		"templates/layout/head.tmpl",
 		"templates/components/sidebar.tmpl",
+		"templates/components/session-sidebar.tmpl",
 		"templates/components/chat-area.tmpl",
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",

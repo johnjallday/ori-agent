@@ -553,7 +553,10 @@ func isValidHexColor(color string) bool {
 		return false
 	}
 	for _, c := range color[1:] {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		isDigit := c >= '0' && c <= '9'
+		isLowerHex := c >= 'a' && c <= 'f'
+		isUpperHex := c >= 'A' && c <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
 			return false
 		}
 	}
@@ -566,7 +569,11 @@ func isValidIconName(icon string) bool {
 		return false
 	}
 	for _, c := range icon {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+		isLower := c >= 'a' && c <= 'z'
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isHyphen := c == '-'
+		if !isLower && !isUpper && !isDigit && !isHyphen {
 			return false
 		}
 	}

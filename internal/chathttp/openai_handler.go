@@ -20,6 +20,7 @@ import (
 // handleOpenAIChat handles chat requests for OpenAI models
 func (h *Handler) handleOpenAIChat(
 	w http.ResponseWriter,
+	r *http.Request,
 	ag *agent.Agent,
 	userMessage string,
 	tools []llm.Tool,
@@ -28,6 +29,7 @@ func (h *Handler) handleOpenAIChat(
 	files []pluginapi.FileAttachment,
 	agentClient openai.Client,
 ) {
+	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ContextTimeout)
 	defer cancel()
 
@@ -111,7 +113,7 @@ func (h *Handler) handleOpenAIChat(
 
 	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
-		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, start)
+		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, start, sessionID)
 		return
 	}
 
@@ -124,6 +126,10 @@ func (h *Handler) handleOpenAIChat(
 
 	logger.Debug("Chat response completed", logger.Fields{"duration": time.Since(start), "response": text})
 	_ = h.store.SetAgent(agentName, ag)
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
+
 	writeJSONResponse(w, map[string]any{"response": text})
 }
 
@@ -138,6 +144,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	agentClient openai.Client,
 	choice openai.ChatCompletionMessage,
 	start time.Time,
+	sessionID string,
 ) {
 	// Append the assistant message with tool calls first
 	ag.Messages = append(ag.Messages, choice.ToParam())
@@ -201,6 +208,9 @@ func (h *Handler) handleOpenAIToolCalls(
 		logger.Debug("Chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(agentName, ag)
 
+		// Store assistant response in session
+		h.storeMessageInSession(baseCtx, sessionID, "assistant", combinedResult)
+
 		response := map[string]any{
 			"response":  combinedResult,
 			"toolCalls": toolResults,
@@ -249,6 +259,10 @@ func (h *Handler) handleOpenAIToolCalls(
 
 	logger.Debug("Chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", final.Content)
+
 	orihttp.WriteJSON(w, map[string]any{
 		"response":  final.Content,
 		"toolCalls": toolResults,

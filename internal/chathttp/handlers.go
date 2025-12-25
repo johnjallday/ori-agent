@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -57,6 +58,7 @@ type Handler struct {
 	commandHandler *CommandHandler
 	orchestrator   *orchestration.Orchestrator
 	costTracker    *llm.CostTracker
+	sessionStore   session.HybridStore
 	mcpRegistry    interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
@@ -150,6 +152,36 @@ func (h *Handler) SetShutdownFunc(fn func()) {
 	h.commandHandler.SetShutdownFunc(fn)
 }
 
+// SetSessionStore sets the session store for storing chat messages
+func (h *Handler) SetSessionStore(store session.HybridStore) {
+	h.sessionStore = store
+}
+
+// storeMessageInSession stores a message in the session if session ID is provided
+func (h *Handler) storeMessageInSession(ctx context.Context, sessionID, role, content string) {
+	if h.sessionStore == nil || sessionID == "" {
+		return
+	}
+
+	msg := &session.Message{
+		Role:    session.MessageRole(role),
+		Content: content,
+	}
+
+	if err := h.sessionStore.AddMessage(ctx, sessionID, msg); err != nil {
+		logger.Warn("Failed to store message in session", logger.Fields{
+			"session_id": sessionID,
+			"role":       role,
+			"error":      err,
+		})
+	}
+}
+
+// getSessionID extracts the session ID from request header
+func (h *Handler) getSessionID(r *http.Request) string {
+	return r.Header.Get("X-Session-ID")
+}
+
 // findTool searches for a tool by name in both plugins and MCP servers
 func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
 	// First check native plugins
@@ -215,9 +247,13 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get session ID from header for multi-tab support
+	sessionID := h.getSessionID(r)
+
 	logger.Info("Chat request received", logger.Fields{
 		"question":   q[:min(50, len(q))],
 		"file_count": len(req.Files),
+		"session_id": sessionID,
 	})
 	for i, f := range req.Files {
 		logger.Info("Received file", logger.Fields{
@@ -486,6 +522,9 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Prepare and call the model
 	ag.Messages = append(ag.Messages, openai.UserMessage(q))
 
+	// Store user message in session if session ID is provided
+	h.storeMessageInSession(r.Context(), sessionID, "user", q)
+
 	// Convert uploaded files to FileAttachments for tool execution
 	fileAttachments := ConvertUploadedFilesToAttachments(req.Files)
 	logger.Info("Converted files for tool execution", logger.Fields{
@@ -522,5 +561,5 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
-	h.handleOpenAIChat(w, ag, q, tools, current, base, fileAttachments, agentClient)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient)
 }

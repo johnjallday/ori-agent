@@ -30,7 +30,7 @@ func NewHandler(categoryStore store.ModelCategoryStore) *Handler {
 // GET /api/model-categories
 func (h *Handler) GetAllHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (h *Handler) GetAllHandler(w http.ResponseWriter, r *http.Request) {
 // POST /api/model-categories
 func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
@@ -83,10 +83,10 @@ func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 			errors.Is(err, store.ErrMaxCategoriesReached) ||
 			errors.Is(err, store.ErrInvalidColorFormat) ||
 			errors.Is(err, store.ErrInvalidIconName) {
-			orihttp.RespondBadRequest(w, err.Error())
+			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -98,14 +98,14 @@ func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 // PUT /api/model-categories/{id}
 func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract category ID from path
 	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "")
 	if id == "" {
-		orihttp.RespondBadRequest(w, "category ID is required")
+		_ = orihttp.RespondBadRequest(w, "category ID is required")
 		return
 	}
 
@@ -117,13 +117,13 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.UpdateCategory(id, req.Name, req.Color, req.Icon); err != nil {
 		if errors.Is(err, store.ErrCategoryNotFound) {
-			orihttp.RespondNotFound(w, err.Error())
+			_ = orihttp.RespondNotFound(w, err.Error())
 			return
 		}
 		if errors.Is(err, store.ErrCategoryNameRequired) ||
@@ -131,10 +131,10 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 			errors.Is(err, store.ErrCategoryNameExists) ||
 			errors.Is(err, store.ErrInvalidColorFormat) ||
 			errors.Is(err, store.ErrInvalidIconName) {
-			orihttp.RespondBadRequest(w, err.Error())
+			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -147,27 +147,27 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 // DELETE /api/model-categories/{id}
 func (h *Handler) DeleteCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract category ID from path
 	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "")
 	if id == "" {
-		orihttp.RespondBadRequest(w, "category ID is required")
+		_ = orihttp.RespondBadRequest(w, "category ID is required")
 		return
 	}
 
 	if err := h.store.DeleteCategory(id); err != nil {
 		if errors.Is(err, store.ErrCategoryNotFound) {
-			orihttp.RespondNotFound(w, err.Error())
+			_ = orihttp.RespondNotFound(w, err.Error())
 			return
 		}
 		if errors.Is(err, store.ErrCannotDeleteDefault) {
-			orihttp.RespondBadRequest(w, err.Error())
+			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -178,7 +178,7 @@ func (h *Handler) DeleteCategoryHandler(w http.ResponseWriter, r *http.Request) 
 // PUT /api/model-categories/reorder
 func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -188,12 +188,12 @@ func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Reques
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.ReorderCategories(req.CategoryIDs); err != nil {
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -208,14 +208,14 @@ func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Reques
 // PUT /api/model-categories/{id}/visibility
 func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract category ID from path
 	id := extractPathSegment(r.URL.Path, "/api/model-categories/", "/visibility")
 	if id == "" {
-		orihttp.RespondBadRequest(w, "category ID is required")
+		_ = orihttp.RespondBadRequest(w, "category ID is required")
 		return
 	}
 
@@ -225,16 +225,16 @@ func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetCategoryVisibility(id, req.Hidden); err != nil {
 		if errors.Is(err, store.ErrCategoryNotFound) {
-			orihttp.RespondNotFound(w, err.Error())
+			_ = orihttp.RespondNotFound(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -247,14 +247,14 @@ func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 // PUT /api/models/{modelId}/categories
 func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// Extract model ID from path
 	modelID := extractPathSegment(r.URL.Path, "/api/models/", "/categories")
 	if modelID == "" {
-		orihttp.RespondBadRequest(w, "model ID is required")
+		_ = orihttp.RespondBadRequest(w, "model ID is required")
 		return
 	}
 
@@ -264,16 +264,16 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetModelAssignments(modelID, req.CategoryIDs); err != nil {
 		if errors.Is(err, store.ErrInvalidCategoryID) {
-			orihttp.RespondBadRequest(w, err.Error())
+			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -289,7 +289,7 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 // PUT /api/model-categories/view-preference
 func (h *Handler) SetViewPreferenceHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -299,16 +299,16 @@ func (h *Handler) SetViewPreferenceHandler(w http.ResponseWriter, r *http.Reques
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "invalid request body")
+		_ = orihttp.RespondBadRequest(w, "invalid request body")
 		return
 	}
 
 	if err := h.store.SetViewPreference(req.Preference); err != nil {
 		if errors.Is(err, store.ErrInvalidViewPreference) {
-			orihttp.RespondBadRequest(w, err.Error())
+			_ = orihttp.RespondBadRequest(w, err.Error())
 			return
 		}
-		orihttp.RespondInternalError(w, err.Error())
+		_ = orihttp.RespondInternalError(w, err.Error())
 		return
 	}
 
@@ -325,7 +325,7 @@ func (h *Handler) CategoriesHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.CreateCategoryHandler(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -343,7 +343,7 @@ func (h *Handler) CategoryHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.DeleteCategoryHandler(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 

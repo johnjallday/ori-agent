@@ -1,0 +1,259 @@
+<!-- Session Sidebar -->
+<div class="session-sidebar d-none" id="sessionSidebar">
+  <div class="session-sidebar-content">
+    <!-- Header with New Session Button -->
+    <div class="session-sidebar-header">
+      <div class="d-flex align-items-center justify-content-between">
+        <h6 class="fw-semibold mb-0 d-flex align-items-center" style="color: var(--text-primary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
+          </svg>
+          Sessions
+        </h6>
+        <div class="d-flex gap-1">
+          <button id="newSessionBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;" title="New Session (Ctrl+N)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+          </button>
+          <button id="toggleSessionSidebarBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;" title="Close Sessions">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="session-search-container">
+      <div class="session-search-wrapper">
+        <svg class="session-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/>
+        </svg>
+        <input type="text" id="sessionSearchInput" class="session-search-input" placeholder="Search sessions... (Ctrl+K)">
+        <button id="clearSessionSearch" class="session-search-clear" style="display: none;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="session-filter-bar">
+        <div class="session-filter-dropdown">
+          <button id="sortDropdownBtn" class="session-filter-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3,13H15V11H3M3,6V8H21V6M3,18H9V16H3V18Z"/>
+            </svg>
+            <span id="sortLabel">Recent</span>
+          </button>
+          <div id="sortDropdown" class="session-dropdown-menu" style="display: none;">
+            <button class="session-dropdown-item active" data-sort="updated_at">Recent</button>
+            <button class="session-dropdown-item" data-sort="created_at">Created</button>
+            <button class="session-dropdown-item" data-sort="title">Title</button>
+          </div>
+        </div>
+        <div class="session-filter-dropdown">
+          <button id="filterDropdownBtn" class="session-filter-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M14,12V19.88C14.04,20.18 13.94,20.5 13.71,20.71C13.32,21.1 12.69,21.1 12.3,20.71L10.29,18.7C10.06,18.47 9.96,18.16 10,17.87V12H9.97L4.21,4.62C3.87,4.19 3.95,3.56 4.38,3.22C4.57,3.08 4.78,3 5,3V3H19V3C19.22,3 19.43,3.08 19.62,3.22C20.05,3.56 20.13,4.19 19.79,4.62L14.03,12H14Z"/>
+            </svg>
+            <span id="filterLabel">All</span>
+          </button>
+          <div id="filterDropdown" class="session-dropdown-menu" style="display: none;">
+            <button class="session-dropdown-item active" data-filter="all">All Sessions</button>
+            <div class="session-dropdown-divider"></div>
+            <div class="session-dropdown-header">By Agent</div>
+            <div id="agentFilters" class="session-filter-agents">
+              <!-- Agent filters will be populated dynamically -->
+            </div>
+            <div class="session-dropdown-divider"></div>
+            <div class="session-dropdown-header">By Tag</div>
+            <div id="tagFilters" class="session-filter-tags">
+              <!-- Tag filters will be populated dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Folder Tree and Sessions List -->
+    <div class="session-list-container" id="sessionListContainer">
+      <!-- Folders Section -->
+      <div id="folderTreeSection" class="folder-tree-section">
+        <div class="folder-tree-header" id="folderTreeToggle">
+          <svg class="folder-expand-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+          </svg>
+          <span>Folders</span>
+          <button id="addFolderBtn" class="folder-add-btn" title="Add Folder">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+          </button>
+        </div>
+        <div id="folderTree" class="folder-tree" style="display: none;">
+          <!-- Folder tree will be populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Sessions List -->
+      <div id="sessionsList" class="sessions-list">
+        <!-- Loading state -->
+        <div id="sessionsLoading" class="session-loading">
+          <div class="spinner-border spinner-border-sm me-2" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          Loading sessions...
+        </div>
+        <!-- Sessions will be populated dynamically -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="sessionsEmpty" class="session-empty" style="display: none;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="session-empty-icon">
+          <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
+        </svg>
+        <p class="session-empty-text">No sessions yet</p>
+        <button id="createFirstSessionBtn" class="modern-btn modern-btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+          </svg>
+          Start New Session
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resize Handle -->
+  <div class="session-sidebar-resize-handle" id="sessionSidebarResizeHandle"></div>
+</div>
+
+<!-- Session Context Menu -->
+<div id="sessionContextMenu" class="session-context-menu" style="display: none;">
+  <button class="session-context-item" data-action="rename">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+    </svg>
+    Rename
+  </button>
+  <button class="session-context-item" data-action="move">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+    </svg>
+    Move to Folder
+  </button>
+  <button class="session-context-item" data-action="tags">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5.5,7A1.5,1.5 0 0,1 4,5.5A1.5,1.5 0 0,1 5.5,4A1.5,1.5 0 0,1 7,5.5A1.5,1.5 0 0,1 5.5,7M21.41,11.58L12.41,2.58C12.05,2.22 11.55,2 11,2H4C2.89,2 2,2.89 2,4V11C2,11.55 2.22,12.05 2.59,12.41L11.59,21.41C11.95,21.78 12.45,22 13,22C13.55,22 14.05,21.78 14.41,21.41L21.41,14.41C21.78,14.05 22,13.55 22,13C22,12.45 21.77,11.94 21.41,11.58Z"/>
+    </svg>
+    Edit Tags
+  </button>
+  <div class="session-context-divider"></div>
+  <button class="session-context-item session-context-danger" data-action="delete">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+    </svg>
+    Delete
+  </button>
+</div>
+
+<!-- Folder Context Menu -->
+<div id="folderContextMenu" class="session-context-menu" style="display: none;">
+  <button class="session-context-item" data-action="rename">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+    </svg>
+    Rename
+  </button>
+  <button class="session-context-item" data-action="color">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M17.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,9A1.5,1.5 0 0,1 19,10.5A1.5,1.5 0 0,1 17.5,12M14.5,8A1.5,1.5 0 0,1 13,6.5A1.5,1.5 0 0,1 14.5,5A1.5,1.5 0 0,1 16,6.5A1.5,1.5 0 0,1 14.5,8M9.5,8A1.5,1.5 0 0,1 8,6.5A1.5,1.5 0 0,1 9.5,5A1.5,1.5 0 0,1 11,6.5A1.5,1.5 0 0,1 9.5,8M6.5,12A1.5,1.5 0 0,1 5,10.5A1.5,1.5 0 0,1 6.5,9A1.5,1.5 0 0,1 8,10.5A1.5,1.5 0 0,1 6.5,12M12,3A9,9 0 0,0 3,12A9,9 0 0,0 12,21A1.5,1.5 0 0,0 13.5,19.5C13.5,19.11 13.35,18.76 13.11,18.5C12.88,18.23 12.73,17.88 12.73,17.5A1.5,1.5 0 0,1 14.23,16H16A5,5 0 0,0 21,11C21,6.58 16.97,3 12,3Z"/>
+    </svg>
+    Change Color
+  </button>
+  <div class="session-context-divider"></div>
+  <button class="session-context-item session-context-danger" data-action="delete">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+    </svg>
+    Delete Folder
+  </button>
+</div>
+
+<!-- Move to Folder Modal -->
+<div class="modal fade" id="moveToFolderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Move to Folder</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="moveToFolderList" class="move-folder-list">
+          <!-- Folders will be populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Tags Modal -->
+<div class="modal fade" id="editTagsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Edit Tags</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="tagInput" class="modern-input w-100 mb-2" placeholder="Add tags (comma separated)">
+        <div id="currentTags" class="session-tags-edit">
+          <!-- Current tags will be shown here -->
+        </div>
+        <div id="suggestedTags" class="session-tags-suggested mt-2">
+          <!-- Suggested tags will be shown here -->
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="saveTagsBtn" class="modern-btn modern-btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Folder Modal -->
+<div class="modal fade" id="addFolderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Create Folder</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Folder name">
+        <div class="folder-color-picker">
+          <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
+          <div id="folderColorOptions" class="folder-color-options mt-1">
+            <button class="folder-color-btn active" data-color="" title="Default"></button>
+            <button class="folder-color-btn" data-color="#ef4444" title="Red" style="background: #ef4444;"></button>
+            <button class="folder-color-btn" data-color="#f59e0b" title="Orange" style="background: #f59e0b;"></button>
+            <button class="folder-color-btn" data-color="#22c55e" title="Green" style="background: #22c55e;"></button>
+            <button class="folder-color-btn" data-color="#3b82f6" title="Blue" style="background: #3b82f6;"></button>
+            <button class="folder-color-btn" data-color="#8b5cf6" title="Purple" style="background: #8b5cf6;"></button>
+            <button class="folder-color-btn" data-color="#ec4899" title="Pink" style="background: #ec4899;"></button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+</div>

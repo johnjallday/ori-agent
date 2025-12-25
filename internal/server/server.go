@@ -36,6 +36,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -116,6 +118,10 @@ type Server struct {
 	marketplaceHandler    *marketplacehttp.Handler
 	modelCategoryStore    store.ModelCategoryStore
 	modelCategoryHandler  *modelcategoryhttp.Handler
+
+	// Session management
+	sessionStore   session.HybridStore
+	sessionHandler *sessionhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

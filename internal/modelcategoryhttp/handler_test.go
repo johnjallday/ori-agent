@@ -118,7 +118,9 @@ func TestUpdateCategoryHandler(t *testing.T) {
 	handler.CreateCategoryHandler(createW, createReq)
 
 	var created types.ModelCategory
-	json.NewDecoder(createW.Body).Decode(&created)
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("Failed to decode created category: %v", err)
+	}
 
 	// Now update it
 	updateBody := bytes.NewBufferString(`{"name":"Programming","color":"#ef4444","icon":"terminal"}`)
@@ -133,7 +135,9 @@ func TestUpdateCategoryHandler(t *testing.T) {
 	}
 
 	var updated types.ModelCategory
-	json.NewDecoder(updateW.Body).Decode(&updated)
+	if err := json.NewDecoder(updateW.Body).Decode(&updated); err != nil {
+		t.Fatalf("Failed to decode updated category: %v", err)
+	}
 
 	if updated.Name != "Programming" {
 		t.Errorf("Expected name 'Programming', got '%s'", updated.Name)
@@ -152,7 +156,9 @@ func TestDeleteCategoryHandler(t *testing.T) {
 	handler.CreateCategoryHandler(createW, createReq)
 
 	var created types.ModelCategory
-	json.NewDecoder(createW.Body).Decode(&created)
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("Failed to decode created category: %v", err)
+	}
 
 	// Delete it
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/model-categories/"+created.ID, nil)
@@ -196,7 +202,9 @@ func TestSetVisibilityHandler(t *testing.T) {
 	}
 
 	var category types.ModelCategory
-	json.NewDecoder(w.Body).Decode(&category)
+	if err := json.NewDecoder(w.Body).Decode(&category); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if !category.IsHidden {
 		t.Error("Expected category to be hidden")
@@ -222,7 +230,9 @@ func TestSetModelAssignmentsHandler(t *testing.T) {
 		ModelID     string   `json:"model_id"`
 		CategoryIDs []string `json:"category_ids"`
 	}
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if len(response.CategoryIDs) != 2 {
 		t.Errorf("Expected 2 category IDs, got %d", len(response.CategoryIDs))
@@ -247,7 +257,9 @@ func TestSetViewPreferenceHandler(t *testing.T) {
 	var response struct {
 		ViewPreference string `json:"view_preference"`
 	}
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if response.ViewPreference != "category" {
 		t.Errorf("Expected preference 'category', got '%s'", response.ViewPreference)
@@ -273,7 +285,9 @@ func TestReorderCategoriesHandler(t *testing.T) {
 	var response struct {
 		Categories []types.ModelCategory `json:"categories"`
 	}
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if len(response.Categories) < 3 {
 		t.Fatal("Expected at least 3 categories")

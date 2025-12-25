@@ -527,6 +527,21 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// =============================================================================
+	// Session Management Endpoints
+	// =============================================================================
+	if s.sessionHandler != nil {
+		// Cleanup and stats routes (must be registered before the wildcard routes)
+		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
+		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
+		mux.HandleFunc("/api/sessions/", s.sessionHandler.HandleSessions)
+		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
+		mux.HandleFunc("/api/folders/", s.sessionHandler.HandleFolders)
+		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
+		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
+		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
+	}
+
+	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {

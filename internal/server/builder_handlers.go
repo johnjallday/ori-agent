@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"os"
 
 	"github.com/johnjallday/ori-agent/internal/chathttp"
@@ -16,6 +17,8 @@ import (
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
@@ -91,6 +94,19 @@ func (b *ServerBuilder) initializeHandlers() error {
 	} else {
 		s.modelCategoryStore = modelCategoryStore
 		s.modelCategoryHandler = modelcategoryhttp.NewHandler(modelCategoryStore)
+	}
+
+	// Initialize session store and handler
+	ctx := context.Background()
+	sessionStore, err := session.NewHybridStore(ctx, session.DefaultHybridStoreConfig())
+	if err != nil {
+		logger.Error("Failed to create session store", logger.Fields{"error": err})
+		// Non-fatal: continue without session management
+	} else {
+		s.sessionStore = sessionStore
+		s.sessionHandler = sessionhttp.New(sessionStore)
+		// Wire session store to chat handler for multi-tab support
+		s.chatHandler.SetSessionStore(sessionStore)
 	}
 
 	return nil
