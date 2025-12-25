@@ -250,3 +250,201 @@ Status: Online
     loadSessionSettings();
   }
 })();
+
+// Reset Application functionality
+(function() {
+  const resetCheckboxes = {
+    settings: document.getElementById('resetSettings'),
+    agents: document.getElementById('resetAgents'),
+    sessions: document.getElementById('resetSessions'),
+    plugins: document.getElementById('resetPlugins'),
+    onboarding: document.getElementById('resetOnboarding')
+  };
+
+  const resetAppBtn = document.getElementById('resetAppBtn');
+  const selectAllBtn = document.getElementById('selectAllResetBtn');
+  const clearAllBtn = document.getElementById('clearAllResetBtn');
+  const resetConfirmInput = document.getElementById('resetConfirmInput');
+  const confirmResetBtn = document.getElementById('confirmResetBtn');
+  const resetConfirmError = document.getElementById('resetConfirmError');
+  const resetItemsList = document.getElementById('resetItemsList');
+
+  // Item descriptions for the confirmation modal
+  const itemDescriptions = {
+    settings: 'Settings & API Keys',
+    agents: 'All Agents',
+    sessions: 'Chat Sessions',
+    plugins: 'Plugins',
+    onboarding: 'Onboarding State'
+  };
+
+  // Update reset button state based on checkbox selection
+  function updateResetButtonState() {
+    const anyChecked = Object.values(resetCheckboxes).some(cb => cb && cb.checked);
+    if (resetAppBtn) {
+      resetAppBtn.disabled = !anyChecked;
+    }
+  }
+
+  // Add change listeners to all checkboxes
+  Object.values(resetCheckboxes).forEach(checkbox => {
+    if (checkbox) {
+      checkbox.addEventListener('change', updateResetButtonState);
+    }
+  });
+
+  // Select All button
+  selectAllBtn?.addEventListener('click', function() {
+    Object.values(resetCheckboxes).forEach(cb => {
+      if (cb) cb.checked = true;
+    });
+    updateResetButtonState();
+  });
+
+  // Clear All button
+  clearAllBtn?.addEventListener('click', function() {
+    Object.values(resetCheckboxes).forEach(cb => {
+      if (cb) cb.checked = false;
+    });
+    updateResetButtonState();
+  });
+
+  // Get selected items
+  function getSelectedItems() {
+    const selected = {};
+    Object.entries(resetCheckboxes).forEach(([key, cb]) => {
+      if (cb && cb.checked) {
+        selected[key] = true;
+      }
+    });
+    return selected;
+  }
+
+  // Open confirmation modal
+  resetAppBtn?.addEventListener('click', function() {
+    const selected = getSelectedItems();
+    const selectedKeys = Object.keys(selected);
+
+    if (selectedKeys.length === 0) {
+      return;
+    }
+
+    // Populate the items list in the modal (using safe DOM methods)
+    if (resetItemsList) {
+      resetItemsList.innerHTML = '';
+      selectedKeys.forEach(key => {
+        const li = document.createElement('li');
+        li.textContent = itemDescriptions[key];
+        resetItemsList.appendChild(li);
+      });
+    }
+
+    // Reset the confirmation input
+    if (resetConfirmInput) {
+      resetConfirmInput.value = '';
+    }
+    if (confirmResetBtn) {
+      confirmResetBtn.disabled = true;
+    }
+    if (resetConfirmError) {
+      resetConfirmError.style.display = 'none';
+    }
+
+    // Show the modal
+    const modal = new bootstrap.Modal(document.getElementById('resetConfirmModal'));
+    modal.show();
+  });
+
+  // Validate confirmation input
+  resetConfirmInput?.addEventListener('input', function() {
+    const isValid = this.value.trim() === 'RESET';
+    if (confirmResetBtn) {
+      confirmResetBtn.disabled = !isValid;
+    }
+    if (resetConfirmError) {
+      resetConfirmError.style.display = 'none';
+    }
+  });
+
+  // Handle Enter key in confirmation input
+  resetConfirmInput?.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && this.value.trim() === 'RESET') {
+      confirmResetBtn?.click();
+    }
+  });
+
+  // Perform the reset
+  confirmResetBtn?.addEventListener('click', async function() {
+    const inputValue = resetConfirmInput?.value.trim();
+
+    if (inputValue !== 'RESET') {
+      if (resetConfirmError) {
+        resetConfirmError.style.display = 'block';
+      }
+      return;
+    }
+
+    const selected = getSelectedItems();
+    // Add confirmation field for server-side validation
+    selected.confirmation = 'RESET';
+
+    // Disable button and show loading state
+    this.disabled = true;
+    const originalHTML = this.innerHTML;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Resetting...';
+
+    try {
+      const response = await fetch('/api/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'  // CSRF protection
+        },
+        body: JSON.stringify(selected)
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        // Close the modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('resetConfirmModal'));
+        modal?.hide();
+
+        // Show success message
+        const resetItems = result.reset_items.map(key => itemDescriptions[key] || key).join(', ');
+
+        // Check if onboarding was reset - redirect to root to trigger onboarding
+        if (selected.onboarding) {
+          alert(`Successfully reset: ${resetItems}\n\nThe application will now redirect to the setup wizard.`);
+          window.location.href = '/';
+        } else {
+          alert(`Successfully reset: ${resetItems}\n\nPlease restart the application for changes to take full effect.`);
+          window.location.reload();
+        }
+      } else {
+        // Show error
+        const errors = result.errors ? result.errors.join('\n') : 'Unknown error occurred';
+        alert(`Reset failed:\n${errors}`);
+      }
+    } catch (error) {
+      console.error('Error during reset:', error);
+      alert('Error during reset: ' + error.message);
+    } finally {
+      this.disabled = false;
+      this.innerHTML = originalHTML;
+    }
+  });
+
+  // Reset modal state when hidden
+  document.getElementById('resetConfirmModal')?.addEventListener('hidden.bs.modal', function() {
+    if (resetConfirmInput) {
+      resetConfirmInput.value = '';
+    }
+    if (confirmResetBtn) {
+      confirmResetBtn.disabled = true;
+    }
+    if (resetConfirmError) {
+      resetConfirmError.style.display = 'none';
+    }
+  });
+})();

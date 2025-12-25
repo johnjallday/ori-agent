@@ -118,6 +118,7 @@ type Server struct {
 	marketplaceHandler    *marketplacehttp.Handler
 	modelCategoryStore    store.ModelCategoryStore
 	modelCategoryHandler  *modelcategoryhttp.Handler
+	resetHandler          *settingshttp.ResetHandler
 
 	// Session management
 	sessionStore   session.HybridStore

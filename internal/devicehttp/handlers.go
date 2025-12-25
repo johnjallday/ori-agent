@@ -1,10 +1,13 @@
 package devicehttp
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -153,4 +156,73 @@ func detectMacOSWiFiSSID() string {
 	}
 
 	return ""
+}
+
+// OllamaStatus represents the status of Ollama installation
+type OllamaStatus struct {
+	Installed     bool     `json:"installed"`      // Ollama CLI is installed
+	Running       bool     `json:"running"`        // Ollama server is running
+	Models        []string `json:"models"`         // Available models
+	Version       string   `json:"version"`        // Ollama version (if available)
+	ServerAddress string   `json:"server_address"` // Ollama server address
+}
+
+// GetOllamaStatus checks if Ollama is installed and running
+// GET /api/device/ollama
+func (h *Handler) GetOllamaStatus(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	status := OllamaStatus{
+		ServerAddress: "http://localhost:11434",
+	}
+
+	// Check if Ollama CLI is installed
+	ollamaPath, err := exec.LookPath("ollama")
+	if err == nil && ollamaPath != "" {
+		status.Installed = true
+
+		// Try to get version
+		cmd := exec.Command("ollama", "--version")
+		if output, err := cmd.Output(); err == nil {
+			version := strings.TrimSpace(string(output))
+			// Clean up version string (e.g., "ollama version 0.1.17" -> "0.1.17")
+			if strings.HasPrefix(version, "ollama version ") {
+				version = strings.TrimPrefix(version, "ollama version ")
+			}
+			status.Version = version
+		}
+	}
+
+	// Check if Ollama server is running by hitting the API
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", status.ServerAddress+"/api/tags", nil)
+	if err == nil {
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				status.Running = true
+
+				// Parse models
+				var tagsResp struct {
+					Models []struct {
+						Name string `json:"name"`
+					} `json:"models"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err == nil {
+					status.Models = make([]string, 0, len(tagsResp.Models))
+					for _, model := range tagsResp.Models {
+						status.Models = append(status.Models, model.Name)
+					}
+				}
+			}
+		}
+	}
+
+	orihttp.WriteJSON(w, status)
 }

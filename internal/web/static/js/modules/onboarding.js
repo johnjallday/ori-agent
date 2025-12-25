@@ -159,34 +159,83 @@ export class OnboardingManager {
   // Check if API keys are configured (via env vars or settings)
   async checkAPIKeyStatus() {
     try {
+      // Check API keys
       const response = await fetch('/api/api-key');
+      if (response.ok) {
+        const data = await response.json();
+
+        // Show info message if env vars are set
+        if (data.has_openai || data.has_anthropic) {
+          const providers = [];
+          if (data.has_openai) providers.push('OpenAI');
+          if (data.has_anthropic) providers.push('Anthropic');
+
+          const envInfo = document.getElementById('apiKeysEnvInfo');
+          if (envInfo) {
+            envInfo.innerHTML = `
+              <div class="alert alert-success">
+                <svg class="bi me-2" width="16" height="16" fill="currentColor">
+                  <use xlink:href="#check-circle-fill"/>
+                </svg>
+                ${providers.join(' and ')} API key${providers.length > 1 ? 's are' : ' is'} already configured. You can skip this step or add additional keys.
+              </div>
+            `;
+            envInfo.classList.remove('d-none');
+          }
+        }
+      }
+
+      // Check for Ollama
+      await this.checkOllamaStatus();
+    } catch (error) {
+      console.error('Error checking API key status:', error);
+    }
+  }
+
+  // Check if Ollama is installed/running
+  async checkOllamaStatus() {
+    try {
+      const response = await fetch('/api/device/ollama');
       if (!response.ok) {
         return;
       }
 
       const data = await response.json();
 
-      // Show info message if env vars are set
-      if (data.has_openai || data.has_anthropic) {
-        const providers = [];
-        if (data.has_openai) providers.push('OpenAI');
-        if (data.has_anthropic) providers.push('Anthropic');
+      // Show Ollama status if installed or running
+      if (data.installed || data.running) {
+        const ollamaInfo = document.getElementById('ollamaInfo');
+        if (ollamaInfo) {
+          let message = '';
+          let alertClass = 'alert-info';
 
-        const envInfo = document.getElementById('apiKeysEnvInfo');
-        if (envInfo) {
-          envInfo.innerHTML = `
-            <div class="alert alert-success">
-              <svg class="bi me-2" width="16" height="16" fill="currentColor">
-                <use xlink:href="#check-circle-fill"/>
-              </svg>
-              ${providers.join(' and ')} API key${providers.length > 1 ? 's are' : ' is'} already configured. You can skip this step or add additional keys.
-            </div>
-          `;
-          envInfo.classList.remove('d-none');
+          if (data.running && data.models && data.models.length > 0) {
+            alertClass = 'alert-success';
+            const modelList = data.models.slice(0, 3).join(', ');
+            const moreModels = data.models.length > 3 ? ` and ${data.models.length - 3} more` : '';
+            message = `
+              <strong>Ollama is running!</strong> You have local AI models available: ${modelList}${moreModels}.
+              <br><small class="text-muted">You can use Ollama without API keys for offline AI capabilities.</small>
+            `;
+          } else if (data.running) {
+            alertClass = 'alert-success';
+            message = `
+              <strong>Ollama is running!</strong> No models installed yet.
+              <br><small class="text-muted">Run <code>ollama pull llama3.2</code> to download a model.</small>
+            `;
+          } else if (data.installed) {
+            message = `
+              <strong>Ollama is installed</strong>${data.version ? ` (v${data.version})` : ''} but not running.
+              <br><small class="text-muted">Start Ollama to use local AI models without API keys.</small>
+            `;
+          }
+
+          ollamaInfo.innerHTML = `<div class="alert ${alertClass}">${message}</div>`;
+          ollamaInfo.classList.remove('d-none');
         }
       }
     } catch (error) {
-      console.error('Error checking API key status:', error);
+      console.error('Error checking Ollama status:', error);
     }
   }
 
@@ -290,12 +339,10 @@ export class OnboardingManager {
       console.error('Error checking API key status:', error);
     }
 
-    // If both are empty and no existing keys, show validation error
+    // If both are empty and no existing keys, just allow continuing
+    // User can add keys later in Settings
     if (!openaiKey && !anthropicKey && !hasExistingKeys) {
-      document.getElementById('apiKeysError').classList.remove('d-none');
-      document.getElementById('apiKeysErrorMessage').textContent =
-        'Please provide at least one API key to continue, or set OPENAI_API_KEY or ANTHROPIC_API_KEY environment variables.';
-      return false;
+      return true;
     }
 
     // If both are empty but keys exist, skip saving (user chose to use env vars)

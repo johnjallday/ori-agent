@@ -261,6 +261,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
 
+	// Reset endpoints
+	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)
+	mux.HandleFunc("/api/reset/preview", s.resetHandler.GetResetPreview)
+
 	// =============================================================================
 	// Marketplace Management Endpoints
 	// =============================================================================
@@ -351,6 +355,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
+	mux.HandleFunc("/api/device/ollama", s.deviceHandler.GetOllamaStatus)
 
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints

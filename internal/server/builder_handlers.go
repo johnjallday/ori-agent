@@ -56,6 +56,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.pluginUpdateHandler.SetRegistryManager(s.registryManager)
 	s.onboardingHandler = onboardinghttp.NewHandler(s.onboardingMgr)
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
+	s.resetHandler = settingshttp.NewResetHandler(s.onboardingMgr, ".")
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
 
 	// Initialize plugin management components
