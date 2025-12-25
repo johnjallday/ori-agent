@@ -362,15 +362,22 @@ class PluginMarketplace {
             'windows': '🪟',
             'freebsd': '🐡'
         };
+        const platformNames = {
+            'darwin': 'macOS',
+            'linux': 'Linux',
+            'windows': 'Windows',
+            'freebsd': 'FreeBSD'
+        };
 
         // Use supported_os if available
         if (plugin.supported_os && plugin.supported_os.length > 0) {
             plugin.supported_os.forEach(os => {
                 if (os !== 'all' && platformIcons[os]) {
+                    const displayName = platformNames[os] || os;
                     const archInfo = plugin.supported_arch && plugin.supported_arch.length > 0
                         ? ` (${plugin.supported_arch.filter(a => a !== 'all').join(', ')})`
                         : '';
-                    badges.push(`<span class="badge bg-secondary me-1" title="${os}${archInfo}">${platformIcons[os]} ${os}</span>`);
+                    badges.push(`<span class="badge bg-secondary me-1" title="${displayName}${archInfo}">${platformIcons[os]} ${displayName}</span>`);
                 }
             });
         }
