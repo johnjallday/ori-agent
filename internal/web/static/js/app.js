@@ -715,6 +715,12 @@ async function sendMessage(message) {
       requestBody.files = uploadedFiles;
     }
 
+    // Add agent_name from the active session (for per-session agent binding)
+    const activeSession = window.sessionManager?.getActiveSession?.();
+    if (activeSession?.agent_name) {
+      requestBody.agent_name = activeSession.agent_name;
+    }
+
     // Build headers with session ID for multi-tab support
     const chatHeaders = {
       'Content-Type': 'application/json',

@@ -329,16 +329,13 @@ const sessionManager = {
     const timeAgo = this.formatTimeAgo(session.updated_at);
     const preview = session.preview || 'No messages yet';
     const tags = session.tags || [];
+    const agentName = session.agent_name || 'Unknown';
 
     return `
       <div class="session-item ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}" data-session-id="${session.id}">
         <div class="session-item-header">
-          <div class="session-agent-icon" title="${this.escapeHtml(session.agent_name || 'Unknown')}">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2Z"/>
-            </svg>
-          </div>
           <span class="session-title">${this.escapeHtml(session.title || 'New Session')}</span>
+          <span class="session-agent-badge" title="Agent: ${this.escapeHtml(agentName)}">${this.escapeHtml(agentName)}</span>
           <span class="session-time">${timeAgo}</span>
         </div>
         <div class="session-item-footer">
@@ -582,15 +579,118 @@ const sessionManager = {
     });
   },
 
-  // Create new session
+  // Create new session - shows agent picker dialog first
   async createNewSession() {
+    try {
+      // Fetch available agents
+      const agents = await this.fetchAgents();
+      if (!agents || agents.length === 0) {
+        console.error('No agents available');
+        return;
+      }
+
+      // If only one agent, skip the picker
+      if (agents.length === 1) {
+        await this.createSessionWithAgent(agents[0].name);
+        return;
+      }
+
+      // Show agent picker dialog
+      this.showAgentPickerDialog(agents);
+    } catch (error) {
+      console.error('Failed to create session:', error);
+    }
+  },
+
+  // Fetch available agents
+  async fetchAgents() {
+    try {
+      const response = await fetch('/api/agents');
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.agents || [];
+    } catch (error) {
+      console.error('Failed to fetch agents:', error);
+      return [];
+    }
+  },
+
+  // Show agent picker dialog
+  showAgentPickerDialog(agents) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('agentPickerModal');
+    if (existingModal) existingModal.remove();
+
+    const currentAgentName = typeof currentAgent !== 'undefined' ? currentAgent : '';
+
+    const modalHtml = `
+      <div class="modal fade" id="agentPickerModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+              <h5 class="modal-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
+                </svg>
+                Select Agent for New Session
+              </h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="list-group list-group-flush">
+                ${agents.map(agent => `
+                  <button type="button" class="list-group-item list-group-item-action bg-dark text-light border-secondary agent-picker-item ${agent.name === currentAgentName ? 'active' : ''}"
+                          data-agent-name="${this.escapeHtml(agent.name)}">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <strong>${this.escapeHtml(agent.name)}</strong>
+                        ${agent.model ? `<small class="text-muted ms-2">${this.escapeHtml(agent.model)}</small>` : ''}
+                      </div>
+                      ${agent.name === currentAgentName ? '<span class="badge bg-primary">Current</span>' : ''}
+                    </div>
+                    ${agent.description ? `<small class="text-muted d-block mt-1">${this.escapeHtml(agent.description)}</small>` : ''}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+            <div class="modal-footer border-secondary">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const modal = new bootstrap.Modal(document.getElementById('agentPickerModal'));
+
+    // Handle agent selection
+    document.querySelectorAll('.agent-picker-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const agentName = item.dataset.agentName;
+        modal.hide();
+        await this.createSessionWithAgent(agentName);
+      });
+    });
+
+    // Cleanup on modal hidden
+    document.getElementById('agentPickerModal').addEventListener('hidden.bs.modal', () => {
+      document.getElementById('agentPickerModal')?.remove();
+    });
+
+    modal.show();
+  },
+
+  // Create session with specific agent
+  async createSessionWithAgent(agentName) {
     try {
       const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: 'New Session',
-          agent_name: currentAgent || ''
+          agent_name: agentName
         })
       });
 
@@ -602,6 +702,9 @@ const sessionManager = {
         this.activeSessionId = data.session.id;
         this.saveActiveSession();
         this.renderSessions();
+
+        // Update the current agent display
+        this.updateCurrentAgent(agentName);
 
         // Clear chat area for new session
         if (typeof clearChatHistory === 'function') {
@@ -628,10 +731,37 @@ const sessionManager = {
       this.saveActiveSession();
       this.renderSessions();
 
+      // Update the current agent to match the session's agent
+      if (session.agent_name) {
+        this.updateCurrentAgent(session.agent_name);
+      }
+
       // Restore messages to chat area
       this.restoreSessionMessages(session);
     } catch (error) {
       console.error('Failed to switch session:', error);
+    }
+  },
+
+  // Update the current agent display in navbar
+  updateCurrentAgent(agentName) {
+    if (!agentName) return;
+
+    // Update the global currentAgent variable
+    if (typeof currentAgent !== 'undefined') {
+      window.currentAgent = agentName;
+    }
+
+    // Update the navbar display
+    const agentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
+    if (agentElement) {
+      agentElement.textContent = agentName;
+    }
+
+    // Also update any agent display in the header
+    const agentHeader = document.querySelector('.agent-name');
+    if (agentHeader) {
+      agentHeader.textContent = agentName;
     }
   },
 
@@ -1248,7 +1378,12 @@ const sessionManager = {
       </div>
       <div class="session-info-row">
         <span class="session-info-label">Agent</span>
-        <span class="session-info-value">${this.escapeHtml(session.agent_name || 'Unknown')}</span>
+        <div class="session-info-value d-flex align-items-center gap-2">
+          <span id="sessionInfoAgentName">${this.escapeHtml(session.agent_name || 'Unknown')}</span>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="changeSessionAgentBtn" data-session-id="${session.id}">
+            Change
+          </button>
+        </div>
       </div>
       <div class="session-info-row">
         <span class="session-info-label">Folder</span>
@@ -1276,8 +1411,128 @@ const sessionManager = {
       </div>
     `;
 
+    // Bind change agent button
+    document.getElementById('changeSessionAgentBtn')?.addEventListener('click', async () => {
+      const sessionId = document.getElementById('changeSessionAgentBtn').dataset.sessionId;
+      // Close the info modal first
+      bootstrap.Modal.getInstance(document.getElementById('sessionInfoModal'))?.hide();
+      // Show agent picker for changing
+      await this.showChangeAgentDialog(sessionId);
+    });
+
     const modal = new bootstrap.Modal(document.getElementById('sessionInfoModal'));
     modal.show();
+  },
+
+  // Show dialog to change session's agent
+  async showChangeAgentDialog(sessionId) {
+    const session = this.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const agents = await this.fetchAgents();
+    if (!agents || agents.length === 0) return;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('changeAgentModal');
+    if (existingModal) existingModal.remove();
+
+    const modalHtml = `
+      <div class="modal fade" id="changeAgentModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content bg-dark text-light">
+            <div class="modal-header border-secondary">
+              <h5 class="modal-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
+                </svg>
+                Change Session Agent
+              </h5>
+              <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <p class="text-muted small mb-3">Select a new agent for this session. Future messages will use the selected agent.</p>
+              <div class="list-group list-group-flush">
+                ${agents.map(agent => `
+                  <button type="button" class="list-group-item list-group-item-action bg-dark text-light border-secondary change-agent-item ${agent.name === session.agent_name ? 'active' : ''}"
+                          data-agent-name="${this.escapeHtml(agent.name)}">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <strong>${this.escapeHtml(agent.name)}</strong>
+                        ${agent.model ? `<small class="text-muted ms-2">${this.escapeHtml(agent.model)}</small>` : ''}
+                      </div>
+                      ${agent.name === session.agent_name ? '<span class="badge bg-success">Current</span>' : ''}
+                    </div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+            <div class="modal-footer border-secondary">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const modal = new bootstrap.Modal(document.getElementById('changeAgentModal'));
+
+    // Handle agent selection
+    document.querySelectorAll('.change-agent-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const newAgentName = item.dataset.agentName;
+        if (newAgentName === session.agent_name) {
+          modal.hide();
+          return;
+        }
+
+        modal.hide();
+        await this.changeSessionAgent(sessionId, newAgentName);
+      });
+    });
+
+    // Cleanup on modal hidden
+    document.getElementById('changeAgentModal').addEventListener('hidden.bs.modal', () => {
+      document.getElementById('changeAgentModal')?.remove();
+    });
+
+    modal.show();
+  },
+
+  // Change a session's agent
+  async changeSessionAgent(sessionId, newAgentName) {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_name: newAgentName })
+      });
+
+      if (!response.ok) throw new Error('Failed to update session');
+
+      const data = await response.json();
+      if (data.session) {
+        // Update local session data
+        const index = this.sessions.findIndex(s => s.id === sessionId);
+        if (index >= 0) {
+          this.sessions[index] = data.session;
+        }
+
+        // Re-render sessions
+        this.renderSessions();
+
+        // If this is the active session, update the agent display
+        if (sessionId === this.activeSessionId) {
+          this.updateCurrentAgent(newAgentName);
+        }
+
+        console.log(`Session ${sessionId} agent changed to ${newAgentName}`);
+      }
+    } catch (error) {
+      console.error('Failed to change session agent:', error);
+      alert('Failed to change session agent');
+    }
   },
 
   // Update folder drag hint text
@@ -1510,6 +1765,12 @@ const sessionManager = {
     }
   },
 
+  // Get the active session object
+  getActiveSession() {
+    if (!this.activeSessionId) return null;
+    return this.sessions.find(s => s.id === this.activeSessionId) || null;
+  },
+
   // Restore active session from localStorage
   // Returns true if session was restored, false otherwise
   restoreActiveSession() {
@@ -1522,9 +1783,16 @@ const sessionManager = {
       savedId = localStorage.getItem('activeSessionId');
     }
 
-    if (savedId && this.sessions.find(s => s.id === savedId)) {
+    const session = savedId ? this.sessions.find(s => s.id === savedId) : null;
+    if (session) {
       this.activeSessionId = savedId;
       this.renderSessions();
+
+      // Update the current agent to match the session's agent
+      if (session.agent_name) {
+        this.updateCurrentAgent(session.agent_name);
+      }
+
       return true;
     }
     return false;

@@ -368,12 +368,24 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(base, ContextTimeout)
 	defer cancel()
 
-	// Load agent - use agent_name from request if provided, otherwise use current agent
+	// Load agent - priority: session's agent > request agent_name > global current agent
 	var current string
-	if req.AgentName != "" {
+
+	// First, try to get agent from the session (sessionID already extracted above)
+	if sessionID != "" && h.sessionStore != nil {
+		if sess, err := h.sessionStore.GetSession(ctx, sessionID); err == nil && sess != nil && sess.AgentName != "" {
+			current = sess.AgentName
+			logger.Debug("Using agent from session", logger.Fields{"session_id": sessionID, "agent": current})
+		}
+	}
+
+	// If no agent from session, check request body
+	if current == "" && req.AgentName != "" {
 		current = req.AgentName
-	} else {
-		// Fallback to current agent from store
+	}
+
+	// Fallback to current agent from store
+	if current == "" {
 		names, cur := h.store.ListAgents()
 		current = cur
 		if current == "" && len(names) > 0 {

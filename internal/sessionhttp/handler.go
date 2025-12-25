@@ -155,9 +155,10 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 	}
 
 	var req struct {
-		Title    *string   `json:"title,omitempty"`
-		FolderID *string   `json:"folder_id,omitempty"`
-		Tags     *[]string `json:"tags,omitempty"`
+		Title     *string   `json:"title,omitempty"`
+		FolderID  *string   `json:"folder_id,omitempty"`
+		Tags      *[]string `json:"tags,omitempty"`
+		AgentName *string   `json:"agent_name,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -174,6 +175,9 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 	}
 	if req.Tags != nil {
 		sess.Tags = *req.Tags
+	}
+	if req.AgentName != nil && *req.AgentName != "" {
+		sess.AgentName = *req.AgentName
 	}
 
 	if err := h.store.UpdateSession(r.Context(), sess); err != nil {

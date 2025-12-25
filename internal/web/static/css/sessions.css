@@ -527,23 +527,6 @@
   margin-bottom: 4px;
 }
 
-.session-agent-icon {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  background: var(--primary-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.session-agent-icon svg {
-  width: 12px;
-  height: 12px;
-  fill: white;
-}
-
 .session-title {
   flex: 1;
   font-size: 13px;
@@ -570,6 +553,26 @@
   font-size: 10px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.session-agent-badge {
+  font-size: 9px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(var(--primary-rgb, 99, 102, 241), 0.2);
+  color: var(--primary-color, #6366f1);
+  white-space: nowrap;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.dark-mode .session-agent-badge,
+[data-bs-theme="dark"] .session-agent-badge {
+  background: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
 }
 
 .session-item-footer {
