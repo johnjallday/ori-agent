@@ -20,7 +20,7 @@ func TestOpenInMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open in-memory database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify the database is accessible
 	var result int
@@ -42,7 +42,7 @@ func TestOpenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -55,7 +55,7 @@ func TestOpenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open file database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify the database file was created
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -80,7 +80,7 @@ func TestMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify schema version
 	version, err := db.GetSchemaVersion(ctx)
@@ -122,7 +122,7 @@ func TestForeignKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Verify foreign keys are enabled
 	var fkEnabled int
@@ -148,7 +148,7 @@ func TestInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Test successful transaction
 	err = db.InTransaction(ctx, func(tx *sql.Tx) error {
@@ -211,7 +211,7 @@ func TestIndexesExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	expectedIndexes := []string{
 		"idx_sessions_agent_name",
@@ -246,7 +246,7 @@ func TestCascadeDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Insert a session
 	_, err = db.ExecContext(ctx, `

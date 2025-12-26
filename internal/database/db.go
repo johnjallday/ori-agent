@@ -102,13 +102,13 @@ func Open(ctx context.Context, cfg *Config) (*DB, error) {
 
 	// Apply pragmas for performance
 	if err := db.applyPragmas(ctx, cfg); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("failed to apply pragmas: %w", err)
 	}
 
 	// Run migrations
 	if err := db.migrate(ctx); err != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 

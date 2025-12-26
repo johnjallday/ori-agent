@@ -29,7 +29,7 @@ func (h *Handler) HandleFolders(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createFolder(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -45,7 +45,7 @@ func (h *Handler) handleFolder(w http.ResponseWriter, r *http.Request, id string
 	case http.MethodDelete:
 		h.deleteFolder(w, r, id)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -59,12 +59,12 @@ func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		orihttp.RespondBadRequest(w, "name is required")
+		_ = orihttp.RespondBadRequest(w, "name is required")
 		return
 	}
 
@@ -77,13 +77,13 @@ func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.CreateFolder(r.Context(), folder); err != nil {
 		logger.Error("Failed to create folder", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to create folder")
+		_ = orihttp.RespondInternalError(w, "Failed to create folder")
 		return
 	}
 
 	logger.Info("Folder created", logger.Fields{"id": folder.ID, "name": req.Name})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
 		"folder":  folder,
 	})
@@ -93,12 +93,12 @@ func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getFolder(w http.ResponseWriter, r *http.Request, id string) {
 	folder, err := h.store.GetFolder(r.Context(), id)
 	if err == session.ErrFolderNotFound {
-		orihttp.RespondNotFound(w, "Folder not found")
+		_ = orihttp.RespondNotFound(w, "Folder not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to get folder", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to get folder")
+		_ = orihttp.RespondInternalError(w, "Failed to get folder")
 		return
 	}
 
@@ -109,11 +109,11 @@ func (h *Handler) getFolder(w http.ResponseWriter, r *http.Request, id string) {
 func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string) {
 	folder, err := h.store.GetFolder(r.Context(), id)
 	if err == session.ErrFolderNotFound {
-		orihttp.RespondNotFound(w, "Folder not found")
+		_ = orihttp.RespondNotFound(w, "Folder not found")
 		return
 	}
 	if err != nil {
-		orihttp.RespondInternalError(w, "Failed to get folder")
+		_ = orihttp.RespondInternalError(w, "Failed to get folder")
 		return
 	}
 
@@ -125,7 +125,7 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -139,7 +139,7 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 	if req.ParentID != nil {
 		// Check for circular reference
 		if *req.ParentID == folder.ID {
-			orihttp.RespondBadRequest(w, "Folder cannot be its own parent")
+			_ = orihttp.RespondBadRequest(w, "Folder cannot be its own parent")
 			return
 		}
 		folder.ParentID = *req.ParentID
@@ -150,7 +150,7 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 
 	if err := h.store.UpdateFolder(r.Context(), folder); err != nil {
 		logger.Error("Failed to update folder", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to update folder")
+		_ = orihttp.RespondInternalError(w, "Failed to update folder")
 		return
 	}
 
@@ -166,12 +166,12 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 func (h *Handler) deleteFolder(w http.ResponseWriter, r *http.Request, id string) {
 	err := h.store.DeleteFolder(r.Context(), id)
 	if err == session.ErrFolderNotFound {
-		orihttp.RespondNotFound(w, "Folder not found")
+		_ = orihttp.RespondNotFound(w, "Folder not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to delete folder", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to delete folder")
+		_ = orihttp.RespondInternalError(w, "Failed to delete folder")
 		return
 	}
 
@@ -188,7 +188,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 		folders, err := h.store.GetFolderTree(r.Context())
 		if err != nil {
 			logger.Error("Failed to get folder tree", logger.Fields{"error": err})
-			orihttp.RespondInternalError(w, "Failed to get folders")
+			_ = orihttp.RespondInternalError(w, "Failed to get folders")
 			return
 		}
 
@@ -201,7 +201,7 @@ func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
 	folders, err := h.store.ListFolders(r.Context())
 	if err != nil {
 		logger.Error("Failed to list folders", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to list folders")
+		_ = orihttp.RespondInternalError(w, "Failed to list folders")
 		return
 	}
 

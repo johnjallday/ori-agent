@@ -18,10 +18,9 @@ type hybridStore struct {
 	sqlite *SQLiteStore
 	db     *database.DB
 
-	mu         sync.RWMutex
-	flushTimer *time.Timer
-	stopCh     chan struct{}
-	config     *HybridStoreConfig
+	mu     sync.RWMutex
+	stopCh chan struct{}
+	config *HybridStoreConfig
 }
 
 // NewHybridStore creates a new hybrid store with the given configuration.
@@ -352,7 +351,7 @@ func (h *hybridStore) Cleanup(ctx context.Context, inactiveDays int) (int, error
 			idsToDelete = append(idsToDelete, id)
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Remove from cache first
 	for _, id := range idsToDelete {
@@ -393,7 +392,7 @@ func (h *hybridStore) GetInactiveSessions(ctx context.Context, inactiveDays int)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sessions []*Session
 	for rows.Next() {
@@ -550,7 +549,7 @@ func (h *hybridStore) enforceMaxSessions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var idsToDelete []string
 	for rows.Next() {

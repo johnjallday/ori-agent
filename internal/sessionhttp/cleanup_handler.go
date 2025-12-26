@@ -18,21 +18,21 @@ func (h *Handler) HandleCleanup(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.runCleanup(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
 // HandleStorageStats handles GET /api/sessions/stats.
 func (h *Handler) HandleStorageStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	stats, err := h.store.GetStorageStats(r.Context())
 	if err != nil {
 		logger.Error("Failed to get storage stats", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to get storage statistics")
+		_ = orihttp.RespondInternalError(w, "Failed to get storage statistics")
 		return
 	}
 
@@ -53,7 +53,7 @@ func (h *Handler) getCleanupPreview(w http.ResponseWriter, r *http.Request) {
 	sessions, err := h.store.GetInactiveSessions(r.Context(), days)
 	if err != nil {
 		logger.Error("Failed to get inactive sessions", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to get inactive sessions")
+		_ = orihttp.RespondInternalError(w, "Failed to get inactive sessions")
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *Handler) runCleanup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body")
+		_ = orihttp.RespondBadRequest(w, "Invalid request body")
 		return
 	}
 
@@ -84,7 +84,7 @@ func (h *Handler) runCleanup(w http.ResponseWriter, r *http.Request) {
 	deleted, err := h.store.Cleanup(r.Context(), req.Days)
 	if err != nil {
 		logger.Error("Cleanup failed", logger.Fields{"error": err, "days": req.Days})
-		orihttp.RespondInternalError(w, "Cleanup failed")
+		_ = orihttp.RespondInternalError(w, "Cleanup failed")
 		return
 	}
 

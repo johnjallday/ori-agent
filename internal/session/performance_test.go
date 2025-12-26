@@ -16,10 +16,10 @@ func BenchmarkCreateSession(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 100)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -39,10 +39,10 @@ func BenchmarkGetSession(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 100)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create sessions to retrieve
 	var sessionIDs []string
@@ -70,10 +70,10 @@ func BenchmarkAddMessage(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 100)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create a session to add messages to
 	sess := &Session{
@@ -101,10 +101,10 @@ func BenchmarkListSessions(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 100)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create 100 sessions
 	for i := 0; i < 100; i++ {
@@ -131,10 +131,10 @@ func BenchmarkSearch(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 100)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create sessions with searchable content
 	topics := []string{"Python", "JavaScript", "Go", "Rust", "TypeScript"}
@@ -172,10 +172,10 @@ func TestPerformance_100Sessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50) // Cache smaller than session count
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create 150 sessions
 	start := time.Now()
@@ -226,10 +226,10 @@ func TestPerformance_SearchWith100Sessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create 100 sessions with messages
 	topics := []string{"Python", "JavaScript", "Go", "Rust", "TypeScript", "Java", "C++", "Ruby", "Swift", "Kotlin"}
@@ -278,10 +278,10 @@ func TestPerformance_CacheEfficiency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 20) // Small cache
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create more sessions than cache size
 	var sessionIDs []string
@@ -325,10 +325,10 @@ func TestPerformance_ConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create sessions
 	var sessionIDs []string

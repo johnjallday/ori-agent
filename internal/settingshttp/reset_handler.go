@@ -56,13 +56,13 @@ func NewResetHandler(onboardingMgr *onboarding.Manager, dataDir string) *ResetHa
 // authentication middleware.
 func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	// CSRF protection: require XMLHttpRequest header
 	if r.Header.Get("X-Requested-With") != "XMLHttpRequest" {
-		orihttp.RespondBadRequest(w, "Missing required header")
+		_ = orihttp.RespondBadRequest(w, "Missing required header")
 		return
 	}
 
@@ -71,19 +71,19 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 
 	var req ResetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	// Server-side confirmation validation (defense in depth)
 	if req.Confirmation != "RESET" {
-		orihttp.RespondBadRequest(w, "Confirmation required: type RESET to confirm")
+		_ = orihttp.RespondBadRequest(w, "Confirmation required: type RESET to confirm")
 		return
 	}
 
 	// Validate that at least one option is selected
 	if !req.Settings && !req.Agents && !req.Sessions && !req.Plugins && !req.Onboarding {
-		orihttp.RespondBadRequest(w, "At least one reset option must be selected")
+		_ = orihttp.RespondBadRequest(w, "At least one reset option must be selected")
 		return
 	}
 
@@ -271,7 +271,7 @@ func (h *ResetHandler) resetPlugins() error {
 // GetResetPreview returns information about what would be reset
 func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 

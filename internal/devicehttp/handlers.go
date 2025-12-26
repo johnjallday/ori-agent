@@ -188,9 +188,7 @@ func (h *Handler) GetOllamaStatus(w http.ResponseWriter, r *http.Request) {
 		if output, err := cmd.Output(); err == nil {
 			version := strings.TrimSpace(string(output))
 			// Clean up version string (e.g., "ollama version 0.1.17" -> "0.1.17")
-			if strings.HasPrefix(version, "ollama version ") {
-				version = strings.TrimPrefix(version, "ollama version ")
-			}
+			version = strings.TrimPrefix(version, "ollama version ")
 			status.Version = version
 		}
 	}
@@ -204,7 +202,7 @@ func (h *Handler) GetOllamaStatus(w http.ResponseWriter, r *http.Request) {
 		client := &http.Client{Timeout: 2 * time.Second}
 		resp, err := client.Do(req)
 		if err == nil {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode == http.StatusOK {
 				status.Running = true
 

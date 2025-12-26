@@ -16,7 +16,7 @@ func setupHybridStore(t *testing.T, cacheSize int) (HybridStore, func()) {
 	}
 
 	store := NewHybridStoreWithDB(db, cacheSize)
-	return store, func() { store.Close() }
+	return store, func() { _ = store.Close() }
 }
 
 func TestHybridStore_CreateAndGet(t *testing.T) {

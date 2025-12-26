@@ -16,10 +16,10 @@ func TestCleanup_InactiveSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -83,10 +83,10 @@ func TestCleanup_GetInactiveSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -154,7 +154,7 @@ func TestCleanup_EnforceMaxSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create store with small max sessions config
 	store := &hybridStore{
@@ -167,7 +167,7 @@ func TestCleanup_EnforceMaxSessions(t *testing.T) {
 			MaxTotalSessions: 5,
 		},
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create 10 sessions (more than max)
 	for i := 0; i < 10; i++ {
@@ -214,10 +214,10 @@ func TestStorageStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -290,10 +290,10 @@ func TestCleanup_CacheConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -347,10 +347,10 @@ func TestCleanup_WithMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := NewHybridStoreWithDB(db, 50)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	hs, ok := store.(*hybridStore)
 	if !ok {
@@ -416,7 +416,7 @@ func TestEnforceStorageLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	store := &hybridStore{
 		cache:  NewMemoryCache(50),
@@ -429,7 +429,7 @@ func TestEnforceStorageLimits(t *testing.T) {
 			MaxTotalSessions:     5,
 		},
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create sessions
 	for i := 0; i < 10; i++ {

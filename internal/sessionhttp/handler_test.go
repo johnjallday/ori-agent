@@ -27,7 +27,7 @@ func createTestHandler(t *testing.T) (*Handler, func()) {
 	handler := New(store)
 
 	return handler, func() {
-		store.Close()
+		_ = store.Close()
 	}
 }
 
@@ -95,7 +95,9 @@ func TestHandler_GetSession(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	if err := json.Unmarshal(createW.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -109,7 +111,9 @@ func TestHandler_GetSession(t *testing.T) {
 	}
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	if err := json.Unmarshal(getW.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	if getResp["title"] != "Get Test" {
 		t.Errorf("Expected title 'Get Test', got '%v'", getResp["title"])
 	}
@@ -142,7 +146,9 @@ func TestHandler_UpdateSession(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	if err := json.Unmarshal(createW.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -159,7 +165,9 @@ func TestHandler_UpdateSession(t *testing.T) {
 
 	// Verify update
 	var updateResp map[string]interface{}
-	json.Unmarshal(updateW.Body.Bytes(), &updateResp)
+	if err := json.Unmarshal(updateW.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	updatedSess := updateResp["session"].(map[string]interface{})
 	if updatedSess["title"] != "Updated Title" {
 		t.Errorf("Expected title 'Updated Title', got '%v'", updatedSess["title"])
@@ -179,7 +187,9 @@ func TestHandler_DeleteSession(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	if err := json.Unmarshal(createW.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -226,7 +236,9 @@ func TestHandler_ListSessions(t *testing.T) {
 	}
 
 	var listResp map[string]interface{}
-	json.Unmarshal(listW.Body.Bytes(), &listResp)
+	if err := json.Unmarshal(listW.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
 
 	sessions := listResp["sessions"].([]interface{})
 	if len(sessions) != 3 {
@@ -252,7 +264,7 @@ func TestHandler_AddAndGetMessages(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -277,7 +289,7 @@ func TestHandler_AddAndGetMessages(t *testing.T) {
 	}
 
 	var msgResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &msgResp)
+	_ = json.Unmarshal(getW.Body.Bytes(), &msgResp)
 
 	messages := msgResp["messages"].([]interface{})
 	if len(messages) != 1 {
@@ -305,7 +317,7 @@ func TestHandler_MultiTab_IndependentSessions(t *testing.T) {
 	handler.HandleSessions(tab1W, tab1Req)
 
 	var tab1Resp map[string]interface{}
-	json.Unmarshal(tab1W.Body.Bytes(), &tab1Resp)
+	_ = json.Unmarshal(tab1W.Body.Bytes(), &tab1Resp)
 	tab1Session := tab1Resp["session"].(map[string]interface{})
 	tab1SessionID := tab1Session["id"].(string)
 
@@ -318,7 +330,7 @@ func TestHandler_MultiTab_IndependentSessions(t *testing.T) {
 	handler.HandleSessions(tab2W, tab2Req)
 
 	var tab2Resp map[string]interface{}
-	json.Unmarshal(tab2W.Body.Bytes(), &tab2Resp)
+	_ = json.Unmarshal(tab2W.Body.Bytes(), &tab2Resp)
 	tab2Session := tab2Resp["session"].(map[string]interface{})
 	tab2SessionID := tab2Session["id"].(string)
 
@@ -347,7 +359,7 @@ func TestHandler_MultiTab_IndependentSessions(t *testing.T) {
 	handler.HandleSessions(get1W, get1Req)
 
 	var msgs1Resp map[string]interface{}
-	json.Unmarshal(get1W.Body.Bytes(), &msgs1Resp)
+	_ = json.Unmarshal(get1W.Body.Bytes(), &msgs1Resp)
 	msgs1 := msgs1Resp["messages"].([]interface{})
 	if len(msgs1) != 1 {
 		t.Errorf("Tab 1 should have 1 message, got %d", len(msgs1))
@@ -362,7 +374,7 @@ func TestHandler_MultiTab_IndependentSessions(t *testing.T) {
 	handler.HandleSessions(get2W, get2Req)
 
 	var msgs2Resp map[string]interface{}
-	json.Unmarshal(get2W.Body.Bytes(), &msgs2Resp)
+	_ = json.Unmarshal(get2W.Body.Bytes(), &msgs2Resp)
 	msgs2 := msgs2Resp["messages"].([]interface{})
 	if len(msgs2) != 1 {
 		t.Errorf("Tab 2 should have 1 message, got %d", len(msgs2))
@@ -385,7 +397,7 @@ func TestHandler_MultiTab_SessionSwitching(t *testing.T) {
 	handler.HandleSessions(session1W, session1Req)
 
 	var session1Resp map[string]interface{}
-	json.Unmarshal(session1W.Body.Bytes(), &session1Resp)
+	_ = json.Unmarshal(session1W.Body.Bytes(), &session1Resp)
 	sessionA := session1Resp["session"].(map[string]interface{})
 	sessionAID := sessionA["id"].(string)
 
@@ -396,7 +408,7 @@ func TestHandler_MultiTab_SessionSwitching(t *testing.T) {
 	handler.HandleSessions(session2W, session2Req)
 
 	var session2Resp map[string]interface{}
-	json.Unmarshal(session2W.Body.Bytes(), &session2Resp)
+	_ = json.Unmarshal(session2W.Body.Bytes(), &session2Resp)
 	sessionB := session2Resp["session"].(map[string]interface{})
 	sessionBID := sessionB["id"].(string)
 
@@ -424,7 +436,7 @@ func TestHandler_MultiTab_SessionSwitching(t *testing.T) {
 	handler.HandleSessions(getAW, getAReq)
 
 	var msgsARep map[string]interface{}
-	json.Unmarshal(getAW.Body.Bytes(), &msgsARep)
+	_ = json.Unmarshal(getAW.Body.Bytes(), &msgsARep)
 	msgsA := msgsARep["messages"].([]interface{})
 	if len(msgsA) != 3 {
 		t.Errorf("Session A should have 3 messages, got %d", len(msgsA))
@@ -436,7 +448,7 @@ func TestHandler_MultiTab_SessionSwitching(t *testing.T) {
 	handler.HandleSessions(getBW, getBReq)
 
 	var msgsBRep map[string]interface{}
-	json.Unmarshal(getBW.Body.Bytes(), &msgsBRep)
+	_ = json.Unmarshal(getBW.Body.Bytes(), &msgsBRep)
 	msgsB := msgsBRep["messages"].([]interface{})
 	if len(msgsB) != 2 {
 		t.Errorf("Session B should have 2 messages, got %d", len(msgsB))
@@ -456,7 +468,7 @@ func TestHandler_MultiTab_ConcurrentUpdates(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -491,7 +503,7 @@ func TestHandler_MultiTab_ConcurrentUpdates(t *testing.T) {
 	handler.HandleSessions(getW, getReq)
 
 	var msgsResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &msgsResp)
+	_ = json.Unmarshal(getW.Body.Bytes(), &msgsResp)
 	msgs := msgsResp["messages"].([]interface{})
 	if len(msgs) != 10 {
 		t.Errorf("Expected 10 messages after concurrent writes, got %d", len(msgs))
@@ -511,7 +523,7 @@ func TestHandler_Tags(t *testing.T) {
 	handler.HandleSessions(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	sess := createResp["session"].(map[string]interface{})
 	sessionID := sess["id"].(string)
 
@@ -561,7 +573,7 @@ func TestHandler_FilterByAgent(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(filterW.Body.Bytes(), &resp)
+	_ = json.Unmarshal(filterW.Body.Bytes(), &resp)
 	sessions := resp["sessions"].([]interface{})
 
 	if len(sessions) != 2 {
@@ -593,7 +605,7 @@ func TestHandler_Search(t *testing.T) {
 		handler.HandleSessions(createW, createReq)
 
 		var resp map[string]interface{}
-		json.Unmarshal(createW.Body.Bytes(), &resp)
+		_ = json.Unmarshal(createW.Body.Bytes(), &resp)
 		sess := resp["session"].(map[string]interface{})
 		sessionID := sess["id"].(string)
 
@@ -618,7 +630,7 @@ func TestHandler_Search(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(searchW.Body.Bytes(), &resp)
+	_ = json.Unmarshal(searchW.Body.Bytes(), &resp)
 
 	total := int(resp["total"].(float64))
 	if total < 2 {
@@ -650,7 +662,7 @@ func TestHandler_CacheStats(t *testing.T) {
 	}
 
 	var stats map[string]interface{}
-	json.Unmarshal(statsW.Body.Bytes(), &stats)
+	_ = json.Unmarshal(statsW.Body.Bytes(), &stats)
 
 	size := int(stats["size"].(float64))
 	if size != 5 {
@@ -674,7 +686,7 @@ func createTestFolder(t *testing.T, handler *Handler, name string) string {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	folder := resp["folder"].(map[string]interface{})
 	return folder["id"].(string)
 }
@@ -754,7 +766,7 @@ func TestHandler_CreateNoteInFolder(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
 	note := resp["note"].(map[string]interface{})
 	if note["folder_id"] != folderID {
@@ -777,7 +789,7 @@ func TestHandler_GetNote(t *testing.T) {
 	handler.HandleNotes(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	note := createResp["note"].(map[string]interface{})
 	noteID := note["id"].(string)
 
@@ -791,7 +803,7 @@ func TestHandler_GetNote(t *testing.T) {
 	}
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	_ = json.Unmarshal(getW.Body.Bytes(), &getResp)
 	if getResp["name"] != "Get Me" {
 		t.Errorf("Expected name 'Get Me', got '%v'", getResp["name"])
 	}
@@ -829,7 +841,7 @@ func TestHandler_UpdateNote(t *testing.T) {
 	handler.HandleNotes(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	note := createResp["note"].(map[string]interface{})
 	noteID := note["id"].(string)
 
@@ -845,7 +857,7 @@ func TestHandler_UpdateNote(t *testing.T) {
 	}
 
 	var updateResp map[string]interface{}
-	json.Unmarshal(updateW.Body.Bytes(), &updateResp)
+	_ = json.Unmarshal(updateW.Body.Bytes(), &updateResp)
 	updatedNote := updateResp["note"].(map[string]interface{})
 	if updatedNote["name"] != "Updated Name" {
 		t.Errorf("Expected name 'Updated Name', got '%v'", updatedNote["name"])
@@ -870,7 +882,7 @@ func TestHandler_UpdateNotePartial(t *testing.T) {
 	handler.HandleNotes(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	note := createResp["note"].(map[string]interface{})
 	noteID := note["id"].(string)
 
@@ -886,7 +898,7 @@ func TestHandler_UpdateNotePartial(t *testing.T) {
 	}
 
 	var updateResp map[string]interface{}
-	json.Unmarshal(updateW.Body.Bytes(), &updateResp)
+	_ = json.Unmarshal(updateW.Body.Bytes(), &updateResp)
 	updatedNote := updateResp["note"].(map[string]interface{})
 	if updatedNote["name"] != "New Name Only" {
 		t.Errorf("Expected name 'New Name Only', got '%v'", updatedNote["name"])
@@ -911,7 +923,7 @@ func TestHandler_DeleteNote(t *testing.T) {
 	handler.HandleNotes(createW, createReq)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	_ = json.Unmarshal(createW.Body.Bytes(), &createResp)
 	note := createResp["note"].(map[string]interface{})
 	noteID := note["id"].(string)
 
@@ -960,7 +972,7 @@ func TestHandler_ListNotesByFolder(t *testing.T) {
 	}
 
 	var listResp map[string]interface{}
-	json.Unmarshal(listW.Body.Bytes(), &listResp)
+	_ = json.Unmarshal(listW.Body.Bytes(), &listResp)
 
 	notes := listResp["notes"].([]interface{})
 	if len(notes) != 3 {
@@ -1006,7 +1018,7 @@ func TestHandler_SearchNotes(t *testing.T) {
 	}
 
 	var searchResp map[string]interface{}
-	json.Unmarshal(searchW.Body.Bytes(), &searchResp)
+	_ = json.Unmarshal(searchW.Body.Bytes(), &searchResp)
 
 	results := searchResp["notes"].([]interface{})
 	if len(results) != 1 {
@@ -1035,7 +1047,7 @@ func TestHandler_SearchNotesEmpty(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(searchW.Body.Bytes(), &resp)
+	_ = json.Unmarshal(searchW.Body.Bytes(), &resp)
 
 	notes := resp["notes"].([]interface{})
 	if len(notes) != 0 {
@@ -1063,7 +1075,7 @@ func TestHandler_CreateNoteDefaultName(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
 	note := resp["note"].(map[string]interface{})
 	if note["name"] != "Untitled Note" {

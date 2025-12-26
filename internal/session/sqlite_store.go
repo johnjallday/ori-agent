@@ -174,14 +174,14 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, filter *SessionFilter, o
 
 		if err := rows.Scan(&item.ID, &item.Title, &item.AgentName, &folderID,
 			&item.MessageCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
 		item.FolderID = folderID.String
 		sessions = append(sessions, item)
 	}
-	rows.Close() // Close rows before making additional queries
+	_ = rows.Close() // Close rows before making additional queries
 
 	// Now fetch tags and previews for each session
 	for i := range sessions {
@@ -255,7 +255,7 @@ func (s *SQLiteStore) GetMessages(ctx context.Context, sessionID string) ([]Mess
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	messages := make([]Message, 0)
 	for rows.Next() {
@@ -336,7 +336,7 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 
 		if err := rows.Scan(&result.ID, &result.Title, &result.AgentName, &folderID,
 			&result.MessageCount, &result.CreatedAt, &result.UpdatedAt, &snippet); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, 0, fmt.Errorf("failed to scan search result: %w", err)
 		}
 
@@ -347,7 +347,7 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 
 		results = append(results, result)
 	}
-	rows.Close() // Close rows before making additional queries
+	_ = rows.Close() // Close rows before making additional queries
 
 	// Fetch tags for each result
 	for i := range results {
@@ -378,7 +378,7 @@ func (s *SQLiteStore) GetAllTags(ctx context.Context) ([]Tag, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tags: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	tags := make([]Tag, 0)
 	for rows.Next() {
@@ -506,7 +506,7 @@ func (s *SQLiteStore) ListFolders(ctx context.Context) ([]Folder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list folders: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	folders := make([]Folder, 0)
 	for rows.Next() {
@@ -573,7 +573,7 @@ func (s *SQLiteStore) GetSubfolderIDs(ctx context.Context, folderID string) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("failed to get subfolder IDs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	ids := make([]string, 0)
 	for rows.Next() {
@@ -594,7 +594,7 @@ func (s *SQLiteStore) getSessionTags(ctx context.Context, sessionID string) ([]s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	tags := make([]string, 0)
 	for rows.Next() {
@@ -842,7 +842,7 @@ func (s *SQLiteStore) ListNotesByFolder(ctx context.Context, folderID string) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to list notes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	notes := make([]FolderNoteListItem, 0)
 	for rows.Next() {
@@ -883,7 +883,7 @@ func (s *SQLiteStore) SearchNotes(ctx context.Context, query string, limit int) 
 		}
 		return nil, fmt.Errorf("failed to search notes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results := make([]NoteSearchResult, 0)
 	for rows.Next() {

@@ -49,7 +49,7 @@ func (h *Handler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createSession(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -65,7 +65,7 @@ func (h *Handler) handleSession(w http.ResponseWriter, r *http.Request, id strin
 	case http.MethodDelete:
 		h.deleteSession(w, r, id)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -77,7 +77,7 @@ func (h *Handler) handleMessages(w http.ResponseWriter, r *http.Request, session
 	case http.MethodPost:
 		h.addMessage(w, r, sessionID)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -91,12 +91,12 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if req.AgentName == "" {
-		orihttp.RespondBadRequest(w, "agent_name is required")
+		_ = orihttp.RespondBadRequest(w, "agent_name is required")
 		return
 	}
 
@@ -114,13 +114,13 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.CreateSession(r.Context(), sess); err != nil {
 		logger.Error("Failed to create session", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to create session")
+		_ = orihttp.RespondInternalError(w, "Failed to create session")
 		return
 	}
 
 	logger.Info("Session created", logger.Fields{"id": sess.ID, "agent": req.AgentName})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
 		"session": sess,
 	})
@@ -130,12 +130,12 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getSession(w http.ResponseWriter, r *http.Request, id string) {
 	sess, err := h.store.GetSession(r.Context(), id)
 	if err == session.ErrSessionNotFound {
-		orihttp.RespondNotFound(w, "Session not found")
+		_ = orihttp.RespondNotFound(w, "Session not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to get session", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to get session")
+		_ = orihttp.RespondInternalError(w, "Failed to get session")
 		return
 	}
 
@@ -146,11 +146,11 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request, id string) 
 func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id string) {
 	sess, err := h.store.GetSession(r.Context(), id)
 	if err == session.ErrSessionNotFound {
-		orihttp.RespondNotFound(w, "Session not found")
+		_ = orihttp.RespondNotFound(w, "Session not found")
 		return
 	}
 	if err != nil {
-		orihttp.RespondInternalError(w, "Failed to get session")
+		_ = orihttp.RespondInternalError(w, "Failed to get session")
 		return
 	}
 
@@ -162,7 +162,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -182,7 +182,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 
 	if err := h.store.UpdateSession(r.Context(), sess); err != nil {
 		logger.Error("Failed to update session", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to update session")
+		_ = orihttp.RespondInternalError(w, "Failed to update session")
 		return
 	}
 
@@ -198,12 +198,12 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 func (h *Handler) deleteSession(w http.ResponseWriter, r *http.Request, id string) {
 	err := h.store.DeleteSession(r.Context(), id)
 	if err == session.ErrSessionNotFound {
-		orihttp.RespondNotFound(w, "Session not found")
+		_ = orihttp.RespondNotFound(w, "Session not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to delete session", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to delete session")
+		_ = orihttp.RespondInternalError(w, "Failed to delete session")
 		return
 	}
 
@@ -285,7 +285,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		results, total, err := h.store.Search(r.Context(), searchQuery, filter, opts)
 		if err != nil {
 			logger.Error("Failed to search sessions", logger.Fields{"error": err})
-			orihttp.RespondInternalError(w, "Failed to search sessions")
+			_ = orihttp.RespondInternalError(w, "Failed to search sessions")
 			return
 		}
 
@@ -301,7 +301,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	result, err := h.store.ListSessions(r.Context(), filter, opts)
 	if err != nil {
 		logger.Error("Failed to list sessions", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to list sessions")
+		_ = orihttp.RespondInternalError(w, "Failed to list sessions")
 		return
 	}
 
@@ -312,12 +312,12 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) getMessages(w http.ResponseWriter, r *http.Request, sessionID string) {
 	messages, err := h.store.GetMessages(r.Context(), sessionID)
 	if err == session.ErrSessionNotFound {
-		orihttp.RespondNotFound(w, "Session not found")
+		_ = orihttp.RespondNotFound(w, "Session not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to get messages", logger.Fields{"session_id": sessionID, "error": err})
-		orihttp.RespondInternalError(w, "Failed to get messages")
+		_ = orihttp.RespondInternalError(w, "Failed to get messages")
 		return
 	}
 
@@ -337,16 +337,16 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if req.Role == "" {
-		orihttp.RespondBadRequest(w, "role is required")
+		_ = orihttp.RespondBadRequest(w, "role is required")
 		return
 	}
 	if req.Content == "" {
-		orihttp.RespondBadRequest(w, "content is required")
+		_ = orihttp.RespondBadRequest(w, "content is required")
 		return
 	}
 
@@ -359,15 +359,15 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 
 	if err := h.store.AddMessage(r.Context(), sessionID, msg); err != nil {
 		if err == session.ErrSessionNotFound {
-			orihttp.RespondNotFound(w, "Session not found")
+			_ = orihttp.RespondNotFound(w, "Session not found")
 			return
 		}
 		logger.Error("Failed to add message", logger.Fields{"session_id": sessionID, "error": err})
-		orihttp.RespondInternalError(w, "Failed to add message")
+		_ = orihttp.RespondInternalError(w, "Failed to add message")
 		return
 	}
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
 		"message": msg,
 	})
@@ -376,14 +376,14 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 // HandleTags handles GET /api/tags for tag listing.
 func (h *Handler) HandleTags(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
 	tags, err := h.store.GetAllTags(r.Context())
 	if err != nil {
 		logger.Error("Failed to get tags", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to get tags")
+		_ = orihttp.RespondInternalError(w, "Failed to get tags")
 		return
 	}
 
@@ -395,7 +395,7 @@ func (h *Handler) HandleTags(w http.ResponseWriter, r *http.Request) {
 // HandleSessionTags handles PUT /api/sessions/{id}/tags for updating session tags.
 func (h *Handler) HandleSessionTags(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 
@@ -408,17 +408,17 @@ func (h *Handler) HandleSessionTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if err := h.store.UpdateTags(r.Context(), sessionID, req.Tags); err != nil {
 		if err == session.ErrSessionNotFound {
-			orihttp.RespondNotFound(w, "Session not found")
+			_ = orihttp.RespondNotFound(w, "Session not found")
 			return
 		}
 		logger.Error("Failed to update tags", logger.Fields{"session_id": sessionID, "error": err})
-		orihttp.RespondInternalError(w, "Failed to update tags")
+		_ = orihttp.RespondInternalError(w, "Failed to update tags")
 		return
 	}
 
@@ -433,7 +433,7 @@ func (h *Handler) HandleSessionTags(w http.ResponseWriter, r *http.Request) {
 // GetCacheStats returns cache statistics for monitoring.
 func (h *Handler) HandleCacheStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
 

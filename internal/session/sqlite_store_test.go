@@ -14,7 +14,7 @@ func setupTestDB(t *testing.T) (*database.DB, func()) {
 	if err != nil {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
-	return db, func() { db.Close() }
+	return db, func() { _ = db.Close() }
 }
 
 func TestSQLiteStore_CreateAndGetSession(t *testing.T) {

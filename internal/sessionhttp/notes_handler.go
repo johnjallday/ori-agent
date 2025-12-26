@@ -35,7 +35,7 @@ func (h *Handler) HandleNotes(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createNote(w, r)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -48,7 +48,7 @@ func (h *Handler) HandleFolderNotes(w http.ResponseWriter, r *http.Request) {
 	// Path should be "{folder_id}/notes" or "{folder_id}/notes/{note_id}"
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 || parts[1] != "notes" {
-		orihttp.RespondBadRequest(w, "Invalid path")
+		_ = orihttp.RespondBadRequest(w, "Invalid path")
 		return
 	}
 
@@ -67,7 +67,7 @@ func (h *Handler) HandleFolderNotes(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createNoteInFolder(w, r, folderID)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -83,7 +83,7 @@ func (h *Handler) handleNote(w http.ResponseWriter, r *http.Request, id string) 
 	case http.MethodDelete:
 		h.deleteNote(w, r, id)
 	default:
-		orihttp.RespondMethodNotAllowed(w)
+		_ = orihttp.RespondMethodNotAllowed(w)
 	}
 }
 
@@ -96,12 +96,12 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
 	if req.FolderID == "" {
-		orihttp.RespondBadRequest(w, "folder_id is required")
+		_ = orihttp.RespondBadRequest(w, "folder_id is required")
 		return
 	}
 
@@ -121,17 +121,17 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.CreateNote(r.Context(), note); err != nil {
 		if err == session.ErrFolderNotFound {
-			orihttp.RespondNotFound(w, "Folder not found")
+			_ = orihttp.RespondNotFound(w, "Folder not found")
 			return
 		}
 		logger.Error("Failed to create note", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to create note")
+		_ = orihttp.RespondInternalError(w, "Failed to create note")
 		return
 	}
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "folder_id": req.FolderID, "name": req.Name})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
 		"note":    note,
 	})
@@ -145,7 +145,7 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -165,17 +165,17 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 
 	if err := h.store.CreateNote(r.Context(), note); err != nil {
 		if err == session.ErrFolderNotFound {
-			orihttp.RespondNotFound(w, "Folder not found")
+			_ = orihttp.RespondNotFound(w, "Folder not found")
 			return
 		}
 		logger.Error("Failed to create note", logger.Fields{"error": err})
-		orihttp.RespondInternalError(w, "Failed to create note")
+		_ = orihttp.RespondInternalError(w, "Failed to create note")
 		return
 	}
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "folder_id": folderID, "name": req.Name})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
 		"note":    note,
 	})
@@ -185,12 +185,12 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 func (h *Handler) getNote(w http.ResponseWriter, r *http.Request, id string) {
 	note, err := h.store.GetNote(r.Context(), id)
 	if err == session.ErrNoteNotFound {
-		orihttp.RespondNotFound(w, "Note not found")
+		_ = orihttp.RespondNotFound(w, "Note not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to get note", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to get note")
+		_ = orihttp.RespondInternalError(w, "Failed to get note")
 		return
 	}
 
@@ -201,11 +201,11 @@ func (h *Handler) getNote(w http.ResponseWriter, r *http.Request, id string) {
 func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) {
 	note, err := h.store.GetNote(r.Context(), id)
 	if err == session.ErrNoteNotFound {
-		orihttp.RespondNotFound(w, "Note not found")
+		_ = orihttp.RespondNotFound(w, "Note not found")
 		return
 	}
 	if err != nil {
-		orihttp.RespondInternalError(w, "Failed to get note")
+		_ = orihttp.RespondInternalError(w, "Failed to get note")
 		return
 	}
 
@@ -216,7 +216,7 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
 		return
 	}
 
@@ -234,7 +234,7 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 
 	if err := h.store.UpdateNote(r.Context(), note); err != nil {
 		logger.Error("Failed to update note", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to update note")
+		_ = orihttp.RespondInternalError(w, "Failed to update note")
 		return
 	}
 
@@ -250,12 +250,12 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) {
 	err := h.store.DeleteNote(r.Context(), id)
 	if err == session.ErrNoteNotFound {
-		orihttp.RespondNotFound(w, "Note not found")
+		_ = orihttp.RespondNotFound(w, "Note not found")
 		return
 	}
 	if err != nil {
 		logger.Error("Failed to delete note", logger.Fields{"id": id, "error": err})
-		orihttp.RespondInternalError(w, "Failed to delete note")
+		_ = orihttp.RespondInternalError(w, "Failed to delete note")
 		return
 	}
 
@@ -269,7 +269,7 @@ func (h *Handler) listNotesByFolder(w http.ResponseWriter, r *http.Request, fold
 	notes, err := h.store.ListNotesByFolder(r.Context(), folderID)
 	if err != nil {
 		logger.Error("Failed to list notes", logger.Fields{"folder_id": folderID, "error": err})
-		orihttp.RespondInternalError(w, "Failed to list notes")
+		_ = orihttp.RespondInternalError(w, "Failed to list notes")
 		return
 	}
 
@@ -291,7 +291,7 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 	notes, err := h.store.SearchNotes(r.Context(), query, 50)
 	if err != nil {
 		logger.Error("Failed to search notes", logger.Fields{"query": query, "error": err})
-		orihttp.RespondInternalError(w, "Failed to search notes")
+		_ = orihttp.RespondInternalError(w, "Failed to search notes")
 		return
 	}
 

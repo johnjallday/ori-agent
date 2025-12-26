@@ -215,7 +215,6 @@ func TestIntegration_SearchAndFilter(t *testing.T) {
 		{"Travel Planning", "general-assistant", []string{"travel"}, "Plan a trip to Japan"},
 	}
 
-	var sessionIDs []string
 	for _, s := range sessions {
 		session := &Session{
 			ID:        uuid.New().String(),
@@ -228,7 +227,6 @@ func TestIntegration_SearchAndFilter(t *testing.T) {
 		if err := store.CreateSession(ctx, session); err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
-		sessionIDs = append(sessionIDs, session.ID)
 
 		// Add message
 		msg := &Message{
@@ -274,7 +272,7 @@ func TestIntegration_SearchAndFilter(t *testing.T) {
 
 	// Test 4: Combined filter + search
 	filter = &SessionFilter{AgentName: "code-assistant"}
-	searchResults, total, err = store.Search(ctx, "error", filter, nil)
+	_, total, err = store.Search(ctx, "error", filter, nil)
 	if err != nil {
 		t.Fatalf("Failed to search with filter: %v", err)
 	}
@@ -293,7 +291,7 @@ func TestIntegration_LRUEvictionAndRestore(t *testing.T) {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
 	store := NewHybridStoreWithDB(db, 3)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create 5 sessions (more than cache size)
 	var sessionIDs []string
@@ -475,6 +473,6 @@ func createTestStore(t *testing.T) (HybridStore, func()) {
 
 	store := NewHybridStoreWithDB(db, 50)
 	return store, func() {
-		store.Close()
+		_ = store.Close()
 	}
 }
