@@ -333,22 +333,46 @@
         <div class="onboarding-step d-none" id="step-3" role="tabpanel" aria-labelledby="step-3-title">
           <h3 class="mb-3" id="step-3-title">Create Your First Agent</h3>
           <p class="mb-4">Agents are AI assistants that can use plugins and tools to help you accomplish tasks.</p>
-          <div class="card mb-3">
+
+          <!-- Visual guide -->
+          <div class="card mb-3" style="border: 2px solid var(--primary-color, #0d6efd);">
             <div class="card-body">
-              <h5 class="card-title">How to create an agent:</h5>
-              <ol class="mb-0">
-                <li class="mb-2">Click the <strong>New Agent</strong> button in the sidebar</li>
-                <li class="mb-2">Give your agent a name (e.g., "My Assistant")</li>
-                <li class="mb-2">Select an AI model (GPT-4, Claude, etc.)</li>
-                <li class="mb-2">Add a custom system prompt if desired</li>
-              </ol>
+              <div class="d-flex align-items-start mb-3">
+                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">1</div>
+                <div>
+                  <h6 class="mb-1">Look at the left sidebar</h6>
+                  <p class="mb-0 text-muted small">Find the <strong>"Agents"</strong> section in the navigation menu on the left side of the screen.</p>
+                </div>
+              </div>
+              <div class="d-flex align-items-start mb-3">
+                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">2</div>
+                <div>
+                  <h6 class="mb-1">Click "Agents" in the navigation</h6>
+                  <p class="mb-0 text-muted small">This will take you to the Agents page where you can manage all your AI assistants.</p>
+                </div>
+              </div>
+              <div class="d-flex align-items-start mb-3">
+                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">3</div>
+                <div>
+                  <h6 class="mb-1">Click the "+ New Agent" button</h6>
+                  <p class="mb-0 text-muted small">You'll find this button at the top of the Agents page. Click it to start creating your agent.</p>
+                </div>
+              </div>
+              <div class="d-flex align-items-start">
+                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">4</div>
+                <div>
+                  <h6 class="mb-1">Configure your agent</h6>
+                  <p class="mb-0 text-muted small">Give it a name, select an AI model (GPT-4, Claude, Ollama, etc.), and optionally add a system prompt to customize its behavior.</p>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="alert alert-warning">
+
+          <div class="alert alert-info mb-0">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
             </svg>
-            You'll need to configure your API keys in settings before creating an agent.
+            <strong>Tip:</strong> You can create multiple agents for different purposes - one for coding help, another for writing, etc.
           </div>
         </div>
 
