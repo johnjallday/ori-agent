@@ -18,6 +18,59 @@
         <div class="mb-4">
           <h6 style="color: var(--text-primary);">Create New Agent</h6>
           <form id="studiosCreateAgentForm" class="modern-card p-3">
+            <!-- Config Mode Toggle -->
+            <div class="mb-3">
+              <div class="d-flex align-items-center gap-3">
+                <label class="form-label mb-0" style="color: var(--text-primary);">Configuration Mode</label>
+                <div class="btn-group" role="group" aria-label="Configuration mode toggle">
+                  <input type="radio" class="btn-check" name="configMode" id="configModeManual" value="manual" checked>
+                  <label class="btn btn-outline-secondary btn-sm" for="configModeManual">Manual</label>
+                  <input type="radio" class="btn-check" name="configMode" id="configModeAuto" value="auto">
+                  <label class="btn btn-outline-secondary btn-sm" for="configModeAuto">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
+                    </svg>
+                    Auto
+                  </label>
+                </div>
+                <span id="autoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.7rem;"></span>
+              </div>
+              <small id="configModeHelp" class="text-muted d-none mt-1">Describe what you want this agent to do, and we'll configure it automatically.</small>
+            </div>
+
+            <!-- Auto-config Description (shown when Auto mode selected) -->
+            <div id="autoConfigSection" class="mb-3 d-none">
+              <label class="form-label" style="color: var(--text-primary);">Describe Your Agent</label>
+              <textarea id="studios-auto-config-description" class="form-control" rows="3"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                        placeholder="Example: An agent that helps with file management tasks like organizing documents, searching for files, and creating backups..."></textarea>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <small class="text-muted">Tip: Be specific about the tasks and tools this agent should use.</small>
+                <button type="button" id="generateAutoConfigBtn" class="btn btn-sm btn-outline-primary">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                  </svg>
+                  Generate Config
+                </button>
+              </div>
+            </div>
+
+            <!-- LLM Not Available Warning -->
+            <div id="llmNotAvailableWarning" class="alert alert-warning d-none mb-3" style="font-size: 0.875rem;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+              </svg>
+              <span id="llmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
+            </div>
+
+            <!-- Auto-selected Indicator -->
+            <div id="autoSelectedIndicator" class="alert alert-info d-none mb-3" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              <strong>Auto-configured</strong> - Settings below were selected based on your description. You can still adjust them manually.
+            </div>
+
             <div class="row">
               <div class="col-md-6 mb-3">
                 <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
