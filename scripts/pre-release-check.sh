@@ -266,7 +266,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}Running: All Tests${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
   echo -e "${GREEN}✅ All Tests: PASSED${NC}"
   echo ""
   rm -f "$TEST_OUTPUT_FILE"
@@ -318,7 +318,7 @@ Please fix these test failures." --permission-mode acceptEdits
         echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
         echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-        if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+        if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
           echo -e "${GREEN}✅ All Tests (iteration $ITERATION): PASSED${NC}"
           echo ""
           TESTS_PASSED=true
@@ -369,7 +369,7 @@ Please fix these test failures." --permission-mode acceptEdits
         echo -e "${BLUE}Re-running tests after diagnostics...${NC}"
         echo ""
         # Re-run tests after diagnostics
-        if go test -p 1 ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+        if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
           echo -e "${GREEN}✅ All Tests (after diagnostics): PASSED${NC}"
           # Remove the original failure from FAILED_CHECKS
           FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")

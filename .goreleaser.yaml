@@ -187,8 +187,6 @@ nfpms:
     # Debian-specific configuration
     deb:
       compression: xz
-      fields:
-        Priority: optional
 
 # Checksums
 checksum:
