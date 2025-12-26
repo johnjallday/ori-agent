@@ -208,6 +208,59 @@
           <div class="mb-4">
             <h6 style="color: var(--text-primary);">Create New Agent</h6>
             <form id="createAgentForm" class="modern-card p-3">
+              <!-- Config Mode Toggle -->
+              <div class="mb-3">
+                <div class="d-flex align-items-center gap-3">
+                  <label class="form-label mb-0" style="color: var(--text-primary);">Configuration Mode</label>
+                  <div class="btn-group" role="group" aria-label="Configuration mode toggle">
+                    <input type="radio" class="btn-check" name="wsDashConfigMode" id="wsDashConfigModeManual" value="manual" checked>
+                    <label class="btn btn-outline-secondary btn-sm" for="wsDashConfigModeManual">Manual</label>
+                    <input type="radio" class="btn-check" name="wsDashConfigMode" id="wsDashConfigModeAuto" value="auto">
+                    <label class="btn btn-outline-secondary btn-sm" for="wsDashConfigModeAuto">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
+                      </svg>
+                      Auto
+                    </label>
+                  </div>
+                  <span id="wsDashAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.7rem;"></span>
+                </div>
+                <small id="wsDashConfigModeHelp" class="text-muted d-none mt-1">Describe what you want this agent to do, and we'll configure it automatically.</small>
+              </div>
+
+              <!-- Auto-config Description (shown when Auto mode selected) -->
+              <div id="wsDashAutoConfigSection" class="mb-3 d-none">
+                <label class="form-label" style="color: var(--text-primary);">Describe Your Agent</label>
+                <textarea id="wsDashAutoConfigDescription" class="form-control" rows="3"
+                          style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                          placeholder="Example: An agent that helps with file management tasks like organizing documents, searching for files, and creating backups..."></textarea>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                  <small class="text-muted">Tip: Be specific about the tasks and tools this agent should use.</small>
+                  <button type="button" id="wsDashGenerateAutoConfigBtn" class="btn btn-sm btn-outline-primary">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                    </svg>
+                    Generate Config
+                  </button>
+                </div>
+              </div>
+
+              <!-- LLM Not Available Warning -->
+              <div id="wsDashLlmNotAvailableWarning" class="alert alert-warning d-none mb-3" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+                </svg>
+                <span>Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
+              </div>
+
+              <!-- Auto-selected Indicator -->
+              <div id="wsDashAutoSelectedIndicator" class="alert alert-info d-none mb-3" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+                <strong>Auto-configured</strong> - Settings below were selected based on your description. You can still adjust them manually.
+              </div>
+
               <div class="row">
                 <div class="col-md-6 mb-3">
                   <label class="form-label" style="color: var(--text-primary);">Agent Name</label>
@@ -1631,6 +1684,163 @@
     document.getElementById('new-agent-temperature').addEventListener('input', function(e) {
       document.getElementById('new-agent-temperature-value').textContent = e.target.value;
     });
+
+    // Auto-config state
+    let wsDashLLMAvailable = false;
+    let wsDashAutoConfigApplied = false;
+
+    // Check LLM availability
+    async function checkWsDashLLMAvailability() {
+      try {
+        const response = await fetch('/api/agents/auto-config/availability');
+        const data = await response.json();
+        wsDashLLMAvailable = data.available;
+        return data;
+      } catch (error) {
+        console.error('Failed to check LLM availability:', error);
+        wsDashLLMAvailable = false;
+        return { available: false };
+      }
+    }
+
+    // Handle config mode toggle
+    function handleWsDashConfigModeChange(mode) {
+      const autoConfigSection = document.getElementById('wsDashAutoConfigSection');
+      const llmWarning = document.getElementById('wsDashLlmNotAvailableWarning');
+      const configModeHelp = document.getElementById('wsDashConfigModeHelp');
+      const autoSelectedIndicator = document.getElementById('wsDashAutoSelectedIndicator');
+
+      if (mode === 'auto') {
+        if (configModeHelp) configModeHelp.classList.remove('d-none');
+        if (wsDashLLMAvailable) {
+          if (autoConfigSection) autoConfigSection.classList.remove('d-none');
+          if (llmWarning) llmWarning.classList.add('d-none');
+        } else {
+          if (autoConfigSection) autoConfigSection.classList.add('d-none');
+          if (llmWarning) llmWarning.classList.remove('d-none');
+        }
+      } else {
+        if (autoConfigSection) autoConfigSection.classList.add('d-none');
+        if (llmWarning) llmWarning.classList.add('d-none');
+        if (configModeHelp) configModeHelp.classList.add('d-none');
+        if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
+        wsDashAutoConfigApplied = false;
+      }
+    }
+
+    // Generate auto-config
+    async function generateWsDashAutoConfig() {
+      const description = document.getElementById('wsDashAutoConfigDescription').value.trim();
+      const generateBtn = document.getElementById('wsDashGenerateAutoConfigBtn');
+      const autoConfigStatus = document.getElementById('wsDashAutoConfigStatus');
+
+      if (!description) {
+        alert('Please enter a description of what you want your agent to do.');
+        return;
+      }
+
+      generateBtn.disabled = true;
+      generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Generating...';
+      if (autoConfigStatus) {
+        autoConfigStatus.textContent = 'Analyzing...';
+        autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger');
+        autoConfigStatus.classList.add('bg-secondary');
+      }
+
+      try {
+        const response = await fetch('/api/agents/auto-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to generate configuration');
+        }
+
+        const config = await response.json();
+
+        // Apply config
+        const typeSelect = document.getElementById('new-agent-type');
+        if (typeSelect && config.agent_type) {
+          typeSelect.value = config.agent_type;
+          typeSelect.dispatchEvent(new Event('change'));
+        }
+
+        setTimeout(() => {
+          const modelSelect = document.getElementById('new-agent-model');
+          if (modelSelect && config.model) {
+            for (let i = 0; i < modelSelect.options.length; i++) {
+              if (modelSelect.options[i].value === config.model) {
+                modelSelect.selectedIndex = i;
+                break;
+              }
+            }
+          }
+        }, 100);
+
+        const tempSlider = document.getElementById('new-agent-temperature');
+        const tempValue = document.getElementById('new-agent-temperature-value');
+        if (tempSlider && config.temperature !== undefined) {
+          tempSlider.value = config.temperature;
+          if (tempValue) tempValue.textContent = config.temperature.toFixed(1);
+        }
+
+        const promptTextarea = document.getElementById('new-agent-prompt');
+        if (promptTextarea && config.system_prompt) {
+          promptTextarea.value = config.system_prompt;
+        }
+
+        if (autoConfigStatus) {
+          autoConfigStatus.textContent = 'Applied!';
+          autoConfigStatus.classList.remove('bg-secondary');
+          autoConfigStatus.classList.add('bg-success');
+        }
+
+        const indicator = document.getElementById('wsDashAutoSelectedIndicator');
+        if (indicator) indicator.classList.remove('d-none');
+        wsDashAutoConfigApplied = true;
+
+        if (config.reasoning) console.log('Auto-config reasoning:', config.reasoning);
+
+      } catch (error) {
+        console.error('Auto-config error:', error);
+        if (autoConfigStatus) {
+          autoConfigStatus.textContent = 'Failed';
+          autoConfigStatus.classList.remove('bg-secondary');
+          autoConfigStatus.classList.add('bg-danger');
+        }
+        alert('Failed to generate configuration: ' + error.message);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Config';
+      }
+    }
+
+    // Config mode toggle listeners
+    const wsDashConfigModeManual = document.getElementById('wsDashConfigModeManual');
+    const wsDashConfigModeAuto = document.getElementById('wsDashConfigModeAuto');
+
+    if (wsDashConfigModeManual) {
+      wsDashConfigModeManual.addEventListener('change', function() {
+        if (this.checked) handleWsDashConfigModeChange('manual');
+      });
+    }
+
+    if (wsDashConfigModeAuto) {
+      wsDashConfigModeAuto.addEventListener('change', async function() {
+        if (this.checked) {
+          await checkWsDashLLMAvailability();
+          handleWsDashConfigModeChange('auto');
+        }
+      });
+    }
+
+    const wsDashGenerateBtn = document.getElementById('wsDashGenerateAutoConfigBtn');
+    if (wsDashGenerateBtn) {
+      wsDashGenerateBtn.addEventListener('click', generateWsDashAutoConfig);
+    }
 
     document.getElementById('createAgentForm').addEventListener('submit', async function(e) {
       e.preventDefault();

@@ -116,6 +116,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Agent capabilities endpoint
 	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
 
+	// Agent auto-config endpoints
+	mux.HandleFunc("/api/agents/auto-config", s.autoConfigHandler.AutoConfigHandler)
+	mux.HandleFunc("/api/agents/auto-config/availability", s.autoConfigHandler.CheckLLMAvailabilityHandler)
+
 	// =============================================================================
 	// Plugin API Endpoints
 	// =============================================================================

@@ -647,7 +647,239 @@ function setupAgentManagement() {
     });
   }
 
+  // Auto-config mode toggle listeners
+  setupAutoConfigListeners();
+
   console.log('Agent management setup complete');
+}
+
+// State for auto-config
+let baseAutoConfigApplied = false;
+let baseLLMAvailable = false;
+
+// Setup auto-config event listeners
+function setupAutoConfigListeners() {
+  const configModeManual = document.getElementById('baseConfigModeManual');
+  const configModeAuto = document.getElementById('baseConfigModeAuto');
+
+  if (configModeManual) {
+    configModeManual.addEventListener('change', function() {
+      if (this.checked) handleBaseConfigModeChange('manual');
+    });
+  }
+
+  if (configModeAuto) {
+    configModeAuto.addEventListener('change', async function() {
+      if (this.checked) {
+        await checkBaseLLMAvailability();
+        handleBaseConfigModeChange('auto');
+      }
+    });
+  }
+
+  // Generate auto-config button
+  const generateBtn = document.getElementById('baseGenerateAutoConfigBtn');
+  if (generateBtn) {
+    generateBtn.addEventListener('click', generateBaseAutoConfig);
+  }
+}
+
+// Check if any LLM provider is available
+async function checkBaseLLMAvailability() {
+  try {
+    const response = await fetch('/api/agents/auto-config/availability');
+    const data = await response.json();
+    baseLLMAvailable = data.available;
+    return data;
+  } catch (error) {
+    console.error('Failed to check LLM availability:', error);
+    baseLLMAvailable = false;
+    return { available: false, message: 'Failed to check LLM availability' };
+  }
+}
+
+// Handle config mode toggle
+function handleBaseConfigModeChange(mode) {
+  const autoConfigSection = document.getElementById('baseAutoConfigSection');
+  const llmWarning = document.getElementById('baseLlmNotAvailableWarning');
+  const configModeHelp = document.getElementById('baseConfigModeHelp');
+  const autoSelectedIndicator = document.getElementById('baseAutoSelectedIndicator');
+
+  if (mode === 'auto') {
+    if (configModeHelp) configModeHelp.classList.remove('d-none');
+
+    if (baseLLMAvailable) {
+      if (autoConfigSection) autoConfigSection.classList.remove('d-none');
+      if (llmWarning) llmWarning.classList.add('d-none');
+    } else {
+      if (autoConfigSection) autoConfigSection.classList.add('d-none');
+      if (llmWarning) llmWarning.classList.remove('d-none');
+    }
+  } else {
+    // Manual mode
+    if (autoConfigSection) autoConfigSection.classList.add('d-none');
+    if (llmWarning) llmWarning.classList.add('d-none');
+    if (configModeHelp) configModeHelp.classList.add('d-none');
+    if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
+    baseAutoConfigApplied = false;
+  }
+}
+
+// Generate auto-config from description
+async function generateBaseAutoConfig() {
+  const description = document.getElementById('baseAutoConfigDescription').value.trim();
+  const generateBtn = document.getElementById('baseGenerateAutoConfigBtn');
+  const autoConfigStatus = document.getElementById('baseAutoConfigStatus');
+
+  if (!description) {
+    alert('Please enter a description of what you want your agent to do.');
+    return;
+  }
+
+  // Show loading state
+  generateBtn.disabled = true;
+  generateBtn.innerHTML = `
+    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+    Generating...
+  `;
+  if (autoConfigStatus) {
+    autoConfigStatus.textContent = 'Analyzing...';
+    autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger');
+    autoConfigStatus.classList.add('bg-secondary');
+  }
+
+  try {
+    const response = await fetch('/api/agents/auto-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error || 'Failed to generate configuration');
+    }
+
+    const config = await response.json();
+
+    // Apply the configuration to form fields
+    applyBaseAutoConfig(config);
+
+    // Show success status
+    if (autoConfigStatus) {
+      autoConfigStatus.textContent = 'Applied!';
+      autoConfigStatus.classList.remove('bg-secondary');
+      autoConfigStatus.classList.add('bg-success');
+    }
+
+    // Show the auto-selected indicator
+    const indicator = document.getElementById('baseAutoSelectedIndicator');
+    if (indicator) indicator.classList.remove('d-none');
+    baseAutoConfigApplied = true;
+
+    if (config.reasoning) {
+      console.log('Auto-config reasoning:', config.reasoning);
+    }
+
+  } catch (error) {
+    console.error('Auto-config error:', error);
+    if (autoConfigStatus) {
+      autoConfigStatus.textContent = 'Failed';
+      autoConfigStatus.classList.remove('bg-secondary');
+      autoConfigStatus.classList.add('bg-danger');
+    }
+    alert('Failed to generate configuration: ' + error.message);
+  } finally {
+    // Restore button
+    generateBtn.disabled = false;
+    generateBtn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+        <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+      </svg>
+      Generate Config
+    `;
+  }
+}
+
+// Apply auto-generated config to form fields
+function applyBaseAutoConfig(config) {
+  // Apply agent type
+  const typeSelect = document.getElementById('agentType');
+  if (typeSelect && config.agent_type) {
+    typeSelect.value = config.agent_type;
+    // Trigger change to update model list
+    typeSelect.dispatchEvent(new Event('change'));
+  }
+
+  // Apply model (need to wait a moment for model list to repopulate)
+  setTimeout(() => {
+    const modelSelect = document.getElementById('agentModel');
+    if (modelSelect && config.model) {
+      for (let i = 0; i < modelSelect.options.length; i++) {
+        if (modelSelect.options[i].value === config.model) {
+          modelSelect.selectedIndex = i;
+          break;
+        }
+      }
+    }
+  }, 100);
+
+  // Apply temperature
+  const tempSlider = document.getElementById('agentTemperature');
+  const tempValue = document.getElementById('temperatureValue');
+  if (tempSlider && config.temperature !== undefined) {
+    tempSlider.value = config.temperature;
+    if (tempValue) {
+      tempValue.textContent = config.temperature.toFixed(1);
+    }
+  }
+
+  // Apply system prompt
+  const promptTextarea = document.getElementById('agentSystemPrompt');
+  if (promptTextarea && config.system_prompt) {
+    promptTextarea.value = config.system_prompt;
+  }
+
+  // Add visual feedback - briefly highlight the changed fields
+  highlightBaseAutoConfiguredFields();
+}
+
+// Briefly highlight fields that were auto-configured
+function highlightBaseAutoConfiguredFields() {
+  const fields = ['agentType', 'agentModel', 'agentTemperature', 'agentSystemPrompt'];
+
+  fields.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.style.transition = 'box-shadow 0.3s ease';
+      element.style.boxShadow = '0 0 0 2px var(--primary-color)';
+      setTimeout(() => {
+        element.style.boxShadow = '';
+      }, 1500);
+    }
+  });
+}
+
+// Reset auto-config state (call after form submission)
+function resetBaseAutoConfigState() {
+  baseAutoConfigApplied = false;
+
+  const configModeManual = document.getElementById('baseConfigModeManual');
+  if (configModeManual) configModeManual.checked = true;
+
+  const autoConfigSection = document.getElementById('baseAutoConfigSection');
+  const llmWarning = document.getElementById('baseLlmNotAvailableWarning');
+  const configModeHelp = document.getElementById('baseConfigModeHelp');
+  const autoSelectedIndicator = document.getElementById('baseAutoSelectedIndicator');
+  const autoConfigStatus = document.getElementById('baseAutoConfigStatus');
+  const descriptionTextarea = document.getElementById('baseAutoConfigDescription');
+
+  if (autoConfigSection) autoConfigSection.classList.add('d-none');
+  if (llmWarning) llmWarning.classList.add('d-none');
+  if (configModeHelp) configModeHelp.classList.add('d-none');
+  if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
+  if (autoConfigStatus) autoConfigStatus.classList.add('d-none');
+  if (descriptionTextarea) descriptionTextarea.value = '';
 }
 
 // Update agent settings from accordion

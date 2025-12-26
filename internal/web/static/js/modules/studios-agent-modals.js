@@ -6,6 +6,8 @@
 // State for agent management (using shared variable from studios-workspace.js)
 // studiosSystemAgents is declared in studios-workspace.js
 let studiosAvailableProviders = [];
+let studiosLLMAvailable = false;
+let studiosAutoConfigApplied = false;
 
 /**
  * Load providers from API
@@ -252,9 +254,221 @@ async function addAgentToSelectedWorkspace(agentName) {
 }
 
 /**
+ * Check if any LLM provider is available for auto-config
+ */
+async function checkLLMAvailability() {
+    try {
+        const response = await fetch('/api/agents/auto-config/availability');
+        const data = await response.json();
+        studiosLLMAvailable = data.available;
+        return data;
+    } catch (error) {
+        console.error('Failed to check LLM availability:', error);
+        studiosLLMAvailable = false;
+        return { available: false, message: 'Failed to check LLM availability' };
+    }
+}
+
+/**
+ * Handle config mode toggle
+ */
+function handleConfigModeChange(mode) {
+    const autoConfigSection = document.getElementById('autoConfigSection');
+    const llmWarning = document.getElementById('llmNotAvailableWarning');
+    const configModeHelp = document.getElementById('configModeHelp');
+    const autoSelectedIndicator = document.getElementById('autoSelectedIndicator');
+
+    if (mode === 'auto') {
+        configModeHelp.classList.remove('d-none');
+
+        if (studiosLLMAvailable) {
+            autoConfigSection.classList.remove('d-none');
+            llmWarning.classList.add('d-none');
+        } else {
+            autoConfigSection.classList.add('d-none');
+            llmWarning.classList.remove('d-none');
+        }
+    } else {
+        // Manual mode
+        autoConfigSection.classList.add('d-none');
+        llmWarning.classList.add('d-none');
+        configModeHelp.classList.add('d-none');
+        autoSelectedIndicator.classList.add('d-none');
+        studiosAutoConfigApplied = false;
+    }
+}
+
+/**
+ * Generate auto-config from description
+ */
+async function generateAutoConfig() {
+    const description = document.getElementById('studios-auto-config-description').value.trim();
+    const generateBtn = document.getElementById('generateAutoConfigBtn');
+    const autoConfigStatus = document.getElementById('autoConfigStatus');
+
+    if (!description) {
+        alert('Please enter a description of what you want your agent to do.');
+        return;
+    }
+
+    // Show loading state
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = `
+        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+        Generating...
+    `;
+    autoConfigStatus.textContent = 'Analyzing...';
+    autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger');
+    autoConfigStatus.classList.add('bg-secondary');
+
+    try {
+        const response = await fetch('/api/agents/auto-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description })
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to generate configuration');
+        }
+
+        const config = await response.json();
+
+        // Apply the configuration to form fields
+        applyAutoConfig(config);
+
+        // Show success status
+        autoConfigStatus.textContent = 'Applied!';
+        autoConfigStatus.classList.remove('bg-secondary');
+        autoConfigStatus.classList.add('bg-success');
+
+        // Show the auto-selected indicator
+        document.getElementById('autoSelectedIndicator').classList.remove('d-none');
+        studiosAutoConfigApplied = true;
+
+        // Log reasoning if available
+        if (config.reasoning) {
+            console.log('Auto-config reasoning:', config.reasoning);
+        }
+
+    } catch (error) {
+        console.error('Auto-config error:', error);
+        autoConfigStatus.textContent = 'Failed';
+        autoConfigStatus.classList.remove('bg-secondary');
+        autoConfigStatus.classList.add('bg-danger');
+        alert('Failed to generate configuration: ' + error.message);
+    } finally {
+        // Restore button
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+            </svg>
+            Generate Config
+        `;
+    }
+}
+
+/**
+ * Apply auto-generated config to form fields
+ */
+function applyAutoConfig(config) {
+    // Apply agent type
+    const typeSelect = document.getElementById('studios-new-agent-type');
+    if (typeSelect && config.agent_type) {
+        typeSelect.value = config.agent_type;
+        // Trigger change to update model list
+        typeSelect.dispatchEvent(new Event('change'));
+    }
+
+    // Apply model (need to wait a moment for model list to repopulate)
+    setTimeout(() => {
+        const modelSelect = document.getElementById('studios-new-agent-model');
+        if (modelSelect && config.model) {
+            // Try to find and select the model
+            for (let i = 0; i < modelSelect.options.length; i++) {
+                if (modelSelect.options[i].value === config.model) {
+                    modelSelect.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+    }, 100);
+
+    // Apply temperature
+    const tempSlider = document.getElementById('studios-new-agent-temperature');
+    const tempValue = document.getElementById('studios-new-agent-temperature-value');
+    if (tempSlider && config.temperature !== undefined) {
+        tempSlider.value = config.temperature;
+        if (tempValue) {
+            tempValue.textContent = config.temperature.toFixed(1);
+        }
+    }
+
+    // Apply system prompt
+    const promptTextarea = document.getElementById('studios-new-agent-prompt');
+    if (promptTextarea && config.system_prompt) {
+        promptTextarea.value = config.system_prompt;
+    }
+
+    // Add visual feedback - briefly highlight the changed fields
+    highlightAutoConfiguredFields();
+}
+
+/**
+ * Briefly highlight fields that were auto-configured
+ */
+function highlightAutoConfiguredFields() {
+    const fields = [
+        'studios-new-agent-type',
+        'studios-new-agent-model',
+        'studios-new-agent-temperature',
+        'studios-new-agent-prompt'
+    ];
+
+    fields.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.style.transition = 'box-shadow 0.3s ease';
+            element.style.boxShadow = '0 0 0 2px var(--primary-color)';
+            setTimeout(() => {
+                element.style.boxShadow = '';
+            }, 1500);
+        }
+    });
+}
+
+/**
  * Initialize agent modal event listeners
  */
 function initializeAgentModalListeners() {
+    // Config mode toggle listeners
+    const configModeManual = document.getElementById('configModeManual');
+    const configModeAuto = document.getElementById('configModeAuto');
+
+    if (configModeManual) {
+        configModeManual.addEventListener('change', function() {
+            if (this.checked) handleConfigModeChange('manual');
+        });
+    }
+
+    if (configModeAuto) {
+        configModeAuto.addEventListener('change', async function() {
+            if (this.checked) {
+                // Check LLM availability when switching to auto mode
+                await checkLLMAvailability();
+                handleConfigModeChange('auto');
+            }
+        });
+    }
+
+    // Generate auto-config button
+    const generateBtn = document.getElementById('generateAutoConfigBtn');
+    if (generateBtn) {
+        generateBtn.addEventListener('click', generateAutoConfig);
+    }
+
     // Update model dropdown when agent type changes
     const typeSelect = document.getElementById('studios-new-agent-type');
     if (typeSelect) {
@@ -320,6 +534,7 @@ function initializeAgentModalListeners() {
 
                 // Clear form and reload
                 createAgentForm.reset();
+                resetAutoConfigState();
                 await loadStudiosSystemAgents();
 
                 // Refresh workspace agents if function exists
@@ -347,6 +562,32 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/**
+ * Reset auto-config state (called when form is reset or modal closed)
+ */
+function resetAutoConfigState() {
+    studiosAutoConfigApplied = false;
+
+    const configModeManual = document.getElementById('configModeManual');
+    if (configModeManual) {
+        configModeManual.checked = true;
+    }
+
+    const autoConfigSection = document.getElementById('autoConfigSection');
+    const llmWarning = document.getElementById('llmNotAvailableWarning');
+    const configModeHelp = document.getElementById('configModeHelp');
+    const autoSelectedIndicator = document.getElementById('autoSelectedIndicator');
+    const autoConfigStatus = document.getElementById('autoConfigStatus');
+    const descriptionTextarea = document.getElementById('studios-auto-config-description');
+
+    if (autoConfigSection) autoConfigSection.classList.add('d-none');
+    if (llmWarning) llmWarning.classList.add('d-none');
+    if (configModeHelp) configModeHelp.classList.add('d-none');
+    if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
+    if (autoConfigStatus) autoConfigStatus.classList.add('d-none');
+    if (descriptionTextarea) descriptionTextarea.value = '';
+}
+
 // Export functions for global access
 window.openManageAgentsModal = openManageAgentsModal;
 window.loadStudiosSystemAgents = loadStudiosSystemAgents;
@@ -354,6 +595,9 @@ window.deleteStudiosSystemAgent = deleteStudiosSystemAgent;
 window.addAgentToSelectedWorkspace = addAgentToSelectedWorkspace;
 window.loadStudiosProviders = loadStudiosProviders;
 window.populateStudiosModelSelect = populateStudiosModelSelect;
+window.checkLLMAvailability = checkLLMAvailability;
+window.generateAutoConfig = generateAutoConfig;
+window.resetAutoConfigState = resetAutoConfigState;
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', initializeAgentModalListeners);

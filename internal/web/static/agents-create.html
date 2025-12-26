@@ -358,6 +358,60 @@
         <!-- Error Message -->
         <div id="errorMessage" class="error-message"></div>
 
+        <!-- Configuration Mode -->
+        <div class="form-card">
+            <h2 class="form-section-title">Configuration Mode</h2>
+            <div class="form-group">
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="btn-group" role="group" aria-label="Configuration mode toggle">
+                        <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeManual" value="manual" checked>
+                        <label class="btn btn-outline-secondary" for="createConfigModeManual">Manual</label>
+                        <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeAuto" value="auto">
+                        <label class="btn btn-outline-secondary" for="createConfigModeAuto">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                                <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
+                            </svg>
+                            Auto Configure
+                        </label>
+                    </div>
+                    <span id="createAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.75rem;"></span>
+                </div>
+                <div class="form-help">Choose Manual to set all options yourself, or Auto to generate configuration from a description.</div>
+            </div>
+
+            <!-- Auto-config Description (shown when Auto mode selected) -->
+            <div id="createAutoConfigSection" class="d-none">
+                <div class="form-group">
+                    <label class="form-label" for="createAutoConfigDescription">Describe Your Agent</label>
+                    <textarea id="createAutoConfigDescription" class="form-textarea" rows="3"
+                              placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements..."></textarea>
+                    <div class="form-help">Be specific about what tasks this agent should handle and what tools it needs.</div>
+                </div>
+                <button type="button" id="createGenerateAutoConfigBtn" class="btn btn-primary mb-3">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                    </svg>
+                    Generate Configuration
+                </button>
+            </div>
+
+            <!-- LLM Not Available Warning -->
+            <div id="createLlmNotAvailableWarning" class="alert alert-warning d-none" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+                </svg>
+                Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.
+            </div>
+
+            <!-- Auto-selected Indicator -->
+            <div id="createAutoSelectedIndicator" class="alert alert-info d-none" style="font-size: 0.875rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                    <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+                <strong>Auto-configured!</strong> Settings below were generated from your description. You can still adjust them manually.
+            </div>
+        </div>
+
         <!-- Basic Information -->
         <div class="form-card">
             <h2 class="form-section-title">Basic Information</h2>

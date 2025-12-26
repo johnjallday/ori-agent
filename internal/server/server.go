@@ -119,6 +119,7 @@ type Server struct {
 	modelCategoryStore    store.ModelCategoryStore
 	modelCategoryHandler  *modelcategoryhttp.Handler
 	resetHandler          *settingshttp.ResetHandler
+	autoConfigHandler     *agenthttp.AutoConfigHandler
 
 	// Session management
 	sessionStore   session.HybridStore
