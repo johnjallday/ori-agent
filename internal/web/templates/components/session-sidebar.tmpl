@@ -171,6 +171,19 @@
 
 <!-- Folder Context Menu -->
 <div id="folderContextMenu" class="session-context-menu" style="display: none;">
+  <button class="session-context-item" data-action="new-note">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
+    </svg>
+    New Note
+  </button>
+  <button class="session-context-item" data-action="paste-note" id="folderPasteNoteBtn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,20H5A2,2 0 0,1 3,18V6A2,2 0 0,1 5,4H9V2H15V4H19A2,2 0 0,1 21,6V18A2,2 0 0,1 19,20M12,7A5,5 0 0,0 7,12A5,5 0 0,0 12,17A5,5 0 0,0 17,12A5,5 0 0,0 12,7M12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15Z"/>
+    </svg>
+    Paste Note
+  </button>
+  <div class="session-context-divider"></div>
   <button class="session-context-item" data-action="rename">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
       <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -189,6 +202,42 @@
       <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
     </svg>
     Delete Folder
+  </button>
+</div>
+
+<!-- Note Context Menu -->
+<div id="noteContextMenu" class="session-context-menu" style="display: none;">
+  <button class="session-context-item" data-action="edit">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+    </svg>
+    Edit
+  </button>
+  <button class="session-context-item" data-action="rename">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M18,17H10.5L12.5,15H18M6,17V14.5L13.88,6.65C14.07,6.45 14.39,6.45 14.59,6.65L16.35,8.41C16.55,8.61 16.55,8.92 16.35,9.12L8.47,17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/>
+    </svg>
+    Rename
+  </button>
+  <div class="session-context-divider"></div>
+  <button class="session-context-item" data-action="copy">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+    </svg>
+    Copy
+  </button>
+  <button class="session-context-item" data-action="cut">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,3L13,9L15,11L22,4V3M12,12.5A0.5,0.5 0 0,1 11.5,12A0.5,0.5 0 0,1 12,11.5A0.5,0.5 0 0,1 12.5,12A0.5,0.5 0 0,1 12,12.5M6,20A2,2 0 0,1 4,18C4,16.89 4.9,16 6,16A2,2 0 0,1 8,18C8,19.11 7.1,20 6,20M6,8A2,2 0 0,1 4,6C4,4.89 4.9,4 6,4A2,2 0 0,1 8,6C8,7.11 7.1,8 6,8M9.64,7.64C9.87,7.14 10,6.59 10,6A4,4 0 0,0 6,2A4,4 0 0,0 2,6A4,4 0 0,0 6,10C6.59,10 7.14,9.87 7.64,9.64L10,12L7.64,14.36C7.14,14.13 6.59,14 6,14A4,4 0 0,0 2,18A4,4 0 0,0 6,22A4,4 0 0,0 10,18C10,17.41 9.87,16.86 9.64,16.36L12,14L19,21H22V20L9.64,7.64Z"/>
+    </svg>
+    Cut
+  </button>
+  <div class="session-context-divider"></div>
+  <button class="session-context-item session-context-danger" data-action="delete">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+    </svg>
+    Delete Note
   </button>
 </div>
 
@@ -278,6 +327,42 @@
         <div id="sessionInfoBody" class="session-info-list">
           <!-- Session info will be populated dynamically -->
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Note Editor Modal -->
+<div class="modal fade" id="noteEditorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <div class="d-flex align-items-center gap-2 flex-grow-1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
+          </svg>
+          <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title">
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="note-editor-toolbar">
+          <button type="button" id="notePreviewToggle" class="note-toolbar-btn" title="Toggle Preview">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+            </svg>
+            Preview
+          </button>
+        </div>
+        <div class="note-editor-container">
+          <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..."></textarea>
+          <div id="notePreviewContent" class="note-preview-content" style="display: none;"></div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <span id="noteLastSaved" class="text-muted me-auto" style="font-size: 12px;"></span>
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="saveNoteBtn" class="modern-btn modern-btn-primary">Save</button>
       </div>
     </div>
   </div>

@@ -72,6 +72,7 @@ const sessionManager = {
 
     this.loadCollapsedFolders();
     this.bindEvents();
+    this.bindNoteEvents();
     this.setupKeyboardShortcuts();
     this.initChatAgentBar();
     await this.loadSessions();
@@ -181,6 +182,7 @@ const sessionManager = {
     // Folder context menu actions
     document.querySelectorAll('#folderContextMenu .session-context-item').forEach(item => {
       item.addEventListener('click', (e) => {
+        e.stopPropagation();
         const action = e.currentTarget.dataset.action;
         this.handleFolderContextAction(action);
       });
@@ -218,6 +220,9 @@ const sessionManager = {
   },
 
   // Load sessions from API
+  // Store for note search results
+  noteSearchResults: [],
+
   async loadSessions() {
     this.isLoading = true;
     this.renderLoadingState();
@@ -236,14 +241,36 @@ const sessionManager = {
       const data = await response.json();
       this.sessions = data.sessions || [];
       this.reconcileSelection();
+
+      // Also search notes if there's a search query
+      if (this.searchQuery && this.searchQuery.trim()) {
+        await this.searchNotes(this.searchQuery);
+      } else {
+        this.noteSearchResults = [];
+      }
+
       this.renderSessions();
     } catch (error) {
       console.error('Failed to load sessions:', error);
       this.sessions = [];
+      this.noteSearchResults = [];
       this.clearSelection();
       this.renderEmptyState();
     } finally {
       this.isLoading = false;
+    }
+  },
+
+  // Search notes
+  async searchNotes(query) {
+    try {
+      const response = await fetch(`/api/notes/search?q=${encodeURIComponent(query)}`);
+      if (!response.ok) throw new Error('Failed to search notes');
+      const data = await response.json();
+      this.noteSearchResults = data.notes || [];
+    } catch (error) {
+      console.error('Failed to search notes:', error);
+      this.noteSearchResults = [];
     }
   },
 
@@ -255,10 +282,24 @@ const sessionManager = {
 
       const data = await response.json();
       this.folders = data.folders || [];
+
+      // Load notes for all folders
+      await this.loadAllFolderNotes(this.folders);
+
       this.renderFolderTree();
     } catch (error) {
       console.error('Failed to load folders:', error);
       this.folders = [];
+    }
+  },
+
+  // Load notes for all folders recursively
+  async loadAllFolderNotes(folders) {
+    for (const folder of folders) {
+      await this.loadFolderNotes(folder.id);
+      if (folder.children && folder.children.length > 0) {
+        await this.loadAllFolderNotes(folder.children);
+      }
     }
   },
 
@@ -287,7 +328,10 @@ const sessionManager = {
 
     if (loadingState) loadingState.style.display = 'none';
 
-    if (this.sessions.length === 0) {
+    const hasNotes = this.noteSearchResults.length > 0;
+    const hasSessions = this.sessions.length > 0;
+
+    if (!hasSessions && !hasNotes) {
       container.innerHTML = '';
       if (emptyState) emptyState.style.display = 'flex';
       return;
@@ -307,8 +351,12 @@ const sessionManager = {
 
     const rootSessions = folderGroups.get('') || [];
 
+    // Render note search results first (if searching)
+    const noteResultsHtml = this.searchQuery && hasNotes ? this.renderNoteSearchResults() : '';
+
     // Render root sessions with "No Folder" header
     container.innerHTML = `
+      ${noteResultsHtml}
       ${rootSessions.length > 0 ? this.renderRootHeader() : ''}
       ${rootSessions.map(session => this.renderSessionItem(session)).join('')}
     `;
@@ -321,6 +369,36 @@ const sessionManager = {
 
     this.bindSessionItemEvents(container);
     this.renderFolderTree();
+  },
+
+  // Render note search results
+  renderNoteSearchResults() {
+    if (this.noteSearchResults.length === 0) return '';
+
+    return `
+      <div class="search-notes-section">
+        <div class="search-notes-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
+          </svg>
+          <span>Notes (${this.noteSearchResults.length})</span>
+        </div>
+        <div class="search-notes-list">
+          ${this.noteSearchResults.map(note => `
+            <div class="search-note-result" data-note-id="${note.id}">
+              <svg class="search-note-result-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
+              </svg>
+              <div class="search-note-result-content">
+                <div class="search-note-result-title">${this.escapeHtml(note.name)}</div>
+                ${note.folder_name ? `<div class="search-note-result-folder">${this.escapeHtml(note.folder_name)}</div>` : ''}
+                ${note.snippets && note.snippets.length > 0 ? `<div class="search-note-result-snippet">${note.snippets[0]}</div>` : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
   },
 
   // Render a single session item
@@ -401,6 +479,22 @@ const sessionManager = {
         e.preventDefault();
         e.stopPropagation();
         item.classList.remove('drag-over');
+
+        // Check if it's a note being dropped
+        const noteId = e.dataTransfer.getData('application/x-ori-note-id');
+        const sourceFolderId = e.dataTransfer.getData('application/x-ori-note-folder');
+        if (noteId && sourceFolderId !== folderId) {
+          const moved = await this.moveNoteToFolder(noteId, folderId);
+          if (moved) {
+            item.classList.add('drop-success');
+            setTimeout(() => item.classList.remove('drop-success'), 700);
+            const folderName = item.querySelector('.folder-name')?.textContent?.trim();
+            this.showToast(`Note moved to ${folderName}`, 'success');
+          }
+          return;
+        }
+
+        // Otherwise check for sessions
         const sessionIds = this.getDraggedSessionIds(e);
         if (sessionIds.length > 0) {
           const moved = await this.moveSessionsToFolder(sessionIds, folderId);
@@ -439,6 +533,10 @@ const sessionManager = {
       const accentStyles = hasAccent
         ? `data-has-accent="true" style="padding-left: ${16 + depth * 16}px; --folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
         : `style="padding-left: ${16 + depth * 16}px;"`;
+      // Get notes for this folder
+      const folderNotes = this.notesByFolder?.get(folder.id) || [];
+      const hasContent = folderSessions.length > 0 || folderNotes.length > 0;
+
       const sessionsHtml = folderSessions.length > 0
         ? `
           <div class="folder-sessions ${isCollapsed ? 'collapsed' : ''}" ${accentStyles}>
@@ -447,11 +545,26 @@ const sessionManager = {
         `
         : '';
 
+      const notesHtml = folderNotes.length > 0
+        ? `
+          <div class="folder-notes-section ${isCollapsed ? 'collapsed' : ''}" style="padding-left: ${16 + depth * 16}px;">
+            ${folderNotes.map(note => `
+              <div class="folder-note-item" data-note-id="${note.id}" data-folder-id="${folder.id}" draggable="true">
+                <svg class="folder-note-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
+                </svg>
+                <span class="folder-note-name">${this.escapeHtml(note.name)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `
+        : '';
+
       const folderTitle = folder.description ? this.escapeHtml(folder.description) : folder.name;
       return `
         <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;" title="${folderTitle}">
-          ${hasNestedSessions ? `
-            <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show sessions' : 'Hide sessions'}">
+          ${hasContent ? `
+            <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show content' : 'Hide content'}">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
               </svg>
@@ -463,6 +576,7 @@ const sessionManager = {
           <span class="folder-name">${this.escapeHtml(folder.name)}</span>
           ${folder.session_count > 0 ? `<span class="folder-count">${folder.session_count}</span>` : ''}
         </div>
+        ${notesHtml}
         ${sessionsHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
@@ -1237,8 +1351,10 @@ const sessionManager = {
   hideContextMenus() {
     const sessionMenu = document.getElementById('sessionContextMenu');
     const folderMenu = document.getElementById('folderContextMenu');
+    const noteMenu = document.getElementById('noteContextMenu');
     if (sessionMenu) sessionMenu.style.display = 'none';
     if (folderMenu) folderMenu.style.display = 'none';
+    if (noteMenu) noteMenu.style.display = 'none';
     this.contextMenuTarget = null;
     this.contextMenuType = null;
   },
@@ -1277,6 +1393,12 @@ const sessionManager = {
     this.hideContextMenus();
 
     switch (action) {
+      case 'new-note':
+        this.createNewNoteForFolder(folderId);
+        break;
+      case 'paste-note':
+        this.pasteNoteToFolder(folderId);
+        break;
       case 'rename':
         this.startFolderRename(folderId);
         break;
@@ -2033,6 +2155,559 @@ const sessionManager = {
       if (match) return match;
     }
     return null;
+  },
+
+  // ============================================================================
+  // Utilities
+  // ============================================================================
+
+  // Show toast notification
+  showToast(message, type = 'info') {
+    // Use global showToast if available, otherwise console log
+    if (typeof window.showToast === 'function') {
+      window.showToast(message, type);
+    } else {
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+  },
+
+  // ============================================================================
+  // Folder Notes
+  // ============================================================================
+
+  // Notes state (keyed by folder ID)
+  notesByFolder: new Map(),
+  currentNote: null,
+  isNotePreviewMode: false,
+
+  // Load notes for a folder
+  async loadFolderNotes(folderId) {
+    try {
+      const response = await fetch(`/api/folders/${folderId}/notes`);
+      if (!response.ok) throw new Error('Failed to load notes');
+      const data = await response.json();
+      this.notesByFolder.set(folderId, data.notes || []);
+      return data.notes || [];
+    } catch (error) {
+      console.error('Failed to load folder notes:', error);
+      return [];
+    }
+  },
+
+  // Create a new note in a folder
+  async createNote(folderId, name = 'Untitled Note', content = '') {
+    try {
+      const response = await fetch(`/api/folders/${folderId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, content })
+      });
+      if (!response.ok) throw new Error('Failed to create note');
+      const data = await response.json();
+
+      // Add to local cache
+      const notes = this.notesByFolder.get(folderId) || [];
+      notes.unshift(data.note);
+      this.notesByFolder.set(folderId, notes);
+
+      // Refresh folder tree to show new note
+      this.renderFolderTree();
+
+      return data.note;
+    } catch (error) {
+      console.error('Failed to create note:', error);
+      this.showToast('Failed to create note', 'error');
+      return null;
+    }
+  },
+
+  // Update a note
+  async updateNote(noteId, updates) {
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      if (!response.ok) throw new Error('Failed to update note');
+      const data = await response.json();
+
+      // Update local cache
+      for (const [folderId, notes] of this.notesByFolder) {
+        const index = notes.findIndex(n => n.id === noteId);
+        if (index !== -1) {
+          notes[index] = { ...notes[index], ...data.note };
+          break;
+        }
+      }
+
+      return data.note;
+    } catch (error) {
+      console.error('Failed to update note:', error);
+      this.showToast('Failed to save note', 'error');
+      return null;
+    }
+  },
+
+  // Delete a note
+  async deleteNote(noteId) {
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to delete note');
+
+      // Remove from local cache
+      for (const [folderId, notes] of this.notesByFolder) {
+        const index = notes.findIndex(n => n.id === noteId);
+        if (index !== -1) {
+          notes.splice(index, 1);
+          break;
+        }
+      }
+
+      // Refresh folder tree
+      this.renderFolderTree();
+
+      this.showToast('Note deleted', 'success');
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      this.showToast('Failed to delete note', 'error');
+    }
+  },
+
+  // Move a note to a different folder
+  async moveNoteToFolder(noteId, targetFolderId) {
+    try {
+      const response = await fetch(`/api/notes/${noteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_id: targetFolderId })
+      });
+      if (!response.ok) throw new Error('Failed to move note');
+
+      // Refresh folder data
+      await this.loadFolders();
+      return true;
+    } catch (error) {
+      console.error('Failed to move note:', error);
+      this.showToast('Failed to move note', 'error');
+      return false;
+    }
+  },
+
+  // Copy note to clipboard
+  copyNoteToClipboard(noteId, folderId) {
+    this.clipboardNote = { noteId, folderId };
+    this.clipboardAction = 'copy';
+    this.showToast('Note copied', 'info');
+  },
+
+  // Cut note to clipboard
+  cutNoteToClipboard(noteId, folderId) {
+    this.clipboardNote = { noteId, folderId };
+    this.clipboardAction = 'cut';
+    this.showToast('Note cut', 'info');
+  },
+
+  // Paste note from clipboard to folder
+  async pasteNoteToFolder(targetFolderId) {
+    if (!this.clipboardNote) {
+      this.showToast('Nothing to paste', 'error');
+      return;
+    }
+
+    const { noteId, folderId: sourceFolderId } = this.clipboardNote;
+
+    if (this.clipboardAction === 'cut') {
+      // Move the note
+      if (sourceFolderId !== targetFolderId) {
+        await this.moveNoteToFolder(noteId, targetFolderId);
+      }
+      this.clipboardNote = null;
+      this.clipboardAction = null;
+    } else {
+      // Copy - create a duplicate
+      try {
+        // Get the original note
+        const note = await this.getNote(noteId);
+        if (!note) throw new Error('Note not found');
+
+        // Create a copy in the target folder
+        await this.createNote(targetFolderId, `${note.name} (copy)`, note.content);
+        this.showToast('Note pasted', 'success');
+      } catch (error) {
+        console.error('Failed to paste note:', error);
+        this.showToast('Failed to paste note', 'error');
+      }
+    }
+  },
+
+  // Get a note by ID
+  async getNote(noteId) {
+    try {
+      const response = await fetch(`/api/notes/${noteId}`);
+      if (!response.ok) throw new Error('Failed to get note');
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to get note:', error);
+      return null;
+    }
+  },
+
+  // Render notes in a folder's tree item
+  renderFolderNotes(folderId) {
+    const notes = this.notesByFolder.get(folderId) || [];
+    if (notes.length === 0) return '';
+
+    return `
+      <div class="folder-notes-section">
+        ${notes.map(note => `
+          <div class="folder-note-item" data-note-id="${note.id}" data-folder-id="${folderId}" draggable="true">
+            <svg class="folder-note-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
+            </svg>
+            <span class="folder-note-name">${this.escapeHtml(note.name)}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  },
+
+  // Clipboard for copy/paste
+  clipboardNote: null,
+  clipboardAction: null, // 'copy' or 'cut'
+
+  // Bind note events
+  bindNoteEvents() {
+    // Note click to open editor (folder tree items)
+    document.addEventListener('click', (e) => {
+      const noteItem = e.target.closest('.folder-note-item');
+      if (noteItem) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = noteItem.dataset.noteId;
+        this.openNoteEditor(noteId);
+      }
+
+      // Search result note click
+      const searchNoteItem = e.target.closest('.search-note-result');
+      if (searchNoteItem) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = searchNoteItem.dataset.noteId;
+        this.openNoteEditor(noteId);
+      }
+    });
+
+    // Note context menu
+    document.addEventListener('contextmenu', (e) => {
+      const noteItem = e.target.closest('.folder-note-item');
+      if (noteItem) {
+        e.preventDefault();
+        e.stopPropagation();
+        const noteId = noteItem.dataset.noteId;
+        const folderId = noteItem.dataset.folderId;
+        this.showNoteContextMenu(e, noteId, folderId);
+      }
+    });
+
+    // Note context menu actions
+    document.querySelectorAll('#noteContextMenu .session-context-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = e.currentTarget.dataset.action;
+        this.handleNoteContextAction(action);
+      });
+    });
+
+    // Note editor save button
+    document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
+
+    // Note preview toggle
+    document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
+
+    // Note drag start
+    document.addEventListener('dragstart', (e) => {
+      const noteItem = e.target.closest('.folder-note-item');
+      if (noteItem) {
+        const noteId = noteItem.dataset.noteId;
+        const folderId = noteItem.dataset.folderId;
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('application/x-ori-note-id', noteId);
+        e.dataTransfer.setData('application/x-ori-note-folder', folderId);
+        e.dataTransfer.setData('text/plain', noteId);
+        noteItem.classList.add('dragging');
+      }
+    });
+
+    // Note drag end
+    document.addEventListener('dragend', (e) => {
+      const noteItem = e.target.closest('.folder-note-item');
+      if (noteItem) {
+        noteItem.classList.remove('dragging');
+        document.querySelectorAll('.folder-item').forEach(f => f.classList.remove('drag-over'));
+      }
+    });
+  },
+
+  // Show note context menu
+  showNoteContextMenu(event, noteId, folderId) {
+    this.hideContextMenus();
+    this.contextMenuTarget = noteId;
+    this.contextMenuFolderId = folderId;
+    this.contextMenuType = 'note';
+
+    const menu = document.getElementById('noteContextMenu');
+    if (!menu) return;
+
+    menu.style.display = 'block';
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+
+    // Ensure menu stays in viewport
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+    }
+  },
+
+  // Handle note context menu action
+  handleNoteContextAction(action) {
+    const noteId = this.contextMenuTarget;
+    const folderId = this.contextMenuFolderId;
+    this.hideContextMenus();
+
+    switch (action) {
+      case 'edit':
+        this.openNoteEditor(noteId);
+        break;
+      case 'rename':
+        this.promptRenameNote(noteId);
+        break;
+      case 'copy':
+        this.copyNoteToClipboard(noteId, folderId);
+        break;
+      case 'cut':
+        this.cutNoteToClipboard(noteId, folderId);
+        break;
+      case 'delete':
+        this.confirmDeleteNote(noteId);
+        break;
+    }
+  },
+
+  // Open note editor modal
+  async openNoteEditor(noteId) {
+    const note = await this.getNote(noteId);
+    if (!note) return;
+
+    this.currentNote = note;
+    this.isNotePreviewMode = false;
+
+    const modal = document.getElementById('noteEditorModal');
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+    const previewContent = document.getElementById('notePreviewContent');
+    const previewToggle = document.getElementById('notePreviewToggle');
+    const lastSaved = document.getElementById('noteLastSaved');
+
+    if (nameInput) nameInput.value = note.name;
+    if (contentInput) {
+      contentInput.value = note.content;
+      contentInput.style.display = 'block';
+    }
+    if (previewContent) previewContent.style.display = 'none';
+    if (previewToggle) previewToggle.classList.remove('active');
+    if (lastSaved) {
+      lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
+    }
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+  },
+
+  // Create new note for folder (called from folder context menu)
+  async createNewNoteForFolder(folderId) {
+    const note = await this.createNote(folderId, 'Untitled Note', '');
+    if (note) {
+      this.openNoteEditor(note.id);
+    }
+  },
+
+  // Save current note
+  async saveCurrentNote() {
+    if (!this.currentNote) return;
+
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+
+    const updates = {
+      name: nameInput?.value || 'Untitled Note',
+      content: contentInput?.value || ''
+    };
+
+    const updated = await this.updateNote(this.currentNote.id, updates);
+    if (updated) {
+      this.currentNote = { ...this.currentNote, ...updated };
+      this.showToast('Note saved', 'success');
+
+      // Refresh folder tree to show updated note name
+      this.renderFolderTree();
+
+      // Close the modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
+      modal?.hide();
+    }
+  },
+
+  // Expand @notename references in a message with note content
+  // Returns the message with note references expanded
+  async expandNoteReferences(message) {
+    // Get current session's folder
+    const session = this.getActiveSession();
+    if (!session?.folder_id) {
+      return message; // No folder, return as-is
+    }
+
+    // Get notes for this folder
+    const notes = this.notesByFolder.get(session.folder_id) || [];
+    if (notes.length === 0) {
+      return message; // No notes, return as-is
+    }
+
+    // Find @notename patterns (matches @word or @"phrase with spaces")
+    const noteRefPattern = /@(\w+)|@"([^"]+)"/g;
+    let expandedMessage = message;
+    let match;
+
+    while ((match = noteRefPattern.exec(message)) !== null) {
+      const noteName = match[1] || match[2]; // Either simple word or quoted phrase
+      const fullMatch = match[0];
+
+      // Find note by name (case-insensitive)
+      const note = notes.find(n => n.name.toLowerCase() === noteName.toLowerCase());
+
+      if (note) {
+        // Fetch full note content if we only have preview
+        let noteContent = note.content;
+        if (!noteContent) {
+          try {
+            const response = await fetch(`/api/notes/${note.id}`);
+            if (response.ok) {
+              const fullNote = await response.json();
+              noteContent = fullNote.content || '';
+            }
+          } catch (e) {
+            console.error('Failed to fetch note content:', e);
+          }
+        }
+
+        if (noteContent) {
+          // Replace the reference with the note content (formatted for clarity)
+          expandedMessage = expandedMessage.replace(
+            fullMatch,
+            `\n\n---\n📝 **Note: ${note.name}**\n\n${noteContent}\n\n---\n\n`
+          );
+        }
+      }
+    }
+
+    return expandedMessage;
+  },
+
+  // Toggle preview mode
+  toggleNotePreview() {
+    this.isNotePreviewMode = !this.isNotePreviewMode;
+
+    const contentInput = document.getElementById('noteContentInput');
+    const previewContent = document.getElementById('notePreviewContent');
+    const previewToggle = document.getElementById('notePreviewToggle');
+
+    if (this.isNotePreviewMode) {
+      contentInput.style.display = 'none';
+      previewContent.style.display = 'block';
+      previewToggle.classList.add('active');
+
+      // Simple markdown rendering (basic)
+      const markdown = contentInput.value;
+      previewContent.innerHTML = this.renderMarkdown(markdown);
+    } else {
+      contentInput.style.display = 'block';
+      previewContent.style.display = 'none';
+      previewToggle.classList.remove('active');
+    }
+  },
+
+  // Simple markdown renderer (basic implementation)
+  renderMarkdown(text) {
+    if (!text) return '<p style="color: var(--text-tertiary);">No content</p>';
+
+    let html = this.escapeHtml(text);
+
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+    // Bold and italic
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Code blocks
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Lists
+    html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+    // Blockquotes
+    html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
+
+    // Paragraphs
+    html = html.replace(/\n\n/g, '</p><p>');
+    html = '<p>' + html + '</p>';
+
+    // Clean up empty paragraphs
+    html = html.replace(/<p><\/p>/g, '');
+    html = html.replace(/<p>(<h[1-6]>)/g, '$1');
+    html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<ul>)/g, '$1');
+    html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<pre>)/g, '$1');
+    html = html.replace(/(<\/pre>)<\/p>/g, '$1');
+    html = html.replace(/<p>(<blockquote>)/g, '$1');
+    html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
+
+    return html;
+  },
+
+  // Prompt to rename note
+  async promptRenameNote(noteId) {
+    // Find the note
+    let note = null;
+    for (const [folderId, notes] of this.notesByFolder) {
+      note = notes.find(n => n.id === noteId);
+      if (note) break;
+    }
+    if (!note) return;
+
+    const newName = prompt('Enter new note name:', note.name);
+    if (newName && newName.trim() && newName !== note.name) {
+      await this.updateNote(noteId, { name: newName.trim() });
+      this.renderFolderTree();
+    }
+  },
+
+  // Confirm delete note
+  async confirmDeleteNote(noteId) {
+    if (confirm('Are you sure you want to delete this note?')) {
+      await this.deleteNote(noteId);
+    }
   }
 };
 

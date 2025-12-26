@@ -673,8 +673,13 @@ function hideTypingIndicator() {
 async function sendMessage(message) {
   if (isWaitingForResponse) return;
 
-  const trimmedMessage = message.trim();
+  let trimmedMessage = message.trim();
   if (!trimmedMessage) return;
+
+  // Expand @notename references if sessionManager is available
+  if (window.sessionManager?.expandNoteReferences) {
+    trimmedMessage = await window.sessionManager.expandNoteReferences(trimmedMessage);
+  }
 
   // Add to history
   promptHistory.unshift(trimmedMessage);

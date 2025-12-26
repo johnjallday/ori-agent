@@ -142,6 +142,51 @@ type Tag struct {
 	UsageCount int `json:"usage_count"`
 }
 
+// FolderNote represents a markdown note attached to a folder.
+// Notes provide context and documentation that can be accessed
+// by all sessions within the folder.
+type FolderNote struct {
+	// ID is a unique identifier for the note (UUID format).
+	ID string `json:"id"`
+
+	// FolderID is the folder this note belongs to.
+	FolderID string `json:"folder_id"`
+
+	// Name is the display name of the note.
+	Name string `json:"name"`
+
+	// Content is the markdown content of the note.
+	Content string `json:"content"`
+
+	// CreatedAt is when the note was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the note was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// FolderNoteListItem is a lightweight representation of a note for list views.
+// It omits the full content to reduce payload size.
+type FolderNoteListItem struct {
+	ID        string    `json:"id"`
+	FolderID  string    `json:"folder_id"`
+	Name      string    `json:"name"`
+	Preview   string    `json:"preview,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NoteSearchResult contains a note with search match context.
+type NoteSearchResult struct {
+	FolderNoteListItem
+
+	// FolderName is the name of the folder containing this note.
+	FolderName string `json:"folder_name,omitempty"`
+
+	// Snippets are text excerpts showing where the search matched.
+	Snippets []string `json:"snippets,omitempty"`
+}
+
 // SessionListItem is a lightweight representation of a session for list views.
 // It omits the full message content to reduce payload size.
 type SessionListItem struct {

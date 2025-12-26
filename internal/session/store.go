@@ -10,6 +10,7 @@ var (
 	ErrSessionNotFound = errors.New("session not found")
 	ErrFolderNotFound  = errors.New("folder not found")
 	ErrMessageNotFound = errors.New("message not found")
+	ErrNoteNotFound    = errors.New("note not found")
 	ErrInvalidID       = errors.New("invalid ID format")
 	ErrDuplicateID     = errors.New("duplicate ID")
 )
@@ -93,7 +94,34 @@ type FolderStore interface {
 	GetSubfolderIDs(ctx context.Context, folderID string) ([]string, error)
 }
 
-// HybridStore combines SessionStore and FolderStore with caching capabilities.
+// NoteStore defines the interface for folder note persistence operations.
+type NoteStore interface {
+	// CreateNote creates a new folder note.
+	// The note ID must be pre-populated with a valid UUID.
+	CreateNote(ctx context.Context, note *FolderNote) error
+
+	// GetNote retrieves a note by ID.
+	// Returns ErrNoteNotFound if the note doesn't exist.
+	GetNote(ctx context.Context, id string) (*FolderNote, error)
+
+	// UpdateNote updates note metadata and content.
+	// Returns ErrNoteNotFound if the note doesn't exist.
+	UpdateNote(ctx context.Context, note *FolderNote) error
+
+	// DeleteNote removes a note.
+	// Returns ErrNoteNotFound if the note doesn't exist.
+	DeleteNote(ctx context.Context, id string) error
+
+	// ListNotesByFolder returns all notes in a folder.
+	// Notes are returned without full content for efficiency.
+	ListNotesByFolder(ctx context.Context, folderID string) ([]FolderNoteListItem, error)
+
+	// SearchNotes performs full-text search across note names and content.
+	// Returns results with matching text snippets for display.
+	SearchNotes(ctx context.Context, query string, limit int) ([]NoteSearchResult, error)
+}
+
+// HybridStore combines SessionStore, FolderStore, and NoteStore with caching capabilities.
 // It provides the primary interface for session management with:
 //   - In-memory LRU cache for active sessions
 //   - SQLite persistence for durability
@@ -101,6 +129,7 @@ type FolderStore interface {
 type HybridStore interface {
 	SessionStore
 	FolderStore
+	NoteStore
 
 	// TouchSession marks a session as recently accessed.
 	// This updates its position in the LRU cache.

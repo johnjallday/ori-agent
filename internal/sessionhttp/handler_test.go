@@ -657,3 +657,416 @@ func TestHandler_CacheStats(t *testing.T) {
 		t.Errorf("Expected cache size of 5, got %d", size)
 	}
 }
+
+// FolderNote Handler Tests
+
+// createTestFolder creates a folder and returns its ID.
+func createTestFolder(t *testing.T, handler *Handler, name string) string {
+	t.Helper()
+	body := `{"name": "` + name + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/folders", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleFolders(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Failed to create folder: %d - %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	folder := resp["folder"].(map[string]interface{})
+	return folder["id"].(string)
+}
+
+// TestHandler_CreateNote tests creating a note via POST /api/notes.
+func TestHandler_CreateNote(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Test Folder")
+
+	body := `{"folder_id": "` + folderID + `", "name": "Test Note", "content": "Note content here"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if !resp["success"].(bool) {
+		t.Error("Expected success to be true")
+	}
+
+	note := resp["note"].(map[string]interface{})
+	if note["name"] != "Test Note" {
+		t.Errorf("Expected name 'Test Note', got '%v'", note["name"])
+	}
+	if note["content"] != "Note content here" {
+		t.Errorf("Expected content 'Note content here', got '%v'", note["content"])
+	}
+	if note["id"] == nil || note["id"] == "" {
+		t.Error("Expected note ID to be set")
+	}
+}
+
+// TestHandler_CreateNoteMissingFolderID tests that folder_id is required.
+func TestHandler_CreateNoteMissingFolderID(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	body := `{"name": "Test Note", "content": "Content"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+// TestHandler_CreateNoteInFolder tests creating a note via POST /api/folders/{id}/notes.
+func TestHandler_CreateNoteInFolder(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Notes Folder")
+
+	body := `{"name": "Folder Note", "content": "Content in folder"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/folders/"+folderID+"/notes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleFolderNotes(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	note := resp["note"].(map[string]interface{})
+	if note["folder_id"] != folderID {
+		t.Errorf("Expected folder_id '%s', got '%v'", folderID, note["folder_id"])
+	}
+}
+
+// TestHandler_GetNote tests retrieving a note by ID.
+func TestHandler_GetNote(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Get Note Folder")
+
+	// Create a note
+	createBody := `{"folder_id": "` + folderID + `", "name": "Get Me", "content": "Find me"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	handler.HandleNotes(createW, createReq)
+
+	var createResp map[string]interface{}
+	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	note := createResp["note"].(map[string]interface{})
+	noteID := note["id"].(string)
+
+	// Get the note
+	getReq := httptest.NewRequest(http.MethodGet, "/api/notes/"+noteID, nil)
+	getW := httptest.NewRecorder()
+	handler.HandleNotes(getW, getReq)
+
+	if getW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var getResp map[string]interface{}
+	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	if getResp["name"] != "Get Me" {
+		t.Errorf("Expected name 'Get Me', got '%v'", getResp["name"])
+	}
+	if getResp["content"] != "Find me" {
+		t.Errorf("Expected content 'Find me', got '%v'", getResp["content"])
+	}
+}
+
+// TestHandler_GetNoteNotFound tests 404 for non-existent note.
+func TestHandler_GetNoteNotFound(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notes/non-existent-id", nil)
+	w := httptest.NewRecorder()
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+// TestHandler_UpdateNote tests updating note metadata.
+func TestHandler_UpdateNote(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Update Folder")
+
+	// Create a note
+	createBody := `{"folder_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	handler.HandleNotes(createW, createReq)
+
+	var createResp map[string]interface{}
+	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	note := createResp["note"].(map[string]interface{})
+	noteID := note["id"].(string)
+
+	// Update the note
+	updateBody := `{"name": "Updated Name", "content": "Updated content"}`
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/notes/"+noteID, bytes.NewBufferString(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateW := httptest.NewRecorder()
+	handler.HandleNotes(updateW, updateReq)
+
+	if updateW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+
+	var updateResp map[string]interface{}
+	json.Unmarshal(updateW.Body.Bytes(), &updateResp)
+	updatedNote := updateResp["note"].(map[string]interface{})
+	if updatedNote["name"] != "Updated Name" {
+		t.Errorf("Expected name 'Updated Name', got '%v'", updatedNote["name"])
+	}
+	if updatedNote["content"] != "Updated content" {
+		t.Errorf("Expected content 'Updated content', got '%v'", updatedNote["content"])
+	}
+}
+
+// TestHandler_UpdateNotePartial tests partial note updates.
+func TestHandler_UpdateNotePartial(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Partial Update Folder")
+
+	// Create a note
+	createBody := `{"folder_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	handler.HandleNotes(createW, createReq)
+
+	var createResp map[string]interface{}
+	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	note := createResp["note"].(map[string]interface{})
+	noteID := note["id"].(string)
+
+	// Update only the name
+	updateBody := `{"name": "New Name Only"}`
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/notes/"+noteID, bytes.NewBufferString(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateW := httptest.NewRecorder()
+	handler.HandleNotes(updateW, updateReq)
+
+	if updateW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", updateW.Code)
+	}
+
+	var updateResp map[string]interface{}
+	json.Unmarshal(updateW.Body.Bytes(), &updateResp)
+	updatedNote := updateResp["note"].(map[string]interface{})
+	if updatedNote["name"] != "New Name Only" {
+		t.Errorf("Expected name 'New Name Only', got '%v'", updatedNote["name"])
+	}
+	if updatedNote["content"] != "Original content" {
+		t.Errorf("Expected content to remain 'Original content', got '%v'", updatedNote["content"])
+	}
+}
+
+// TestHandler_DeleteNote tests note deletion.
+func TestHandler_DeleteNote(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Delete Folder")
+
+	// Create a note
+	createBody := `{"folder_id": "` + folderID + `", "name": "To Delete"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+	handler.HandleNotes(createW, createReq)
+
+	var createResp map[string]interface{}
+	json.Unmarshal(createW.Body.Bytes(), &createResp)
+	note := createResp["note"].(map[string]interface{})
+	noteID := note["id"].(string)
+
+	// Delete the note
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/notes/"+noteID, nil)
+	deleteW := httptest.NewRecorder()
+	handler.HandleNotes(deleteW, deleteReq)
+
+	if deleteW.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d", deleteW.Code)
+	}
+
+	// Verify deletion
+	getReq := httptest.NewRequest(http.MethodGet, "/api/notes/"+noteID, nil)
+	getW := httptest.NewRecorder()
+	handler.HandleNotes(getW, getReq)
+
+	if getW.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404 after deletion, got %d", getW.Code)
+	}
+}
+
+// TestHandler_ListNotesByFolder tests listing notes in a folder.
+func TestHandler_ListNotesByFolder(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "List Folder")
+
+	// Create multiple notes
+	for i := 0; i < 3; i++ {
+		body := `{"folder_id": "` + folderID + `", "name": "Note"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.HandleNotes(w, req)
+	}
+
+	// List notes
+	listReq := httptest.NewRequest(http.MethodGet, "/api/folders/"+folderID+"/notes", nil)
+	listW := httptest.NewRecorder()
+	handler.HandleFolderNotes(listW, listReq)
+
+	if listW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", listW.Code)
+	}
+
+	var listResp map[string]interface{}
+	json.Unmarshal(listW.Body.Bytes(), &listResp)
+
+	notes := listResp["notes"].([]interface{})
+	if len(notes) != 3 {
+		t.Errorf("Expected 3 notes, got %d", len(notes))
+	}
+}
+
+// TestHandler_SearchNotes tests note search functionality.
+func TestHandler_SearchNotes(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Search Folder")
+
+	// Create notes with specific content
+	notes := []struct {
+		name    string
+		content string
+	}{
+		{"Meeting Notes", "Discussed quarterly planning"},
+		{"Ideas", "New feature ideas for the product"},
+		{"Project Plan", "Timeline for Q2 deliverables"},
+	}
+
+	for _, n := range notes {
+		body := `{"folder_id": "` + folderID + `", "name": "` + n.name + `", "content": "` + n.content + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.HandleNotes(w, req)
+	}
+
+	// Wait for FTS indexing
+	time.Sleep(50 * time.Millisecond)
+
+	// Search for "feature"
+	searchReq := httptest.NewRequest(http.MethodGet, "/api/notes/search?q=feature", nil)
+	searchW := httptest.NewRecorder()
+	handler.HandleNotes(searchW, searchReq)
+
+	if searchW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d: %s", searchW.Code, searchW.Body.String())
+	}
+
+	var searchResp map[string]interface{}
+	json.Unmarshal(searchW.Body.Bytes(), &searchResp)
+
+	results := searchResp["notes"].([]interface{})
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result for 'feature' search, got %d", len(results))
+	}
+
+	if len(results) > 0 {
+		result := results[0].(map[string]interface{})
+		if result["name"] != "Ideas" {
+			t.Errorf("Expected 'Ideas' note, got '%v'", result["name"])
+		}
+	}
+}
+
+// TestHandler_SearchNotesEmpty tests search with no query.
+func TestHandler_SearchNotesEmpty(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/api/notes/search", nil)
+	searchW := httptest.NewRecorder()
+	handler.HandleNotes(searchW, searchReq)
+
+	if searchW.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", searchW.Code)
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(searchW.Body.Bytes(), &resp)
+
+	notes := resp["notes"].([]interface{})
+	if len(notes) != 0 {
+		t.Errorf("Expected empty results for empty query, got %d", len(notes))
+	}
+}
+
+// TestHandler_CreateNoteDefaultName tests that notes get default name.
+func TestHandler_CreateNoteDefaultName(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	folderID := createTestFolder(t, handler, "Default Name Folder")
+
+	// Create note without name
+	body := `{"folder_id": "` + folderID + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleNotes(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("Expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	note := resp["note"].(map[string]interface{})
+	if note["name"] != "Untitled Note" {
+		t.Errorf("Expected default name 'Untitled Note', got '%v'", note["name"])
+	}
+}

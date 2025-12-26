@@ -62,6 +62,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 	switch version {
 	case 1:
 		return db.migration001InitialSchema(ctx)
+	case 2:
+		return db.migration002FolderNotes(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -218,4 +220,73 @@ func (db *DB) GetSchemaVersion(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	return version, nil
+}
+
+// migration002FolderNotes adds folder notes table and FTS support.
+func (db *DB) migration002FolderNotes(ctx context.Context) error {
+	// Create folder_notes table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS folder_notes (
+			id TEXT PRIMARY KEY,
+			folder_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			content TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create folder_notes table: %w", err)
+	}
+
+	// Create indexes for folder_notes
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_folder_notes_folder_id ON folder_notes(folder_id)",
+		"CREATE INDEX IF NOT EXISTS idx_folder_notes_updated_at ON folder_notes(updated_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_folder_notes_name ON folder_notes(name)",
+	}
+
+	for _, idx := range indexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
+	// Create FTS5 virtual table for folder notes full-text search
+	if _, err := db.ExecContext(ctx, `
+		CREATE VIRTUAL TABLE IF NOT EXISTS folder_notes_fts USING fts5(
+			note_id,
+			name,
+			content,
+			tokenize='porter unicode61'
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create folder notes FTS table: %w", err)
+	}
+
+	// Create triggers to keep FTS index in sync
+	triggers := []string{
+		// Insert trigger for notes
+		`CREATE TRIGGER IF NOT EXISTS folder_notes_ai AFTER INSERT ON folder_notes BEGIN
+			INSERT INTO folder_notes_fts(note_id, name, content) VALUES (new.id, new.name, new.content);
+		END`,
+
+		// Update trigger for notes
+		`CREATE TRIGGER IF NOT EXISTS folder_notes_au AFTER UPDATE ON folder_notes BEGIN
+			UPDATE folder_notes_fts SET name = new.name, content = new.content WHERE note_id = old.id;
+		END`,
+
+		// Delete trigger for notes
+		`CREATE TRIGGER IF NOT EXISTS folder_notes_ad AFTER DELETE ON folder_notes BEGIN
+			DELETE FROM folder_notes_fts WHERE note_id = old.id;
+		END`,
+	}
+
+	for _, trigger := range triggers {
+		if _, err := db.ExecContext(ctx, trigger); err != nil {
+			return fmt.Errorf("failed to create trigger: %w", err)
+		}
+	}
+
+	return nil
 }

@@ -457,3 +457,382 @@ func TestSQLiteStore_EmptyID(t *testing.T) {
 		t.Errorf("Expected ErrInvalidID for empty ID, got %v", err)
 	}
 }
+
+// FolderNote Tests
+
+func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create a folder first
+	folder := &Folder{
+		ID:        "test-folder",
+		Name:      "Test Folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder)
+
+	note := &FolderNote{
+		ID:        "test-note-1",
+		FolderID:  "test-folder",
+		Name:      "Test Note",
+		Content:   "This is test content for the note.",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Create
+	err := store.CreateNote(ctx, note)
+	if err != nil {
+		t.Fatalf("Failed to create note: %v", err)
+	}
+
+	// Get
+	got, err := store.GetNote(ctx, "test-note-1")
+	if err != nil {
+		t.Fatalf("Failed to get note: %v", err)
+	}
+
+	if got.ID != note.ID {
+		t.Errorf("Expected ID %s, got %s", note.ID, got.ID)
+	}
+	if got.FolderID != note.FolderID {
+		t.Errorf("Expected FolderID %s, got %s", note.FolderID, got.FolderID)
+	}
+	if got.Name != note.Name {
+		t.Errorf("Expected Name %s, got %s", note.Name, got.Name)
+	}
+	if got.Content != note.Content {
+		t.Errorf("Expected Content %s, got %s", note.Content, got.Content)
+	}
+}
+
+func TestSQLiteStore_NoteNotFound(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	_, err := store.GetNote(ctx, "nonexistent")
+	if err != ErrNoteNotFound {
+		t.Errorf("Expected ErrNoteNotFound, got %v", err)
+	}
+}
+
+func TestSQLiteStore_UpdateNote(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create folder and note
+	folder := &Folder{
+		ID:        "update-folder",
+		Name:      "Update Folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder)
+
+	note := &FolderNote{
+		ID:        "update-note",
+		FolderID:  "update-folder",
+		Name:      "Original Name",
+		Content:   "Original content",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateNote(ctx, note)
+
+	// Update
+	note.Name = "Updated Name"
+	note.Content = "Updated content with more details"
+	note.UpdatedAt = time.Now()
+
+	err := store.UpdateNote(ctx, note)
+	if err != nil {
+		t.Fatalf("Failed to update note: %v", err)
+	}
+
+	got, _ := store.GetNote(ctx, "update-note")
+	if got.Name != "Updated Name" {
+		t.Errorf("Expected updated name, got %s", got.Name)
+	}
+	if got.Content != "Updated content with more details" {
+		t.Errorf("Expected updated content, got %s", got.Content)
+	}
+}
+
+func TestSQLiteStore_MoveNoteBetweenFolders(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create two folders
+	folder1 := &Folder{
+		ID:        "folder-1",
+		Name:      "Folder One",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	folder2 := &Folder{
+		ID:        "folder-2",
+		Name:      "Folder Two",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder1)
+	_ = store.CreateFolder(ctx, folder2)
+
+	// Create note in folder 1
+	note := &FolderNote{
+		ID:        "movable-note",
+		FolderID:  "folder-1",
+		Name:      "Movable Note",
+		Content:   "This note will be moved",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateNote(ctx, note)
+
+	// Verify note is in folder 1
+	notes1, _ := store.ListNotesByFolder(ctx, "folder-1")
+	if len(notes1) != 1 {
+		t.Fatalf("Expected 1 note in folder-1, got %d", len(notes1))
+	}
+
+	// Move note to folder 2
+	note.FolderID = "folder-2"
+	note.UpdatedAt = time.Now()
+	err := store.UpdateNote(ctx, note)
+	if err != nil {
+		t.Fatalf("Failed to move note: %v", err)
+	}
+
+	// Verify note moved - folder 1 should be empty
+	notes1After, _ := store.ListNotesByFolder(ctx, "folder-1")
+	if len(notes1After) != 0 {
+		t.Errorf("Expected 0 notes in folder-1 after move, got %d", len(notes1After))
+	}
+
+	// Verify note is now in folder 2
+	notes2, _ := store.ListNotesByFolder(ctx, "folder-2")
+	if len(notes2) != 1 {
+		t.Errorf("Expected 1 note in folder-2, got %d", len(notes2))
+	}
+
+	// Verify note data integrity after move
+	got, _ := store.GetNote(ctx, "movable-note")
+	if got.FolderID != "folder-2" {
+		t.Errorf("Expected folder_id 'folder-2', got '%s'", got.FolderID)
+	}
+	if got.Name != "Movable Note" {
+		t.Errorf("Expected name preserved, got '%s'", got.Name)
+	}
+}
+
+func TestSQLiteStore_DeleteNote(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create folder and note
+	folder := &Folder{
+		ID:        "delete-note-folder",
+		Name:      "Delete Folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder)
+
+	note := &FolderNote{
+		ID:        "delete-note",
+		FolderID:  "delete-note-folder",
+		Name:      "To Be Deleted",
+		Content:   "This will be deleted",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateNote(ctx, note)
+
+	err := store.DeleteNote(ctx, "delete-note")
+	if err != nil {
+		t.Fatalf("Failed to delete note: %v", err)
+	}
+
+	_, err = store.GetNote(ctx, "delete-note")
+	if err != ErrNoteNotFound {
+		t.Error("Expected note to be deleted")
+	}
+}
+
+func TestSQLiteStore_ListNotesByFolder(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create two folders
+	folder1 := &Folder{ID: "folder-1", Name: "Folder 1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	folder2 := &Folder{ID: "folder-2", Name: "Folder 2", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	_ = store.CreateFolder(ctx, folder1)
+	_ = store.CreateFolder(ctx, folder2)
+
+	// Create notes in folder 1
+	for i := 0; i < 3; i++ {
+		note := &FolderNote{
+			ID:        "note-f1-" + string(rune('a'+i)),
+			FolderID:  "folder-1",
+			Name:      "Note " + string(rune('A'+i)),
+			Content:   "Content for note " + string(rune('A'+i)),
+			CreatedAt: time.Now().Add(time.Duration(i) * time.Hour),
+			UpdatedAt: time.Now().Add(time.Duration(i) * time.Hour),
+		}
+		_ = store.CreateNote(ctx, note)
+	}
+
+	// Create one note in folder 2
+	note := &FolderNote{
+		ID:        "note-f2-a",
+		FolderID:  "folder-2",
+		Name:      "Note in Folder 2",
+		Content:   "Different folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateNote(ctx, note)
+
+	// List notes by folder
+	notes, err := store.ListNotesByFolder(ctx, "folder-1")
+	if err != nil {
+		t.Fatalf("Failed to list notes: %v", err)
+	}
+
+	if len(notes) != 3 {
+		t.Errorf("Expected 3 notes in folder-1, got %d", len(notes))
+	}
+
+	// Notes should be ordered by updated_at DESC
+	if notes[0].Name != "Note C" {
+		t.Errorf("Expected most recent note first, got %s", notes[0].Name)
+	}
+
+	// Check folder 2
+	notes2, _ := store.ListNotesByFolder(ctx, "folder-2")
+	if len(notes2) != 1 {
+		t.Errorf("Expected 1 note in folder-2, got %d", len(notes2))
+	}
+}
+
+func TestSQLiteStore_SearchNotes(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create folder
+	folder := &Folder{
+		ID:        "search-folder",
+		Name:      "Search Folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder)
+
+	// Create notes with different content
+	notes := []FolderNote{
+		{ID: "search-1", FolderID: "search-folder", Name: "Meeting Notes", Content: "Discussed project timeline and deliverables", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{ID: "search-2", FolderID: "search-folder", Name: "Ideas", Content: "New feature ideas for the app", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{ID: "search-3", FolderID: "search-folder", Name: "Project Plan", Content: "The project deadline is next month", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	}
+
+	for _, n := range notes {
+		note := n
+		_ = store.CreateNote(ctx, &note)
+	}
+
+	// Search for "project" - should match 2 notes
+	results, err := store.SearchNotes(ctx, "project", 10)
+	if err != nil {
+		t.Fatalf("Failed to search notes: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Errorf("Expected 2 results for 'project', got %d", len(results))
+	}
+
+	// Search for "meeting" - should match 1 note
+	results, err = store.SearchNotes(ctx, "meeting", 10)
+	if err != nil {
+		t.Fatalf("Failed to search notes: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result for 'meeting', got %d", len(results))
+	}
+
+	if results[0].Name != "Meeting Notes" {
+		t.Errorf("Expected 'Meeting Notes', got %s", results[0].Name)
+	}
+
+	// Search for "nonexistent" - should match 0 notes
+	results, err = store.SearchNotes(ctx, "nonexistent", 10)
+	if err != nil {
+		t.Fatalf("Failed to search notes: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for 'nonexistent', got %d", len(results))
+	}
+}
+
+func TestSQLiteStore_DeleteFolderCascadesNotes(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+
+	// Create folder with notes
+	folder := &Folder{
+		ID:        "cascade-folder",
+		Name:      "Cascade Test",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateFolder(ctx, folder)
+
+	note := &FolderNote{
+		ID:        "cascade-note",
+		FolderID:  "cascade-folder",
+		Name:      "Note to Cascade",
+		Content:   "This should be deleted with folder",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = store.CreateNote(ctx, note)
+
+	// Delete folder
+	err := store.DeleteFolder(ctx, "cascade-folder")
+	if err != nil {
+		t.Fatalf("Failed to delete folder: %v", err)
+	}
+
+	// Note should also be deleted (foreign key cascade)
+	_, err = store.GetNote(ctx, "cascade-note")
+	if err != ErrNoteNotFound {
+		t.Error("Expected note to be deleted with folder")
+	}
+}

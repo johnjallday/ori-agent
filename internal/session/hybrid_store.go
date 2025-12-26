@@ -611,3 +611,37 @@ func generateTitle(content string) string {
 
 	return title
 }
+
+// ============================================================================
+// Folder Note Operations (Passthrough to SQLite)
+// ============================================================================
+
+// CreateNote creates a new folder note.
+func (h *hybridStore) CreateNote(ctx context.Context, note *FolderNote) error {
+	return h.sqlite.CreateNote(ctx, note)
+}
+
+// GetNote retrieves a note by ID.
+func (h *hybridStore) GetNote(ctx context.Context, id string) (*FolderNote, error) {
+	return h.sqlite.GetNote(ctx, id)
+}
+
+// UpdateNote updates note metadata and content.
+func (h *hybridStore) UpdateNote(ctx context.Context, note *FolderNote) error {
+	return h.sqlite.UpdateNote(ctx, note)
+}
+
+// DeleteNote removes a note.
+func (h *hybridStore) DeleteNote(ctx context.Context, id string) error {
+	return h.sqlite.DeleteNote(ctx, id)
+}
+
+// ListNotesByFolder returns all notes in a folder.
+func (h *hybridStore) ListNotesByFolder(ctx context.Context, folderID string) ([]FolderNoteListItem, error) {
+	return h.sqlite.ListNotesByFolder(ctx, folderID)
+}
+
+// SearchNotes performs full-text search across note names and content.
+func (h *hybridStore) SearchNotes(ctx context.Context, query string, limit int) ([]NoteSearchResult, error) {
+	return h.sqlite.SearchNotes(ctx, query, limit)
+}

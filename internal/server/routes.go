@@ -540,7 +540,23 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
 		mux.HandleFunc("/api/sessions/", s.sessionHandler.HandleSessions)
 		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
-		mux.HandleFunc("/api/folders/", s.sessionHandler.HandleFolders)
+
+		// Notes search must be before the wildcard /api/notes/
+		mux.HandleFunc("/api/notes/search", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes/", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes", s.sessionHandler.HandleNotes)
+
+		// Folder routes - note that /api/folders/{id}/notes needs to be handled
+		mux.HandleFunc("/api/folders/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			// Check if this is a folder notes request
+			if strings.Contains(path, "/notes") {
+				s.sessionHandler.HandleFolderNotes(w, r)
+				return
+			}
+			// Otherwise, handle as regular folder request
+			s.sessionHandler.HandleFolders(w, r)
+		})
 		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
 		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
