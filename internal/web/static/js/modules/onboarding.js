@@ -470,24 +470,19 @@ export class OnboardingManager {
 
     // Add highlights based on current step
     switch (this.currentStep) {
-      case 3: // Create Agent step - highlight Agents nav link
-        const agentsLink = document.querySelector('a[href="/agents"], a[href="agents.html"], .nav-link[href*="agents"]');
-        if (agentsLink) {
-          agentsLink.classList.add('onboarding-highlight');
+      case 3: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
+        // Try various selectors for the sidebar toggle button
+        const sidebarToggle = document.querySelector(
+          '#sidebarToggle, .sidebar-toggle, [data-bs-toggle="collapse"][data-bs-target*="sidebar"], ' +
+          'button.navbar-toggler, .hamburger-menu, .menu-toggle, ' +
+          'header button:first-of-type, .navbar button:first-of-type'
+        );
+        if (sidebarToggle) {
+          sidebarToggle.classList.add('onboarding-highlight');
         }
-        // Also try to find by text content
-        document.querySelectorAll('.navbar a, .nav a, header a').forEach(link => {
-          if (link.textContent.trim() === 'Agents') {
-            link.classList.add('onboarding-highlight');
-          }
-        });
         break;
 
       case 4: // Plugins step - highlight Plugins nav link
-        const pluginsLink = document.querySelector('a[href="/plugins"], a[href="plugins.html"], .nav-link[href*="plugins"]');
-        if (pluginsLink) {
-          pluginsLink.classList.add('onboarding-highlight');
-        }
         document.querySelectorAll('.navbar a, .nav a, header a').forEach(link => {
           if (link.textContent.trim() === 'Plugins') {
             link.classList.add('onboarding-highlight');
