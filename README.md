@@ -1,13 +1,22 @@
 # <img src="assets/logo.svg" alt="Ori Agent logo" width="40" height="40" /> Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.28-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.29-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25.5-00add8)
 <!-- AUTO:GO_VERSION_END -->
 
 **Ori Agent** is a local AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents call plugins (gRPC tools) to act—everything stays on your machine unless you opt into cloud LLMs.
+
+If you want to keep your information local, this is a way to go.
+
+Honestly, everybody is chasing for the AGI, and this is a budget friendly version of "smarter" - AI agent that may or may not lead to AGI.
+
+I don't plan on promoting this until Q426 or Q127 (This date may change).
+If you are here early, then welcome! Hope you enjoy this. 
+Let me know, how this is.
+
 
 ## 🤖 Supported Providers
 
@@ -152,6 +161,75 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 4. **Run** `ori-agent.exe`
 
 5. **Access the interface** at `http://localhost:8765`
+
+## 💬 Session Management
+
+Ori Agent includes a comprehensive session management system for organizing and managing your chat conversations.
+
+### Features
+
+- **Persistent Chat Sessions**: All conversations are automatically saved and can be resumed anytime
+- **Folder Organization**: Group related sessions into folders for better organization
+- **Multi-Tab Support**: Work with multiple sessions simultaneously in separate browser tabs
+- **Full-Text Search**: Quickly find messages across all your sessions
+- **Tagging System**: Add tags to sessions for easy categorization and filtering
+- **Automatic Cleanup**: Optionally clean up old, inactive sessions to manage storage
+
+### Session Storage
+
+Sessions are stored in a SQLite database with an in-memory LRU cache for fast access:
+
+- **Cache**: Recently accessed sessions are kept in memory for instant retrieval
+- **Database**: All sessions are persisted to SQLite with full-text search support
+- **Hybrid Architecture**: Automatic cache warming and write-through for optimal performance
+
+### Storage Management
+
+Configure session storage limits via the Settings page or `settings.json`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `session_cleanup_enabled` | `true` | Enable automatic cleanup of old sessions |
+| `session_cleanup_days` | `30` | Days of inactivity before a session is eligible for cleanup |
+| `session_max_count` | `1000` | Maximum number of sessions to keep (0 = unlimited) |
+
+**Via Settings Page:**
+1. Navigate to Settings → Session Management
+2. Configure cleanup options and limits
+3. View current storage statistics
+4. Run manual cleanup if needed
+
+**Via settings.json:**
+```json
+{
+  "session_cleanup_enabled": true,
+  "session_cleanup_days": 30,
+  "session_max_count": 1000
+}
+```
+
+### Session API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/sessions` | GET | List all sessions (with pagination, filtering) |
+| `/api/sessions` | POST | Create a new session |
+| `/api/sessions/{id}` | GET | Get a specific session |
+| `/api/sessions/{id}` | PUT | Update session metadata |
+| `/api/sessions/{id}` | DELETE | Delete a session |
+| `/api/sessions/{id}/messages` | GET | Get messages for a session |
+| `/api/sessions/{id}/messages` | POST | Add a message to a session |
+| `/api/sessions/search` | GET | Search across all sessions |
+| `/api/sessions/storage/stats` | GET | Get storage statistics |
+| `/api/sessions/cleanup` | POST | Trigger manual cleanup |
+
+### Performance
+
+The session system is optimized for handling many sessions efficiently:
+
+- **100+ Sessions**: Tested to handle 150+ sessions with sub-millisecond list operations
+- **Concurrent Access**: Thread-safe operations support multiple tabs and clients
+- **Efficient Search**: Full-text search returns results in under 500µs for typical workloads
 
 ## 🔌 Plugin Development
 

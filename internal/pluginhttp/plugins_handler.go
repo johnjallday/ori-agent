@@ -539,7 +539,9 @@ func (h *PluginsPageHandler) HandleUpdatePluginConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	settingsFileName := fmt.Sprintf("%s_settings.json", pluginName)
+	// Use normalized name (without version) to ensure consistent settings file naming
+	normalizedPluginName := registry.NormalizePluginNameForLookup(pluginName)
+	settingsFileName := fmt.Sprintf("%s_settings.json", normalizedPluginName)
 	settingsPath := filepath.Join(agentDir, settingsFileName)
 
 	settingsData, err := json.MarshalIndent(configReq.Config, "", "  ")

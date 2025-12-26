@@ -9,6 +9,9 @@
   <div class="main-content-wrapper">
     {{template "sidebar.tmpl" .}}
 
+    <!-- Session Sidebar -->
+    {{template "session-sidebar.tmpl" .}}
+
     <!-- Main Content -->
     <div class="main-content">
       {{template "chat-area.tmpl" .}}
@@ -255,6 +258,7 @@
   <script src="js/modules/plugin-health.js"></script>
   <script src="js/modules/file-upload.js"></script>
   <script src="js/modules/location.js"></script>
+  <script src="js/modules/sessions.js"></script>
   <script src="js/app.js?v=1694538177"></script>
 </body>
 </html>

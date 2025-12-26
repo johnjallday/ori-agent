@@ -261,6 +261,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
 
+	// Reset endpoints
+	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)
+	mux.HandleFunc("/api/reset/preview", s.resetHandler.GetResetPreview)
+
 	// =============================================================================
 	// Marketplace Management Endpoints
 	// =============================================================================
@@ -351,6 +355,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/device/info", s.deviceHandler.GetDeviceInfo)
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
+	mux.HandleFunc("/api/device/ollama", s.deviceHandler.GetOllamaStatus)
 
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints
@@ -361,6 +366,27 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/usage/stats/range", s.usageHandler.GetCustomRangeStats)
 	mux.HandleFunc("/api/usage/summary", s.usageHandler.GetSummary)
 	mux.HandleFunc("/api/usage/pricing", s.usageHandler.GetPricingModels)
+
+	// =============================================================================
+	// Model Category Endpoints
+	// =============================================================================
+	if s.modelCategoryHandler != nil {
+		mux.HandleFunc("/api/model-categories", s.modelCategoryHandler.CategoriesHandler)
+		mux.HandleFunc("/api/model-categories/reorder", s.modelCategoryHandler.ReorderCategoriesHandler)
+		mux.HandleFunc("/api/model-categories/view-preference", s.modelCategoryHandler.SetViewPreferenceHandler)
+		mux.HandleFunc("/api/model-categories/", s.modelCategoryHandler.CategoryHandler)
+		mux.HandleFunc("/api/models/", func(w http.ResponseWriter, r *http.Request) {
+			// Handle model category assignments
+			if strings.HasSuffix(r.URL.Path, "/categories") {
+				s.modelCategoryHandler.SetModelAssignmentsHandler(w, r)
+				return
+			}
+			// Otherwise, 404
+			if err := orihttp.RespondNotFound(w, "Not found"); err != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": err})
+			}
+		})
+	}
 
 	// =============================================================================
 	// Location Management Endpoints
@@ -504,6 +530,37 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Fall through to other workspace endpoints (handled elsewhere)
 		http.NotFound(w, r)
 	})
+
+	// =============================================================================
+	// Session Management Endpoints
+	// =============================================================================
+	if s.sessionHandler != nil {
+		// Cleanup and stats routes (must be registered before the wildcard routes)
+		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
+		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
+		mux.HandleFunc("/api/sessions/", s.sessionHandler.HandleSessions)
+		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
+
+		// Notes search must be before the wildcard /api/notes/
+		mux.HandleFunc("/api/notes/search", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes/", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes", s.sessionHandler.HandleNotes)
+
+		// Folder routes - note that /api/folders/{id}/notes needs to be handled
+		mux.HandleFunc("/api/folders/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			// Check if this is a folder notes request
+			if strings.Contains(path, "/notes") {
+				s.sessionHandler.HandleFolderNotes(w, r)
+				return
+			}
+			// Otherwise, handle as regular folder request
+			s.sessionHandler.HandleFolders(w, r)
+		})
+		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
+		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
+		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
+	}
 
 	// =============================================================================
 	// Agent Studio API Endpoints

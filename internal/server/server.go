@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
@@ -35,6 +36,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -113,6 +116,13 @@ type Server struct {
 	workflowHandler       *workflowhttp.Handler
 	marketplaceStore      *marketplace.Store
 	marketplaceHandler    *marketplacehttp.Handler
+	modelCategoryStore    store.ModelCategoryStore
+	modelCategoryHandler  *modelcategoryhttp.Handler
+	resetHandler          *settingshttp.ResetHandler
+
+	// Session management
+	sessionStore   session.HybridStore
+	sessionHandler *sessionhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -455,6 +465,15 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	// Redirect /agents/ to /agents (agents dashboard)
 	if r.URL.Path == "/agents/" {
 		http.Redirect(w, r, "/agents", http.StatusMovedPermanently)
+		return
+	}
+
+	// Check if this is a clean agent detail URL: /agents/{agent-name}
+	// (not a file request like /agents/{agent-name}/config.json)
+	pathAfterAgents := strings.TrimPrefix(r.URL.Path, "/agents/")
+	if !strings.Contains(pathAfterAgents, "/") && !strings.Contains(pathAfterAgents, ".") && pathAfterAgents != "" {
+		// This is a request for /agents/{agent-name} - serve the agent detail page
+		s.serveAgentsDetail(w, r)
 		return
 	}
 

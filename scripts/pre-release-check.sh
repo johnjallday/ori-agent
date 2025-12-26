@@ -304,11 +304,12 @@ else
         echo ""
 
         # Call Claude with the test errors
-        claude --print "The following Go tests are failing. Please fix the test errors by modifying the appropriate source files or test files. Here is the test output:
+        # -p runs non-interactively, --permission-mode acceptEdits allows file edits without prompting
+        claude -p "The following Go tests are failing. Please fix the test errors by modifying the appropriate source files or test files. Here is the test output:
 
 $TEST_ERRORS
 
-Please fix these test failures."
+Please fix these test failures." --permission-mode acceptEdits
 
         echo ""
         echo -e "${BLUE}Re-running tests after Claude fixes...${NC}"
@@ -420,10 +421,20 @@ run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || {
       echo ""
       echo -e "${BLUE}Re-running Go Mod Tidy check after fixes...${NC}"
       echo ""
-      # Re-run go mod tidy check after fixes
-      if run_check "Go Mod Tidy (after fixes)" "go mod tidy && git diff --exit-code go.mod go.sum"; then
+      # Go mod tidy already ran in fix-go-mod.sh; only re-run to confirm success.
+      if go mod tidy; then
+        if git diff --exit-code go.mod go.sum; then
+          echo -e "${GREEN}✅ Go Mod Tidy (after fixes): PASSED${NC}"
+        else
+          echo -e "${YELLOW}⚠️  Go Mod Tidy (after fixes): CHANGES APPLIED${NC}"
+          echo -e "${YELLOW}   go.mod/go.sum updated; commit the changes.${NC}"
+        fi
+        echo ""
         # Remove the original failure from FAILED_CHECKS
         FAILED_CHECKS=("${FAILED_CHECKS[@]/Go Mod Tidy/}")
+      else
+        echo -e "${RED}❌ Go Mod Tidy (after fixes): FAILED${NC}"
+        echo ""
       fi
     else
       echo -e "${RED}❌ fix-go-mod.sh not found in ./scripts/${NC}"
@@ -464,12 +475,12 @@ else
   echo ""
 
   # Check what types of changes exist
-  # Exclude VERSION and README.md from this check (will be auto-committed at the end)
-  NON_VERSION_CHANGES=$(git status --porcelain | grep -v "VERSION\|README.md" | wc -l | tr -d ' ')
+  # Exclude VERSION, README.md, go.mod, go.sum from this check (will be auto-committed at the end)
+  NON_VERSION_CHANGES=$(git status --porcelain | grep -v "VERSION\|README.md\|go\.mod\|go\.sum" | wc -l | tr -d ' ')
 
   if [ "$NON_VERSION_CHANGES" -eq 0 ]; then
-    # Only VERSION/README changes (will be auto-committed after all checks pass)
-    echo -e "${BLUE}💡 Note: Only VERSION/README.md changes detected${NC}"
+    # Only VERSION/README/go.mod/go.sum changes (will be auto-committed after all checks pass)
+    echo -e "${BLUE}💡 Note: Only VERSION/README.md/go.mod/go.sum changes detected${NC}"
     if [ -n "$VERSION" ]; then
       echo -e "${BLUE}   These will be auto-committed after all checks pass.${NC}"
     else
@@ -477,8 +488,8 @@ else
     fi
     echo ""
   else
-    # Check if only script files + VERSION/README changed
-    NON_SCRIPT_CHANGES=$(git status --porcelain | grep -v "scripts/" | grep -v "VERSION\|README.md" | grep -v "^??" | wc -l | tr -d ' ')
+    # Check if only script files + VERSION/README/go.mod/go.sum changed
+    NON_SCRIPT_CHANGES=$(git status --porcelain | grep -v "scripts/" | grep -v "VERSION\|README.md\|go\.mod\|go\.sum" | grep -v "^??" | wc -l | tr -d ' ')
     SCRIPT_CHANGES=$(git status --porcelain | grep "scripts/" | wc -l | tr -d ' ')
 
     if [ "$NON_SCRIPT_CHANGES" -eq 0 ] && [ "$SCRIPT_CHANGES" -gt 0 ]; then
@@ -566,6 +577,26 @@ echo ""
 if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
   echo -e "${GREEN}✅ All checks passed!${NC}"
   echo ""
+
+  # Commit go.mod/go.sum changes if they were modified during checks
+  if ! git diff --quiet go.mod go.sum 2>/dev/null; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${BLUE}[AUTO-COMMIT]${NC} Committing go.mod/go.sum changes..."
+    echo ""
+    git add go.mod go.sum 2>/dev/null || true
+    if git commit -m "chore: tidy go module dependencies" --no-verify; then
+      echo ""
+      echo -e "${GREEN}✅ Go module files committed successfully${NC}"
+      echo -e "${GREEN}   Files: go.mod, go.sum${NC}"
+      echo ""
+    else
+      echo ""
+      echo -e "${YELLOW}⚠️  No go.mod changes to commit (already clean)${NC}"
+      echo ""
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+  fi
 
   # Commit VERSION and README changes if a version was specified and all checks passed
   if [ -n "$VERSION" ]; then

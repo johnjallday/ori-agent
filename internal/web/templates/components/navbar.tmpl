@@ -10,9 +10,14 @@
         </svg>
       </a>
       {{else if ne .ShowSidebarToggle false}}
-      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-3" type="button" title="Toggle Sidebar">
+      <button {{if .SidebarToggleId}}id="{{.SidebarToggleId}}"{{else}}id="sidebarToggle"{{end}} class="modern-btn modern-btn-secondary {{if .SidebarToggleHideOnLg}}d-lg-none{{end}} me-2" type="button" title="Toggle Sidebar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+        </svg>
+      </button>
+      <button id="sessionsToggle" class="modern-btn modern-btn-secondary me-3" type="button" title="Toggle Sessions (Ctrl+N for new)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
         </svg>
       </button>
       {{end}}

@@ -75,8 +75,11 @@ activity_logs/
 
 # Database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+model_categories.json
 
 # Backup files
 *.bak

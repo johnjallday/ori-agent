@@ -115,8 +115,8 @@ func ensureDataDirectory() error {
 		fileExists("plugin_cache") ||
 		fileExists("uploaded_plugins")
 
-	// If already in ori-agent directory or data files exist, we're good
-	if baseName == "ori-agent" || hasDataFiles {
+	// If already in ori-agent directory (or OriAgent for installed app) or data files exist, we're good
+	if baseName == "ori-agent" || baseName == "OriAgent" || hasDataFiles {
 		return nil
 	}
 

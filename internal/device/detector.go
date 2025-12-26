@@ -12,7 +12,7 @@ import (
 // Detect automatically detects device information
 func Detect() types.DeviceInfo {
 	info := types.DeviceInfo{
-		OS:       runtime.GOOS,
+		OS:       friendlyOSName(runtime.GOOS),
 		Arch:     runtime.GOARCH,
 		Detected: true,
 		UserSet:  false,
@@ -22,6 +22,26 @@ func Detect() types.DeviceInfo {
 	info.Type = detectDeviceType()
 
 	return info
+}
+
+// friendlyOSName converts the Go runtime OS name to a user-friendly name
+func friendlyOSName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macOS"
+	case "windows":
+		return "Windows"
+	case "linux":
+		return "Linux"
+	case "freebsd":
+		return "FreeBSD"
+	case "openbsd":
+		return "OpenBSD"
+	case "netbsd":
+		return "NetBSD"
+	default:
+		return goos
+	}
 }
 
 // detectDeviceType attempts to determine if this is a desktop, laptop, or server

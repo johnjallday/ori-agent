@@ -17,6 +17,7 @@ import (
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
 func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
+	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
@@ -53,7 +54,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start)
+		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID)
 		return
 	}
 
@@ -63,6 +64,10 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	logger.Debug("Claude chat response completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
+
 	writeJSONResponse(w, map[string]any{"response": text})
 }
 
@@ -79,6 +84,7 @@ func (h *Handler) handleClaudeToolCalls(
 	provider llm.Provider,
 	baseCtx context.Context,
 	start time.Time,
+	sessionID string,
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -100,6 +106,10 @@ func (h *Handler) handleClaudeToolCalls(
 		ag.Messages = append(ag.Messages, openai.AssistantMessage(execResult.CombinedResult))
 		logger.Debug("Claude chat with structured tool result completed", logger.Fields{"duration": time.Since(start)})
 		_ = h.store.SetAgent(agentName, ag)
+
+		// Store assistant response in session
+		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
+
 		writeToolCallResponse(w, execResult)
 		return
 	}
@@ -130,6 +140,10 @@ func (h *Handler) handleClaudeToolCalls(
 
 	logger.Debug("Claude chat with tool completed", logger.Fields{"duration": time.Since(start)})
 	_ = h.store.SetAgent(agentName, ag)
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", resp2.Content)
+
 	orihttp.WriteJSON(w, map[string]any{
 		"response":  resp2.Content,
 		"toolCalls": execResult.Results,

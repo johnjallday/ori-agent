@@ -14,6 +14,11 @@ type Settings struct {
 	OpenAIAPIKey    string   `json:"openai_api_key"`
 	AnthropicAPIKey string   `json:"anthropic_api_key"`
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
+
+	// Session cleanup settings
+	SessionCleanupEnabled bool `json:"session_cleanup_enabled"` // Enable automatic cleanup of old sessions (default: true)
+	SessionCleanupDays    int  `json:"session_cleanup_days"`    // Days of inactivity before session cleanup (default: 30)
+	SessionMaxCount       int  `json:"session_max_count"`       // Maximum number of sessions to keep (0 = unlimited, default: 1000)
 }
 
 // Manager handles configuration loading and saving
@@ -41,10 +46,7 @@ func (m *Manager) Load() error {
 		// If file doesn't exist, use default settings
 		if os.IsNotExist(err) {
 			m.mu.Lock()
-			m.settings = Settings{
-				CurrentAgent: "default",
-				OpenAIAPIKey: "",
-			}
+			m.settings = defaultSettings()
 			m.mu.Unlock()
 			return nil
 		}
@@ -54,11 +56,25 @@ func (m *Manager) Load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Start with defaults
+	m.settings = defaultSettings()
+
 	if err := json.Unmarshal(data, &m.settings); err != nil {
 		return fmt.Errorf("failed to parse config file %s: %w", m.filePath, err)
 	}
 
 	return m.validate()
+}
+
+// defaultSettings returns the default configuration
+func defaultSettings() Settings {
+	return Settings{
+		CurrentAgent:          "default",
+		OpenAIAPIKey:          "",
+		SessionCleanupEnabled: true,
+		SessionCleanupDays:    30,
+		SessionMaxCount:       1000,
+	}
 }
 
 // Save writes current configuration to file
@@ -242,4 +258,40 @@ func (m *Manager) MaskAPIKey() string {
 
 	// No API key found anywhere
 	return "API key required"
+}
+
+// GetSessionCleanupEnabled returns whether automatic session cleanup is enabled
+func (m *Manager) GetSessionCleanupEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.SessionCleanupEnabled
+}
+
+// GetSessionCleanupDays returns the number of days of inactivity before cleanup
+func (m *Manager) GetSessionCleanupDays() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.settings.SessionCleanupDays <= 0 {
+		return 30 // Default
+	}
+	return m.settings.SessionCleanupDays
+}
+
+// GetSessionMaxCount returns the maximum number of sessions to keep
+func (m *Manager) GetSessionMaxCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.settings.SessionMaxCount <= 0 {
+		return 1000 // Default
+	}
+	return m.settings.SessionMaxCount
+}
+
+// SetSessionCleanupSettings updates session cleanup settings
+func (m *Manager) SetSessionCleanupSettings(enabled bool, days int, maxCount int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.SessionCleanupEnabled = enabled
+	m.settings.SessionCleanupDays = days
+	m.settings.SessionMaxCount = maxCount
 }

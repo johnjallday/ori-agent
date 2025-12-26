@@ -36,9 +36,14 @@ var TypeModels = map[string][]string{
 	},
 }
 
-// GetTypeForModel returns the agent type that supports the given model
+// GetTypeForModel returns the agent type that supports the given model.
+// When a model appears in multiple types, priority is: tool-calling > general > research
+// (returns the most cost-efficient type that supports the model)
 func GetTypeForModel(model string) string {
-	for agentType, models := range TypeModels {
+	// Check in priority order: tool-calling (cheapest) → general → research (most capable)
+	typePriority := []string{TypeToolCalling, TypeGeneral, TypeResearch}
+	for _, agentType := range typePriority {
+		models := TypeModels[agentType]
 		for _, m := range models {
 			if m == model {
 				return agentType

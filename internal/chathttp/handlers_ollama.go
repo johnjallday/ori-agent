@@ -18,6 +18,7 @@ import (
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
 func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
+	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
@@ -60,14 +61,19 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx)
+		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID)
 		return
 	}
 
 	// No tool calls - direct response
+	text := getResponseText(resp.Content)
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 	_ = h.store.SetAgent(agentName, ag)
-	writeJSONResponse(w, map[string]any{"response": getResponseText(resp.Content)})
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
+
+	writeJSONResponse(w, map[string]any{"response": text})
 }
 
 // handleOllamaToolCalls handles tool execution for Ollama
@@ -82,6 +88,7 @@ func (h *Handler) handleOllamaToolCalls(
 	files []pluginapi.FileAttachment,
 	provider llm.Provider,
 	baseCtx context.Context,
+	sessionID string,
 ) {
 	logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -133,6 +140,9 @@ func (h *Handler) handleOllamaToolCalls(
 
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(finalText))
 	_ = h.store.SetAgent(agentName, ag)
+
+	// Store assistant response in session
+	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
 	orihttp.WriteJSON(w, map[string]any{
 		"response":  finalText,

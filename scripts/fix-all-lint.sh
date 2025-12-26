@@ -37,7 +37,8 @@ echo -e "${BLUE}Step 1: Running golangci-lint auto-fix${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-$GOLANGCI_LINT run ./... --fix || true
+# Use --max-same-issues 0 to show ALL errors, not just first 3 of each type
+$GOLANGCI_LINT run ./... --fix --max-same-issues 0 --max-issues-per-linter 0 || true
 
 echo ""
 echo -e "${GREEN}✓ Auto-fix complete${NC}"
@@ -53,7 +54,7 @@ echo ""
 TEMP_ERRORS=$(mktemp)
 trap "rm -f $TEMP_ERRORS" EXIT
 
-if $GOLANGCI_LINT run ./... > "$TEMP_ERRORS" 2>&1; then
+if $GOLANGCI_LINT run ./... --max-same-issues 0 --max-issues-per-linter 0 > "$TEMP_ERRORS" 2>&1; then
   echo -e "${GREEN}✅ All lint issues resolved by auto-fix!${NC}"
   echo ""
   exit 0
@@ -82,7 +83,7 @@ if [ "${FIX_ORIHTTP_ERRCHECK:-}" = "1" ] && [ -f "./scripts/fix-orihttp-errcheck
 
     echo ""
     echo "Re-running lint after orihttp errcheck fix..."
-    if $GOLANGCI_LINT run ./... > "$TEMP_ERRORS" 2>&1; then
+    if $GOLANGCI_LINT run ./... --max-same-issues 0 --max-issues-per-linter 0 > "$TEMP_ERRORS" 2>&1; then
       echo -e "${GREEN}✅ All lint issues resolved!${NC}"
       echo ""
       exit 0
@@ -141,7 +142,8 @@ if ! command -v claude &> /dev/null; then
 fi
 
 # Launch Claude Code with the prompt
-if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits --max-turns 15; then
+# -p runs non-interactively, --permission-mode acceptEdits allows file edits without prompting
+if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits; then
   echo ""
   echo -e "${GREEN}✓ Claude Code finished${NC}"
   echo ""
@@ -153,7 +155,7 @@ if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits --max-turns 1
   echo ""
 
   echo "Running lint check..."
-  if $GOLANGCI_LINT run ./...; then
+  if $GOLANGCI_LINT run ./... --max-same-issues 0 --max-issues-per-linter 0; then
     echo ""
     echo -e "${GREEN}✅ All lint issues resolved!${NC}"
     echo ""

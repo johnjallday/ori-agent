@@ -241,7 +241,7 @@ lint: ## Run linter (requires golangci-lint)
 		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
 		exit 1; \
 	fi
-	golangci-lint run ./...
+	golangci-lint run ./... --max-same-issues 0 --max-issues-per-linter 0
 	@echo "$(GREEN)✓ Lint passed$(NC)"
 
 check: fmt vet test ## Run all checks (fmt, vet, test)

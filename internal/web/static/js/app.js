@@ -142,7 +142,7 @@ function setupAgentDisplayClick() {
     const agentName = agentNameSpan?.textContent?.trim();
 
     if (agentName) {
-      window.location.href = `/agents-detail.html?name=${encodeURIComponent(agentName)}`;
+      window.location.href = `/agents/${encodeURIComponent(agentName)}`;
     }
   });
 }
@@ -673,8 +673,13 @@ function hideTypingIndicator() {
 async function sendMessage(message) {
   if (isWaitingForResponse) return;
 
-  const trimmedMessage = message.trim();
+  let trimmedMessage = message.trim();
   if (!trimmedMessage) return;
+
+  // Expand @notename references if sessionManager is available
+  if (window.sessionManager?.expandNoteReferences) {
+    trimmedMessage = await window.sessionManager.expandNoteReferences(trimmedMessage);
+  }
 
   // Add to history
   promptHistory.unshift(trimmedMessage);
@@ -715,11 +720,23 @@ async function sendMessage(message) {
       requestBody.files = uploadedFiles;
     }
 
+    // Add agent_name from the active session (for per-session agent binding)
+    const activeSession = window.sessionManager?.getActiveSession?.();
+    if (activeSession?.agent_name) {
+      requestBody.agent_name = activeSession.agent_name;
+    }
+
+    // Build headers with session ID for multi-tab support
+    const chatHeaders = {
+      'Content-Type': 'application/json',
+    };
+    if (window.sessionManager && window.sessionManager.getActiveSessionId()) {
+      chatHeaders['X-Session-ID'] = window.sessionManager.getActiveSessionId();
+    }
+
     const response = await fetch('/api/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: chatHeaders,
       body: JSON.stringify(requestBody)
     });
 
@@ -772,6 +789,11 @@ async function sendMessage(message) {
             loadAgents();
           }
         }, 100); // Small delay to ensure backend has updated
+      }
+
+      // Notify session manager about the new message
+      if (window.sessionManager && window.sessionManager.onMessageSent) {
+        window.sessionManager.onMessageSent();
       }
     } else {
       console.error('No response field found. Available fields:', Object.keys(data));
@@ -981,6 +1003,10 @@ function setupSidebarToggle() {
     });
   }
 }
+
+// Export functions for use by session manager
+window.appendMessageToUI = appendMessageToUI;
+window.clearChatHistory = clearChatHistory;
 
 // Initialize application
 async function initializeApp() {
