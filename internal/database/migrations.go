@@ -62,8 +62,6 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 	switch version {
 	case 1:
 		return db.migration001InitialSchema(ctx)
-	case 2:
-		return db.migration002FolderNotes(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -209,21 +207,6 @@ func (db *DB) migration001InitialSchema(ctx context.Context) error {
 		return fmt.Errorf("failed to create tag_counts view: %w", err)
 	}
 
-	return nil
-}
-
-// GetSchemaVersion returns the current database schema version.
-func (db *DB) GetSchemaVersion(ctx context.Context) (int, error) {
-	var version int
-	err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
-	if err != nil {
-		return 0, err
-	}
-	return version, nil
-}
-
-// migration002FolderNotes adds folder notes table and FTS support.
-func (db *DB) migration002FolderNotes(ctx context.Context) error {
 	// Create folder_notes table
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS folder_notes (
@@ -240,13 +223,13 @@ func (db *DB) migration002FolderNotes(ctx context.Context) error {
 	}
 
 	// Create indexes for folder_notes
-	indexes := []string{
+	noteIndexes := []string{
 		"CREATE INDEX IF NOT EXISTS idx_folder_notes_folder_id ON folder_notes(folder_id)",
 		"CREATE INDEX IF NOT EXISTS idx_folder_notes_updated_at ON folder_notes(updated_at DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_folder_notes_name ON folder_notes(name)",
 	}
 
-	for _, idx := range indexes {
+	for _, idx := range noteIndexes {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
@@ -264,29 +247,34 @@ func (db *DB) migration002FolderNotes(ctx context.Context) error {
 		return fmt.Errorf("failed to create folder notes FTS table: %w", err)
 	}
 
-	// Create triggers to keep FTS index in sync
-	triggers := []string{
-		// Insert trigger for notes
+	// Create triggers to keep folder notes FTS index in sync
+	noteTriggers := []string{
 		`CREATE TRIGGER IF NOT EXISTS folder_notes_ai AFTER INSERT ON folder_notes BEGIN
 			INSERT INTO folder_notes_fts(note_id, name, content) VALUES (new.id, new.name, new.content);
 		END`,
-
-		// Update trigger for notes
 		`CREATE TRIGGER IF NOT EXISTS folder_notes_au AFTER UPDATE ON folder_notes BEGIN
 			UPDATE folder_notes_fts SET name = new.name, content = new.content WHERE note_id = old.id;
 		END`,
-
-		// Delete trigger for notes
 		`CREATE TRIGGER IF NOT EXISTS folder_notes_ad AFTER DELETE ON folder_notes BEGIN
 			DELETE FROM folder_notes_fts WHERE note_id = old.id;
 		END`,
 	}
 
-	for _, trigger := range triggers {
+	for _, trigger := range noteTriggers {
 		if _, err := db.ExecContext(ctx, trigger); err != nil {
 			return fmt.Errorf("failed to create trigger: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// GetSchemaVersion returns the current database schema version.
+func (db *DB) GetSchemaVersion(ctx context.Context) (int, error) {
+	var version int
+	err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
 }
