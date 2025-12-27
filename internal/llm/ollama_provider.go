@@ -244,6 +244,15 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 			Content: msg.Content,
 		}
 
+		// Add images if present (for vision-capable models like llava)
+		if len(msg.Images) > 0 {
+			ollamaMsg.Images = make([]string, len(msg.Images))
+			for i, img := range msg.Images {
+				// Ollama expects raw base64 data, not data URLs
+				ollamaMsg.Images[i] = img.Base64Data
+			}
+		}
+
 		// Convert tool calls if present (for assistant messages)
 		if len(msg.ToolCalls) > 0 {
 			ollamaMsg.ToolCalls = make([]ollamaToolCall, len(msg.ToolCalls))
@@ -428,6 +437,15 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 		ollamaMsg := ollamaMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
+		}
+
+		// Add images if present (for vision-capable models like llava)
+		if len(msg.Images) > 0 {
+			ollamaMsg.Images = make([]string, len(msg.Images))
+			for i, img := range msg.Images {
+				// Ollama expects raw base64 data, not data URLs
+				ollamaMsg.Images[i] = img.Base64Data
+			}
 		}
 
 		// Convert tool calls if present (for assistant messages)

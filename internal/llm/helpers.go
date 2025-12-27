@@ -10,6 +10,15 @@ func NewUserMessage(content string) Message {
 	}
 }
 
+// NewUserMessageWithImages creates a new user message with image attachments
+func NewUserMessageWithImages(content string, images []ImageAttachment) Message {
+	return Message{
+		Role:    RoleUser,
+		Content: content,
+		Images:  images,
+	}
+}
+
 // NewAssistantMessage creates a new assistant message
 func NewAssistantMessage(content string) Message {
 	return Message{

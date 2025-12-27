@@ -264,12 +264,23 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// If files are attached, prepend their content to the question
-	if len(req.Files) > 0 {
+	// Separate image files from text files for proper API handling
+	var imageFiles []UploadedFile
+	var textFiles []UploadedFile
+	for _, file := range req.Files {
+		if isImageMimeType(file.Type) {
+			imageFiles = append(imageFiles, file)
+		} else {
+			textFiles = append(textFiles, file)
+		}
+	}
+
+	// For text files, prepend their content to the question as before
+	if len(textFiles) > 0 {
 		var filesContext strings.Builder
 		filesContext.WriteString("Here are the uploaded documents:\n\n")
 
-		for _, file := range req.Files {
+		for _, file := range textFiles {
 			filesContext.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Name))
 			filesContext.WriteString(file.Content)
 			filesContext.WriteString("\n\n")
@@ -532,7 +543,28 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Prepare and call the model
-	ag.Messages = append(ag.Messages, openai.UserMessage(q))
+	// If there are image files, use multi-part message with vision API format
+	if len(imageFiles) > 0 {
+		var contentParts []openai.ChatCompletionContentPartUnionParam
+
+		// Add text content first
+		contentParts = append(contentParts, openai.TextContentPart(q))
+
+		// Add image parts with base64 data URLs
+		for _, img := range imageFiles {
+			// Build data URL: data:image/png;base64,<content>
+			dataURL := fmt.Sprintf("data:%s;base64,%s", img.Type, img.Content)
+			contentParts = append(contentParts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL:    dataURL,
+				Detail: "auto",
+			}))
+			logger.Info("Added image to message", logger.Fields{"name": img.Name, "type": img.Type})
+		}
+
+		ag.Messages = append(ag.Messages, openai.UserMessage(contentParts))
+	} else {
+		ag.Messages = append(ag.Messages, openai.UserMessage(q))
+	}
 
 	// Store user message in session if session ID is provided
 	h.storeMessageInSession(r.Context(), sessionID, "user", q)
@@ -544,10 +576,19 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		"converted_count": len(fileAttachments),
 	})
 
+	// Convert image files to llm.ImageAttachment for vision-capable providers
+	var llmImages []llm.ImageAttachment
+	for _, img := range imageFiles {
+		llmImages = append(llmImages, llm.ImageAttachment{
+			MimeType:   img.Type,
+			Base64Data: img.Content,
+		})
+	}
+
 	// Check if this is a Claude model - if so, use provider system
 	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages)
 		return
 	}
 
@@ -557,7 +598,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages)
 					return
 				}
 			}
@@ -574,4 +615,14 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Handle OpenAI models
 	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient)
+}
+
+// isImageMimeType checks if a MIME type represents an image
+func isImageMimeType(mimeType string) bool {
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }

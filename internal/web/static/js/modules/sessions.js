@@ -2592,16 +2592,31 @@ const sessionManager = {
       return;
     }
 
-    // Extract FILE_PATH from note content
-    const filePathMatch = note.content.match(/<!-- FILE_PATH:([^\s]+) -->/);
-    if (!filePathMatch) {
-      this.showToast('No attached file found in this note', 'error');
+    console.log('Note content for attach:', note.content.substring(note.content.length - 200));
+
+    // Try new format first: FILE_PATH (server storage)
+    const filePathMatch = note.content.match(/<!-- FILE_PATH:(.+?) -->/);
+    if (filePathMatch) {
+      const [, serverPath] = filePathMatch;
+      console.log('Found FILE_PATH:', serverPath);
+      await this.attachFileFromServer(serverPath);
       return;
     }
 
-    const [, serverPath] = filePathMatch;
+    // Fall back to old format: FILE_DATA (base64 in note)
+    const fileDataMatch = note.content.match(/<!-- FILE_DATA:(.+?):([^:]*):([A-Za-z0-9+/=]+) -->/);
+    if (fileDataMatch) {
+      const [, fileName, mimeType] = fileDataMatch;
+      console.log('Found FILE_DATA:', fileName, mimeType);
+      this.attachFileDirectly(fileName, mimeType, fileDataMatch[3]);
+      return;
+    }
 
-    // Fetch file content from server
+    this.showToast('No attached file found in this note. Re-drop the file to enable this feature.', 'error');
+  },
+
+  // Attach file from server storage
+  async attachFileFromServer(serverPath) {
     try {
       const response = await fetch(`/api/files/content?path=${encodeURIComponent(serverPath)}`);
       const result = await response.json();
@@ -2611,12 +2626,11 @@ const sessionManager = {
         return;
       }
 
-      // Add to chat's uploaded files using the global function
       if (typeof window.addFileToUpload === 'function') {
         const success = window.addFileToUpload({
           name: result.filename,
           type: result.mime_type || 'application/octet-stream',
-          size: Math.round(result.content.length * 0.75), // Approximate decoded size
+          size: Math.round(result.content.length * 0.75),
           content: result.content
         });
         if (success) {
@@ -2630,6 +2644,25 @@ const sessionManager = {
     } catch (e) {
       console.error('Failed to fetch file:', e);
       this.showToast('Failed to load file', 'error');
+    }
+  },
+
+  // Attach file directly from base64 content (legacy format)
+  attachFileDirectly(fileName, mimeType, base64Content) {
+    if (typeof window.addFileToUpload === 'function') {
+      const success = window.addFileToUpload({
+        name: fileName,
+        type: mimeType || 'application/octet-stream',
+        size: Math.round(base64Content.length * 0.75),
+        content: base64Content
+      });
+      if (success) {
+        this.showToast(`Attached "${fileName}" to chat`, 'success');
+      } else {
+        this.showToast('Chat input not available on this page', 'error');
+      }
+    } else {
+      this.showToast('Chat not available', 'error');
     }
   },
 

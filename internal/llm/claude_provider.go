@@ -160,9 +160,26 @@ func (p *ClaudeProvider) convertMessages(messages []Message) []anthropic.Message
 	for _, msg := range messages {
 		switch msg.Role {
 		case RoleUser:
-			claudeMessages = append(claudeMessages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock(msg.Content),
-			))
+			// Build content blocks for the user message
+			var contentBlocks []anthropic.ContentBlockParamUnion
+
+			// Add text content first
+			if msg.Content != "" {
+				contentBlocks = append(contentBlocks, anthropic.NewTextBlock(msg.Content))
+			}
+
+			// Add image blocks if present (for vision support)
+			for _, img := range msg.Images {
+				contentBlocks = append(contentBlocks, anthropic.NewImageBlockBase64(
+					img.MimeType,
+					img.Base64Data,
+				))
+			}
+
+			// Only add the message if there's content
+			if len(contentBlocks) > 0 {
+				claudeMessages = append(claudeMessages, anthropic.NewUserMessage(contentBlocks...))
+			}
 
 		case RoleAssistant:
 			claudeMessages = append(claudeMessages, anthropic.NewAssistantMessage(

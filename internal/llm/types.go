@@ -45,6 +45,15 @@ type ChatResponse struct {
 	Provider string
 }
 
+// ImageAttachment represents an image attached to a message
+type ImageAttachment struct {
+	// MimeType is the image MIME type (e.g., "image/png", "image/jpeg")
+	MimeType string
+
+	// Base64Data is the base64-encoded image data (without data URL prefix)
+	Base64Data string
+}
+
 // Message represents a single message in a conversation
 type Message struct {
 	// Role is the message role: "user", "assistant", "system", or "tool"
@@ -52,6 +61,9 @@ type Message struct {
 
 	// Content is the message content
 	Content string
+
+	// Images contains image attachments for vision-capable models
+	Images []ImageAttachment
 
 	// ToolCallID is used when Role is "tool" to reference the tool call
 	ToolCallID string
