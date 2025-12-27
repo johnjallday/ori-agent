@@ -15,6 +15,10 @@ type Settings struct {
 	AnthropicAPIKey string   `json:"anthropic_api_key"`
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
+	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
+	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "claude", "ollama")
+	SystemModel    string `json:"system_model,omitempty"`    // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
+
 	// Session cleanup settings
 	SessionCleanupEnabled bool `json:"session_cleanup_enabled"` // Enable automatic cleanup of old sessions (default: true)
 	SessionCleanupDays    int  `json:"session_cleanup_days"`    // Days of inactivity before session cleanup (default: 30)
@@ -294,4 +298,83 @@ func (m *Manager) SetSessionCleanupSettings(enabled bool, days int, maxCount int
 	m.settings.SessionCleanupEnabled = enabled
 	m.settings.SessionCleanupDays = days
 	m.settings.SessionMaxCount = maxCount
+}
+
+// GetSystemModel returns the configured system model provider and model
+func (m *Manager) GetSystemModel() (provider, model string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.SystemProvider, m.settings.SystemModel
+}
+
+// SetSystemModel updates the system model configuration
+func (m *Manager) SetSystemModel(provider, model string) error {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+
+	if err := validateSystemModel(provider, model); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.settings.SystemProvider = provider
+	m.settings.SystemModel = model
+	m.mu.Unlock()
+	return nil
+}
+
+// IsSystemModelConfigured returns true if both system provider and model are set
+func (m *Manager) IsSystemModelConfigured() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.SystemProvider != "" && m.settings.SystemModel != ""
+}
+
+// ValidProviders returns the list of valid provider names for system model
+func ValidProviders() []string {
+	return []string{"openai", "claude", "ollama"}
+}
+
+// validateSystemModel validates the system model configuration
+func validateSystemModel(provider, model string) error {
+	// Both must be set or both must be empty
+	if (provider == "") != (model == "") {
+		return fmt.Errorf("system provider and model must both be set or both be empty")
+	}
+
+	// If both are empty, that's valid (unconfigured)
+	if provider == "" && model == "" {
+		return nil
+	}
+
+	// Validate provider is one of the known providers
+	validProviders := ValidProviders()
+	isValidProvider := false
+	for _, vp := range validProviders {
+		if strings.EqualFold(provider, vp) {
+			isValidProvider = true
+			break
+		}
+	}
+	if !isValidProvider {
+		return fmt.Errorf("invalid system provider %q: must be one of %v", provider, validProviders)
+	}
+
+	// Validate model is not empty (we already checked this above, but be explicit)
+	if model == "" {
+		return fmt.Errorf("system model cannot be empty when provider is set")
+	}
+
+	// Basic model format validation - must contain only alphanumeric, dash, underscore, dot, colon
+	for _, char := range model {
+		isLower := char >= 'a' && char <= 'z'
+		isUpper := char >= 'A' && char <= 'Z'
+		isDigit := char >= '0' && char <= '9'
+		isAllowed := char == '-' || char == '_' || char == '.' || char == ':'
+		if !isLower && !isUpper && !isDigit && !isAllowed {
+			return fmt.Errorf("invalid system model %q: contains invalid character %q", model, string(char))
+		}
+	}
+
+	return nil
 }

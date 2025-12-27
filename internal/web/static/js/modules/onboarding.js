@@ -2,10 +2,11 @@
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 5;
+    this.totalSteps = 6;
     this.modal = null;
     this.modalInstance = null;
     this.deviceInfo = null;
+    this.availableProviders = [];
   }
 
   // Initialize the onboarding system
@@ -380,6 +381,159 @@ export class OnboardingManager {
     }
   }
 
+  // Load available providers for system model selection
+  async loadSystemModelProviders() {
+    const providerSelect = document.getElementById('onboardingSystemProvider');
+    const modelSelect = document.getElementById('onboardingSystemModel');
+    const statusIcon = document.getElementById('onboardingSystemModelStatusIcon');
+    const statusText = document.getElementById('onboardingSystemModelStatusText');
+    const statusDetails = document.getElementById('onboardingSystemModelStatusDetails');
+
+    if (!providerSelect || !modelSelect) return;
+
+    try {
+      const response = await fetch('/api/providers');
+      if (!response.ok) {
+        throw new Error('Failed to fetch providers');
+      }
+      const data = await response.json();
+      this.availableProviders = data.providers || [];
+
+      // Populate provider dropdown
+      providerSelect.innerHTML = '<option value="">Select a provider...</option>';
+      const availableCount = this.availableProviders.filter(p => p.available).length;
+
+      this.availableProviders
+        .filter(p => p.available)
+        .forEach(provider => {
+          const option = document.createElement('option');
+          option.value = provider.name;
+          option.textContent = provider.display_name;
+          providerSelect.appendChild(option);
+        });
+
+      // Update status
+      if (availableCount > 0) {
+        statusIcon.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
+            <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+          </svg>
+        `;
+        statusText.textContent = `${availableCount} provider${availableCount > 1 ? 's' : ''} available`;
+        statusDetails.textContent = 'Select a provider and model below.';
+      } else {
+        statusIcon.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#ffc107">
+            <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+          </svg>
+        `;
+        statusText.textContent = 'No providers available';
+        statusDetails.textContent = 'Please configure an API key first.';
+      }
+
+      // Setup provider change handler
+      providerSelect.addEventListener('change', async (e) => {
+        const provider = e.target.value;
+        await this.loadSystemModelModels(provider);
+      });
+    } catch (error) {
+      console.error('Error loading providers:', error);
+      statusIcon.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#dc3545">
+          <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Error loading providers';
+      statusDetails.textContent = 'Please try again later.';
+    }
+  }
+
+  // Load models for a specific provider
+  async loadSystemModelModels(providerName) {
+    const modelSelect = document.getElementById('onboardingSystemModel');
+    if (!modelSelect) return;
+
+    modelSelect.innerHTML = '<option value="">Loading models...</option>';
+    modelSelect.disabled = true;
+
+    if (!providerName) {
+      modelSelect.innerHTML = '<option value="">Select provider first...</option>';
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/settings/available-models?provider=${encodeURIComponent(providerName)}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch models');
+      }
+      const data = await response.json();
+
+      if (!data.available) {
+        modelSelect.innerHTML = '<option value="">Provider not available</option>';
+        return;
+      }
+
+      modelSelect.innerHTML = '<option value="">Select a model...</option>';
+      const models = data.models || [];
+      models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        // Recommend fast models
+        if (model.includes('haiku') || model.includes('4o-mini')) {
+          option.textContent = model + ' (Recommended)';
+        }
+        modelSelect.appendChild(option);
+      });
+
+      modelSelect.disabled = false;
+    } catch (error) {
+      console.error('Error loading models:', error);
+      modelSelect.innerHTML = '<option value="">Error loading models</option>';
+    }
+  }
+
+  // Save system model configuration
+  async saveSystemModel() {
+    const providerSelect = document.getElementById('onboardingSystemProvider');
+    const modelSelect = document.getElementById('onboardingSystemModel');
+    const successAlert = document.getElementById('onboardingSystemModelSuccess');
+
+    const provider = providerSelect?.value;
+    const model = modelSelect?.value;
+
+    // If both are empty, user is skipping - that's fine
+    if (!provider && !model) {
+      return true;
+    }
+
+    // If only one is selected, don't save
+    if (!provider || !model) {
+      return true;
+    }
+
+    try {
+      const response = await fetch('/api/settings/system-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save system model');
+      }
+
+      if (successAlert) {
+        successAlert.classList.remove('d-none');
+      }
+      console.log('System model saved successfully');
+      return true;
+    } catch (error) {
+      console.error('Error saving system model:', error);
+      return true; // Don't block onboarding progress
+    }
+  }
+
   // Move to next step
   async nextStep() {
     if (this.currentStep < this.totalSteps - 1) {
@@ -390,6 +544,13 @@ export class OnboardingManager {
         if (saved === false) {
           return;
         }
+        // Load providers for step 2 (system model)
+        await this.loadSystemModelProviders();
+      }
+
+      // Save system model if leaving step-2
+      if (this.currentStep === 2) {
+        await this.saveSystemModel();
       }
 
       // Mark current step as completed
@@ -470,7 +631,7 @@ export class OnboardingManager {
 
     // Add highlights based on current step
     switch (this.currentStep) {
-      case 3: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
+      case 4: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
         // Try various selectors for the sidebar toggle button
         const sidebarToggle = document.querySelector(
           '#sidebarToggle, .sidebar-toggle, [data-bs-toggle="collapse"][data-bs-target*="sidebar"], ' +
@@ -482,7 +643,7 @@ export class OnboardingManager {
         }
         break;
 
-      case 4: // Plugins step - highlight Plugins nav link
+      case 5: // Plugins step - highlight Plugins nav link
         document.querySelectorAll('.navbar a, .nav a, header a').forEach(link => {
           if (link.textContent.trim() === 'Plugins') {
             link.classList.add('onboarding-highlight');

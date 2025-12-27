@@ -250,7 +250,8 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
                   <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
                 </svg>
-                <span>Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
+                <span id="wsDashLlmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
+                <a href="/settings" class="alert-link ms-1">Go to Settings</a>
               </div>
 
               <!-- Auto-selected Indicator -->
@@ -1687,6 +1688,7 @@
 
     // Auto-config state
     let wsDashLLMAvailable = false;
+    let wsDashSystemModelConfigured = false;
     let wsDashAutoConfigApplied = false;
 
     // Check LLM availability
@@ -1695,11 +1697,13 @@
         const response = await fetch('/api/agents/auto-config/availability');
         const data = await response.json();
         wsDashLLMAvailable = data.available;
+        wsDashSystemModelConfigured = data.system_model_configured || false;
         return data;
       } catch (error) {
         console.error('Failed to check LLM availability:', error);
         wsDashLLMAvailable = false;
-        return { available: false };
+        wsDashSystemModelConfigured = false;
+        return { available: false, system_model_configured: false };
       }
     }
 
@@ -1707,6 +1711,7 @@
     function handleWsDashConfigModeChange(mode) {
       const autoConfigSection = document.getElementById('wsDashAutoConfigSection');
       const llmWarning = document.getElementById('wsDashLlmNotAvailableWarning');
+      const llmWarningMessage = document.getElementById('wsDashLlmWarningMessage');
       const configModeHelp = document.getElementById('wsDashConfigModeHelp');
       const autoSelectedIndicator = document.getElementById('wsDashAutoSelectedIndicator');
 
@@ -1718,6 +1723,14 @@
         } else {
           if (autoConfigSection) autoConfigSection.classList.add('d-none');
           if (llmWarning) llmWarning.classList.remove('d-none');
+          // Update warning message based on what's missing
+          if (llmWarningMessage) {
+            if (!wsDashSystemModelConfigured) {
+              llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+            } else {
+              llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+            }
+          }
         }
       } else {
         if (autoConfigSection) autoConfigSection.classList.add('d-none');
