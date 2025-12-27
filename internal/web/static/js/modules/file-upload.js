@@ -384,10 +384,36 @@ function clearFilesAfterSend() {
   updateFilesList();
 }
 
+// Add a file to upload list (used by sessions to attach stored files)
+function addFileToUpload(fileData) {
+  const filesArea = document.getElementById('uploadedFilesArea');
+  if (!filesArea) {
+    console.error('Chat upload area not found - make sure chat is visible');
+    return false;
+  }
+
+  uploadedFiles.push({
+    name: fileData.name,
+    type: fileData.type,
+    size: fileData.size,
+    content: fileData.content
+  });
+  updateFilesList();
+
+  // Scroll to input area to show the attached file
+  const inputContainer = document.getElementById('inputContainer');
+  if (inputContainer) {
+    inputContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  return true;
+}
+
 // Make functions globally available
 window.initFileUpload = initFileUpload;
 window.getUploadedFiles = getUploadedFiles;
 window.clearFilesAfterSend = clearFilesAfterSend;
+window.addFileToUpload = addFileToUpload;
 
 // Auto-initialize on page load
 if (document.readyState === 'loading') {

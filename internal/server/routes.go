@@ -329,6 +329,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	fileHandler := filehttp.NewHandler()
 	mux.HandleFunc("/api/files/parse", fileHandler.ParseFileHandler)
+	mux.HandleFunc("/api/files/upload", fileHandler.UploadFileHandler)
+	mux.HandleFunc("/api/files/content", fileHandler.GetFileHandler)
 
 	// =============================================================================
 	// Onboarding Endpoints
