@@ -128,9 +128,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 		if strings.TrimSpace(req.Name) == "" {
-			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "name required")
 			return
 		}
 
@@ -189,9 +187,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			}
 		}
 		if !found {
-			if respErr := orihttp.RespondBadRequest(w, "plugin not found in registry"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "plugin not found in registry")
 			return
 		}
 
@@ -222,9 +218,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, "current agent not found")
 			return
 		}
 		if ag.Plugins == nil {
@@ -290,9 +284,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if strings.TrimSpace(name) == "" {
-			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "name required")
 			return
 		}
 
@@ -687,9 +679,7 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	_, currentAgent := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(currentAgent)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 

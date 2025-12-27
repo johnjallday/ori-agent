@@ -136,9 +136,7 @@ func (h *Handler) UpdateMarketplace(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from URL path
 	id := extractMarketplaceID(r.URL.Path)
 	if id == "" {
-		if err := orihttp.RespondBadRequest(w, "Marketplace ID required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Marketplace ID required")
 		return
 	}
 
@@ -195,9 +193,7 @@ func (h *Handler) DeleteMarketplace(w http.ResponseWriter, r *http.Request) {
 	// Extract ID from URL path
 	id := extractMarketplaceID(r.URL.Path)
 	if id == "" {
-		if err := orihttp.RespondBadRequest(w, "Marketplace ID required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Marketplace ID required")
 		return
 	}
 
@@ -252,9 +248,7 @@ func (h *Handler) ReorderMarketplaces(w http.ResponseWriter, r *http.Request) {
 // POST /api/marketplaces/test
 func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -401,9 +395,7 @@ func (h *Handler) RefreshMarketplace(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/refresh")
 	id := extractMarketplaceID(path)
 	if id == "" {
-		if err := orihttp.RespondBadRequest(w, "Marketplace ID required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Marketplace ID required")
 		return
 	}
 

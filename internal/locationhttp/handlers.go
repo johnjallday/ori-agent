@@ -108,9 +108,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 // UpdateZone handles PUT /api/location/zones/:id
 func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -121,9 +119,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "zone ID is required")
 		return
 	}
 
@@ -137,9 +133,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 
 	// Validate zone
 	if zone.Name == "" {
-		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "zone name is required")
 		return
 	}
 
@@ -163,9 +157,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 // DeleteZone handles DELETE /api/location/zones/:id
 func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -175,9 +167,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
-		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "zone ID is required")
 		return
 	}
 
@@ -198,9 +188,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 // SetManualLocation handles POST /api/location/override
 func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -213,9 +201,7 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if request.Location == "" {
-		if err := orihttp.RespondBadRequest(w, "location is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "location is required")
 		return
 	}
 

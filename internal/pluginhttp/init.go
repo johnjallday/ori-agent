@@ -124,9 +124,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if pluginName == "" {
 		fmt.Printf("❌ Plugin name is empty\n")
-		if respErr := orihttp.RespondBadRequest(w, "plugin name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "plugin name required")
 		return
 	}
 
@@ -137,9 +135,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		fmt.Printf("❌ Agent '%s' not found\n", current)
-		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 
@@ -235,9 +231,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		h.handlePluginDefaultSettings(w, plugin.Tool, pluginName)
 
 	default:
-		if respErr := orihttp.RespondBadRequest(w, "invalid action"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "invalid action")
 	}
 }
 
@@ -412,9 +406,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if req.PluginName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "plugin_name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "plugin_name required")
 		return
 	}
 
@@ -422,9 +414,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	_, current := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 

@@ -27,9 +27,7 @@ func NewNotificationsHandler(notifMgr *pluginmanager.NotificationManager) *Notif
 // GET /api/plugins/notifications
 func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -49,17 +47,13 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 // POST /api/plugins/notifications/:id/dismiss
 func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	notificationID := h.extractNotificationID(r.URL.Path)
 	if notificationID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Notification ID required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Notification ID required")
 		return
 	}
 

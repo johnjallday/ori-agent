@@ -64,9 +64,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if agentName != "" {
 			agent, ok := h.State.GetAgent(agentName)
 			if !ok || agent == nil {
-				if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.NotFound(w, "Agent not found")
 				return
 			}
 
@@ -242,9 +240,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Get existing agent
 		agent, ok := h.State.GetAgent(agentName)
 		if !ok || agent == nil {
-			if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, "Agent not found")
 			return
 		}
 
@@ -332,9 +328,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if _, exists := h.State.GetAgent(*req.Name); exists {
-				if respErr := orihttp.RespondConflict(w, "Agent with that name already exists"); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.Conflict(w, "Agent with that name already exists")
 				return
 			}
 
@@ -419,9 +413,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "name required")
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {

@@ -39,16 +39,12 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if sh.orchestrator == nil {
-		if respErr := orihttp.RespondInternalError(w, "orchestrator not initialized"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "orchestrator not initialized")
 		return
 	}
 
@@ -81,9 +77,7 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 
 func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -299,17 +293,13 @@ func (sh *StreamingHandler) sendWorkspaceStatus(w http.ResponseWriter, flusher h
 // GET /api/orchestration/progress/stream?workspace_id=<id>
 func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -331,9 +321,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "streaming not supported"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "streaming not supported")
 		return
 	}
 

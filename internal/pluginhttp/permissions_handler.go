@@ -33,9 +33,7 @@ func NewPermissionsHandler(
 // GET /api/plugins/:name/permissions
 func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -66,9 +64,7 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 // POST /api/plugins/:name/permissions/approve
 func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 

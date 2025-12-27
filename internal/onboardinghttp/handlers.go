@@ -39,9 +39,7 @@ type CompleteStepRequest struct {
 // GET /api/onboarding/status
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -66,9 +64,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/step
 func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -78,9 +74,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.StepName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "step_name is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "step_name is required")
 		return
 	}
 
@@ -114,9 +108,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/skip
 func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -137,9 +129,7 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/complete
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -160,9 +150,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/reset
 func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -193,9 +181,7 @@ type SetThemeRequest struct {
 // GET /api/theme
 func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -215,9 +201,7 @@ func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 // POST /api/theme
 func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -227,9 +211,7 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Theme == "" {
-		if respErr := orihttp.RespondBadRequest(w, "theme is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "theme is required")
 		return
 	}
 

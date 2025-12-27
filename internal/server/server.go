@@ -231,9 +231,7 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	html, err := s.UI.TemplateRenderer.RenderTemplate(templateName, data)
 	if err != nil {
 		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
-		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
 
@@ -335,9 +333,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	html, err := s.UI.TemplateRenderer.RenderTemplate("studios", data)
 	if err != nil {
 		logger.Error("Failed to render studios template", logger.Fields{"error": err})
-		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
 
@@ -507,9 +503,7 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
 		return
 	}
 
@@ -525,9 +519,7 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !strings.HasPrefix(absPath, agentsDir+string(filepath.Separator)) {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
 		return
 	}
 

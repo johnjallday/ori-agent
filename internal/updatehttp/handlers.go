@@ -81,9 +81,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 	releases, err := h.updateManager.ListReleases(includePrerelease, limit)
 	if err != nil {
 		logger.Error("Error listing releases", logger.Fields{"error": err})
-		if respErr := orihttp.RespondInternalError(w, "Failed to list releases"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to list releases")
 		return
 	}
 
@@ -107,9 +105,7 @@ func (h *Handler) ListReleasesHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -123,18 +119,14 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if request.Version == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Version is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Version is required")
 		return
 	}
 
 	filePath, err := h.updateManager.DownloadUpdate(request.Version)
 	if err != nil {
 		logger.Error("Error downloading update", logger.Fields{"error": err})
-		if respErr := orihttp.RespondInternalError(w, "Failed to download update"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to download update")
 		return
 	}
 
@@ -175,9 +167,7 @@ func (h *Handler) DownloadUpdateHandler(w http.ResponseWriter, r *http.Request) 
 // GetVersionHandler handles GET /api/updates/version
 func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -186,9 +176,7 @@ func (h *Handler) GetVersionHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(versionInfo); encErr != nil {
 		logger.Error("Error encoding version info", logger.Fields{"error": encErr})
-		if respErr := orihttp.RespondInternalError(w, "Failed to encode response"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to encode response")
 		return
 	}
 }

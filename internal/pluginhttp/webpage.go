@@ -32,9 +32,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(path, "/pages/", 2)
 
 	if len(parts) != 2 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}")
 		return
 	}
 

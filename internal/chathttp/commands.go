@@ -49,9 +49,7 @@ func (ch *CommandHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Reque
 	// Get current agent information
 	ag, current, ok := store.GetCurrentAgent(ch.store)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 
@@ -109,9 +107,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 	// Get current agent information
 	ag, _, ok := store.GetCurrentAgent(ch.store)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 

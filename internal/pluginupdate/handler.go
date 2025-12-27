@@ -68,9 +68,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL path"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL path")
 		return
 	}
 	pluginName := pathParts[2]
@@ -132,9 +130,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.pluginReg == nil {
-		if err := orihttp.RespondInternalError(w, "Plugin registry not loaded"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Plugin registry not loaded")
 		return
 	}
 
@@ -190,9 +186,7 @@ func (h *Handler) HandleUpdatePlugin(w http.ResponseWriter, r *http.Request) {
 // GET /api/plugins/backups
 func (h *Handler) HandleListBackups(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -217,9 +211,7 @@ func (h *Handler) HandleListBackups(w http.ResponseWriter, r *http.Request) {
 // POST /api/plugins/backups/clean
 func (h *Handler) HandleCleanBackups(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -275,9 +267,7 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL path"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL path")
 		return
 	}
 	pluginName := pathParts[2]
@@ -287,9 +277,7 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid request body")
 		return
 	}
 
@@ -305,9 +293,7 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 
 	agentNames, _ := h.store.ListAgents()
 	if len(agentNames) == 0 {
-		if err := orihttp.RespondInternalError(w, "No agents found"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "No agents found")
 		return
 	}
 
@@ -359,9 +345,7 @@ func (h *Handler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 // GET /api/plugins/check-updates
 func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -448,16 +432,12 @@ func (h *Handler) HandleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 // GET /api/plugins/updates/status
 func (h *Handler) HandleGetUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if h.updateService == nil {
-		if err := orihttp.RespondInternalError(w, "Plugin update service not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Plugin update service not initialized")
 		return
 	}
 

@@ -45,9 +45,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	path := r.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 4 {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name required in path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name required in path")
 		return
 	}
 	agentName := parts[2]
@@ -55,9 +53,7 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Agent not found")
 		return
 	}
 
@@ -133,9 +129,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	// api/agents/{name}/mcp-servers/{serverName}/enable
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name and server name required in path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name and server name required in path")
 		return
 	}
 	agentName := parts[2]
@@ -144,9 +138,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Agent not found")
 		return
 	}
 
@@ -195,9 +187,7 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 // POST /api/agents/{name}/mcp-servers/{serverName}/disable
 func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -206,9 +196,7 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	path := r.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name and server name required in path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name and server name required in path")
 		return
 	}
 	agentName := parts[2]

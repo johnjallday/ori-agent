@@ -44,9 +44,7 @@ func (th *TemplateHandler) TemplatesHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 
 	if th.templateManager == nil {
-		if respErr := orihttp.RespondInternalError(w, "template manager not initialized"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "template manager not initialized")
 		return
 	}
 
@@ -121,9 +119,7 @@ func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.R
 func (th *TemplateHandler) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	templateID := r.URL.Query().Get("id")
 	if templateID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "template id required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "template id required")
 		return
 	}
 
@@ -150,9 +146,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	if th.templateManager == nil {
-		if respErr := orihttp.RespondInternalError(w, "template manager not initialized"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "template manager not initialized")
 		return
 	}
 

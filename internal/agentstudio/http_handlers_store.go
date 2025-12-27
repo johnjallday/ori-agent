@@ -26,18 +26,14 @@ type CreateStoreNodeRequest struct {
 // CreateStoreNode handles POST /api/studios/:id/store-nodes
 func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -49,15 +45,11 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	// Validate required fields
 
 	if req.Name == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Store node name is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Store node name is required")
 		return
 	}
 	if req.BaseDir == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Base directory is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Base directory is required")
 		return
 	}
 	if req.Format == "" {
@@ -182,18 +174,14 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 // GetStoreNodes handles GET /api/studios/:id/store-nodes
 func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 1 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -228,18 +216,14 @@ type UpdateStoreNodeRequest struct {
 // UpdateStoreNode handles PUT /api/studios/:id/store-nodes/:node_id
 func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -302,9 +286,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.Format != nil {
 		validFormats := map[string]bool{"json": true, "text": true, "markdown": true, "binary": true}
 		if !validFormats[*req.Format] {
-			if respErr := orihttp.RespondBadRequest(w, "Format must be one of: json, text, markdown, binary"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "Format must be one of: json, text, markdown, binary")
 			return
 		}
 		storeNode.Format = *req.Format
@@ -312,9 +294,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	if req.WriteMode != nil {
 		validModes := map[string]bool{"overwrite": true, "append": true}
 		if !validModes[*req.WriteMode] {
-			if respErr := orihttp.RespondBadRequest(w, "Write mode must be one of: overwrite, append"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "Write mode must be one of: overwrite, append")
 			return
 		}
 		storeNode.WriteMode = *req.WriteMode
@@ -383,18 +363,14 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 // DeleteStoreNode handles DELETE /api/studios/:id/store-nodes/:node_id
 func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -469,18 +445,14 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 // GetStoreNodeStatus handles GET /api/studios/:id/store-nodes/:node_id/status
 func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -505,9 +477,7 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	if storeNode == nil {
-		if respErr := orihttp.RespondNotFound(w, "Store node not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Store node not found")
 		return
 	}
 

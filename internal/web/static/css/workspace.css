@@ -1,0 +1,8 @@
+/* Legacy workspace page styles placeholder. */
+
+:root {
+  --bg-color: var(--bg-primary);
+  --text-color: var(--text-primary);
+  --card-bg: var(--bg-secondary);
+  --muted-text: var(--text-muted);
+}

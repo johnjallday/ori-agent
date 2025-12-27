@@ -236,9 +236,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
-		if respErr := orihttp.RespondBadRequest(w, "empty question"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "empty question")
 		return
 	}
 
@@ -351,9 +349,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Load agent
 		ag, current, ok := store.GetCurrentAgent(h.store)
 		if !ok {
-			if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, "current agent not found")
 			return
 		}
 

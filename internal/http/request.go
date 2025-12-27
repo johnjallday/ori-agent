@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ParseJSONBody reads and parses a JSON request body into the provided struct.
@@ -20,31 +18,23 @@ import (
 //	// Use req...
 func ParseJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 	if r.Body == nil {
-		if respErr := RespondBadRequest(w, "Request body is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		BadRequest(w, "Request body is required")
 		return false
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if respErr := RespondBadRequest(w, "Failed to read request body"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		BadRequest(w, "Failed to read request body")
 		return false
 	}
 
 	if len(body) == 0 {
-		if respErr := RespondBadRequest(w, "Request body is empty"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		BadRequest(w, "Request body is empty")
 		return false
 	}
 
 	if err := json.Unmarshal(body, v); err != nil {
-		if respErr := RespondBadRequest(w, "Invalid JSON: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		BadRequest(w, "Invalid JSON: "+err.Error())
 		return false
 	}
 
@@ -61,9 +51,7 @@ func ParseJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 //	}
 func RequireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 	if r.Method != method {
-		if err := RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		MethodNotAllowed(w)
 		return false
 	}
 	return true
@@ -83,9 +71,7 @@ func RequireMethods(w http.ResponseWriter, r *http.Request, methods ...string) b
 			return true
 		}
 	}
-	if err := RespondMethodNotAllowed(w); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
-	}
+	MethodNotAllowed(w)
 	return false
 }
 
@@ -114,10 +100,29 @@ func GetQueryParam(r *http.Request, key, defaultValue string) string {
 func RequireQueryParam(w http.ResponseWriter, r *http.Request, key string) string {
 	value := r.URL.Query().Get(key)
 	if value == "" {
-		if err := RespondBadRequest(w, key+" is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		BadRequest(w, key+" is required")
 		return ""
 	}
 	return value
+}
+
+// MaxFormSize is the maximum size for multipart form data (10 MB)
+const MaxFormSize = 10 << 20 // 10 MB
+
+// ParseFormData parses multipart form data, falling back to regular form parsing.
+// Returns true if parsing succeeded, false if an error response was sent.
+//
+// Usage:
+//
+//	if !http.ParseFormData(w, r) {
+//		return // Error response already sent
+//	}
+func ParseFormData(w http.ResponseWriter, r *http.Request) bool {
+	if err := r.ParseMultipartForm(MaxFormSize); err != nil {
+		if err := r.ParseForm(); err != nil {
+			BadRequest(w, "Failed to parse form data: "+err.Error())
+			return false
+		}
+	}
+	return true
 }

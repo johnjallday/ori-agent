@@ -100,9 +100,7 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 
 	// Validate required fields
 	if msg.From == "" {
-		if respErr := orihttp.RespondBadRequest(w, "from field is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "from field is required")
 		return
 	}
 	if msg.Content == "" {

@@ -282,9 +282,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodPost:
 				s.marketplaceHandler.AddMarketplace(w, r)
 			default:
-				if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		})
 		mux.HandleFunc("/api/marketplaces/reorder", s.marketplaceHandler.ReorderMarketplaces)
@@ -390,9 +388,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				return
 			}
 			// Otherwise, 404
-			if respErr := orihttp.RespondNotFound(w, "Not found"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, "Not found")
 		})
 	}
 
@@ -407,9 +403,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.locationHandler.CreateZone(w, r)
 		default:
-			if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
@@ -419,9 +413,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodDelete:
 			s.locationHandler.DeleteZone(w, r)
 		default:
-			if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
@@ -436,9 +428,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.mcpHandler.AddServerHandler(w, r)
 		default:
-			if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
@@ -458,9 +448,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		} else if r.Method == http.MethodDelete {
 			s.mcpHandler.RemoveServerHandler(w, r)
 		} else {
-			if respErr := orihttp.RespondNotFound(w, "Not found"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, "Not found")
 		}
 	})
 	mux.HandleFunc("/api/mcp/import", s.mcpHandler.ImportServersHandler)
@@ -660,9 +648,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
-				if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 			// Handle agent add/remove operations
 		} else if strings.Contains(r.URL.Path, "/agents") {
@@ -673,9 +659,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.studioHandler.RemoveAgent(w, r)
 			default:
-				if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		} else {
 			s.studioHandler.GetStudio(w, r)
