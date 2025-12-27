@@ -117,10 +117,7 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var model llm.PricingModel
-	if err := json.NewDecoder(r.Body).Decode(&model); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "invalid request body"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &model) {
 		return
 	}
 

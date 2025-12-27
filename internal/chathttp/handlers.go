@@ -231,21 +231,18 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		AgentName string         `json:"agent_name,omitempty"` // Allow specifying target agent
 		Files     []UploadedFile `json:"files,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
 		if respErr := orihttp.RespondBadRequest(w, "empty question"); respErr != nil {
-			logger.
-				// Debug: Log received files
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
+
+	// Debug: Log received files
 
 	// Get session ID from header for multi-tab support
 	sessionID := h.getSessionID(r)

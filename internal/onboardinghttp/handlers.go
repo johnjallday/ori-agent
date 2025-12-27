@@ -73,10 +73,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CompleteStepRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid request body"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -89,13 +86,12 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.onboardingMgr.CompleteStep(req.StepName); err != nil {
 		if respErr := orihttp.RespondInternalError(w, "Failed to complete step: "+err.Error()); respErr != nil {
-			logger.
-
-				// Return updated status
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
+
+	// Return updated status
 
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
@@ -226,10 +222,7 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SetThemeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid request body"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

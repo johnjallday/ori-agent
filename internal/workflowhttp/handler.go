@@ -63,15 +63,14 @@ func (h *Handler) WorkflowsHandler(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateWorkflow(w, r)
 	default:
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-
-			// WorkflowHandler handles /api/workflows/:id requests
-			// GET: Get specific workflow
-			// DELETE: Delete custom workflow
 			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 	}
 }
 
+// WorkflowHandler handles /api/workflows/:id requests
+// GET: Get specific workflow
+// DELETE: Delete custom workflow
 func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -83,13 +82,12 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 
 	if workflowID == "" {
 		if err := orihttp.RespondBadRequest(w, "Workflow ID is required"); err != nil {
-			logger.
-
-				// Check if this is a check-agents request
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Check if this is a check-agents request
 
 	if len(parts) > 1 && parts[1] == "check-agents" {
 		h.handleCheckAgents(w, r, workflowID)
@@ -103,12 +101,12 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteWorkflow(w, r, workflowID)
 	default:
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-
-			// handleListWorkflows returns all custom workflows
 			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 	}
 }
+
+// handleListWorkflows returns all custom workflows
 
 func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 	if h.workflowManager == nil {
@@ -138,13 +136,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateWorkflowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.
-
-				// Validate required fields
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -164,13 +156,12 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Nodes) > templates.MaxWorkflowNodes {
 		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes))); err != nil {
-			logger.
-
-				// Create workflow
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Create workflow
 
 	workflow := templates.NewCustomWorkflow(req.Name, req.Description, req.Category)
 	workflow.Nodes = req.Nodes
@@ -226,24 +217,21 @@ func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, work
 func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if h.workflowManager == nil {
 		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.
-
-				// Check if workflow exists
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
 
+	// Check if workflow exists
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
 		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.
-
-				// Only allow deletion of custom workflows
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Only allow deletion of custom workflows
 
 	if workflow.Source != templates.WorkflowSourceCustom {
 		if encodeErr := orihttp.RespondForbidden(w, "Cannot delete built-in workflows"); encodeErr != nil {
@@ -276,53 +264,43 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 
 	if h.workflowManager == nil {
 		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.
-
-				// Get workflow
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	workflow, err := h.workflowManager.GetWorkflow(workflowID)
-	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.
-
-				// Parse request
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
-		return
-	}
-
-	var req CheckAgentsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
 			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
 
-	if req.StudioID == "" {
-		if err := orihttp.RespondBadRequest(w, "Studio ID is required"); err != nil {
-			logger.
-
-				// Get studio agents
-				Error("Failed to write response", logger.Fields{"error": err})
+	// Get workflow
+	workflow, err := h.workflowManager.GetWorkflow(workflowID)
+	if err != nil {
+		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
 
+	// Parse request
+	var req CheckAgentsRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.StudioID == "" {
+		if err := orihttp.RespondBadRequest(w, "Studio ID is required"); err != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": err})
+		}
+		return
+	}
+
+	// Get studio agents
 	studio, err := h.workspaceStore.Get(req.StudioID)
 	if err != nil {
 		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.
-
-				// Check agent availability
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Check agent availability
 
 	requiredAgents := workflow.GetAgentNames()
 	missingAgents := h.workflowManager.CheckAgentAvailability(workflow, studio.Agents)

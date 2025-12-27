@@ -124,10 +124,7 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		var req struct {
 			Name string `json:"name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
 		}
 		if strings.TrimSpace(req.Name) == "" {
@@ -397,10 +394,7 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 		var req struct {
 			PluginNames []string `json:"plugin_names,omitempty"` // Empty = update all
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
 		}
 
@@ -468,15 +462,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		if encErr := json.NewEncoder(w).Encode(map[string]any{
-			"success": false,
-			"message": err.Error(),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -702,13 +688,12 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	ag, ok := h.store.GetAgent(currentAgent)
 	if !ok {
 		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.
-
-				// Check for updates
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
+
+	// Check for updates
 
 	var updates []map[string]any
 	for name, installedPlugin := range ag.Plugins {

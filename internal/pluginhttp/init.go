@@ -125,14 +125,12 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	if pluginName == "" {
 		fmt.Printf("❌ Plugin name is empty\n")
 		if respErr := orihttp.RespondBadRequest(w, "plugin name required"); respErr != nil {
-			logger.
-
-				// Get current agent and its plugins
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
+	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	fmt.Printf("📁 Current agent: %s\n", current)
 
@@ -140,13 +138,12 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		fmt.Printf("❌ Agent '%s' not found\n", current)
 		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.
-
-				// Find the plugin
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
+
+	// Find the plugin
 
 	plugin, exists := ag.Plugins[pluginName]
 	if !exists {
@@ -338,13 +335,7 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 
 	// Parse configuration from request body first
 	var configData map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
-		if encErr := json.NewEncoder(w).Encode(map[string]any{
-			"success": false,
-			"message": "Invalid JSON in request body: " + err.Error(),
-		}); encErr != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &configData) {
 		return
 	}
 
@@ -416,34 +407,28 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 		Parameters map[string]interface{} `json:"parameters"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "invalid JSON"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.PluginName == "" {
 		if respErr := orihttp.RespondBadRequest(w, "plugin_name required"); respErr != nil {
-			logger.
-
-				// Get current agent and its plugins
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
+	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
-			logger.
-
-				// Find the plugin
-				Error("Failed to write response", logger.Fields{"error": respErr})
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
+
+	// Find the plugin
 
 	plugin, exists := ag.Plugins[req.PluginName]
 	if !exists {

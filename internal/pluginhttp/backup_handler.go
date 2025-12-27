@@ -77,10 +77,7 @@ func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.
 
 	// Read request body
 	var configData json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &configData) {
 		return
 	}
 

@@ -92,10 +92,7 @@ func (h *Handler) AddMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req AddMarketplaceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, "Invalid request body"); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -140,10 +137,7 @@ func (h *Handler) UpdateMarketplace(w http.ResponseWriter, r *http.Request) {
 	id := extractMarketplaceID(r.URL.Path)
 	if id == "" {
 		if err := orihttp.RespondBadRequest(w, "Marketplace ID required"); err != nil {
-			logger.
-
-				// Get existing marketplace
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -158,13 +152,7 @@ func (h *Handler) UpdateMarketplace(w http.ResponseWriter, r *http.Request) {
 
 	// Parse update request
 	var updates map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.
-
-				// Apply updates
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &updates) {
 		return
 	}
 
@@ -240,10 +228,7 @@ func (h *Handler) ReorderMarketplaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ReorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -274,13 +259,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req TestMarketplaceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.
-
-				// Detect source type
-				Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

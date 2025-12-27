@@ -73,8 +73,7 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var zone location.Zone
-	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &zone) {
 		return
 	}
 
@@ -110,14 +109,13 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-
-				// Extract zone ID from URL path
-				// URL format: /api/location/zones/{id}
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Extract zone ID from URL path
+	// URL format: /api/location/zones/{id}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
@@ -130,8 +128,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var zone location.Zone
-	if err := json.NewDecoder(r.Body).Decode(&zone); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &zone) {
 		return
 	}
 
@@ -141,10 +138,7 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 	// Validate zone
 	if zone.Name == "" {
 		if err := orihttp.RespondBadRequest(w, "zone name is required"); err != nil {
-			logger.
-
-				// Update zone
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -170,23 +164,19 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-
-				// Extract zone ID from URL path
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
+
+	// Extract zone ID from URL path
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/location/zones/")
 	zoneID := strings.Split(path, "/")[0]
 
 	if zoneID == "" {
 		if err := orihttp.RespondBadRequest(w, "zone ID is required"); err != nil {
-			logger.
-
-				// Delete zone
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}
@@ -218,17 +208,13 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 		Location string `json:"location"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &request) {
 		return
 	}
 
 	if request.Location == "" {
 		if err := orihttp.RespondBadRequest(w, "location is required"); err != nil {
-			logger.
-
-				// Set manual location
-				Error("Failed to write response", logger.Fields{"error": err})
+			logger.Error("Failed to write response", logger.Fields{"error": err})
 		}
 		return
 	}

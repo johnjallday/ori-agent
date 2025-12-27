@@ -38,13 +38,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 
 	var req ToolCallRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if encErr := json.NewEncoder(w).Encode(ToolCallResponse{
-			Success: false,
-			Error:   fmt.Sprintf("Invalid request: %v", err),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

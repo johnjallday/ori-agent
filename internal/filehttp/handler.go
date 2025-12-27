@@ -43,15 +43,11 @@ func (h *Handler) ParseFileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req ParseFileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-			logger.
-
-				// Decode base64 content
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+
+	// Decode base64 content
 
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
@@ -109,8 +105,7 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req UploadFileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		json.NewEncoder(w).Encode(UploadFileResponse{Error: "Invalid request: " + err.Error()})
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

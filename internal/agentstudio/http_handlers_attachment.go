@@ -82,10 +82,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	studioID := parts[0]
 
 	var req CreateAttachmentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -204,10 +201,7 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		Y       *float64            `json:"y,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

@@ -44,14 +44,10 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Parse request body
 
 	var req CreateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.
-				// Validate request
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	// Validate request
 
 	if req.Description == "" {
 		if respErr := orihttp.RespondBadRequest(w, "Task description is required"); respErr != nil {
@@ -152,14 +148,10 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		InputTaskIDs   *[]string `json:"input_task_ids,omitempty"`
 		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.
-				// Get studio
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	// Get studio
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {

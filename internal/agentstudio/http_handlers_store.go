@@ -43,14 +43,10 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 	studioID := parts[0]
 
 	var req CreateStoreNodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.
-				// Validate required fields
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	// Validate required fields
 
 	if req.Name == "" {
 		if respErr := orihttp.RespondBadRequest(w, "Store node name is required"); respErr != nil {
@@ -258,10 +254,7 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateStoreNodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
