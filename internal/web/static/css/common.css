@@ -317,6 +317,41 @@ body::before {
     transform: translateY(-1px);
 }
 
+/* Input wrapper for drop zone */
+.input-wrapper {
+    position: relative;
+}
+
+/* Drop zone indicator (replaces textarea visually) */
+.drop-zone-indicator {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 80px;
+    border: 2px dashed var(--primary-color);
+    border-radius: var(--radius-md);
+    background: rgba(29, 78, 216, 0.08);
+    color: var(--primary-color);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.input-wrapper.drag-active .drop-zone-indicator {
+    display: flex;
+}
+
+.input-wrapper.drag-active #input {
+    display: none;
+}
+
+.dark-mode .drop-zone-indicator,
+[data-bs-theme="dark"] .drop-zone-indicator {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: var(--primary-light);
+    color: var(--primary-light);
+}
+
 /* Badge Styles */
 .modern-badge {
     display: inline-flex;

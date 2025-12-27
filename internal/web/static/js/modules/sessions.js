@@ -480,6 +480,20 @@ const sessionManager = {
         e.stopPropagation();
         item.classList.remove('drag-over');
 
+        // Check if files are being dropped from OS
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+          const folderName = item.querySelector('.folder-name')?.textContent?.trim();
+          for (const file of files) {
+            await this.createFileReferenceNote(folderId, file);
+          }
+          item.classList.add('drop-success');
+          setTimeout(() => item.classList.remove('drop-success'), 700);
+          const fileText = files.length === 1 ? 'file reference' : `${files.length} file references`;
+          this.showToast(`Created ${fileText} in ${folderName}`, 'success');
+          return;
+        }
+
         // Check if it's a note being dropped
         const noteId = e.dataTransfer.getData('application/x-ori-note-id');
         const sourceFolderId = e.dataTransfer.getData('application/x-ori-note-folder');
@@ -2192,6 +2206,31 @@ const sessionManager = {
       console.error('Failed to load folder notes:', error);
       return [];
     }
+  },
+
+  // Create a file reference note from a dropped file
+  async createFileReferenceNote(folderId, file) {
+    const name = `📎 ${file.name}`;
+    const sizeKB = (file.size / 1024).toFixed(1);
+    const sizeStr = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${sizeKB} KB`;
+
+    let content = `**File:** ${file.name}\n**Size:** ${sizeStr}\n**Type:** ${file.type || 'unknown'}`;
+
+    // For text files, include the content
+    const textExtensions = ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'csv', 'yaml', 'yml'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (textExtensions.includes(ext) && file.size < 100 * 1024) { // Under 100KB
+      try {
+        const text = await file.text();
+        content += `\n\n---\n\n\`\`\`${ext}\n${text}\n\`\`\``;
+      } catch (e) {
+        console.warn('Could not read file content:', e);
+      }
+    }
+
+    return this.createNote(folderId, name, content);
   },
 
   // Create a new note in a folder

@@ -450,18 +450,65 @@
   margin: 4px 0 8px 0;
 }
 
+/* Make folder sessions compact like notes */
 .folder-sessions .session-item {
   margin-left: 8px;
+  flex-direction: row;
+  align-items: center;
+  padding: 6px 8px 6px 12px;
+  background: transparent;
+  border: none;
+  gap: 8px;
+  position: relative;
+}
+
+.folder-sessions .session-item::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-color: var(--text-tertiary);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+.folder-sessions .session-item:hover::before {
+  background-color: var(--text-secondary);
+}
+
+.folder-sessions .session-item:hover {
+  background: var(--bg-hover);
+}
+
+.folder-sessions .session-title {
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.folder-sessions .session-preview {
+  display: none;
+}
+
+.folder-sessions .session-header {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-sessions .session-meta {
+  flex-shrink: 0;
+}
+
+.folder-sessions .session-agent-badge {
+  font-size: 10px;
+  padding: 1px 6px;
 }
 
 .folder-sessions[data-has-accent="true"] .session-item:not(.active):not(.selected) {
-  background: var(--folder-accent-bg);
-  border-color: var(--folder-accent-border);
+  background: transparent;
 }
 
 .folder-sessions[data-has-accent="true"] .session-item:not(.active):not(.selected):hover {
-  background: var(--folder-accent-bg-hover);
-  border-color: var(--folder-accent-border);
+  background: var(--bg-hover);
 }
 
 /* Session Item */

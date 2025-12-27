@@ -15,13 +15,130 @@ function initFileUpload() {
   if (clearFilesBtn) {
     clearFilesBtn.addEventListener('click', clearAllFiles);
   }
+
+  // Initialize drag and drop
+  initDragAndDrop();
 }
 
-// Handle file selection
+// Initialize drag and drop functionality
+function initDragAndDrop() {
+  const chatContainer = document.getElementById('chatContainer');
+  const inputWrapper = document.getElementById('inputWrapper');
+  const inputContainer = document.getElementById('inputContainer');
+
+  if (!inputWrapper) {
+    console.log('inputWrapper not found');
+    return;
+  }
+
+  let dragCounter = 0;
+
+  function showDropZone() {
+    inputWrapper.classList.add('drag-active');
+  }
+
+  function hideDropZone() {
+    inputWrapper.classList.remove('drag-active');
+    dragCounter = 0;
+  }
+
+  // Prevent default on document to stop browser from opening files
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => e.preventDefault());
+
+  // Listen on chat container for drag events
+  if (chatContainer) {
+    chatContainer.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.types.includes('Files')) {
+        dragCounter++;
+        showDropZone();
+      }
+    });
+
+    chatContainer.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.types.includes('Files')) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    chatContainer.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        hideDropZone();
+      }
+    });
+
+    chatContainer.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      hideDropZone();
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        await processFiles(Array.from(files));
+      }
+    });
+  }
+
+  // Listen on input container (the whole input card area)
+  if (inputContainer) {
+    inputContainer.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.types.includes('Files')) {
+        dragCounter++;
+        showDropZone();
+      }
+    });
+
+    inputContainer.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.types.includes('Files')) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    inputContainer.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        hideDropZone();
+      }
+    });
+
+    inputContainer.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      hideDropZone();
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        await processFiles(Array.from(files));
+      }
+    });
+  }
+}
+
+// Handle file selection from file input
 async function handleFileSelect(event) {
   const files = Array.from(event.target.files);
+  await processFiles(files);
+
+  // Clear the input so the same file can be selected again
+  event.target.value = '';
+}
+
+// Process files (shared between file input and drag-drop)
+async function processFiles(files) {
+  // Allowed file extensions
+  const allowedExtensions = ['txt', 'md', 'pdf', 'doc', 'docx', 'csv', 'json', 'xml', 'html', 'mp3', 'wav', 'flac', 'ogg', 'zip', 'pptx', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
 
   for (const file of files) {
+    // Check file extension
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!allowedExtensions.includes(ext)) {
+      alert(`File type .${ext} is not supported. Supported types: ${allowedExtensions.join(', ')}`);
+      continue;
+    }
+
     // Check file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       alert(`File ${file.name} is too large. Maximum size is 10MB.`);
@@ -34,7 +151,6 @@ async function handleFileSelect(event) {
       // Determine MIME type - use actual type or infer from extension
       let mimeType = file.type;
       if (!mimeType) {
-        const ext = file.name.split('.').pop().toLowerCase();
         const mimeMap = {
           'pdf': 'application/pdf',
           'wav': 'audio/wav',
@@ -47,7 +163,12 @@ async function handleFileSelect(event) {
           'midi': 'audio/midi',
           'zip': 'application/zip',
           'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'png': 'image/png',
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'gif': 'image/gif',
+          'webp': 'image/webp'
         };
         mimeType = mimeMap[ext] || 'application/octet-stream';
       }
@@ -66,16 +187,13 @@ async function handleFileSelect(event) {
     }
   }
 
-  // Clear the input so the same file can be selected again
-  event.target.value = '';
-
   updateFilesList();
 }
 
-// Check if file is binary (PDF, DOCX, DOC, audio, etc.)
+// Check if file is binary (PDF, DOCX, DOC, audio, images, etc.)
 function isBinaryFile(filename) {
   const ext = filename.split('.').pop().toLowerCase();
-  return ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip'].includes(ext);
+  return ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip', 'png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
 }
 
 // Check if file should be parsed for text (for LLM consumption)
@@ -224,7 +342,12 @@ function getFileIcon(filename) {
     'wav': '🎵',
     'flac': '🎵',
     'ogg': '🎵',
-    'zip': '📦'
+    'zip': '📦',
+    'png': '🖼️',
+    'jpg': '🖼️',
+    'jpeg': '🖼️',
+    'gif': '🖼️',
+    'webp': '🖼️'
   };
   return iconMap[ext] || '📎';
 }
