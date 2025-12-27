@@ -264,6 +264,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings", s.settingsHandler.SettingsHandler)
 	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
+	mux.HandleFunc("/api/settings/system-model", s.settingsHandler.SystemModelHandler)
+	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
 
 	// Reset endpoints
 	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)

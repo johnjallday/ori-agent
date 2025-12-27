@@ -3,11 +3,13 @@ package agenthttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -15,13 +17,15 @@ import (
 
 // AutoConfigHandler handles auto-configuration requests for new agents
 type AutoConfigHandler struct {
-	llmFactory *llm.Factory
+	llmFactory    *llm.Factory
+	configManager *config.Manager
 }
 
 // NewAutoConfigHandler creates a new AutoConfigHandler
-func NewAutoConfigHandler(llmFactory *llm.Factory) *AutoConfigHandler {
+func NewAutoConfigHandler(llmFactory *llm.Factory, configManager *config.Manager) *AutoConfigHandler {
 	return &AutoConfigHandler{
-		llmFactory: llmFactory,
+		llmFactory:    llmFactory,
+		configManager: configManager,
 	}
 }
 
@@ -42,12 +46,15 @@ type AutoConfigResponse struct {
 
 // LLMAvailabilityResponse represents the response for LLM availability check
 type LLMAvailabilityResponse struct {
-	Available bool     `json:"available"`
-	Providers []string `json:"providers"`
-	Message   string   `json:"message,omitempty"`
+	Available             bool     `json:"available"`
+	Providers             []string `json:"providers"`
+	SystemModelConfigured bool     `json:"system_model_configured"`
+	SystemProvider        string   `json:"system_provider,omitempty"`
+	SystemModel           string   `json:"system_model,omitempty"`
+	Message               string   `json:"message,omitempty"`
 }
 
-// CheckLLMAvailabilityHandler returns whether any LLM provider is configured
+// CheckLLMAvailabilityHandler returns whether any LLM provider is configured and system model is set
 func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -61,13 +68,29 @@ func (h *AutoConfigHandler) CheckLLMAvailabilityHandler(w http.ResponseWriter, r
 		availableProviders = append(availableProviders, p.Name)
 	}
 
+	// Check if system model is configured
+	systemModelConfigured := h.configManager.IsSystemModelConfigured()
+	systemProvider, systemModel := h.configManager.GetSystemModel()
+
+	// For auto-config to be available, we need BOTH:
+	// 1. At least one LLM provider configured
+	// 2. System model configured
+	available := len(availableProviders) > 0 && systemModelConfigured
+
 	response := LLMAvailabilityResponse{
-		Available: len(availableProviders) > 0,
-		Providers: availableProviders,
+		Available:             available,
+		Providers:             availableProviders,
+		SystemModelConfigured: systemModelConfigured,
+		SystemProvider:        systemProvider,
+		SystemModel:           systemModel,
 	}
 
-	if !response.Available {
-		response.Message = "No LLM provider configured. Please set up an API key (OpenAI or Anthropic) or install Ollama to use auto-config."
+	if !available {
+		if len(availableProviders) == 0 {
+			response.Message = "No LLM provider configured. Please set up an API key (OpenAI or Anthropic) or install Ollama."
+		} else if !systemModelConfigured {
+			response.Message = "System model not configured. Please configure a system model in Settings to use auto-config."
+		}
 	}
 
 	orihttp.WriteJSON(w, response)
@@ -91,24 +114,22 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Check if any LLM provider is available
-	providers := h.llmFactory.ListProviders()
-	if len(providers) == 0 {
-		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-			"No LLM provider available. Please configure an API key or install Ollama.", nil)
+	// Get the configured system model
+	systemProvider, systemModel := h.configManager.GetSystemModel()
+	result, err := h.llmFactory.GetSystemModelProvider(systemProvider, systemModel)
+	if err != nil {
+		if errors.Is(err, llm.ErrSystemModelNotConfigured) {
+			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
+				"System model not configured. Please configure a system model in Settings to use auto-config.", err)
+		} else {
+			orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
+				"System model provider not available: "+err.Error(), err)
+		}
 		return
 	}
 
-	// Select the best available provider for analysis
-	provider, model := h.selectAnalysisProvider(providers)
-	if provider == nil {
-		orihttp.RespondErrorWithErr(w, http.StatusServiceUnavailable,
-			"Unable to find a suitable LLM provider for auto-config.", nil)
-		return
-	}
-
-	// Generate auto-config using LLM
-	config, err := h.generateAutoConfig(r.Context(), provider, model, req.Description)
+	// Generate auto-config using the configured system model
+	config, err := h.generateAutoConfig(r.Context(), result.Provider, result.Model, req.Description)
 	if err != nil {
 		logger.Error("Auto-config generation failed", logger.Fields{"error": err})
 		// Return defaults on failure
@@ -117,50 +138,6 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	orihttp.WriteJSON(w, config)
-}
-
-// selectAnalysisProvider selects the best provider and model for analysis
-// Prefers faster/cheaper models since this is just for configuration analysis
-func (h *AutoConfigHandler) selectAnalysisProvider(providers []llm.ProviderInfo) (llm.Provider, string) {
-	// Priority order: claude (haiku), openai (mini), ollama
-	preferredProviders := []struct {
-		name  string
-		model string
-	}{
-		{"claude", "claude-3-haiku-20240307"},
-		{"openai", "gpt-4o-mini"},
-		{"ollama", ""}, // Will use first available model
-	}
-
-	for _, pref := range preferredProviders {
-		for _, p := range providers {
-			if p.Name == pref.name {
-				provider, err := h.llmFactory.GetProvider(pref.name)
-				if err != nil {
-					continue
-				}
-				model := pref.model
-				if model == "" && len(p.Models) > 0 {
-					model = p.Models[0]
-				}
-				return provider, model
-			}
-		}
-	}
-
-	// Fallback: use first available provider
-	if len(providers) > 0 {
-		provider, err := h.llmFactory.GetProvider(providers[0].Name)
-		if err == nil {
-			model := ""
-			if len(providers[0].Models) > 0 {
-				model = providers[0].Models[0]
-			}
-			return provider, model
-		}
-	}
-
-	return nil, ""
 }
 
 // generateAutoConfig uses LLM to analyze the description and generate configuration

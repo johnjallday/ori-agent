@@ -6,44 +6,91 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 )
+
+// createTestConfigManager creates a config manager for testing
+func createTestConfigManager(t *testing.T, systemProvider, systemModel string) *config.Manager {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "settings.json")
+	configManager := config.NewManager(tmpFile)
+	configManager.Load()
+	if systemProvider != "" && systemModel != "" {
+		configManager.SetSystemModel(systemProvider, systemModel)
+	}
+	return configManager
+}
 
 // TestAutoConfigHandler_CheckLLMAvailability tests the LLM availability check endpoint
 func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupFactory   func() *llm.Factory
-		expectedAvail  bool
-		expectedStatus int
+		name             string
+		setupFactory     func() *llm.Factory
+		systemProvider   string
+		systemModel      string
+		expectedAvail    bool
+		expectedSMConfig bool
+		expectedStatus   int
 	}{
 		{
-			name: "no providers registered",
+			name: "no providers registered, no system model",
 			setupFactory: func() *llm.Factory {
 				return llm.NewFactory()
 			},
-			expectedAvail:  false,
-			expectedStatus: http.StatusOK,
+			systemProvider:   "",
+			systemModel:      "",
+			expectedAvail:    false,
+			expectedSMConfig: false,
+			expectedStatus:   http.StatusOK,
 		},
 		{
-			name: "provider registered",
+			name: "provider registered but no system model",
 			setupFactory: func() *llm.Factory {
 				factory := llm.NewFactory()
-				// Register a mock provider
-				factory.Register("mock", &mockProvider{})
+				factory.Register("openai", &mockProvider{})
 				return factory
 			},
-			expectedAvail:  true,
-			expectedStatus: http.StatusOK,
+			systemProvider:   "",
+			systemModel:      "",
+			expectedAvail:    false, // Not available because no system model
+			expectedSMConfig: false,
+			expectedStatus:   http.StatusOK,
+		},
+		{
+			name: "provider registered and system model configured",
+			setupFactory: func() *llm.Factory {
+				factory := llm.NewFactory()
+				factory.Register("openai", &mockProvider{})
+				return factory
+			},
+			systemProvider:   "openai",
+			systemModel:      "gpt-4o-mini",
+			expectedAvail:    true,
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
+		},
+		{
+			name: "system model configured but provider not available",
+			setupFactory: func() *llm.Factory {
+				return llm.NewFactory() // Empty factory
+			},
+			systemProvider:   "openai",
+			systemModel:      "gpt-4o-mini",
+			expectedAvail:    false, // Provider not available
+			expectedSMConfig: true,
+			expectedStatus:   http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := tt.setupFactory()
-			handler := NewAutoConfigHandler(factory)
+			configManager := createTestConfigManager(t, tt.systemProvider, tt.systemModel)
+			handler := NewAutoConfigHandler(factory, configManager)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/agents/auto-config/availability", nil)
 			rr := httptest.NewRecorder()
@@ -63,17 +110,23 @@ func TestAutoConfigHandler_CheckLLMAvailability(t *testing.T) {
 				t.Errorf("Expected available=%v, got %v", tt.expectedAvail, response.Available)
 			}
 
+			if response.SystemModelConfigured != tt.expectedSMConfig {
+				t.Errorf("Expected system_model_configured=%v, got %v", tt.expectedSMConfig, response.SystemModelConfigured)
+			}
+
 			if !tt.expectedAvail && response.Message == "" {
-				t.Error("Expected message when LLM not available")
+				t.Error("Expected message when not available")
 			}
 		})
 	}
 }
 
-// TestAutoConfigHandler_AutoConfig_NoProvider tests auto-config when no LLM provider is available
-func TestAutoConfigHandler_AutoConfig_NoProvider(t *testing.T) {
-	factory := llm.NewFactory() // Empty factory
-	handler := NewAutoConfigHandler(factory)
+// TestAutoConfigHandler_AutoConfig_NoSystemModel tests auto-config when system model not configured
+func TestAutoConfigHandler_AutoConfig_NoSystemModel(t *testing.T) {
+	factory := llm.NewFactory()
+	factory.Register("openai", &mockProvider{})
+	configManager := createTestConfigManager(t, "", "") // No system model
+	handler := NewAutoConfigHandler(factory, configManager)
 
 	reqBody := AutoConfigRequest{
 		Description: "An agent that helps with file management",
@@ -86,7 +139,30 @@ func TestAutoConfigHandler_AutoConfig_NoProvider(t *testing.T) {
 
 	handler.AutoConfigHandler(rr, req)
 
-	// Should return service unavailable when no LLM provider
+	// Should return service unavailable when no system model configured
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+	}
+}
+
+// TestAutoConfigHandler_AutoConfig_ProviderNotAvailable tests auto-config when provider not registered
+func TestAutoConfigHandler_AutoConfig_ProviderNotAvailable(t *testing.T) {
+	factory := llm.NewFactory()                                          // Empty factory - provider not registered
+	configManager := createTestConfigManager(t, "openai", "gpt-4o-mini") // System model configured
+	handler := NewAutoConfigHandler(factory, configManager)
+
+	reqBody := AutoConfigRequest{
+		Description: "An agent that helps with file management",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/auto-config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.AutoConfigHandler(rr, req)
+
+	// Should return service unavailable when provider not available
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusServiceUnavailable, rr.Code, rr.Body.String())
 	}
@@ -95,8 +171,9 @@ func TestAutoConfigHandler_AutoConfig_NoProvider(t *testing.T) {
 // TestAutoConfigHandler_AutoConfig_EmptyDescription tests auto-config with empty description
 func TestAutoConfigHandler_AutoConfig_EmptyDescription(t *testing.T) {
 	factory := llm.NewFactory()
-	factory.Register("mock", &mockProvider{})
-	handler := NewAutoConfigHandler(factory)
+	factory.Register("openai", &mockProvider{})
+	configManager := createTestConfigManager(t, "openai", "gpt-4o-mini")
+	handler := NewAutoConfigHandler(factory, configManager)
 
 	reqBody := AutoConfigRequest{
 		Description: "",
@@ -117,7 +194,8 @@ func TestAutoConfigHandler_AutoConfig_EmptyDescription(t *testing.T) {
 // TestAutoConfigHandler_AutoConfig_InvalidMethod tests auto-config with wrong HTTP method
 func TestAutoConfigHandler_AutoConfig_InvalidMethod(t *testing.T) {
 	factory := llm.NewFactory()
-	handler := NewAutoConfigHandler(factory)
+	configManager := createTestConfigManager(t, "", "")
+	handler := NewAutoConfigHandler(factory, configManager)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents/auto-config", nil)
 	rr := httptest.NewRecorder()

@@ -656,6 +656,7 @@ function setupAgentManagement() {
 // State for auto-config
 let baseAutoConfigApplied = false;
 let baseLLMAvailable = false;
+let baseSystemModelConfigured = false;
 
 // Setup auto-config event listeners
 function setupAutoConfigListeners() {
@@ -690,11 +691,13 @@ async function checkBaseLLMAvailability() {
     const response = await fetch('/api/agents/auto-config/availability');
     const data = await response.json();
     baseLLMAvailable = data.available;
+    baseSystemModelConfigured = data.system_model_configured || false;
     return data;
   } catch (error) {
     console.error('Failed to check LLM availability:', error);
     baseLLMAvailable = false;
-    return { available: false, message: 'Failed to check LLM availability' };
+    baseSystemModelConfigured = false;
+    return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
   }
 }
 
@@ -702,6 +705,7 @@ async function checkBaseLLMAvailability() {
 function handleBaseConfigModeChange(mode) {
   const autoConfigSection = document.getElementById('baseAutoConfigSection');
   const llmWarning = document.getElementById('baseLlmNotAvailableWarning');
+  const llmWarningMessage = document.getElementById('baseLlmWarningMessage');
   const configModeHelp = document.getElementById('baseConfigModeHelp');
   const autoSelectedIndicator = document.getElementById('baseAutoSelectedIndicator');
 
@@ -714,6 +718,14 @@ function handleBaseConfigModeChange(mode) {
     } else {
       if (autoConfigSection) autoConfigSection.classList.add('d-none');
       if (llmWarning) llmWarning.classList.remove('d-none');
+      // Update warning message based on what's missing
+      if (llmWarningMessage) {
+        if (!baseSystemModelConfigured) {
+          llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+        } else {
+          llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+        }
+      }
     }
   } else {
     // Manual mode

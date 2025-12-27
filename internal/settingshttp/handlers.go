@@ -439,3 +439,128 @@ func getProviderDisplayName(name string) string {
 		return name
 	}
 }
+
+// SystemModelRequest represents a request to update the system model
+type SystemModelRequest struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// SystemModelResponse represents the system model configuration
+type SystemModelResponse struct {
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Configured bool   `json:"configured"`
+}
+
+// SystemModelHandler handles system model configuration
+func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		provider, model := h.configManager.GetSystemModel()
+		response := SystemModelResponse{
+			Provider:   provider,
+			Model:      model,
+			Configured: h.configManager.IsSystemModelConfigured(),
+		}
+		orihttp.WriteJSON(w, response)
+
+	case http.MethodPost:
+		var req SystemModelRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
+			}
+			return
+		}
+
+		// Normalize provider name to lowercase
+		provider := strings.ToLower(strings.TrimSpace(req.Provider))
+		model := strings.TrimSpace(req.Model)
+
+		// If clearing the system model (both empty), allow it
+		if provider == "" && model == "" {
+			if err := h.configManager.SetSystemModel("", ""); err != nil {
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Failed to clear system model", err)
+				return
+			}
+			if err := h.configManager.Save(); err != nil {
+				if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+					logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+				}
+				return
+			}
+			orihttp.WriteJSON(w, SystemModelResponse{
+				Provider:   "",
+				Model:      "",
+				Configured: false,
+			})
+			return
+		}
+
+		// Validate that the provider exists and is available
+		_, err := h.llmFactory.GetProvider(provider)
+		if err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Provider not available. Please configure the API key first.", err)
+			return
+		}
+
+		// Set the system model
+		if err := h.configManager.SetSystemModel(provider, model); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid system model configuration", err)
+			return
+		}
+
+		// Save configuration
+		if err := h.configManager.Save(); err != nil {
+			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
+				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
+			}
+			return
+		}
+
+		orihttp.WriteJSON(w, SystemModelResponse{
+			Provider:   provider,
+			Model:      model,
+			Configured: true,
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// AvailableModelsHandler returns models available for a specific provider (for system model dropdown)
+func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	providerName := r.URL.Query().Get("provider")
+	if providerName == "" {
+		orihttp.RespondBadRequest(w, "provider query parameter is required")
+		return
+	}
+
+	providerName = strings.ToLower(strings.TrimSpace(providerName))
+
+	provider, err := h.llmFactory.GetProvider(providerName)
+	if err != nil {
+		// Provider not available - return empty models list with available=false
+		orihttp.WriteJSON(w, map[string]interface{}{
+			"provider":  providerName,
+			"available": false,
+			"models":    []string{},
+			"message":   "Provider not configured. Please add the API key first.",
+		})
+		return
+	}
+
+	models := provider.DefaultModels()
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"provider":  providerName,
+		"available": true,
+		"models":    models,
+	})
+}

@@ -190,3 +190,135 @@ func TestCaseInsensitiveProviderNames(t *testing.T) {
 		}
 	}
 }
+
+// Test GetSystemModelProvider
+func TestGetSystemModelProvider(t *testing.T) {
+	factory := NewFactory()
+	factory.Register("openai", &MockProvider{
+		name:         "openai",
+		providerType: ProviderTypeCloud,
+		models:       []string{"gpt-4o-mini", "gpt-4o"},
+	})
+	factory.Register("ollama", &MockProvider{
+		name:         "ollama",
+		providerType: ProviderTypeLocal,
+		models:       []string{"llama3.2"},
+	})
+
+	tests := []struct {
+		name         string
+		providerName string
+		modelName    string
+		wantErr      bool
+		errContains  string
+	}{
+		{
+			name:         "valid openai provider and model",
+			providerName: "openai",
+			modelName:    "gpt-4o-mini",
+			wantErr:      false,
+		},
+		{
+			name:         "case insensitive model name",
+			providerName: "openai",
+			modelName:    "GPT-4O-MINI",
+			wantErr:      false,
+		},
+		{
+			name:         "empty provider",
+			providerName: "",
+			modelName:    "gpt-4o-mini",
+			wantErr:      true,
+			errContains:  "not configured",
+		},
+		{
+			name:         "empty model",
+			providerName: "openai",
+			modelName:    "",
+			wantErr:      true,
+			errContains:  "not configured",
+		},
+		{
+			name:         "both empty",
+			providerName: "",
+			modelName:    "",
+			wantErr:      true,
+			errContains:  "not configured",
+		},
+		{
+			name:         "provider not available",
+			providerName: "claude",
+			modelName:    "claude-3-haiku",
+			wantErr:      true,
+			errContains:  "not available",
+		},
+		{
+			name:         "model not available for non-ollama provider",
+			providerName: "openai",
+			modelName:    "unknown-model",
+			wantErr:      true,
+			errContains:  "not available",
+		},
+		{
+			name:         "ollama allows any model name",
+			providerName: "ollama",
+			modelName:    "custom-model:latest",
+			wantErr:      false, // Ollama should allow any model name
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := factory.GetSystemModelProvider(tt.providerName, tt.modelName)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("GetSystemModelProvider() expected error, got nil")
+					return
+				}
+				if tt.errContains != "" && !containsString(err.Error(), tt.errContains) {
+					t.Errorf("GetSystemModelProvider() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("GetSystemModelProvider() unexpected error: %v", err)
+				return
+			}
+
+			if result == nil {
+				t.Error("GetSystemModelProvider() returned nil result")
+				return
+			}
+
+			if result.Provider == nil {
+				t.Error("GetSystemModelProvider() returned nil provider")
+			}
+
+			if result.Model == "" {
+				t.Error("GetSystemModelProvider() returned empty model")
+			}
+		})
+	}
+}
+
+// Test ErrSystemModelNotConfigured error type
+func TestErrSystemModelNotConfigured(t *testing.T) {
+	factory := NewFactory()
+
+	_, err := factory.GetSystemModelProvider("", "")
+	if err != ErrSystemModelNotConfigured {
+		t.Errorf("Expected ErrSystemModelNotConfigured, got %v", err)
+	}
+}
+
+// containsString helper for testing
+func containsString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

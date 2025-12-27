@@ -7,6 +7,7 @@
 // studiosSystemAgents is declared in studios-workspace.js
 let studiosAvailableProviders = [];
 let studiosLLMAvailable = false;
+let studiosSystemModelConfigured = false;
 let studiosAutoConfigApplied = false;
 
 /**
@@ -261,11 +262,13 @@ async function checkLLMAvailability() {
         const response = await fetch('/api/agents/auto-config/availability');
         const data = await response.json();
         studiosLLMAvailable = data.available;
+        studiosSystemModelConfigured = data.system_model_configured || false;
         return data;
     } catch (error) {
         console.error('Failed to check LLM availability:', error);
         studiosLLMAvailable = false;
-        return { available: false, message: 'Failed to check LLM availability' };
+        studiosSystemModelConfigured = false;
+        return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
     }
 }
 
@@ -275,6 +278,7 @@ async function checkLLMAvailability() {
 function handleConfigModeChange(mode) {
     const autoConfigSection = document.getElementById('autoConfigSection');
     const llmWarning = document.getElementById('llmNotAvailableWarning');
+    const llmWarningMessage = document.getElementById('llmWarningMessage');
     const configModeHelp = document.getElementById('configModeHelp');
     const autoSelectedIndicator = document.getElementById('autoSelectedIndicator');
 
@@ -287,6 +291,14 @@ function handleConfigModeChange(mode) {
         } else {
             autoConfigSection.classList.add('d-none');
             llmWarning.classList.remove('d-none');
+            // Update warning message based on what's missing
+            if (llmWarningMessage) {
+                if (!studiosSystemModelConfigured) {
+                    llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+                } else {
+                    llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+                }
+            }
         }
     } else {
         // Manual mode

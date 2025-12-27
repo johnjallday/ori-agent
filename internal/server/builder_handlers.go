@@ -61,7 +61,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
 
 	// Initialize auto-config handler for agent creation
-	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory)
+	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)
 
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()
