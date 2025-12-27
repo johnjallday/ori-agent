@@ -50,15 +50,11 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
-			if respErr := orihttp.RespondInternalError(w, "Failed to get default settings"); respErr != nil {
-				logger.Error(
-
-					// Check if default settings is empty (plugin doesn't actually have settings)
-					"Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, "Failed to get default settings")
 			return
 		}
 
+		// Check if default settings is empty (plugin doesn't actually have settings)
 		if defaultSettings == "" {
 			response := map[string]interface{}{
 				"success": false,
@@ -73,14 +69,11 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 		// Parse the JSON settings to ensure it's valid
 		var settings map[string]interface{}
 		if err := json.Unmarshal([]byte(defaultSettings), &settings); err != nil {
-			if respErr := orihttp.RespondInternalError(w, "Invalid default settings format"); respErr != nil {
-				logger.Error(
-
-					// Return the default settings
-					"Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, "Invalid default settings format")
 			return
 		}
+
+		// Return the default settings
 
 		response := map[string]interface{}{
 			"success":          true,
@@ -112,9 +105,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(pathParts) < 2 {
 		fmt.Printf("❌ Invalid path format - not enough parts\n")
-		if respErr := orihttp.RespondBadRequest(w, "invalid path format"); respErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "invalid path format")
 		return
 	}
 
@@ -202,9 +193,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !exists {
-		if respErr := orihttp.RespondNotFound(w, "plugin not found"); respErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "plugin not found")
 		return
 	}
 
@@ -422,34 +411,25 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 
 	plugin, exists := ag.Plugins[req.PluginName]
 	if !exists {
-		if respErr := orihttp.RespondNotFound(w, "plugin not found"); respErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "plugin not found")
 		return
 	}
 
 	// Convert parameters to JSON string
 	argsJSON, err := json.Marshal(req.Parameters)
 	if err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err)); respErr != nil {
-			logger.
-
-				// Execute the plugin function
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err))
 		return
 	}
 
+	// Execute the plugin function
 	result, err := plugin.Tool.Call(r.Context(), string(argsJSON))
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("plugin execution error: %v", err)); respErr != nil {
-			logger.
-
-				// Return the result
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("plugin execution error: %v", err))
 		return
 	}
+
+	// Return the result
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -463,9 +443,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 // PluginInitStatusHandler checks filesystem for settings files
 func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 

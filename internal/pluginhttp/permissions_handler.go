@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/registry"
 )
@@ -39,20 +38,14 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Plugin name required"); respErr != nil {
-			logger.
-
-				// Get permissions from permission manager
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Plugin name required")
 		return
 	}
 
+	// Get permissions from permission manager
 	permissionEntry, err := h.PermissionManager.GetPermissionEntry(pluginName)
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to get permissions: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to get permissions: %v", err))
 		return
 	}
 
@@ -70,24 +63,17 @@ func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Plugin name required"); respErr != nil {
-			logger.
-
-				// Approve permissions
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Plugin name required")
 		return
 	}
 
+	// Approve permissions
 	if err := h.PermissionManager.ApprovePermissions(pluginName); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to approve permissions: %v", err)); respErr != nil {
-			logger.
-
-				// Update registry to mark permissions as approved
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to approve permissions: %v", err))
 		return
 	}
+
+	// Update registry to mark permissions as approved
 
 	permissionEntry, err := h.PermissionManager.GetPermissionEntry(pluginName)
 	if err == nil && permissionEntry != nil {

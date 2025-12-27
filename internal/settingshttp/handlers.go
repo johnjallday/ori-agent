@@ -8,7 +8,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -42,9 +41,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			if respErr := orihttp.RespondNotFound(w, "agent not found"); respErr != nil {
-				logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, "agent not found")
 			return
 		}
 		// Wrap settings in the expected format for frontend compatibility
@@ -70,16 +67,12 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			if respErr := orihttp.RespondNotFound(w, "agent not found"); respErr != nil {
-				logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, "agent not found")
 			return
 		}
 		ag.Settings = s
 		if err := h.store.SetAgent(agentName, ag); err != nil {
-			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.InternalError(w, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -152,9 +145,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
-			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.InternalError(w, err.Error())
 			return
 		}
 
@@ -474,9 +465,7 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if err := h.configManager.Save(); err != nil {
-				if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
-					logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-				}
+				orihttp.InternalError(w, err.Error())
 				return
 			}
 			orihttp.WriteJSON(w, SystemModelResponse{
@@ -502,9 +491,7 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Save configuration
 		if err := h.configManager.Save(); err != nil {
-			if encodeErr := orihttp.RespondInternalError(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.InternalError(w, err.Error())
 			return
 		}
 
@@ -528,7 +515,7 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 
 	providerName := r.URL.Query().Get("provider")
 	if providerName == "" {
-		orihttp.RespondBadRequest(w, "provider query parameter is required")
+		orihttp.BadRequest(w, "provider query parameter is required")
 		return
 	}
 

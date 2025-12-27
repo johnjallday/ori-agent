@@ -95,9 +95,7 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
@@ -117,21 +115,16 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.AddAttachment(attachment); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err))
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); respErr != nil {
-			logger.
-				// Publish event for live updates
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
+	// Publish event for live updates
 	createdAttachment, err := studio.GetAttachment(attachment.ID)
 	if err != nil {
 		logger.Debug("Could not retrieve created attachment, using original", logger.Fields{"attachment_id": attachment.ID, "error": err})
@@ -195,22 +188,17 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
 	attachment, err := studio.GetAttachment(attachmentID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-			logger.
-				// Apply updates
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
+	// Apply updates
 	if req.Title != nil {
 		attachment.Title = *req.Title
 	}
@@ -249,16 +237,12 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.UpdateAttachment(*attachment); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update attachment: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update attachment: %v", err))
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
@@ -309,23 +293,17 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
 	if err := studio.DeleteAttachment(attachmentID); err != nil {
-		if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
