@@ -52,16 +52,8 @@
       </div>
       {{end}}
 
-      <!-- Right: Agent, Location, Actions, Theme -->
+      <!-- Right: Location, Actions, Theme -->
       <div class="d-flex align-items-center gap-3 ms-auto">
-        <!-- Current Agent Display (optional) -->
-        {{if ne .ShowCurrentAgent false}}
-        <span id="currentAgentDisplay" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="{{if .CurrentAgentClickable}}cursor:pointer;{{end}} padding: 0.5rem 1rem; border-radius: var(--radius-lg);" {{if .CurrentAgentClickable}}title="Click to view agent details"{{end}}>
-          <span class="status-indicator status-online"></span>
-          <span class="fw-medium">{{.CurrentAgent}}</span>
-        </span>
-        {{end}}
-
         <!-- Location Indicator (optional) -->
         {{if .ShowLocationIndicator}}
         <span id="locationIndicator" class="modern-badge badge-secondary d-flex align-items-center gap-2" style="padding: 0.5rem 1rem; border-radius: var(--radius-lg);" title="Current location">
