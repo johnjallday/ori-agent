@@ -1375,3 +1375,66 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .search-notes-list {
   padding: 0 4px;
 }
+
+/* ============================================
+   Motion Sensitivity - Reduced Motion Support
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  /* Session sidebar - disable transitions */
+  .session-sidebar {
+    transition: none;
+  }
+
+  /* Mobile sidebar - instant show/hide instead of slide */
+  @media (max-width: 991px) {
+    .session-sidebar {
+      transform: none;
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .session-sidebar.mobile-open {
+      transform: none;
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+
+  /* Session items - disable transitions */
+  .session-item,
+  .session-item-content,
+  .folder-item,
+  .folder-header {
+    transition: none;
+  }
+
+  /* Folder toggle arrows - no rotation animation */
+  .folder-toggle-icon {
+    transition: none;
+  }
+
+  /* Action buttons - disable hover transitions */
+  .session-actions button,
+  .folder-actions button {
+    transition: none;
+  }
+
+  .folder-actions button:hover,
+  .session-actions button:hover {
+    transform: none;
+  }
+
+  /* Search panel - disable transitions */
+  .search-panel,
+  .search-results,
+  .search-notes-header {
+    transition: none;
+  }
+
+  /* Toggle buttons - disable transitions */
+  .resize-handle,
+  #toggleSessionSidebarBtn {
+    transition: none;
+  }
+}

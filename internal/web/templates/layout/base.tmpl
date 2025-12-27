@@ -3,6 +3,9 @@
 {{template "head.tmpl" .}}
 
 <body class="bg-light">
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -13,9 +16,9 @@
     {{template "session-sidebar.tmpl" .}}
 
     <!-- Main Content -->
-    <div class="main-content">
+    <main class="main-content" role="main" aria-label="Chat area">
       {{template "chat-area.tmpl" .}}
-    </div>
+    </main>
   </div>
 
   <!-- Add Agent Modal -->
@@ -88,8 +91,9 @@
             </div>
 
             <div class="mb-3">
-              <label for="agentName" class="form-label" style="color: var(--text-primary);">Agent Name</label>
-              <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required>
+              <label for="agentName" class="form-label required" style="color: var(--text-primary);">Agent Name</label>
+              <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required minlength="2" maxlength="50" aria-describedby="agentNameHelp">
+              <small id="agentNameHelp" class="form-helper">Use letters, numbers, and hyphens. 2-50 characters.</small>
             </div>
             <div class="mb-3">
               <label for="agentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
@@ -112,8 +116,8 @@
                 Temperature: <span id="temperatureValue">1.0</span>
               </label>
               <input type="range" id="agentTemperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
-                     style="cursor: pointer;">
-              <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
+                     style="cursor: pointer;" aria-describedby="temperatureHelp" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1.0">
+              <div id="temperatureHelp" class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
                 <span>Focused (0)</span>
                 <span>Balanced (1)</span>
                 <span>Creative (2)</span>
@@ -121,9 +125,11 @@
             </div>
             <div class="mb-3">
               <label for="agentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
-              <textarea id="agentSystemPrompt" class="form-control" rows="4"
+              <textarea id="agentSystemPrompt" class="form-control" rows="4" maxlength="4000"
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
-                        placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+                        placeholder="Example: You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
+                        data-char-counter="true"></textarea>
+              <small class="form-helper">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
             </div>
           </form>
         </div>
@@ -313,6 +319,8 @@
   <script src="js/modules/file-upload.js"></script>
   <script src="js/modules/location.js"></script>
   <script src="js/modules/sessions.js"></script>
+  <script src="js/modules/toast.js"></script>
+  <script src="js/modules/form-validation.js"></script>
   <script src="js/app.js?v=1694538177"></script>
 </body>
 </html>

@@ -131,17 +131,23 @@ async function processFiles(files) {
   // Allowed file extensions
   const allowedExtensions = ['txt', 'md', 'pdf', 'doc', 'docx', 'csv', 'json', 'xml', 'html', 'mp3', 'wav', 'flac', 'ogg', 'zip', 'pptx', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
 
+  let successCount = 0;
+
   for (const file of files) {
     // Check file extension
     const ext = file.name.split('.').pop().toLowerCase();
     if (!allowedExtensions.includes(ext)) {
-      alert(`File type .${ext} is not supported. Supported types: ${allowedExtensions.join(', ')}`);
+      if (window.Toast) {
+        Toast.warning(`File type .${ext} is not supported`, { title: 'Unsupported File' });
+      }
       continue;
     }
 
     // Check file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      alert(`File ${file.name} is too large. Maximum size is 10MB.`);
+      if (window.Toast) {
+        Toast.warning(`${file.name} exceeds 10MB limit`, { title: 'File Too Large' });
+      }
       continue;
     }
 
@@ -181,13 +187,24 @@ async function processFiles(files) {
       });
 
       console.log(`File added: ${file.name}, type: ${mimeType}, has binary: ${!!result.binaryContent}`);
+      successCount++;
     } catch (error) {
       console.error(`Error reading file ${file.name}:`, error);
-      alert(`Failed to read file ${file.name}`);
+      if (window.Toast) {
+        Toast.error(`Failed to read ${file.name}`, { title: 'Upload Error' });
+      }
     }
   }
 
   updateFilesList();
+
+  // Show success toast if files were added
+  if (successCount > 0) {
+    if (window.Toast) {
+      const message = successCount === 1 ? '1 file attached' : `${successCount} files attached`;
+      Toast.success(message, { title: 'Files Ready' });
+    }
+  }
 }
 
 // Check if file is binary (PDF, DOCX, DOC, audio, images, etc.)

@@ -1,5 +1,5 @@
 <!-- Sidebar -->
-<div class="sidebar d-none" id="sidebar">
+<nav class="sidebar d-none" id="sidebar" role="navigation" aria-label="Main navigation">
   <div class="sidebar-content">
   <!-- Agents Section -->
   <div class="sidebar-section">
@@ -11,8 +11,8 @@
           </svg>
           Agents
         </h6>
-        <button id="addAgentBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <button id="addAgentBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;" aria-label="Add new agent" title="Add new agent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
           </svg>
         </button>
@@ -44,8 +44,8 @@
           </svg>
           Plugins
         </h6>
-        <button id="browsePluginsBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <button id="browsePluginsBtn" class="modern-btn modern-btn-secondary p-1" style="min-width: auto;" aria-label="Browse plugins" title="Browse plugins">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
           </svg>
         </button>
@@ -166,5 +166,5 @@
   </div>
 
   <!-- Resize Handle -->
-  <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
-</div>
+  <div class="sidebar-resize-handle" id="sidebarResizeHandle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
+</nav>
