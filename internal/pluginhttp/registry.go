@@ -125,22 +125,22 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			Name string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
 		if strings.TrimSpace(req.Name) == "" {
-			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
 
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -155,8 +155,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 				var wasCached bool
 				entryPath, wasCached, err = h.pluginDownloader.GetPlugin(e)
 				if err != nil {
-					if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err)); err != nil {
-						logger.Error("Failed to write response", logger.Fields{"error": err})
+					if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("failed to get plugin %s: %v", e.Name, err)); respErr != nil {
+						logger.Error("Failed to write response", logger.Fields{"error": respErr})
 					}
 					return
 				}
@@ -192,8 +192,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			}
 		}
 		if !found {
-			if err := orihttp.RespondBadRequest(w, "plugin not found in registry"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, "plugin not found in registry"); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -203,8 +203,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		if err != nil {
 			// SECURITY: Log full path internally but don't expose to client
 			logger.Error("Failed to load plugin", logger.Fields{"path": entryPath, "error": err})
-			if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to load plugin %s", req.Name)); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("failed to load plugin %s", req.Name)); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -225,8 +225,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 		ag, ok := h.store.GetAgent(current)
 		if !ok {
-			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -244,8 +244,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 			AcceptedFileTypes: acceptedFileTypes,
 		}
 		if err := h.store.SetAgent(current, ag); err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -293,8 +293,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")
 		if strings.TrimSpace(name) == "" {
-			if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -320,8 +320,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 		}
 
 		if foundIndex == -1 {
-			if err := orihttp.RespondNotFound(w, "plugin not found in local registry (only user uploaded plugins can be deleted)"); err != nil {
-				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondNotFound(w, "plugin not found in local registry (only user uploaded plugins can be deleted)"); respErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -331,8 +331,8 @@ func (h *RegistryHandler) PluginRegistryHandler(w http.ResponseWriter, r *http.R
 
 		// Save updated local registry
 		if err := h.registryManager.SaveLocal(localReg); err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -373,16 +373,16 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 		// Check for available updates
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
 
 		updates, err := h.pluginDownloader.CheckForUpdates(reg)
 		if err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -398,16 +398,16 @@ func (h *RegistryHandler) PluginUpdatesHandler(w http.ResponseWriter, r *http.Re
 			PluginNames []string `json:"plugin_names,omitempty"` // Empty = update all
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
 
 		reg, _, err := h.registryManager.Load()
 		if err != nil {
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -456,11 +456,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "method not allowed",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -471,11 +471,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -483,11 +483,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if strings.TrimSpace(req.Name) == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "name required",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -497,11 +497,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -518,11 +518,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if pluginEntry == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "plugin not found in registry",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -545,8 +545,8 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		}
 
 		logger.Debug("Plugin download blocked: not compatible with", logger.Fields{"plugin": req.Name, "currentPlatform": currentPlatform})
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -555,11 +555,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if pluginEntry.DownloadURL == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "plugin does not have a download URL",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -569,11 +569,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to create upload directory: %v", err),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -583,11 +583,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to get plugin %s: %v", pluginEntry.Name, err),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -610,11 +610,11 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 	if err := copyFile(downloadedPath, filePath); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": fmt.Sprintf("failed to persist plugin: %v", err),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -631,13 +631,13 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success":  true,
 		"message":  fmt.Sprintf("Plugin %s downloaded successfully", pluginEntry.Name),
 		"filename": filename,
 		"path":     filePath,
 	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -674,11 +674,11 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	if r.Method != http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "method not allowed",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -688,11 +688,11 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
 		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -701,11 +701,11 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	_, currentAgent := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(currentAgent)
 	if !ok {
-		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
 			logger.
 
 				// Check for updates
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -732,11 +732,11 @@ func (h *RegistryHandler) PluginUpdatesCheckHandler(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success":      true,
 		"updatesCount": len(updates),
 		"updates":      updates,
 	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

@@ -20,30 +20,30 @@ import (
 //	// Use req...
 func ParseJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 	if r.Body == nil {
-		if err := RespondBadRequest(w, "Request body is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := RespondBadRequest(w, "Request body is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return false
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if err := RespondBadRequest(w, "Failed to read request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := RespondBadRequest(w, "Failed to read request body"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return false
 	}
 
 	if len(body) == 0 {
-		if err := RespondBadRequest(w, "Request body is empty"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := RespondBadRequest(w, "Request body is empty"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return false
 	}
 
 	if err := json.Unmarshal(body, v); err != nil {
-		if err := RespondBadRequest(w, "Invalid JSON: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := RespondBadRequest(w, "Invalid JSON: "+err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return false
 	}

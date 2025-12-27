@@ -1,7 +1,6 @@
 package sessionhttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -95,8 +94,7 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 		Content  string `json:"content"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -144,8 +142,7 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 		Content string `json:"content"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -215,8 +212,7 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 		FolderID *string `json:"folder_id,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

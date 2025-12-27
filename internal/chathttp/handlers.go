@@ -107,8 +107,8 @@ func (h *Handler) setCachedDefinition(pluginName string, definition pluginapi.To
 // writeJSONResponse writes a JSON response and logs errors if encoding fails
 func writeJSONResponse(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		logger.Error("Failed to encode JSON response", logger.Fields{"error": err})
+	if encErr := json.NewEncoder(w).Encode(data); encErr != nil {
+		logger.Error("Failed to encode JSON response", logger.Fields{"error": encErr})
 		// If we've already started writing, we can't change the status code
 		// But at least we've logged the error
 	}
@@ -232,17 +232,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		Files     []UploadedFile `json:"files,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	q := strings.TrimSpace(req.Question)
 	if q == "" {
-		if err := orihttp.RespondBadRequest(w, "empty question"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "empty question"); respErr != nil {
 			logger.
 				// Debug: Log received files
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -354,8 +354,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		// Load agent
 		ag, current, ok := store.GetCurrentAgent(h.store)
 		if !ok {
-			if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -406,8 +406,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}

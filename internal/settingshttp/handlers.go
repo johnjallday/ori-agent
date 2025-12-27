@@ -1,8 +1,6 @@
 package settingshttp
 
 import (
-	"encoding/json"
-
 	"net/http"
 	"strings"
 
@@ -44,8 +42,8 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
-				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondNotFound(w, "agent not found"); respErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -59,10 +57,7 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var s types.Settings
-		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-			}
+		if !orihttp.ParseJSONBody(w, r, &s) {
 			return
 		}
 
@@ -75,8 +70,8 @@ func (h *Handler) SettingsHandler(w http.ResponseWriter, r *http.Request) {
 
 		ag, ok := h.store.GetAgent(agentName)
 		if !ok {
-			if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
-				logger.Error("Failed to write not found response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondNotFound(w, "agent not found"); respErr != nil {
+				logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -117,10 +112,7 @@ func (h *Handler) APIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
 			AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-			}
+		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
 		}
 
@@ -467,10 +459,7 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req SystemModelRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-			}
+		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
 		}
 

@@ -1,7 +1,6 @@
 package orchestrationhttp
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -22,8 +21,8 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateScheduledTask(w, r)
 	default:
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 	}
 }
@@ -31,8 +30,8 @@ func (th *TaskHandler) ScheduledTasksHandler(w http.ResponseWriter, r *http.Requ
 func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -64,39 +63,38 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 		Enabled     bool                       `json:"enabled"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	// Validate required fields
 	if req.WorkspaceID == "" {
-		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	if req.Name == "" {
-		if err := orihttp.RespondBadRequest(w, "name is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "name is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	if req.Prompt == "" {
-		if err := orihttp.RespondBadRequest(w, "prompt is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "prompt is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	if req.From == "" {
-		if err := orihttp.RespondBadRequest(w, "from is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "from is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	if req.To == "" {
-		if err := orihttp.RespondBadRequest(w, "to is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "to is required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -170,8 +168,8 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 
 	// Minimum parts: ["", "api", "orchestration", "scheduled-tasks", "{id}"] = 5
 	if len(parts) < 5 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL: missing task ID"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Invalid URL: missing task ID"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -193,8 +191,8 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 			th.handleTriggerScheduledTask(w, r, id)
 			return
 		default:
-			if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action)); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action)); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -208,8 +206,8 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteScheduledTask(w, r, id)
 	default:
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 	}
 }
@@ -237,8 +235,8 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 	}
 }
 
@@ -252,8 +250,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		Enabled     *bool                       `json:"enabled,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -334,8 +331,8 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 	}
 }
 
@@ -368,15 +365,15 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 	}
 }
 
 func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Request, id string, enable bool) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -441,15 +438,15 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 	}
 }
 
 func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -509,8 +506,8 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		})
 		return
 	}
-	if err := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 	}
 }
 

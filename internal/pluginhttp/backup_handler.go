@@ -27,8 +27,8 @@ func NewBackupHandler(backupMgr *pluginmanager.BackupManager) *BackupHandler {
 // GET /api/plugins/export (all plugins)
 func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -69,8 +69,8 @@ func (h *BackupHandler) HandleExportPluginConfig(w http.ResponseWriter, r *http.
 // Request body: JSON configuration data (single or multiple plugins)
 func (h *BackupHandler) HandleImportPluginConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": respErr})
 		}
 		return
 	}

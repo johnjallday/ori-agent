@@ -28,8 +28,8 @@ func (h *Handler) GetAllTimeStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetAllTimeStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -39,8 +39,8 @@ func (h *Handler) GetTodayStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetTodayStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -50,8 +50,8 @@ func (h *Handler) GetThisMonthStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetThisMonthStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -63,8 +63,8 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	endStr := r.URL.Query().Get("end")
 
 	if startStr == "" || endStr == "" {
-		if err := orihttp.RespondBadRequest(w, "start and end parameters are required"); err != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "start and end parameters are required"); respErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -88,8 +88,8 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetStats(start, end)
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -99,10 +99,10 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 	models := h.costTracker.GetPricingModels()
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"pricing_models": models,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -110,16 +110,16 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 // PUT /api/usage/pricing
 func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write method not allowed response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	var model llm.PricingModel
 	if err := json.NewDecoder(r.Body).Decode(&model); err != nil {
-		if err := orihttp.RespondBadRequest(w, "invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "invalid request body"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -127,11 +127,11 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	h.costTracker.UpdatePricingModel(model)
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Pricing model updated successfully",
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -164,7 +164,7 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(summary); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(summary); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

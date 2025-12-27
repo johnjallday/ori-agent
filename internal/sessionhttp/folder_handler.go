@@ -1,7 +1,6 @@
 package sessionhttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -58,8 +57,7 @@ func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
 		Color       string `json:"color,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -124,8 +122,7 @@ func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request, id string
 		Color       *string `json:"color,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

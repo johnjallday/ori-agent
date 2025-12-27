@@ -41,8 +41,8 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Extract component name from URL path
 	componentName := r.URL.Query().Get("name")
 	if componentName == "" {
-		if err := orihttp.RespondBadRequest(w, "Missing component name"); err != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Missing component name"); respErr != nil {
+			logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -66,8 +66,8 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 
 	// Set content type
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write([]byte(content)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
+	if _, writeErr := w.Write([]byte(content)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 
@@ -102,10 +102,8 @@ func (ch *ComponentHandler) ListComponents(w http.ResponseWriter, r *http.Reques
 		joinStrings(components, `","`) +
 		`"]}`
 
-	if _, err := w.Write([]byte(response)); err != nil {
-
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-
+	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 

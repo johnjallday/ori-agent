@@ -2,7 +2,6 @@
 package sessionhttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,8 +89,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		Tags      []string `json:"tags,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -161,8 +159,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request, id strin
 		AgentName *string   `json:"agent_name,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -336,8 +333,7 @@ func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request, sessionID s
 		TokensUsed int                 `json:"tokens_used,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -407,8 +403,7 @@ func (h *Handler) HandleSessionTags(w http.ResponseWriter, r *http.Request) {
 		Tags []string `json:"tags"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

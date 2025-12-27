@@ -231,15 +231,15 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	html, err := s.UI.TemplateRenderer.RenderTemplate(templateName, data)
 	if err != nil {
 		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": err})
+	if _, writeErr := w.Write([]byte(html)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 
@@ -335,15 +335,15 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	html, err := s.UI.TemplateRenderer.RenderTemplate("studios", data)
 	if err != nil {
 		logger.Error("Failed to render studios template", logger.Fields{"error": err})
-		if err := orihttp.RespondInternalError(w, "Internal Server Error"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write([]byte(html)); err != nil {
-		logger.Error("Failed to write response", logger.Fields{"response": err})
+	if _, writeErr := w.Write([]byte(html)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 
@@ -429,10 +429,8 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 
-	if _, err := w.Write(content); err != nil {
-
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-
+	if _, writeErr := w.Write(content); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 
@@ -457,8 +455,8 @@ func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400") // Cache for 1 day
 
-	if _, err := w.Write(content); err != nil {
-		logger.Error("Failed to write favicon response", logger.Fields{"response": err})
+	if _, writeErr := w.Write(content); writeErr != nil {
+		logger.Error("Failed to write favicon response", logger.Fields{"error": writeErr})
 	}
 }
 
@@ -488,47 +486,47 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure path doesn't contain traversal sequences
 	if strings.Contains(cleanPath, "..") {
-		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
 			logger.
 
 				// Verify path starts with "agents/" to prevent access to other directories
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if !strings.HasPrefix(cleanPath, "agents/") && !strings.HasPrefix(cleanPath, "agents\\") {
-		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
 			logger.
 
 				// Resolve to absolute path and verify it's still within the agents directory
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	agentsDir, err := filepath.Abs("agents")
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, "Internal server error"); err != nil {
+		if respErr := orihttp.RespondInternalError(w, "Internal server error"); respErr != nil {
 			logger.
 
 				// Final check: ensure resolved path is within agents directory
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if !strings.HasPrefix(absPath, agentsDir+string(filepath.Separator)) {
-		if err := orihttp.RespondBadRequest(w, "Invalid path"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -550,10 +548,8 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
 
-	if _, err := w.Write(content); err != nil {
-
-		logger.Error("Failed to write response", logger.Fields{"response": err})
-
+	if _, writeErr := w.Write(content); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
 }
 

@@ -1,8 +1,6 @@
 package agenthttp
 
 import (
-	"encoding/json"
-
 	"net/http"
 	"sort"
 	"strconv"
@@ -160,19 +158,19 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	}
 
 	if agentName == "" {
-		if err := orihttp.RespondBadRequest(w, "Agent name is required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
 			logger.
 
 				// Get agent
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	ag, ok := h.State.GetAgent(agentName)
 	if !ok || ag == nil {
-		if err := orihttp.RespondNotFound(w, "Agent not found"); err != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
+			logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -322,11 +320,11 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	if agentName == "" {
-		if err := orihttp.RespondBadRequest(w, "Agent name is required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
 			logger.
 
 				// Parse request
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -334,8 +332,7 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 	var req struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -347,22 +344,22 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		string(types.AgentStatusDisabled): true,
 	}
 	if !validStatuses[req.Status] {
-		if err := orihttp.RespondBadRequest(w, "Invalid status. Must be one of: active, idle, error, disabled"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid status. Must be one of: active, idle, error, disabled"); respErr != nil {
 			logger.
 
 				// Get agent
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
-		if err := orihttp.RespondNotFound(w, "Agent not found"); err != nil {
+		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
 			logger.
 
 				// Store old status for logging
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -408,11 +405,11 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 // Returns activity log for a specific agent with pagination and filtering
 func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Request) {
 	if h.ActivityLogger == nil {
-		if err := orihttp.RespondServiceUnavailable(w, "Activity logging not enabled"); err != nil {
+		if respErr := orihttp.RespondServiceUnavailable(w, "Activity logging not enabled"); respErr != nil {
 			logger.
 
 				// Extract agent name from URL path
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -428,11 +425,11 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 	}
 
 	if agentName == "" {
-		if err := orihttp.RespondBadRequest(w, "Agent name is required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
 			logger.
 
 				// Parse query parameters
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}

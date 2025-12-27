@@ -237,15 +237,15 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Form should already be parsed in ServeHTTP, but ensure it's parsed
 	if r.MultipartForm == nil {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
 	}
 	file, header, err := r.FormFile("plugin")
 	if err != nil {
-		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
 			logger.Error("Failed to write response", logger.
 
 				// SECURITY: Sanitize filename to prevent path traversal attacks
@@ -257,21 +257,21 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 
 	cleanFilename := filepath.Base(header.Filename)
 	if cleanFilename == "" || cleanFilename == "." || cleanFilename == ".." {
-		if err := orihttp.RespondBadRequest(w, "Invalid filename"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid filename"); respErr != nil {
 			logger.
 
 				// SECURITY: Reject hidden files (files starting with .)
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if strings.HasPrefix(cleanFilename, ".") {
-		if err := orihttp.RespondBadRequest(w, "Hidden files not allowed"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Hidden files not allowed"); respErr != nil {
 			logger.
 
 				// SECURITY: Only allow alphanumeric characters, hyphens, underscores, and dots in filename
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -282,11 +282,11 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 		isDigit := c >= '0' && c <= '9'
 		isAllowed := c == '-' || c == '_' || c == '.'
 		if !isLower && !isUpper && !isDigit && !isAllowed {
-			if err := orihttp.RespondBadRequest(w, "Invalid characters in filename"); err != nil {
+			if respErr := orihttp.RespondBadRequest(w, "Invalid characters in filename"); respErr != nil {
 				logger.Error(
 
 					// Create a permanent directory for uploaded plugins
-					"Failed to write response", logger.Fields{"error": err})
+					"Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -294,8 +294,8 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 
 	uploadsDir := "uploaded_plugins"
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -303,14 +303,14 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	pluginFile := filepath.Join(uploadsDir, cleanFilename)
 	out, err := os.Create(pluginFile)
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	if _, err := io.Copy(out, file); err != nil {
 		_ = out.Close()
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
 			logger.Error("Failed to write response",
 
 				// Load plugin to get its definition and validate it BEFORE making it executable
@@ -324,8 +324,8 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Make the plugin executable BEFORE loading - RPC plugins must be executable to validate
 	if err := os.Chmod(pluginFile, 0755); err != nil {
 		_ = os.Remove(pluginFile)
-		if err := orihttp.RespondInternalError(w, "Failed to set plugin permissions: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, "Failed to set plugin permissions: "+err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -335,8 +335,8 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Clean up the file if plugin is invalid
 		_ = os.Remove(pluginFile)
-		if err := orihttp.RespondBadRequest(w, "Invalid plugin: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Invalid plugin: "+err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -348,11 +348,11 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	if err := h.LocalRegistry.AddToRegistry(def.Name, def.Description, pluginFile, version); err != nil {
 		// Clean up the file if registry update fails
 		_ = os.Remove(pluginFile)
-		if err := orihttp.RespondInternalError(w, "Failed to register plugin: "+err.Error()); err != nil {
+		if respErr := orihttp.RespondInternalError(w, "Failed to register plugin: "+err.Error()); respErr != nil {
 			logger.
 
 				// Return success with plugin info
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -372,8 +372,8 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	// Try to parse multipart form first, then regular form
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		if err := r.ParseForm(); err != nil {
-			if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
+			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": respErr})
 			}
 			return
 		}
@@ -383,19 +383,19 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	path := r.FormValue("path")
 
 	if name == "" || path == "" {
-		if err := orihttp.RespondBadRequest(w, "name and path required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "name and path required"); respErr != nil {
 			logger.
 
 				// Load plugin from the specified path
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	tool, err := h.Loader.Load(path)
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, "Failed to load plugin: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, "Failed to load plugin: "+err.Error()); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -407,11 +407,11 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
+		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
 			logger.
 
 				// Add plugin to current agent
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -438,11 +438,11 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	logger.Verbosef("💾 Saving agent '%s' to state...", current)
 	if err := h.State.SetAgent(current, ag); err != nil {
 		logger.Verbosef("❌ Failed to save agent: %v", err)
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
 			logger.Error("Failed to write response", logger.Fields{"error":
 
 			// Check if plugin has required configuration fields
-			err})
+			respErr})
 		}
 		return
 	}
@@ -475,22 +475,22 @@ func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) unload(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		if err := orihttp.RespondBadRequest(w, "name required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	_, current := h.State.ListAgents()
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
-		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, "current agent not found"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 	delete(ag.Plugins, name)
 	if err := h.State.SetAgent(current, ag); err != nil {
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
+		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
 			logger.Error("Failed to write response",
 
 				// GetPluginEnums extracts enum values from a specific plugin's function definition
@@ -623,8 +623,8 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if err := orihttp.RespondBadRequest(w, "Failed to read request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Failed to read request body"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -635,19 +635,19 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Failed to parse JSON"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Failed to parse JSON"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if req.PluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "plugin_name required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "plugin_name required"); respErr != nil {
 			logger.
 
 				// Normalize plugin name: OpenAI function names use underscores, but plugin names use hyphens
 				// Convert ori_reaper -> ori-reaper
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -701,11 +701,11 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", current)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err)); err != nil {
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err)); respErr != nil {
 			logger.
 
 				// Save settings to plugin-specific file using normalized name
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -718,15 +718,15 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	// Convert normalized settings to JSON
 	settingsData, err := json.MarshalIndent(normalizedSettings, "", "  ")
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal settings: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal settings: %v", err)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if err := os.WriteFile(settingsPath, settingsData, 0644); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write settings file: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write settings file: %v", err)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -804,8 +804,8 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		if err := orihttp.RespondBadRequest(w, "Failed to read request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Failed to read request body"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -818,46 +818,46 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.Unmarshal(body, &req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Failed to parse JSON"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "Failed to parse JSON"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if req.PluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "plugin_name required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondBadRequest(w, "plugin_name required"); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if req.Filename == "" {
-		if err := orihttp.RespondBadRequest(w, "filename required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "filename required"); respErr != nil {
 			logger.
 
 				// SECURITY: Sanitize filename to prevent path traversal attacks
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	cleanFilename := filepath.Base(req.Filename)
 	if cleanFilename != req.Filename || strings.Contains(req.Filename, "..") {
-		if err := orihttp.RespondBadRequest(w, "Invalid filename: path traversal not allowed"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid filename: path traversal not allowed"); respErr != nil {
 			logger.
 
 				// SECURITY: Only allow .json files
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if !strings.HasSuffix(cleanFilename, ".json") {
-		if err := orihttp.RespondBadRequest(w, "Invalid filename: only .json files allowed"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Invalid filename: only .json files allowed"); respErr != nil {
 			logger.
 
 				// Get current agent
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 
 			// Create agent directory if it doesn't exist
 		}
@@ -868,11 +868,11 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 
 	agentDir := filepath.Join("agents", current)
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err)); err != nil {
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to create agent directory: %v", err)); respErr != nil {
 			logger.
 
 				// Save uploaded config to file (using sanitized filename)
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -882,15 +882,15 @@ func (h *Handler) uploadConfig(w http.ResponseWriter, r *http.Request) {
 	// Convert config to JSON
 	configData, err := json.MarshalIndent(req.Config, "", "  ")
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal config: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to marshal config: %v", err)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if err := os.WriteFile(configPath, configData, 0644); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write config file: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to write config file: %v", err)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}

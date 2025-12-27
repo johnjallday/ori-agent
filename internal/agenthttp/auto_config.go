@@ -104,8 +104,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	var req AutoConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

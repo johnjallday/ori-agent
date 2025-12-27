@@ -33,27 +33,27 @@ func NewPermissionsHandler(
 // GET /api/plugins/:name/permissions
 func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Plugin name required"); respErr != nil {
 			logger.
 
 				// Get permissions from permission manager
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	permissionEntry, err := h.PermissionManager.GetPermissionEntry(pluginName)
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to get permissions: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to get permissions: %v", err)); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
@@ -66,29 +66,29 @@ func (h *PermissionsHandler) HandleGetPermissions(w http.ResponseWriter, r *http
 // POST /api/plugins/:name/permissions/approve
 func (h *PermissionsHandler) HandleApprovePermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
+		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
+		if respErr := orihttp.RespondBadRequest(w, "Plugin name required"); respErr != nil {
 			logger.
 
 				// Approve permissions
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}
 
 	if err := h.PermissionManager.ApprovePermissions(pluginName); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to approve permissions: %v", err)); err != nil {
+		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to approve permissions: %v", err)); respErr != nil {
 			logger.
 
 				// Update registry to mark permissions as approved
-				Error("Failed to write response", logger.Fields{"error": err})
+				Error("Failed to write response", logger.Fields{"error": respErr})
 		}
 		return
 	}

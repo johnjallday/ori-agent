@@ -176,12 +176,19 @@
                 <div id="configEditForm" style="display: none;">
                   <div class="row g-3">
                     <div class="col-sm-6">
-                      <label for="editModel" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Model</label>
-                      <input id="editModel" type="text" class="form-control" placeholder="e.g., gpt-4o-mini" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editProviderFilter" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Provider Filter</label>
+                      <select id="editProviderFilter" class="form-select" onchange="filterEditModelOptions()" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <option value="">All Providers</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="claude">Anthropic Claude</option>
+                        <option value="ollama">Ollama (Local)</option>
+                      </select>
                     </div>
                     <div class="col-sm-6">
-                      <label for="editProvider" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Provider</label>
-                      <input id="editProvider" type="text" class="form-control" placeholder="openai / anthropic / ollama" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editModel" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Model</label>
+                      <select id="editModel" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <option value="">Loading models...</option>
+                      </select>
                     </div>
                     <div class="col-sm-6">
                       <label for="editTemperature" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Temperature</label>
@@ -193,10 +200,11 @@
                     </div>
                     <div class="col-sm-6">
                       <label for="editType" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Type</label>
-                      <select id="editType" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                        <option value="tool-calling">Tool-calling</option>
-                        <option value="general">General</option>
+                      <select id="editType" class="form-select" onchange="filterEditModelOptions()" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                        <option value="tool-calling">Tool Calling</option>
+                        <option value="general">General Purpose</option>
                         <option value="research">Research</option>
+                        <option value="orchestration">Orchestration</option>
                       </select>
                     </div>
                     <div class="col-sm-6">
