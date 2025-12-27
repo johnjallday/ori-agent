@@ -79,9 +79,7 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.onboardingMgr.CompleteStep(req.StepName); err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Failed to complete step: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to complete step: "+err.Error())
 		return
 	}
 
@@ -113,9 +111,7 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.onboardingMgr.SkipOnboarding(); err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Failed to skip onboarding: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to skip onboarding: "+err.Error())
 		return
 	}
 
@@ -134,9 +130,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.onboardingMgr.CompleteOnboarding(); err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Failed to complete onboarding: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to complete onboarding: "+err.Error())
 		return
 	}
 
@@ -155,9 +149,7 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.onboardingMgr.ResetOnboarding(); err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Failed to reset onboarding: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Failed to reset onboarding: "+err.Error())
 		return
 	}
 
@@ -216,9 +208,7 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.onboardingMgr.SetTheme(req.Theme); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "Failed to set theme: "+err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Failed to set theme: "+err.Error())
 		return
 	}
 

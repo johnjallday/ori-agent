@@ -142,9 +142,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Validate agent name
 		if err := validateAgentName(req.Name); err != nil {
 			logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, err.Error())
 			return
 		}
 
@@ -161,9 +159,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("Creating agent", logger.Fields{"agent": req.Name})
 		if err := h.State.CreateAgent(req.Name, config); err != nil {
 			logger.Error("CreateAgent error", logger.Fields{"error": err})
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, err.Error())
 			return
 		}
 
@@ -207,15 +203,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		name := r.URL.Query().Get("name")
 		if name == "" {
-			if respErr := orihttp.RespondBadRequest(w, "name required"); respErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "name required")
 			return
 		}
 		if err := h.State.SwitchAgent(name); err != nil {
-			if encodeErr := orihttp.RespondBadRequest(w, err.Error()); encodeErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.BadRequest(w, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -231,9 +223,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agentName = r.URL.Query().Get("name")
 		}
 		if agentName == "" {
-			if respErr := orihttp.RespondBadRequest(w, "agent name required"); respErr != nil {
-				logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "agent name required")
 			return
 		}
 
@@ -321,9 +311,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if req.Name != nil && *req.Name != "" && *req.Name != agentName {
 			// Validate the new agent name
 			if err := validateAgentName(*req.Name); err != nil {
-				if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": respErr})
-				}
+				orihttp.BadRequest(w, err.Error())
 				return
 			}
 
@@ -417,9 +405,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.State.DeleteAgent(name); err != nil {
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, err.Error())
 			return
 		}
 

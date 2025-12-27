@@ -31,21 +31,15 @@ func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request
 
 	wsID := r.URL.Query().Get("studio_id")
 	if wsID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "workspace_id parameter required"); respErr != nil {
-			logger.
-
-				// Get workspace
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "workspace_id parameter required")
 		return
 	}
 
+	// Get workspace
 	ws, err := mh.workspaceStore.Get(wsID)
 	if err != nil {
 		logger.Error("Error getting workspace", logger.Fields{"workspace_id": wsID, "error": err})
-		if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
@@ -70,9 +64,7 @@ func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Reque
 		// Get messages since timestamp
 		since, err := time.Parse(time.RFC3339, sinceStr)
 		if err != nil {
-			if respErr := orihttp.RespondBadRequest(w, "Invalid since timestamp format (use RFC3339)"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "Invalid since timestamp format (use RFC3339)")
 			return
 		}
 		messages = ws.GetMessagesSince(since)
@@ -104,26 +96,18 @@ func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if msg.Content == "" {
-		if respErr := orihttp.RespondBadRequest(w, "content field is required"); respErr != nil {
-			logger.
-
-				// Add message to workspace
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "content field is required")
 		return
 	}
 
+	// Add message to workspace
 	if err := ws.AddMessage(msg); err != nil {
 		logger.Error("Error adding message to workspace", logger.Fields{"error": err})
-		if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-			logger.
-
-				// Save updated workspace
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 
+	// Save updated workspace
 	if err := mh.workspaceStore.Save(ws); err != nil {
 		logger.Error("Error saving workspace after adding message", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)

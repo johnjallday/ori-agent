@@ -157,9 +157,7 @@ func (h *Handler) handleOpenAIToolCalls(
 
 		tool, found := h.findTool(ag, name)
 		if !found {
-			if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("tool %q not found", name)); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, fmt.Sprintf("tool %q not found", name))
 			return
 		}
 

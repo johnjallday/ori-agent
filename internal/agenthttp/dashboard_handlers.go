@@ -158,20 +158,14 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 	}
 
 	if agentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
-			logger.
-
-				// Get agent
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name is required")
+		// Get agent
 		return
 	}
 
 	ag, ok := h.State.GetAgent(agentName)
 	if !ok || ag == nil {
-		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Agent not found")
 		return
 	}
 
@@ -320,12 +314,8 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	if agentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
-			logger.
-
-				// Parse request
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name is required")
+		// Parse request
 		return
 	}
 
@@ -344,23 +334,15 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 		string(types.AgentStatusDisabled): true,
 	}
 	if !validStatuses[req.Status] {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid status. Must be one of: active, idle, error, disabled"); respErr != nil {
-			logger.
-
-				// Get agent
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid status. Must be one of: active, idle, error, disabled")
+		// Get agent
 		return
 	}
 
 	agent, ok := h.State.GetAgent(agentName)
 	if !ok || agent == nil {
-		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-			logger.
-
-				// Store old status for logging
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Agent not found")
+		// Store old status for logging
 		return
 	}
 
@@ -405,12 +387,8 @@ func (h *DashboardHandler) UpdateAgentStatus(w http.ResponseWriter, r *http.Requ
 // Returns activity log for a specific agent with pagination and filtering
 func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Request) {
 	if h.ActivityLogger == nil {
-		if respErr := orihttp.RespondServiceUnavailable(w, "Activity logging not enabled"); respErr != nil {
-			logger.
-
-				// Extract agent name from URL path
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.ServiceUnavailable(w, "Activity logging not enabled")
+		// Extract agent name from URL path
 		return
 	}
 
@@ -425,12 +403,8 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 	}
 
 	if agentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
-			logger.
-
-				// Parse query parameters
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name is required")
+		// Parse query parameters
 		return
 	}
 
@@ -473,9 +447,7 @@ func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Reque
 	// Get activity logs
 	logs, total, err := h.ActivityLogger.GetActivityLog(agentName, limit, offset, eventType, startDate, endDate)
 	if err != nil {
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to retrieve activity log: "+err.Error()); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.InternalError(w, "Failed to retrieve activity log: "+err.Error())
 		return
 	}
 

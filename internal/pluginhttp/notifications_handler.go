@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
 
@@ -58,9 +57,7 @@ func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, 
 	}
 
 	if err := h.NotificationManager.DismissNotification(notificationID); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err))
 		return
 	}
 

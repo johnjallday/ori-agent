@@ -237,9 +237,7 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Form should already be parsed in ServeHTTP, but ensure it's parsed
 	if r.MultipartForm == nil {
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, err.Error())
 			return
 		}
 	}

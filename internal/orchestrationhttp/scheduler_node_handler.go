@@ -325,9 +325,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	if foundTask == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -404,9 +402,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if st == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -523,9 +519,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if !found {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -589,9 +583,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	if foundTask == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 

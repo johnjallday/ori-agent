@@ -25,9 +25,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 
 	taskIDsStr := r.URL.Query().Get("task_ids")
 	if taskIDsStr == "" {
-		if respErr := orihttp.RespondBadRequest(w, "task_ids parameter required (comma-separated)"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "task_ids parameter required (comma-separated)")
 		return
 	}
 
@@ -128,9 +126,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Task %s not found", req.TaskID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
 		return
 	}
 
@@ -172,9 +168,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
 			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
-			if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err)); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err))
 			return
 		}
 	}

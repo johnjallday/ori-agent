@@ -50,25 +50,15 @@ func (sh *StreamingHandler) WorkflowStatusHandler(w http.ResponseWriter, r *http
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required"); respErr != nil {
-			logger.
-
-				// Get workflow status from orchestrator
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
 
+	// Get workflow status from orchestrator
 	status, err := sh.orchestrator.GetWorkflowStatus(workspaceID)
 	if err != nil {
 		logger.Error("Failed to get workflow status", logger.Fields{"status": err})
-		if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.
-
-				// WorkflowStatusStreamHandler streams real-time workflow status updates using Server-Sent Events (SSE)
-				// GET /api/orchestration/workflow/stream?workspace_id=<id>
-				Fields{"error": err})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
@@ -83,15 +73,11 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required"); respErr != nil {
-			logger.
-
-				// Set headers for SSE
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
 
+	// Set headers for SSE
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -100,15 +86,11 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 	// Get flusher
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, "streaming not supported"); respErr != nil {
-			logger.
-
-				// Context with cancellation
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "streaming not supported")
 		return
 	}
 
+	// Context with cancellation
 	ctx := r.Context()
 
 	logger.Debug("🔄 Starting SSE stream for workspace", logger.Fields{"workspace_id": workspaceID})
@@ -192,15 +174,11 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 // streamEventsFromPolling streams events using polling (fallback)
 func (sh *StreamingHandler) streamEventsFromPolling(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	if sh.orchestrator == nil {
-		if respErr := orihttp.RespondInternalError(w, "orchestrator not initialized and event bus not available"); respErr != nil {
-			logger.
-
-				// Create ticker for periodic updates (every 2 seconds)
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "orchestrator not initialized and event bus not available")
 		return
 	}
 
+	// Create ticker for periodic updates (every 2 seconds)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -306,9 +284,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	// Validate workspace exists before setting up SSE stream
 	if _, err := sh.workspaceStore.Get(workspaceID); err != nil {
 		logger.Debug("Workspace not found for progress stream (may be stale browser session)", logger.Fields{"workspace_id": workspaceID})
-		if respErr := orihttp.RespondNotFound(w, "workspace not found"); respErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "workspace not found")
 		return
 	}
 
@@ -328,9 +304,7 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	ctx := r.Context()
 
 	if sh.eventBus == nil {
-		if respErr := orihttp.RespondServiceUnavailable(w, "event bus not available"); respErr != nil {
-			logger.Error("Failed to write service unavailable response", logger.Fields{"error": respErr})
-		}
+		orihttp.ServiceUnavailable(w, "event bus not available")
 		return
 	}
 

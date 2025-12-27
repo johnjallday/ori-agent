@@ -32,12 +32,8 @@ func NewMCPHandler(registry *mcp.Registry, configManager *mcp.ConfigManager, age
 // GET /api/agents/{name}/mcp-servers
 func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.
-
-				// Extract agent name from path: /api/agents/{name}/mcp-servers
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
+		// Extract agent name from path: /api/agents/{name}/mcp-servers
 		return
 	}
 
@@ -116,12 +112,8 @@ func (h *MCPHandler) ListAgentMCPServersHandler(w http.ResponseWriter, r *http.R
 // POST /api/agents/{name}/mcp-servers/{serverName}/enable
 func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.
-
-				// Extract agent name and server name from path
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
+		// Extract agent name and server name from path
 		return
 	}
 
@@ -144,23 +136,15 @@ func (h *MCPHandler) EnableAgentMCPServerHandler(w http.ResponseWriter, r *http.
 
 	_, err := h.registry.GetServer(serverName)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("MCP server '%s' not found in global registry", serverName)); respErr != nil {
-			logger.
-
-				// Enable server for agent
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("MCP server '%s' not found in global registry", serverName))
+		// Enable server for agent
 		return
 	}
 
 	if err := h.configManager.EnableServerForAgent(agentName, serverName); err != nil {
 		logger.Error("Failed to enable MCP server for agent", logger.Fields{"agentName": agentName, "err": err, "agent": serverName})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.
-
-				// Try to start the server if not already running (best effort, don't fail if it doesn't start)
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
+		// Try to start the server if not already running (best effort, don't fail if it doesn't start)
 		return
 	}
 
@@ -205,20 +189,14 @@ func (h *MCPHandler) DisableAgentMCPServerHandler(w http.ResponseWriter, r *http
 	// Verify agent exists
 	_, ok := h.agentHandler.State.GetAgent(agentName)
 	if !ok {
-		if respErr := orihttp.RespondNotFound(w, "Agent not found"); respErr != nil {
-			logger.
-
-				// Disable server for agent
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, "Agent not found")
+		// Disable server for agent
 		return
 	}
 
 	if err := h.configManager.DisableServerForAgent(agentName, serverName); err != nil {
 		logger.Error("Failed to disable MCP server for agent", logger.Fields{"server": serverName, "agentName": agentName, "err": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 

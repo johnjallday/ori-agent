@@ -399,9 +399,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("agent '%s' not found", current)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 		return
 	}
 

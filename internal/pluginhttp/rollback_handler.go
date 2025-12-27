@@ -71,9 +71,7 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 
 	plugin, err := h.RegistryManager.GetPluginByName(pluginName)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin not found: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Plugin not found: %v", err))
 		return
 	}
 
@@ -85,9 +83,7 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 	// Perform rollback
 	err = h.VersionManager.RollbackToVersion(pluginName, rollbackReq.Version, plugin.Path)
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Rollback failed: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Rollback failed: %v", err))
 		return
 	}
 

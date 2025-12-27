@@ -482,22 +482,14 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure path doesn't contain traversal sequences
 	if strings.Contains(cleanPath, "..") {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.
-
-				// Verify path starts with "agents/" to prevent access to other directories
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
+		// Verify path starts with "agents/" to prevent access to other directories
 		return
 	}
 
 	if !strings.HasPrefix(cleanPath, "agents/") && !strings.HasPrefix(cleanPath, "agents\\") {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.
-
-				// Resolve to absolute path and verify it's still within the agents directory
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
+		// Resolve to absolute path and verify it's still within the agents directory
 		return
 	}
 
@@ -509,12 +501,8 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	agentsDir, err := filepath.Abs("agents")
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Internal server error"); respErr != nil {
-			logger.
-
-				// Final check: ensure resolved path is within agents directory
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal server error")
+		// Final check: ensure resolved path is within agents directory
 		return
 	}
 

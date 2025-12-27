@@ -175,9 +175,7 @@ func (th *TaskHandler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Reque
 			th.handleTriggerScheduledTask(w, r, id)
 			return
 		default:
-			if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Unknown action: %s", action)); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, fmt.Sprintf("Unknown action: %s", action))
 			return
 		}
 	}
@@ -217,9 +215,7 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
-	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": respErr})
-	}
+	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
@@ -313,9 +309,7 @@ func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": respErr})
-	}
+	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
@@ -347,9 +341,7 @@ func (th *TaskHandler) handleDeleteScheduledTask(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": respErr})
-	}
+	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.Request, id string, enable bool) {
@@ -418,9 +410,7 @@ func (th *TaskHandler) handleEnableScheduledTask(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": respErr})
-	}
+	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
@@ -484,9 +474,7 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		})
 		return
 	}
-	if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduled task %s not found", id)); respErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": respErr})
-	}
+	orihttp.NotFound(w, fmt.Sprintf("Scheduled task %s not found", id))
 }
 
 // calculateInitialNextRun calculates the initial next run time for a schedule

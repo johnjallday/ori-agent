@@ -172,7 +172,7 @@ func RespondNotImplemented(w http.ResponseWriter, message string) error {
 //
 // Instead of:
 //
-//	if respErr := orihttp.RespondBadRequest(w, "message"); respErr != nil {
+//	orihttp.BadRequest(w, "message"); respErr != nil {
 //		logger.Error("Failed to write response", logger.Fields{"error": respErr})
 //	}
 //	return

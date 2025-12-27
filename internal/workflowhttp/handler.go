@@ -141,9 +141,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.Nodes) > templates.MaxWorkflowNodes {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes))); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes)))
 		return
 	}
 
@@ -159,9 +157,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Save workflow
 	if err := h.workflowManager.SaveWorkflow(workflow); err != nil {
 		logger.Error("Failed to save workflow", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save workflow: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workflow: %v", err))
 		return
 	}
 
@@ -186,9 +182,7 @@ func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, work
 
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
@@ -207,27 +201,21 @@ func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, w
 	// Check if workflow exists
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
 	// Only allow deletion of custom workflows
 
 	if workflow.Source != templates.WorkflowSourceCustom {
-		if encodeErr := orihttp.RespondForbidden(w, "Cannot delete built-in workflows"); encodeErr != nil {
-			logger.Error("Failed to write forbidden response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.Forbidden(w, "Cannot delete built-in workflows")
 		return
 	}
 
 	// Delete workflow
 	if err := h.workflowManager.DeleteWorkflow(workflowID); err != nil {
 		logger.Error("Failed to delete workflow", logger.Fields{"id": workflowID, "err": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to delete workflow: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to delete workflow: %v", err))
 		return
 	}
 
@@ -250,9 +238,7 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 	// Get workflow
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
@@ -270,9 +256,7 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 	// Get studio agents
 	studio, err := h.workspaceStore.Get(req.StudioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 

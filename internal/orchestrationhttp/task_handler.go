@@ -60,9 +60,7 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		// Get specific task
 		task, err := th.communicator.GetTask(taskID)
 		if err != nil {
-			if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, err.Error())
 			return
 		}
 		orihttp.WriteJSON(w, task)
@@ -118,15 +116,11 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.From == "" {
-		if respErr := orihttp.RespondBadRequest(w, "from (sender agent) is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "from (sender agent) is required")
 		return
 	}
 	if req.To == "" {
-		if respErr := orihttp.RespondBadRequest(w, "to (recipient agent) is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "to (recipient agent) is required")
 		return
 	}
 	if req.Description == "" {
@@ -264,9 +258,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					_, err = th.updateTaskAssignment(ws, req.TaskID, req.To, req.AssignedNodeID)
 					if err != nil {
 						logger.Error("", logger.Fields{"err": err})
-						if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-							logger.Error("Failed to write response", logger.Fields{"error": respErr})
-						}
+						orihttp.InternalError(w, err.Error())
 						return
 					}
 				}
@@ -389,9 +381,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	if err != nil {
 		logger.Error("Failed to update task status", logger.Fields{"task_id": err})
-		if respErr := orihttp.RespondBadRequest(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 
@@ -447,9 +437,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	// Fallback: search all workspaces
 	if err := th.communicator.DeleteTask(taskID); err != nil {
 		logger.Error("Failed to delete task", logger.Fields{"task_id": err})
-		if respErr := orihttp.RespondNotFound(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
