@@ -747,16 +747,36 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 4px;
+  width: 6px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
   transition: background 0.15s ease;
 }
 
+/* Grip dots indicator - always visible but subtle */
+.session-sidebar-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 32px;
+  background-image: radial-gradient(circle, var(--text-muted) 1px, transparent 1px);
+  background-size: 4px 8px;
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.session-sidebar-resize-handle:hover::before,
+.session-sidebar-resize-handle.resizing::before {
+  opacity: 1;
+}
+
 .session-sidebar-resize-handle:hover,
 .session-sidebar-resize-handle.resizing {
-  background: var(--primary-color);
+  background: rgba(29, 78, 216, 0.3);
 }
 
 /* Move to Folder Modal */
