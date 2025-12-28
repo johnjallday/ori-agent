@@ -93,36 +93,37 @@ type Server struct {
 	pluginUpdateService *pluginupdateservice.Service
 
 	// HTTP Handlers (kept separate as they're endpoints, not core logic)
-	healthManager         *healthhttp.Manager
-	activityLogger        *agenthttp.ActivityLogger
-	settingsHandler       *settingshttp.Handler
-	chatHandler           *chathttp.Handler
-	pluginHandler         *pluginhttp.Handler
-	pluginRegistryHandler *pluginhttp.RegistryHandler
-	pluginInitHandler     *pluginhttp.InitHandler
-	healthHandler         *healthhttp.Handler
-	pluginUpdateHandler   *pluginupdate.Handler
-	onboardingHandler     *onboardinghttp.Handler
-	deviceHandler         *devicehttp.Handler
-	webPageHandler        *pluginhttp.WebPageHandler
-	orchestrationHandler  *orchestrationhttp.Handler
-	studioHandler         *agentstudio.HTTPHandler
-	usageHandler          *usagehttp.Handler
-	mcpHandler            *mcphttp.Handler
-	agentMCPHandler       *agenthttp.MCPHandler
-	locationHandler       *locationhttp.Handler
-	pluginsPageHandler    *pluginhttp.PluginsPageHandler
-	rollbackHandler       *pluginhttp.RollbackHandler
-	permissionsHandler    *pluginhttp.PermissionsHandler
-	backupHandler         *pluginhttp.BackupHandler
-	notificationsHandler  *pluginhttp.NotificationsHandler
-	workflowHandler       *workflowhttp.Handler
-	marketplaceStore      *marketplace.Store
-	marketplaceHandler    *marketplacehttp.Handler
-	modelCategoryStore    store.ModelCategoryStore
-	modelCategoryHandler  *modelcategoryhttp.Handler
-	resetHandler          *settingshttp.ResetHandler
-	autoConfigHandler     *agenthttp.AutoConfigHandler
+	healthManager          *healthhttp.Manager
+	activityLogger         *agenthttp.ActivityLogger
+	settingsHandler        *settingshttp.Handler
+	chatHandler            *chathttp.Handler
+	pluginHandler          *pluginhttp.Handler
+	pluginRegistryHandler  *pluginhttp.RegistryHandler
+	pluginInitHandler      *pluginhttp.InitHandler
+	healthHandler          *healthhttp.Handler
+	pluginUpdateHandler    *pluginupdate.Handler
+	onboardingHandler      *onboardinghttp.Handler
+	deviceHandler          *devicehttp.Handler
+	webPageHandler         *pluginhttp.WebPageHandler
+	orchestrationHandler   *orchestrationhttp.Handler
+	studioHandler          *agentstudio.HTTPHandler
+	usageHandler           *usagehttp.Handler
+	mcpHandler             *mcphttp.Handler
+	agentMCPHandler        *agenthttp.MCPHandler
+	locationHandler        *locationhttp.Handler
+	pluginsPageHandler     *pluginhttp.PluginsPageHandler
+	rollbackHandler        *pluginhttp.RollbackHandler
+	permissionsHandler     *pluginhttp.PermissionsHandler
+	backupHandler          *pluginhttp.BackupHandler
+	notificationsHandler   *pluginhttp.NotificationsHandler
+	workflowHandler        *workflowhttp.Handler
+	marketplaceStore       *marketplace.Store
+	marketplaceHandler     *marketplacehttp.Handler
+	modelCategoryStore     store.ModelCategoryStore
+	modelCategoryHandler   *modelcategoryhttp.Handler
+	resetHandler           *settingshttp.ResetHandler
+	autoConfigHandler      *agenthttp.AutoConfigHandler
+	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
 
 	// Session management
 	sessionStore   session.HybridStore

@@ -334,6 +334,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
 
+	// Smart onboarding endpoints (AI-powered profile inference)
+	mux.HandleFunc("/api/onboarding/detect", s.smartOnboardingHandler.Detect)
+	mux.HandleFunc("/api/onboarding/profile", s.smartOnboardingHandler.InferProfile)
+	mux.HandleFunc("/api/onboarding/describe", s.smartOnboardingHandler.Describe)
+	mux.HandleFunc("/api/onboarding/config", s.smartOnboardingHandler.GenerateConfig)
+	mux.HandleFunc("/api/onboarding/apply-config", s.smartOnboardingHandler.Apply)
+	mux.HandleFunc("/api/onboarding/update-profile", s.smartOnboardingHandler.UpdateProfile)
+
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
