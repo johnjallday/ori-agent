@@ -304,7 +304,12 @@ else
   print_status "Updating VERSION file..."
   echo "$VERSION" >"$VERSION_FILE"
   git add "$VERSION_FILE"
-  git commit -m "chore: bump version to $VERSION"
+  # Only commit if there are changes (VERSION might already be set)
+  if ! git diff --cached --quiet; then
+    git commit -m "chore: bump version to $VERSION"
+  else
+    print_status "VERSION already set to $VERSION, no commit needed"
+  fi
 
   # Push to origin (triggers CI)
   print_status "Pushing $RELEASE_BRANCH to origin..."
