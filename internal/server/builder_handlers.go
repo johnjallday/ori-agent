@@ -67,6 +67,10 @@ func (b *ServerBuilder) initializeHandlers() error {
 	// Initialize auto-config handler for agent creation
 	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)
 
+	// Initialize smart onboarding handler
+	systemProvider, systemModel := s.configManager.GetSystemModel()
+	s.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(s.st, s.llmFactory, systemProvider, systemModel)
+
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()
 	s.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")

@@ -1,12 +1,15 @@
 // Onboarding module - Handles the first-time user onboarding flow
+import { smartOnboardingManager } from './smartOnboarding.js';
+
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 6;
+    this.totalSteps = 7;
     this.modal = null;
     this.modalInstance = null;
     this.deviceInfo = null;
     this.availableProviders = [];
+    this.smartOnboarding = smartOnboardingManager;
   }
 
   // Initialize the onboarding system
@@ -25,6 +28,9 @@ export class OnboardingManager {
 
     // Setup event listeners
     this.setupEventListeners();
+
+    // Initialize smart onboarding
+    await this.smartOnboarding.init();
 
     // Check if onboarding is needed
     const status = await this.checkOnboardingStatus();
@@ -631,7 +637,7 @@ export class OnboardingManager {
 
     // Add highlights based on current step
     switch (this.currentStep) {
-      case 4: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
+      case 5: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
         // Try various selectors for the sidebar toggle button
         const sidebarToggle = document.querySelector(
           '#sidebarToggle, .sidebar-toggle, [data-bs-toggle="collapse"][data-bs-target*="sidebar"], ' +
@@ -643,7 +649,7 @@ export class OnboardingManager {
         }
         break;
 
-      case 5: // Plugins step - highlight Plugins nav link
+      case 6: // Plugins step - highlight Plugins nav link
         document.querySelectorAll('.navbar a, .nav a, header a').forEach(link => {
           if (link.textContent.trim() === 'Plugins') {
             link.classList.add('onboarding-highlight');
