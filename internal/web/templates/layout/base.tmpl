@@ -146,6 +146,104 @@
     </div>
   </div>
 
+  <!-- Edit Agent Modal -->
+  <div class="modal fade" id="editAgentModal" tabindex="-1" aria-labelledby="editAgentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h5 class="modal-title" id="editAgentModalLabel" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+            </svg>
+            Edit Agent
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+        </div>
+        <div class="modal-body">
+          <div id="editAgentModalLoading" class="text-center py-4 d-none">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2" style="color: var(--text-secondary);">Loading agent...</p>
+          </div>
+          <div id="editAgentModalContent">
+            <div id="editAgentError" class="alert alert-danger d-none" role="alert"></div>
+            <div id="editAgentSuccess" class="alert alert-success d-none" role="alert">Agent updated successfully.</div>
+            <form id="editAgentForm">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" for="editAgentNameInput" style="color: var(--text-primary);">Name</label>
+                  <input type="text" id="editAgentNameInput" class="modern-input w-100" placeholder="Agent name" minlength="2" maxlength="50">
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" for="editAgentTypeSelect" style="color: var(--text-primary);">Type</label>
+                  <select id="editAgentTypeSelect" class="modern-input w-100">
+                    <option value="tool-calling">Tool Calling</option>
+                    <option value="general">General Purpose</option>
+                    <option value="orchestration">Orchestration</option>
+                    <option value="research">Research</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" for="editAgentRoleSelect" style="color: var(--text-primary);">Role</label>
+                  <select id="editAgentRoleSelect" class="modern-input w-100">
+                    <option value="general">General</option>
+                    <option value="orchestrator">Orchestrator</option>
+                    <option value="researcher">Researcher</option>
+                    <option value="analyzer">Analyzer</option>
+                    <option value="synthesizer">Synthesizer</option>
+                    <option value="validator">Validator</option>
+                    <option value="specialist">Specialist</option>
+                  </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" for="editAgentModelInput" style="color: var(--text-primary);">Model</label>
+                  <input type="text" id="editAgentModelInput" class="modern-input w-100" placeholder="e.g., gpt-4o" list="editAgentModelOptions">
+                  <datalist id="editAgentModelOptions"></datalist>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="editAgentDescription" style="color: var(--text-primary);">Description</label>
+                <textarea id="editAgentDescription" class="form-control" rows="4"
+                          style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); resize: vertical;"
+                          placeholder="Describe the agent's purpose or behavior"></textarea>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Avatar Color</label>
+                  <div class="agent-edit-color-picker">
+                    <div id="editAgentColorPreview" class="agent-edit-color-preview"></div>
+                    <input type="color" id="editAgentAvatarColor" class="modern-input w-100" value="#4f46e5">
+                  </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label" style="color: var(--text-primary);">Favorite</label>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="editAgentFavoriteToggle">
+                    <label class="form-check-label" for="editAgentFavoriteToggle" style="color: var(--text-primary);">Mark as favorite</label>
+                  </div>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="editAgentTagsInput" style="color: var(--text-primary);">Tags</label>
+                <div id="editAgentTagsContainer" class="agent-edit-tags-container">
+                  <input type="text" id="editAgentTagsInput" class="agent-edit-tags-input" placeholder="Add tags...">
+                </div>
+                <small class="text-muted">Press Enter to add tags.</small>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="editAgentSaveBtn" class="modern-btn modern-btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Plugin Store Modal -->
   <div class="modal fade" id="pluginStoreModal" tabindex="-1" aria-labelledby="pluginStoreModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">

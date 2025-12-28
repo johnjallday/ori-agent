@@ -1120,6 +1120,67 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   color: var(--primary-color);
 }
 
+.agent-edit-color-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.agent-edit-color-preview {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 2px solid var(--border-color);
+  background: #4f46e5;
+}
+
+.agent-edit-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  min-height: 44px;
+  background: var(--bg-secondary);
+  cursor: text;
+}
+
+.agent-edit-tags-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  min-width: 120px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.agent-edit-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.agent-edit-tag-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.agent-edit-tag-remove:hover {
+  color: var(--text-primary);
+}
+
 /* ============================================================================
    Folder Notes Styles
    ============================================================================ */
