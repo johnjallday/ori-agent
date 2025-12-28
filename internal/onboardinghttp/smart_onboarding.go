@@ -10,25 +10,29 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboarding/configurator"
 	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 	"github.com/johnjallday/ori-agent/internal/onboarding/profiler"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // SmartOnboardingHandler handles HTTP requests for smart onboarding.
 type SmartOnboardingHandler struct {
 	store          store.Store
 	llmFactory     *llm.Factory
+	onboardingMgr  *onboarding.Manager
 	systemProvider string
 	systemModel    string
 }
 
 // NewSmartOnboardingHandler creates a new smart onboarding handler.
-func NewSmartOnboardingHandler(s store.Store, llmFactory *llm.Factory, systemProvider, systemModel string) *SmartOnboardingHandler {
+func NewSmartOnboardingHandler(s store.Store, llmFactory *llm.Factory, onboardingMgr *onboarding.Manager, systemProvider, systemModel string) *SmartOnboardingHandler {
 	return &SmartOnboardingHandler{
 		store:          s,
 		llmFactory:     llmFactory,
+		onboardingMgr:  onboardingMgr,
 		systemProvider: systemProvider,
 		systemModel:    systemModel,
 	}
@@ -267,6 +271,25 @@ func (h *SmartOnboardingHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save user profile to app state
+	if req.Config.Profile != nil && h.onboardingMgr != nil {
+		userProfile := &types.UserProfile{
+			PrimaryCategory:     string(req.Config.Profile.PrimaryCategory),
+			SecondaryCategories: make([]string, len(req.Config.Profile.SecondaryCategories)),
+			Specializations:     req.Config.Profile.Specializations,
+			Summary:             req.Config.Profile.Summary,
+			Confidence:          req.Config.Profile.Confidence,
+			DetectedApps:        req.Config.Profile.DetectedApps,
+		}
+		for i, cat := range req.Config.Profile.SecondaryCategories {
+			userProfile.SecondaryCategories[i] = string(cat)
+		}
+		if err := h.onboardingMgr.SetUserProfile(userProfile); err != nil {
+			logger.Error("Failed to save user profile", logger.Fields{"error": err})
+			// Non-fatal: continue with success response
+		}
+	}
+
 	h.sendJSON(w, ApplyResponse{
 		Success:       true,
 		AgentsCreated: agentsToCreate,
@@ -358,6 +381,27 @@ func (h *SmartOnboardingHandler) getSystemProvider() (llm.Provider, error) {
 	}
 
 	return nil, fmt.Errorf("no LLM provider available")
+}
+
+// GetStoredProfile returns the user's stored profile.
+// GET /api/onboarding/user-profile
+func (h *SmartOnboardingHandler) GetStoredProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.onboardingMgr == nil {
+		orihttp.InternalError(w, "Onboarding manager not available")
+		return
+	}
+
+	profile := h.onboardingMgr.GetUserProfile()
+
+	h.sendJSON(w, map[string]interface{}{
+		"success": true,
+		"profile": profile,
+	})
 }
 
 // sendJSON sends a JSON response.

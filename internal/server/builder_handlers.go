@@ -69,7 +69,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 
 	// Initialize smart onboarding handler
 	systemProvider, systemModel := s.configManager.GetSystemModel()
-	s.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(s.st, s.llmFactory, systemProvider, systemModel)
+	s.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(s.st, s.llmFactory, s.onboardingMgr, systemProvider, systemModel)
 
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()

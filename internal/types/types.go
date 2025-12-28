@@ -41,13 +41,26 @@ type MenuBarSettings struct {
 	Port             int  `json:"port,omitempty"`      // Server port (defaults to 8765 if not set)
 }
 
+// UserProfile represents the user's inferred or described profile
+type UserProfile struct {
+	PrimaryCategory     string    `json:"primary_category"`               // developer, devops, designer, data_scientist, writer, project_manager, general
+	SecondaryCategories []string  `json:"secondary_categories,omitempty"` // Additional relevant categories
+	Specializations     []string  `json:"specializations,omitempty"`      // e.g., "Go developer", "iOS developer"
+	Summary             string    `json:"summary"`                        // Natural language description
+	Confidence          float64   `json:"confidence"`                     // AI confidence (0-1)
+	DetectedApps        []string  `json:"detected_apps,omitempty"`        // Apps that influenced this profile
+	Description         string    `json:"description,omitempty"`          // User's self-description (if provided)
+	InferredAt          time.Time `json:"inferred_at,omitempty"`          // When the profile was created
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding OnboardingState  `json:"onboarding"`
-	Device     DeviceInfo       `json:"device"`
-	Version    string           `json:"version"`
-	Theme      string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
-	MenuBar    *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
+	Onboarding  OnboardingState  `json:"onboarding"`
+	Device      DeviceInfo       `json:"device"`
+	UserProfile *UserProfile     `json:"user_profile,omitempty"` // User's inferred profile from onboarding
+	Version     string           `json:"version"`
+	Theme       string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar     *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use

@@ -284,3 +284,22 @@ func (m *Manager) SetMenuBarPort(port int) error {
 	m.state.MenuBar.Port = port
 	return m.saveUnlocked()
 }
+
+// GetUserProfile returns the stored user profile (may be nil)
+func (m *Manager) GetUserProfile() *types.UserProfile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.UserProfile
+}
+
+// SetUserProfile stores the user's inferred profile
+func (m *Manager) SetUserProfile(profile *types.UserProfile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if profile != nil && profile.InferredAt.IsZero() {
+		profile.InferredAt = time.Now()
+	}
+	m.state.UserProfile = profile
+	return m.saveUnlocked()
+}
