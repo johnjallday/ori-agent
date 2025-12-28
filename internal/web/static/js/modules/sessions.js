@@ -19,6 +19,7 @@ const sessionManager = {
   dragHintTimer: null,
   sessionsByFolder: new Map(),
   collapsedFolderIds: new Set(),
+  agentModelCache: new Map(),
 
   // Tab ID for multi-tab support
   tabId: null,
@@ -194,6 +195,23 @@ const sessionManager = {
     // Session list scroll (for virtual scroll)
     document.getElementById('sessionListContainer')?.addEventListener('scroll',
       () => this.handleScroll());
+
+    // Session files panel toggle
+    document.getElementById('sessionFilesToggle')?.addEventListener('click', () => {
+      const content = document.getElementById('sessionFilesContent');
+      const icon = document.querySelector('#sessionFilesToggle .folder-expand-icon');
+      if (content && icon) {
+        content.classList.toggle('collapsed');
+        icon.classList.toggle('expanded');
+      }
+    });
+
+    // Open folder button (uses FileManager if available)
+    document.getElementById('openFolderBtn')?.addEventListener('click', () => {
+      if (window.sessionFileManager) {
+        window.sessionFileManager.openFolder();
+      }
+    });
   },
 
   // Setup keyboard shortcuts
@@ -874,8 +892,38 @@ const sessionManager = {
 
       // Restore messages to chat area
       this.restoreSessionMessages(session);
+
+      // Initialize/update session file manager
+      this.initializeSessionFiles(sessionId);
     } catch (error) {
       console.error('Failed to switch session:', error);
+    }
+  },
+
+  // Initialize session files panel
+  initializeSessionFiles(sessionId) {
+    const panel = document.getElementById('sessionFilesPanel');
+    const dropzone = document.getElementById('fileDropzoneCompact');
+    const fileList = document.getElementById('fileListContainer');
+
+    if (panel && sessionId) {
+      // Show the panel
+      panel.style.display = 'block';
+
+      // Update session ID in data attributes
+      if (dropzone) dropzone.dataset.sessionId = sessionId;
+      if (fileList) fileList.dataset.sessionId = sessionId;
+
+      // Initialize or update FileManager
+      if (window.FileManager) {
+        if (window.sessionFileManager) {
+          window.sessionFileManager.disconnect();
+        }
+        window.sessionFileManager = new FileManager(sessionId);
+      }
+    } else if (panel) {
+      // Hide panel when no session
+      panel.style.display = 'none';
     }
   },
 
@@ -888,8 +936,11 @@ const sessionManager = {
       window.currentAgent = agentName;
     }
 
-    // Update the chat agent bar (primary location)
-    this.updateChatAgentBar(agentName);
+    const session = this.getActiveSession();
+    this.updateChatInfoBar(session?.title, agentName);
+
+    // Update the model display for the active agent
+    this.updateChatModelForAgent(agentName);
 
     // Update the navbar display (secondary/legacy)
     const agentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
@@ -949,15 +1000,59 @@ const sessionManager = {
     }
   },
 
-  // Legacy methods for backward compatibility
-  updateChatAgentBar(agentName) {
-    const session = this.getActiveSession();
-    this.updateChatInfoBar(session?.title, agentName);
+  // Update model display in chat info bar
+  updateChatModelName(modelName) {
+    const modelInfo = document.getElementById('chatModelInfo');
+    const modelNameEl = document.getElementById('chatModelName');
+    if (!modelInfo || !modelNameEl) return;
+
+    if (modelName) {
+      modelNameEl.textContent = modelName;
+      modelNameEl.title = modelName;
+      modelInfo.style.display = 'flex';
+    } else {
+      modelNameEl.textContent = '';
+      modelNameEl.title = '';
+      modelInfo.style.display = 'none';
+    }
   },
 
-  updateChatSessionTitle(title) {
-    const session = this.getActiveSession();
-    this.updateChatInfoBar(title, session?.agent_name);
+  // Fetch and update the model for the current agent
+  async updateChatModelForAgent(agentName) {
+    if (!agentName) {
+      this.updateChatModelName('');
+      return;
+    }
+
+    const cachedModel = this.agentModelCache.get(agentName);
+    if (cachedModel) {
+      this.updateChatModelName(cachedModel);
+      return;
+    }
+
+    this.updateChatModelName('');
+
+    try {
+      const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`);
+      if (!response.ok) {
+        this.updateChatModelName('');
+        return;
+      }
+
+      const data = await response.json();
+      const modelName = data.model || '';
+      if (modelName) {
+        this.agentModelCache.set(agentName, modelName);
+      }
+
+      const activeAgentName = this.getActiveSession()?.agent_name || agentName;
+      if (activeAgentName !== agentName) return;
+
+      this.updateChatModelName(modelName);
+    } catch (error) {
+      console.error('Failed to load agent model:', error);
+      this.updateChatModelName('');
+    }
   },
 
   // Initialize chat agent bar button handler
@@ -1019,7 +1114,8 @@ const sessionManager = {
           if (typeof clearChatHistory === 'function') {
             clearChatHistory();
           }
-          this.updateChatSessionTitle('');
+          this.updateChatInfoBar('', '');
+          this.updateChatModelName('');
         }
       }
 
@@ -1046,7 +1142,7 @@ const sessionManager = {
         session.title = newTitle;
         this.renderSessions();
         if (sessionId === this.activeSessionId) {
-          this.updateChatSessionTitle(newTitle);
+          this.updateChatInfoBar(newTitle, session.agent_name);
         }
       }
     } catch (error) {
@@ -2036,6 +2132,9 @@ const sessionManager = {
       if (session.agent_name) {
         this.updateCurrentAgent(session.agent_name);
       }
+
+      // Initialize session files panel
+      this.initializeSessionFiles(savedId);
 
       return true;
     }
