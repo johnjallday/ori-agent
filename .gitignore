@@ -139,3 +139,4 @@ tasks/
 marketplace_config.json
 .gomodcache/
 .gomodcache/
+session_files/
