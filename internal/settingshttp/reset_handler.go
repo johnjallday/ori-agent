@@ -206,7 +206,7 @@ func (h *ResetHandler) resetAgents() error {
 	return nil
 }
 
-// resetSessions removes sessions.db and related SQLite files.
+// resetSessions removes sessions.db, related SQLite files, and session_files/.
 // NOTE: The database file may be in use by the running server. The reset will
 // mark files for deletion, but full cleanup requires a server restart.
 // On Windows, this may fail if the database is locked.
@@ -229,6 +229,15 @@ func (h *ResetHandler) resetSessions() error {
 	shmPath := filepath.Join(h.dataDir, "sessions.db-shm")
 	if err := os.Remove(shmPath); err != nil && !os.IsNotExist(err) {
 		logger.Debug("SHM file may be in use", logger.Fields{"path": shmPath, "error": err})
+	}
+
+	// Remove session_files/ directory (uploaded files for sessions)
+	sessionFilesDir := filepath.Join(h.dataDir, "session_files")
+	if err := h.validatePath(sessionFilesDir); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(sessionFilesDir); err != nil && !os.IsNotExist(err) {
+		logger.Debug("session_files directory may be in use", logger.Fields{"path": sessionFilesDir, "error": err})
 	}
 
 	return nil
@@ -283,8 +292,8 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 			"files":       []string{"agents.json", "agents/"},
 		},
 		"sessions": map[string]interface{}{
-			"description": "All chat sessions and message history",
-			"files":       []string{"sessions.db"},
+			"description": "All chat sessions, message history, and uploaded files",
+			"files":       []string{"sessions.db", "session_files/"},
 		},
 		"plugins": map[string]interface{}{
 			"description": "Uploaded plugins and plugin registry",
