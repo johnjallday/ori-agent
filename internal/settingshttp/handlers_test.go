@@ -55,7 +55,7 @@ func TestSystemModelHandler_Get(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	handler := NewHandler(nil, configManager, nil, llmFactory)
@@ -87,7 +87,7 @@ func TestSystemModelHandler_Post(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	llmFactory.Register("openai", &mockProvider{})
@@ -125,7 +125,7 @@ func TestSystemModelHandler_Post(t *testing.T) {
 
 	// Verify it persisted
 	configManager2 := config.NewManager(tmpFile)
-	configManager2.Load()
+	_ = configManager2.Load()
 	if !configManager2.IsSystemModelConfigured() {
 		t.Error("Expected system model to be persisted")
 	}
@@ -136,7 +136,7 @@ func TestSystemModelHandler_Post_InvalidProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	// Don't register the provider
@@ -163,7 +163,7 @@ func TestSystemModelHandler_Post_Clear(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	llmFactory.Register("openai", &mockProvider{})
@@ -171,8 +171,8 @@ func TestSystemModelHandler_Post_Clear(t *testing.T) {
 	handler := NewHandler(nil, configManager, nil, llmFactory)
 
 	// First set a system model
-	configManager.SetSystemModel("openai", "gpt-4o-mini")
-	configManager.Save()
+	_ = configManager.SetSystemModel("openai", "gpt-4o-mini")
+	_ = configManager.Save()
 
 	// Test POST with empty values to clear
 	reqBody := SystemModelRequest{
@@ -203,7 +203,7 @@ func TestAvailableModelsHandler(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	llmFactory.Register("openai", &mockProvider{})
@@ -241,7 +241,7 @@ func TestAvailableModelsHandler_UnavailableProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	// Don't register the provider
@@ -271,7 +271,7 @@ func TestAvailableModelsHandler_MissingProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 
 	llmFactory := llm.NewFactory()
 	handler := NewHandler(nil, configManager, nil, llmFactory)

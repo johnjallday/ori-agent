@@ -747,16 +747,36 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 4px;
+  width: 6px;
   height: 100%;
   cursor: col-resize;
   background: transparent;
   transition: background 0.15s ease;
 }
 
+/* Grip dots indicator - always visible but subtle */
+.session-sidebar-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 32px;
+  background-image: radial-gradient(circle, var(--text-muted) 1px, transparent 1px);
+  background-size: 4px 8px;
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.session-sidebar-resize-handle:hover::before,
+.session-sidebar-resize-handle.resizing::before {
+  opacity: 1;
+}
+
 .session-sidebar-resize-handle:hover,
 .session-sidebar-resize-handle.resizing {
-  background: var(--primary-color);
+  background: rgba(29, 78, 216, 0.3);
 }
 
 /* Move to Folder Modal */
@@ -1374,4 +1394,67 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .search-notes-list {
   padding: 0 4px;
+}
+
+/* ============================================
+   Motion Sensitivity - Reduced Motion Support
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  /* Session sidebar - disable transitions */
+  .session-sidebar {
+    transition: none;
+  }
+
+  /* Mobile sidebar - instant show/hide instead of slide */
+  @media (max-width: 991px) {
+    .session-sidebar {
+      transform: none;
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .session-sidebar.mobile-open {
+      transform: none;
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+
+  /* Session items - disable transitions */
+  .session-item,
+  .session-item-content,
+  .folder-item,
+  .folder-header {
+    transition: none;
+  }
+
+  /* Folder toggle arrows - no rotation animation */
+  .folder-toggle-icon {
+    transition: none;
+  }
+
+  /* Action buttons - disable hover transitions */
+  .session-actions button,
+  .folder-actions button {
+    transition: none;
+  }
+
+  .folder-actions button:hover,
+  .session-actions button:hover {
+    transform: none;
+  }
+
+  /* Search panel - disable transitions */
+  .search-panel,
+  .search-results,
+  .search-notes-header {
+    transition: none;
+  }
+
+  /* Toggle buttons - disable transitions */
+  .resize-handle,
+  #toggleSessionSidebarBtn {
+    transition: none;
+  }
 }

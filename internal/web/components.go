@@ -41,9 +41,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Extract component name from URL path
 	componentName := r.URL.Query().Get("name")
 	if componentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Missing component name"); respErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Missing component name")
 		return
 	}
 
@@ -58,9 +56,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 	// Render the component
 	content, err := ch.renderer.RenderComponent(componentName, data)
 	if err != nil {
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to render component: "+err.Error()); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.InternalError(w, "Failed to render component: "+err.Error())
 		return
 	}
 

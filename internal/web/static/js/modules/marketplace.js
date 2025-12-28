@@ -238,7 +238,9 @@ class PluginMarketplace {
         const source = document.getElementById('marketplaceSourceInput').value.trim();
 
         if (!name || !source) {
-            alert('Please fill in both name and source fields');
+            if (window.Toast) {
+                Toast.warning('Please fill in both name and source fields', { title: 'Missing Fields' });
+            }
             return;
         }
 
@@ -259,7 +261,9 @@ class PluginMarketplace {
             modal.hide();
 
             // Show success message
-            alert('Marketplace added! Refreshing plugins...');
+            if (window.Toast) {
+                Toast.success('Marketplace added! Refreshing plugins...');
+            }
 
             const marketplacesResp = await fetch('/api/marketplaces');
             if (marketplacesResp.ok) {
@@ -276,7 +280,9 @@ class PluginMarketplace {
             this.render();
         } catch (error) {
             console.error('Error adding marketplace:', error);
-            alert('Failed to add marketplace: ' + error.message);
+            if (window.Toast) {
+                Toast.error('Failed to add marketplace: ' + error.message);
+            }
         }
     }
 
@@ -651,17 +657,23 @@ class PluginMarketplace {
             }
 
             if (result.success) {
-                alert(`Successfully installed ${pluginName}!\n\nThe plugin has been downloaded to: ${result.path}\n\nRefreshing marketplace...`);
+                if (window.Toast) {
+                    Toast.success(`Plugin "${pluginName}" installed successfully`);
+                }
 
                 // Reload marketplace data to show the plugin as installed
                 await this.loadMarketplaceData();
                 this.render();
             } else {
-                alert(`Failed to install ${pluginName}: ${result.message}`);
+                if (window.Toast) {
+                    Toast.error(`Failed to install ${pluginName}: ${result.message}`);
+                }
             }
         } catch (error) {
             console.error('Error installing plugin:', error);
-            alert(`Error installing ${pluginName}: ${error.message}`);
+            if (window.Toast) {
+                Toast.error(`Error installing ${pluginName}: ${error.message}`);
+            }
         }
     }
 
@@ -747,18 +759,26 @@ class PluginMarketplace {
             if (response.ok) {
                 const result = await response.json();
                 if (result.success) {
-                    alert(`Successfully updated ${pluginName} from v${result.old_version} to v${result.new_version}`);
+                    if (window.Toast) {
+                        Toast.success(`Updated ${pluginName} to v${result.new_version}`);
+                    }
                     await this.loadMarketplaceData();
                     this.render();
                 } else {
-                    alert(`Failed to update ${pluginName}: ${result.error}`);
+                    if (window.Toast) {
+                        Toast.error(`Failed to update ${pluginName}: ${result.error}`);
+                    }
                 }
             } else {
-                alert(`Failed to update ${pluginName}: ${response.statusText}`);
+                if (window.Toast) {
+                    Toast.error(`Failed to update ${pluginName}: ${response.statusText}`);
+                }
             }
         } catch (error) {
             console.error('Error updating plugin:', error);
-            alert(`Error updating ${pluginName}: ${error.message}`);
+            if (window.Toast) {
+                Toast.error(`Error updating ${pluginName}: ${error.message}`);
+            }
         }
     }
 

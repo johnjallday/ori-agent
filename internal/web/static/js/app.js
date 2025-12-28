@@ -67,6 +67,7 @@ function saveChatToLocalStorage() {
     localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
     console.error('Failed to save chat history:', error);
+    // Silent fail - don't show toast for localStorage issues
   }
 }
 
@@ -88,6 +89,7 @@ function loadChatFromLocalStorage() {
   } catch (error) {
     console.error('Failed to load chat history:', error);
     chatMessages = [];
+    // Silent fail - don't show toast for localStorage issues
   }
 }
 
@@ -121,8 +123,14 @@ function clearChatHistory() {
     }
 
     console.log('Chat history cleared');
+    if (window.Toast) {
+      Toast.success('Chat history cleared');
+    }
   } catch (error) {
     console.error('Failed to clear chat history:', error);
+    if (window.Toast) {
+      Toast.error('Failed to clear chat history');
+    }
   }
 }
 
@@ -170,6 +178,9 @@ async function refreshAgentDisplay() {
     }
   } catch (error) {
     console.error('Failed to refresh agent display:', error);
+    if (window.Toast) {
+      Toast.error('Failed to load agent information');
+    }
   }
 }
 
@@ -394,6 +405,9 @@ function renderModal(data, metadata) {
               console.error(`Error downloading ${filename}:`, error);
               errorCount++;
               addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
+              if (window.Toast) {
+                Toast.error(`Failed to download ${filename}`);
+              }
             }
           }
 
@@ -417,6 +431,9 @@ function renderModal(data, metadata) {
           addMessageToChat(`Error: ${error.message}`, false, true);
           downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
           downloadBtn.disabled = false;
+          if (window.Toast) {
+            Toast.error('Download failed');
+          }
         }
       });
     }
@@ -799,12 +816,18 @@ async function sendMessage(message) {
       console.error('No response field found. Available fields:', Object.keys(data));
       const details = escapeHtml(JSON.stringify(data, null, 2));
       addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
+      if (window.Toast) {
+        Toast.warning('Received unexpected response format');
+      }
     }
 
   } catch (error) {
     console.error('Chat error:', error);
     hideTypingIndicator();
     addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
+    if (window.Toast) {
+      Toast.error('Failed to send message');
+    }
   } finally {
     isWaitingForResponse = false;
     updateSendButton();
@@ -1028,6 +1051,7 @@ async function initializeApp() {
     await onboardingManager.init();
   } catch (error) {
     console.error('Failed to initialize onboarding:', error);
+    // Silent fail - onboarding is optional
   }
 
   // Sidebar functionality is now handled by modular files

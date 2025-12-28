@@ -231,9 +231,7 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	html, err := s.UI.TemplateRenderer.RenderTemplate(templateName, data)
 	if err != nil {
 		logger.Error("Failed to render template", logger.Fields{"template": templateName, "error": err})
-		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
 
@@ -335,9 +333,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	html, err := s.UI.TemplateRenderer.RenderTemplate("studios", data)
 	if err != nil {
 		logger.Error("Failed to render studios template", logger.Fields{"error": err})
-		if respErr := orihttp.RespondInternalError(w, "Internal Server Error"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
 
@@ -486,48 +482,32 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Ensure path doesn't contain traversal sequences
 	if strings.Contains(cleanPath, "..") {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.
-
-				// Verify path starts with "agents/" to prevent access to other directories
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
+		// Verify path starts with "agents/" to prevent access to other directories
 		return
 	}
 
 	if !strings.HasPrefix(cleanPath, "agents/") && !strings.HasPrefix(cleanPath, "agents\\") {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.
-
-				// Resolve to absolute path and verify it's still within the agents directory
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
+		// Resolve to absolute path and verify it's still within the agents directory
 		return
 	}
 
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
 		return
 	}
 
 	agentsDir, err := filepath.Abs("agents")
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, "Internal server error"); respErr != nil {
-			logger.
-
-				// Final check: ensure resolved path is within agents directory
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, "Internal server error")
+		// Final check: ensure resolved path is within agents directory
 		return
 	}
 
 	if !strings.HasPrefix(absPath, agentsDir+string(filepath.Separator)) {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid path")
 		return
 	}
 

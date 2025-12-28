@@ -71,11 +71,47 @@ async function initializeModels() {
   }
 }
 
+// Initialize form validation for agent creation modal
+function initializeAgentFormValidation() {
+  if (typeof FormValidation === 'undefined') return;
+
+  // Initialize character counter for system prompt
+  const systemPromptInput = document.getElementById('agentSystemPrompt');
+  if (systemPromptInput) {
+    FormValidation.initCharCounter(systemPromptInput, { maxLength: 4000 });
+  }
+
+  // Initialize character counter for auto-config description
+  const autoConfigDescription = document.getElementById('baseAutoConfigDescription');
+  if (autoConfigDescription) {
+    FormValidation.initCharCounter(autoConfigDescription, { maxLength: 1000 });
+  }
+
+  // Add real-time validation to agent name
+  const agentNameInput = document.getElementById('agentName');
+  if (agentNameInput) {
+    FormValidation.initInputValidation(agentNameInput, {
+      required: true,
+      requiredMessage: 'Agent name is required',
+      minLength: 2,
+      minLengthMessage: 'Name must be at least 2 characters',
+      maxLength: 50,
+      maxLengthMessage: 'Name cannot exceed 50 characters',
+      pattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]*$',
+      patternMessage: 'Use letters, numbers, hyphens, and underscores. Must start with a letter or number.'
+    });
+  }
+}
+
 // Call initialization when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeModels);
+  document.addEventListener('DOMContentLoaded', () => {
+    initializeModels();
+    initializeAgentFormValidation();
+  });
 } else {
   initializeModels();
+  initializeAgentFormValidation();
 }
 
 // Agent Management Functions
@@ -151,7 +187,9 @@ async function createNewAgent() {
 
   const agentName = agentNameInput.value.trim();
   if (!agentName) {
-    alert('Please enter an agent name');
+    if (window.Toast) {
+      Toast.warning('Please enter an agent name', { title: 'Missing Name' });
+    }
     agentNameInput.focus();
     return;
   }
@@ -220,6 +258,9 @@ async function createNewAgent() {
 
     // Show success message
     console.log('✅ Agent created successfully:', agentName);
+    if (window.Toast) {
+      Toast.success(`Agent "${agentName}" created successfully`);
+    }
 
     // Refresh the agent list
     console.log('🔄 Refreshing agent list...');
@@ -232,7 +273,9 @@ async function createNewAgent() {
 
   } catch (error) {
     console.error('Error creating agent:', error);
-    alert(`Failed to create agent: ${error.message}`);
+    if (window.Toast) {
+      Toast.error(`Failed to create agent: ${error.message}`);
+    }
   } finally {
     // Reset button state
     createBtn.disabled = false;
@@ -579,12 +622,17 @@ async function deleteAgent(agentName) {
     
     // Refresh the agent list
     await loadAgentsForSidebar();
-    
+
     console.log('Deleted agent:', agentName);
-    
+    if (window.Toast) {
+      Toast.success(`Agent "${agentName}" deleted`);
+    }
+
   } catch (error) {
     console.error('Error deleting agent:', error);
-    alert(`Failed to delete agent: ${error.message}`);
+    if (window.Toast) {
+      Toast.error(`Failed to delete agent: ${error.message}`);
+    }
   }
 }
 
@@ -744,7 +792,9 @@ async function generateBaseAutoConfig() {
   const autoConfigStatus = document.getElementById('baseAutoConfigStatus');
 
   if (!description) {
-    alert('Please enter a description of what you want your agent to do.');
+    if (window.Toast) {
+      Toast.warning('Please describe what you want your agent to do', { title: 'Missing Description' });
+    }
     return;
   }
 
@@ -800,7 +850,9 @@ async function generateBaseAutoConfig() {
       autoConfigStatus.classList.remove('bg-secondary');
       autoConfigStatus.classList.add('bg-danger');
     }
-    alert('Failed to generate configuration: ' + error.message);
+    if (window.Toast) {
+      Toast.error('Failed to generate configuration: ' + error.message);
+    }
   } finally {
     // Restore button
     generateBtn.disabled = false;

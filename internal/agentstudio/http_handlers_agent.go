@@ -19,20 +19,15 @@ type AddAgentRequest struct {
 // AddAgent handles POST /api/studios/:id/agents
 func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.
-				// Extract studio ID from URL path
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
+		// Extract studio ID from URL path
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -45,37 +40,26 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.AgentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Agent name is required"); respErr != nil {
-			logger.
-				// Get studio
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Agent name is required")
+		// Get studio
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); respErr != nil {
-			logger.
-				// Add agent using workspace method (creates stable AgentInstance)
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		// Add agent using workspace method (creates stable AgentInstance)
 		return
 	}
 
 	if err := studio.AddAgent(req.AgentName); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to add agent: %v", err)); respErr != nil {
-			logger.
-				// Save updated studio
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to add agent: %v", err))
+		// Save updated studio
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update studio: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update studio: %v", err))
 		return
 	}
 
@@ -95,22 +79,15 @@ func (h *HTTPHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 // RemoveAgent handles DELETE /api/studios/:id/agents/:agent_name
 func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.
-				// Extract studio ID and agent identifier from URL path
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
+		// Extract studio ID and agent identifier from URL path
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL format"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error":
-			// Format: "name" or "name:instanceNumber"
-			respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -119,11 +96,8 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); respErr != nil {
-			logger.
-				// Parse agent identifier to extract name and instance number
-				Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		// Parse agent identifier to extract name and instance number
 		return
 	}
 
@@ -134,9 +108,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		agentName = identParts[0]
 		instanceNumber, err = strconv.Atoi(identParts[1])
 		if err != nil {
-			if respErr := orihttp.RespondBadRequest(w, "Invalid instance number format"); respErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.BadRequest(w, "Invalid instance number format")
 			return
 		}
 	} else {
@@ -169,38 +141,24 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if targetInstanceID == "" {
-			if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Agent instance %s not found", agentName)); respErr != nil {
-				logger.Error(
-					// Remove using new method (maintains stable node IDs, only unassigns tasks for THIS instance)
-					"Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, fmt.Sprintf("Agent instance %s not found", agentName))
 			return
 		}
 
 		if err := studio.RemoveAgentInstance(targetInstanceID); err != nil {
-			if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to remove agent instance: %v", err)); respErr != nil {
-				logger.Error("Failed to write response",
-					// LEGACY: No AgentInstances exist - use old method (removes first occurrence by name)
-					logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to remove agent instance: %v", err))
 			return
 		}
 	} else {
 
 		if err := studio.RemoveAgent(agentName); err != nil {
-			if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Failed to remove agent: %v", err)); respErr != nil {
-				logger.Error(
-					// Save updated studio
-					"Failed to write response", logger.Fields{"error": respErr})
-			}
+			orihttp.NotFound(w, fmt.Sprintf("Failed to remove agent: %v", err))
 			return
 		}
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 

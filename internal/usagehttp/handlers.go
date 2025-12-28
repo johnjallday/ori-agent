@@ -63,25 +63,19 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	endStr := r.URL.Query().Get("end")
 
 	if startStr == "" || endStr == "" {
-		if respErr := orihttp.RespondBadRequest(w, "start and end parameters are required"); respErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "start and end parameters are required")
 		return
 	}
 
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, "invalid start time format, use RFC3339"); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.BadRequest(w, "invalid start time format, use RFC3339")
 		return
 	}
 
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, "invalid end time format, use RFC3339"); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.BadRequest(w, "invalid end time format, use RFC3339")
 		return
 	}
 
@@ -110,9 +104,7 @@ func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 // PUT /api/usage/pricing
 func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 

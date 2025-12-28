@@ -32,9 +32,7 @@ func NewHandler(registry *mcp.Registry, configManager *mcp.ConfigManager, store 
 // GET /api/mcp/servers
 func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -56,9 +54,7 @@ func (h *Handler) ListServersHandler(w http.ResponseWriter, r *http.Request) {
 // POST /api/mcp/servers
 func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -71,9 +67,7 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.configManager.AddServer(serverConfig); err != nil {
 		logger.Error("Failed to add MCP server to config", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -81,9 +75,7 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.registry.AddServer(serverConfig); err != nil {
 		logger.Error("Failed to add MCP server to registry", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -97,9 +89,7 @@ func (h *Handler) AddServerHandler(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/mcp/servers/:name
 func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -107,9 +97,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
@@ -117,9 +105,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Remove from registry (stops if running)
 	if err := h.registry.RemoveServer(serverName); err != nil {
 		logger.Error("Failed to remove MCP server from registry", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -127,9 +113,7 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.configManager.RemoveServer(serverName); err != nil {
 		logger.Error("Failed to remove MCP server from config", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -143,18 +127,14 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 // POST /api/mcp/servers/:name/enable
 func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Extract server name from path
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
@@ -162,18 +142,14 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Get current agent
 	_, currentAgentName := h.store.ListAgents()
 	if currentAgentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "No current agent"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "No current agent")
 		return
 	}
 
 	// Enable server for agent in config
 	if err := h.configManager.EnableServerForAgent(currentAgentName, serverName); err != nil {
 		logger.Error("Failed to enable MCP server", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -181,9 +157,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 	status, err := h.registry.GetServerStatus(serverName)
 	if err != nil {
 		logger.Error("Failed to get MCP server status", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -199,9 +173,7 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 		// Start the server
 		if err := h.registry.StartServer(serverName); err != nil {
 			logger.Error("Failed to start MCP server", logger.Fields{"server": err})
-			if encodeErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to start server: %v", err)); encodeErr != nil {
-				logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to start server: %v", err))
 			return
 		}
 	case mcp.StatusRunning:
@@ -222,18 +194,14 @@ func (h *Handler) EnableServerHandler(w http.ResponseWriter, r *http.Request) {
 // POST /api/mcp/servers/:name/disable
 func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Extract server name from path
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
@@ -241,9 +209,7 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 	// Get current agent
 	_, currentAgentName := h.store.ListAgents()
 	if currentAgentName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "No current agent"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "No current agent")
 		return
 	}
 
@@ -251,9 +217,7 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.configManager.DisableServerForAgent(currentAgentName, serverName); err != nil {
 		logger.Error("Failed to disable MCP server", logger.Fields{"server": err})
-		if respErr := orihttp.RespondInternalError(w, err.Error()); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -267,9 +231,7 @@ func (h *Handler) DisableServerHandler(w http.ResponseWriter, r *http.Request) {
 // GET /api/mcp/servers/:name/tools
 func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -277,18 +239,14 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
 
 	server, err := h.registry.GetServer(serverName)
 	if err != nil {
-		if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
@@ -307,9 +265,7 @@ func (h *Handler) GetServerToolsHandler(w http.ResponseWriter, r *http.Request) 
 // GET /api/mcp/servers/:name/status
 func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -317,18 +273,14 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
 
 	status, err := h.registry.GetServerStatus(serverName)
 	if err != nil {
-		if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
@@ -345,9 +297,7 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 // POST /api/mcp/servers/:name/test
 func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -355,9 +305,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
@@ -365,9 +313,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 	// Get server
 	server, err := h.registry.GetServer(serverName)
 	if err != nil {
-		if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
@@ -412,9 +358,7 @@ func (h *Handler) TestConnectionHandler(w http.ResponseWriter, r *http.Request) 
 // POST /api/mcp/servers/:name/retry
 func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -422,9 +366,7 @@ func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request)
 
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		if respErr := orihttp.RespondBadRequest(w, "Server name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Server name required")
 		return
 	}
 	serverName := parts[4]
@@ -432,18 +374,14 @@ func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request)
 	// Get server
 	server, err := h.registry.GetServer(serverName)
 	if err != nil {
-		if encodeErr := orihttp.RespondNotFound(w, err.Error()); encodeErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
 	// Restart the server (stops if running, then starts)
 	if err := server.Restart(); err != nil {
 		logger.Error("Failed to restart MCP server", logger.Fields{"server": serverName, "err": err})
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to restart server: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to restart server: %v", err))
 		return
 	}
 
@@ -457,27 +395,20 @@ func (h *Handler) RetryConnectionHandler(w http.ResponseWriter, r *http.Request)
 // POST /api/mcp/import
 func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Parse multipart form
-
-	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
-		if respErr := orihttp.RespondBadRequest(w, "Failed to parse form"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+	if err := r.ParseMultipartForm(orihttp.MaxFormSize); err != nil {
+		orihttp.BadRequest(w, "Failed to parse form")
 		return
 	}
 
 	// Get uploaded file
 	file, _, err := r.FormFile("config_file")
 	if err != nil {
-		if respErr := orihttp.RespondBadRequest(w, "No file uploaded"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "No file uploaded")
 		return
 	}
 	defer func() { _ = file.Close() }()
@@ -487,9 +418,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 		Servers []mcp.ServerConfig `json:"servers"`
 	}
 	if err := json.NewDecoder(file).Decode(&config); err != nil {
-		if respErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid JSON format: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("Invalid JSON format: %v", err))
 		return
 	}
 
@@ -533,9 +462,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 // GET /api/mcp/marketplace
 func (h *Handler) GetMarketplaceServersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 

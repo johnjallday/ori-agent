@@ -62,9 +62,7 @@ func (h *Handler) WorkflowsHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.handleCreateWorkflow(w, r)
 	default:
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 	}
 }
 
@@ -81,9 +79,7 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	workflowID := parts[0]
 
 	if workflowID == "" {
-		if err := orihttp.RespondBadRequest(w, "Workflow ID is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Workflow ID is required")
 		return
 	}
 
@@ -100,9 +96,7 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.handleDeleteWorkflow(w, r, workflowID)
 	default:
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 	}
 }
 
@@ -110,9 +104,7 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 	if h.workflowManager == nil {
-		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
 	}
 
@@ -129,9 +121,7 @@ func (h *Handler) handleListWorkflows(w http.ResponseWriter, r *http.Request) {
 // handleCreateWorkflow creates a new custom workflow
 func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	if h.workflowManager == nil {
-		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
 	}
 
@@ -141,23 +131,17 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name == "" {
-		if err := orihttp.RespondBadRequest(w, "Workflow name is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Workflow name is required")
 		return
 	}
 
 	if len(req.Nodes) == 0 {
-		if err := orihttp.RespondBadRequest(w, "At least one node is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "At least one node is required")
 		return
 	}
 
 	if len(req.Nodes) > templates.MaxWorkflowNodes {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes))); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("Maximum %d nodes allowed, got %d", templates.MaxWorkflowNodes, len(req.Nodes)))
 		return
 	}
 
@@ -173,9 +157,7 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Save workflow
 	if err := h.workflowManager.SaveWorkflow(workflow); err != nil {
 		logger.Error("Failed to save workflow", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save workflow: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workflow: %v", err))
 		return
 	}
 
@@ -194,17 +176,13 @@ func (h *Handler) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 // handleGetWorkflow retrieves a specific workflow
 func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if h.workflowManager == nil {
-		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
@@ -216,36 +194,28 @@ func (h *Handler) handleGetWorkflow(w http.ResponseWriter, r *http.Request, work
 // handleDeleteWorkflow deletes a custom workflow
 func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if h.workflowManager == nil {
-		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	// Check if workflow exists
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
 	// Only allow deletion of custom workflows
 
 	if workflow.Source != templates.WorkflowSourceCustom {
-		if encodeErr := orihttp.RespondForbidden(w, "Cannot delete built-in workflows"); encodeErr != nil {
-			logger.Error("Failed to write forbidden response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.Forbidden(w, "Cannot delete built-in workflows")
 		return
 	}
 
 	// Delete workflow
 	if err := h.workflowManager.DeleteWorkflow(workflowID); err != nil {
 		logger.Error("Failed to delete workflow", logger.Fields{"id": workflowID, "err": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to delete workflow: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to delete workflow: %v", err))
 		return
 	}
 
@@ -256,25 +226,19 @@ func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, w
 // handleCheckAgents checks if all agents required by a workflow are available in a studio
 func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, workflowID string) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if h.workflowManager == nil {
-		if err := orihttp.RespondInternalError(w, "Workflow manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Workflow manager not initialized")
 		return
 	}
 
 	// Get workflow
 	workflow, err := h.workflowManager.GetWorkflow(workflowID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Workflow not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
 		return
 	}
 
@@ -285,18 +249,14 @@ func (h *Handler) handleCheckAgents(w http.ResponseWriter, r *http.Request, work
 	}
 
 	if req.StudioID == "" {
-		if err := orihttp.RespondBadRequest(w, "Studio ID is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Studio ID is required")
 		return
 	}
 
 	// Get studio agents
 	studio, err := h.workspaceStore.Get(req.StudioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 

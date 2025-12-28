@@ -42,18 +42,14 @@ func NewRollbackHandler(
 // Request body: { "version": "1.0.0" }
 func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Extract plugin name from URL
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Plugin name required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Plugin name required")
 		return
 	}
 
@@ -67,9 +63,7 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 	}
 
 	if rollbackReq.Version == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Version required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Version required")
 		return
 	}
 
@@ -77,25 +71,19 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 
 	plugin, err := h.RegistryManager.GetPluginByName(pluginName)
 	if err != nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin not found: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Plugin not found: %v", err))
 		return
 	}
 
 	if plugin.Path == "" {
-		if respErr := orihttp.RespondBadRequest(w, "Plugin path not found"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Plugin path not found")
 		return
 	}
 
 	// Perform rollback
 	err = h.VersionManager.RollbackToVersion(pluginName, rollbackReq.Version, plugin.Path)
 	if err != nil {
-		if respErr := orihttp.RespondInternalError(w, fmt.Sprintf("Rollback failed: %v", err)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Rollback failed: %v", err))
 		return
 	}
 

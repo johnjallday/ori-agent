@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -33,9 +32,7 @@ type ClaudeProvider struct {
 
 // NewClaudeProvider creates a new Claude provider
 func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
-	httpClient := &http.Client{
-		Timeout: 10 * time.Minute, // Increased from 30s to support long-running tasks
-	}
+	httpClient := NewHTTPClient(DefaultCloudTimeout)
 
 	var client anthropic.Client
 	if config.APIKey != "" {
@@ -64,16 +61,7 @@ func (p *ClaudeProvider) Type() ProviderType {
 
 // Capabilities returns Claude's capabilities
 func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsTools:          true,
-		SupportsStreaming:      true,
-		SupportsSystemPrompt:   true,
-		SupportsTemperature:    true,
-		RequiresAPIKey:         true,
-		SupportsCustomEndpoint: false,
-		MaxContextWindow:       200000, // Claude 3.5 Sonnet context window
-		SupportedFormats:       []string{"text"},
-	}
+	return CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
 }
 
 // ValidateConfig validates the Claude configuration

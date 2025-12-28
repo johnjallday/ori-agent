@@ -109,7 +109,7 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if strings.TrimSpace(req.Description) == "" {
-		orihttp.RespondBadRequest(w, "Description is required")
+		_ = orihttp.RespondBadRequest(w, "Description is required")
 		return
 	}
 

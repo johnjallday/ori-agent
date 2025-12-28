@@ -23,9 +23,7 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 	case http.MethodPost:
 		th.handleCreateSchedulerNode(w, r)
 	default:
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 	}
 }
 
@@ -35,9 +33,7 @@ func (th *TaskHandler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Requ
 func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "studio_id parameter is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -140,9 +136,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "workspace_id is required in URL path"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "workspace_id is required in URL path")
 		return
 	}
 
@@ -165,9 +159,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Validate required fields
 	if req.Name == "" {
-		if respErr := orihttp.RespondBadRequest(w, "name is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "name is required")
 		return
 	}
 
@@ -198,9 +190,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 		}
 	}
 	if schedulerNodeCount >= 50 {
-		if respErr := orihttp.RespondBadRequest(w, "Maximum of 50 scheduler nodes per workspace reached"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Maximum of 50 scheduler nodes per workspace reached")
 		return
 	}
 
@@ -294,9 +284,7 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 
 	// Find node_id in path (should be last part)
 	if len(parts) < 2 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL: missing node ID"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL: missing node ID")
 		return
 	}
 	nodeID := parts[len(parts)-1]
@@ -309,18 +297,14 @@ func (th *TaskHandler) SchedulerNodeHandler(w http.ResponseWriter, r *http.Reque
 	case http.MethodDelete:
 		th.handleDeleteSchedulerNode(w, r, nodeID)
 	default:
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 	}
 }
 
 func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "studio_id parameter is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -341,9 +325,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	if foundTask == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -389,9 +371,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "studio_id is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "studio_id is required")
 		return
 	}
 
@@ -422,9 +402,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if st == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -514,9 +492,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "studio_id parameter is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -543,9 +519,7 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	if !found {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
@@ -573,18 +547,14 @@ func (th *TaskHandler) handleDeleteSchedulerNode(w http.ResponseWriter, r *http.
 // SchedulerNodeTriggerHandler handles manual triggering of a scheduler node
 func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if respErr := orihttp.RespondMethodNotAllowed(w); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Extract node ID from URL path
 	parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
 	if len(parts) < 2 {
-		if respErr := orihttp.RespondBadRequest(w, "Invalid URL: missing node ID"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "Invalid URL: missing node ID")
 		return
 	}
 	// node ID is before "trigger"
@@ -592,9 +562,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	workspaceID := r.URL.Query().Get("studio_id")
 	if workspaceID == "" {
-		if respErr := orihttp.RespondBadRequest(w, "studio_id parameter is required"); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.BadRequest(w, "studio_id parameter is required")
 		return
 	}
 
@@ -615,9 +583,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	if foundTask == nil {
-		if respErr := orihttp.RespondNotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID)); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Scheduler node %s not found", nodeID))
 		return
 	}
 
