@@ -75,6 +75,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/chat-area.tmpl",
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",
+		"templates/components/file_dialog.tmpl",
 		"templates/components/studios/manage-agents-modal.tmpl",
 		"templates/components/studios/create-workspace-modal.tmpl",
 		"templates/components/studios/workspace-details-modal.tmpl",

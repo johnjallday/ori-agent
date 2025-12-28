@@ -14,6 +14,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -37,6 +39,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -124,6 +127,11 @@ type Server struct {
 	// Session management
 	sessionStore   session.HybridStore
 	sessionHandler *sessionhttp.Handler
+
+	// Session files management
+	sessionFilesStore   *sessionfiles.Store
+	sessionFilesWatcher *filewatcher.Watcher
+	sessionFilesHandler *fileshttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -157,6 +165,9 @@ func (s *Server) Shutdown() {
 	}
 	if s.pluginUpdateService != nil {
 		s.pluginUpdateService.Stop()
+	}
+	if s.sessionFilesWatcher != nil {
+		s.sessionFilesWatcher.Close()
 	}
 
 	// Clean up all loaded plugins

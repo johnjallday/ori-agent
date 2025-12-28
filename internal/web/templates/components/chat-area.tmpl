@@ -17,6 +17,15 @@
           <span class="chat-agent-indicator"></span>
           <span class="chat-agent-name" id="chatAgentName">-</span>
         </div>
+        <!-- Separator -->
+        <span class="chat-info-separator">|</span>
+        <!-- Model Info -->
+        <div id="chatModelInfo" class="d-flex align-items-center gap-2" style="display: none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="chat-model-icon" aria-hidden="true">
+            <path d="M9,3V5H15V3H17V5A2,2 0 0,1 19,7V17A2,2 0 0,1 17,19V21H15V19H9V21H7V19A2,2 0 0,1 5,17V7A2,2 0 0,1 7,5V3H9M7,7V17H17V7H7Z"/>
+          </svg>
+          <span class="chat-model-name" id="chatModelName">-</span>
+        </div>
       </div>
       <div class="d-flex align-items-center gap-2">
         <a href="#" class="btn btn-sm btn-outline-primary chat-agent-edit-btn" id="chatEditAgentBtn" title="Edit agent settings" aria-label="Edit agent settings">

@@ -158,17 +158,20 @@ func ValidateUploadFilename(w http.ResponseWriter, filename string) (string, boo
 		return "", false
 	}
 
-	// Only allow alphanumeric characters, hyphens, underscores, and dots
+	// Allow common filename characters: alphanumeric, hyphens, underscores, dots, spaces, parentheses
+	// Replace any disallowed characters with underscores
+	var sanitized strings.Builder
 	for _, c := range cleanFilename {
 		isLower := c >= 'a' && c <= 'z'
 		isUpper := c >= 'A' && c <= 'Z'
 		isDigit := c >= '0' && c <= '9'
-		isAllowed := c == '-' || c == '_' || c == '.'
-		if !isLower && !isUpper && !isDigit && !isAllowed {
-			BadRequest(w, "Invalid characters in filename")
-			return "", false
+		isAllowed := c == '-' || c == '_' || c == '.' || c == ' ' || c == '(' || c == ')'
+		if isLower || isUpper || isDigit || isAllowed {
+			sanitized.WriteRune(c)
+		} else {
+			sanitized.WriteRune('_')
 		}
 	}
 
-	return cleanFilename, true
+	return sanitized.String(), true
 }
