@@ -18,9 +18,9 @@ func createTestConfigManager(t *testing.T, systemProvider, systemModel string) *
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "settings.json")
 	configManager := config.NewManager(tmpFile)
-	configManager.Load()
+	_ = configManager.Load()
 	if systemProvider != "" && systemModel != "" {
-		configManager.SetSystemModel(systemProvider, systemModel)
+		_ = configManager.SetSystemModel(systemProvider, systemModel)
 	}
 	return configManager
 }

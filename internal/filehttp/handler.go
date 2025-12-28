@@ -112,7 +112,7 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode base64 content
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
-		json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to decode file content"})
+		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to decode file content"})
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	dateDir := time.Now().Format("2006-01")
 	uploadPath := filepath.Join(h.uploadsDir, dateDir)
 	if err := os.MkdirAll(uploadPath, 0755); err != nil {
-		json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to create upload directory"})
+		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to create upload directory"})
 		return
 	}
 
@@ -138,13 +138,13 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Write file
 	if err := os.WriteFile(finalPath, data, 0644); err != nil {
-		json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to save file"})
+		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to save file"})
 		return
 	}
 
 	// Return relative path
 	relativePath := filepath.Join(dateDir, safeFilename)
-	json.NewEncoder(w).Encode(UploadFileResponse{Path: relativePath})
+	_ = json.NewEncoder(w).Encode(UploadFileResponse{Path: relativePath})
 }
 
 // GetFileRequest represents a file read request
@@ -166,14 +166,14 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		json.NewEncoder(w).Encode(GetFileResponse{Error: "Path parameter required"})
+		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "Path parameter required"})
 		return
 	}
 
 	// Security: prevent directory traversal
 	cleanPath := filepath.Clean(path)
 	if strings.Contains(cleanPath, "..") {
-		json.NewEncoder(w).Encode(GetFileResponse{Error: "Invalid path"})
+		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "Invalid path"})
 		return
 	}
 
@@ -182,7 +182,7 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Read file
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		json.NewEncoder(w).Encode(GetFileResponse{Error: "File not found"})
+		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "File not found"})
 		return
 	}
 
@@ -192,7 +192,7 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Determine mime type from extension
 	mimeType := getMimeType(filepath.Ext(fullPath))
 
-	json.NewEncoder(w).Encode(GetFileResponse{
+	_ = json.NewEncoder(w).Encode(GetFileResponse{
 		Content:  content,
 		MimeType: mimeType,
 		Filename: filepath.Base(fullPath),
