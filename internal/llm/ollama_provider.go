@@ -25,13 +25,9 @@ func NewOllamaProvider(config ProviderConfig) *OllamaProvider {
 		baseURL = "http://localhost:11434"
 	}
 
-	httpClient := &http.Client{
-		Timeout: 5 * time.Minute, // Longer timeout for local models
-	}
-
 	return &OllamaProvider{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: NewHTTPClient(DefaultLocalTimeout),
 	}
 }
 
@@ -47,16 +43,7 @@ func (p *OllamaProvider) Type() ProviderType {
 
 // Capabilities returns what this provider supports
 func (p *OllamaProvider) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsTools:          true, // Ollama supports tool calling
-		SupportsStreaming:      true,
-		SupportsSystemPrompt:   true,
-		SupportsTemperature:    true,
-		RequiresAPIKey:         false,
-		SupportsCustomEndpoint: true,
-		MaxContextWindow:       8192, // Varies by model, using conservative default
-		SupportedFormats:       []string{"text"},
-	}
+	return LocalProviderCapabilities(8192) // Varies by model, using conservative default
 }
 
 // ValidateConfig validates the provider configuration
@@ -244,6 +231,15 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 			Content: msg.Content,
 		}
 
+		// Add images if present (for vision-capable models like llava)
+		if len(msg.Images) > 0 {
+			ollamaMsg.Images = make([]string, len(msg.Images))
+			for i, img := range msg.Images {
+				// Ollama expects raw base64 data, not data URLs
+				ollamaMsg.Images[i] = img.Base64Data
+			}
+		}
+
 		// Convert tool calls if present (for assistant messages)
 		if len(msg.ToolCalls) > 0 {
 			ollamaMsg.ToolCalls = make([]ollamaToolCall, len(msg.ToolCalls))
@@ -428,6 +424,15 @@ func (p *OllamaProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 		ollamaMsg := ollamaMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
+		}
+
+		// Add images if present (for vision-capable models like llava)
+		if len(msg.Images) > 0 {
+			ollamaMsg.Images = make([]string, len(msg.Images))
+			for i, img := range msg.Images {
+				// Ollama expects raw base64 data, not data URLs
+				ollamaMsg.Images[i] = img.Base64Data
+			}
 		}
 
 		// Convert tool calls if present (for assistant messages)

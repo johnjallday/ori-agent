@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -33,9 +32,7 @@ type ClaudeProvider struct {
 
 // NewClaudeProvider creates a new Claude provider
 func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
-	httpClient := &http.Client{
-		Timeout: 10 * time.Minute, // Increased from 30s to support long-running tasks
-	}
+	httpClient := NewHTTPClient(DefaultCloudTimeout)
 
 	var client anthropic.Client
 	if config.APIKey != "" {
@@ -64,16 +61,7 @@ func (p *ClaudeProvider) Type() ProviderType {
 
 // Capabilities returns Claude's capabilities
 func (p *ClaudeProvider) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsTools:          true,
-		SupportsStreaming:      true,
-		SupportsSystemPrompt:   true,
-		SupportsTemperature:    true,
-		RequiresAPIKey:         true,
-		SupportsCustomEndpoint: false,
-		MaxContextWindow:       200000, // Claude 3.5 Sonnet context window
-		SupportedFormats:       []string{"text"},
-	}
+	return CloudProviderCapabilities(200000) // Claude 3.5 Sonnet context window
 }
 
 // ValidateConfig validates the Claude configuration
@@ -160,9 +148,26 @@ func (p *ClaudeProvider) convertMessages(messages []Message) []anthropic.Message
 	for _, msg := range messages {
 		switch msg.Role {
 		case RoleUser:
-			claudeMessages = append(claudeMessages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock(msg.Content),
-			))
+			// Build content blocks for the user message
+			var contentBlocks []anthropic.ContentBlockParamUnion
+
+			// Add text content first
+			if msg.Content != "" {
+				contentBlocks = append(contentBlocks, anthropic.NewTextBlock(msg.Content))
+			}
+
+			// Add image blocks if present (for vision support)
+			for _, img := range msg.Images {
+				contentBlocks = append(contentBlocks, anthropic.NewImageBlockBase64(
+					img.MimeType,
+					img.Base64Data,
+				))
+			}
+
+			// Only add the message if there's content
+			if len(contentBlocks) > 0 {
+				claudeMessages = append(claudeMessages, anthropic.NewUserMessage(contentBlocks...))
+			}
 
 		case RoleAssistant:
 			claudeMessages = append(claudeMessages, anthropic.NewAssistantMessage(

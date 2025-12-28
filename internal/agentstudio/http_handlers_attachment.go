@@ -65,50 +65,37 @@ func inferAttachmentType(req *CreateAttachmentRequest) AttachmentType {
 // CreateAttachment handles POST /api/studios/:id/attachments
 func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 
 	var req CreateAttachmentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.Title == "" {
-		if err := orihttp.RespondBadRequest(w, "Attachment title is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Attachment title is required")
 		return
 	}
 
 	attType := inferAttachmentType(&req)
 	if attType != AttachmentTypeDoc && attType != AttachmentTypeImage && attType != AttachmentTypeOther {
-		if err := orihttp.RespondBadRequest(w, "Attachment type must be one of: doc, image, other"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Attachment type must be one of: doc, image, other")
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
@@ -128,21 +115,16 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.AddAttachment(attachment); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("Failed to add attachment: %v", err))
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
-			logger.
-				// Publish event for live updates
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
+	// Publish event for live updates
 	createdAttachment, err := studio.GetAttachment(attachment.ID)
 	if err != nil {
 		logger.Debug("Could not retrieve created attachment, using original", logger.Fields{"attachment_id": attachment.ID, "error": err})
@@ -164,30 +146,26 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Attachment created successfully",
 		"attachment": createdAttachment,
 		"studio":     studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // UpdateAttachment handles PATCH /api/studios/:id/attachments/:attachment_id
 func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -204,31 +182,23 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 		Y       *float64            `json:"y,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
 	attachment, err := studio.GetAttachment(attachmentID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
-			logger.
-				// Apply updates
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
+	// Apply updates
 	if req.Title != nil {
 		attachment.Title = *req.Title
 	}
@@ -237,9 +207,7 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type != nil {
 		if *req.Type != AttachmentTypeDoc && *req.Type != AttachmentTypeImage && *req.Type != AttachmentTypeOther {
-			if err := orihttp.RespondBadRequest(w, "Attachment type must be one of: doc, image, other"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.BadRequest(w, "Attachment type must be one of: doc, image, other")
 			return
 		}
 		attachment.Type = *req.Type
@@ -269,16 +237,12 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := studio.UpdateAttachment(*attachment); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update attachment: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update attachment: %v", err))
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
@@ -302,30 +266,26 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":    "Attachment updated successfully",
 		"attachment": updatedAttachment,
 		"studio":     studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // DeleteAttachment handles DELETE /api/studios/:id/attachments/:attachment_id
 func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
@@ -333,23 +293,17 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
 	if err := studio.DeleteAttachment(attachmentID); err != nil {
-		if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, err.Error())
 		return
 	}
 
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
@@ -365,11 +319,11 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":       "Attachment deleted successfully",
 		"attachment_id": attachmentID,
 		"studio":        studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

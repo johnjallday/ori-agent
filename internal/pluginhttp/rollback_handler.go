@@ -42,75 +42,52 @@ func NewRollbackHandler(
 // Request body: { "version": "1.0.0" }
 func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-
-				// Extract plugin name from URL
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
+	// Extract plugin name from URL
 	pluginName := h.extractPluginName(r.URL.Path)
 	if pluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "Plugin name required"); err != nil {
-			logger.
-
-				// Parse request body
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Plugin name required")
 		return
 	}
 
+	// Parse request body
 	var rollbackReq struct {
 		Version string `json:"version"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&rollbackReq); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &rollbackReq) {
 		return
 	}
 
 	if rollbackReq.Version == "" {
-		if err := orihttp.RespondBadRequest(w, "Version required"); err != nil {
-			logger.
-
-				// Get plugin from registry to find current path
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Version required")
 		return
 	}
 
+	// Get plugin from registry to find current path
+
 	plugin, err := h.RegistryManager.GetPluginByName(pluginName)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Plugin not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Plugin not found: %v", err))
 		return
 	}
 
 	if plugin.Path == "" {
-		if err := orihttp.RespondBadRequest(w, "Plugin path not found"); err != nil {
-			logger.
-
-				// Perform rollback
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Plugin path not found")
 		return
 	}
 
+	// Perform rollback
 	err = h.VersionManager.RollbackToVersion(pluginName, rollbackReq.Version, plugin.Path)
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Rollback failed: %v", err)); err != nil {
-			logger.
-
-				// The version manager has already replaced the binary at plugin.Path
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Rollback failed: %v", err))
 		return
 	}
+
+	// The version manager has already replaced the binary at plugin.Path
 
 	// Reload plugin if it's enabled in current agent
 	_, currentAgent := h.Store.ListAgents()
@@ -137,12 +114,12 @@ func (h *RollbackHandler) HandleRollbackPlugin(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("Plugin %s rolled back to version %s", pluginName, rollbackReq.Version),
 		"version": rollbackReq.Version,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 

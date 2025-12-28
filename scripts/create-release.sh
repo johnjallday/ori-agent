@@ -304,7 +304,12 @@ else
   print_status "Updating VERSION file..."
   echo "$VERSION" >"$VERSION_FILE"
   git add "$VERSION_FILE"
-  git commit -m "chore: bump version to $VERSION"
+  # Only commit if there are changes (VERSION might already be set)
+  if ! git diff --cached --quiet; then
+    git commit -m "chore: bump version to $VERSION"
+  else
+    print_status "VERSION already set to $VERSION, no commit needed"
+  fi
 
   # Push to origin (triggers CI)
   print_status "Pushing $RELEASE_BRANCH to origin..."
@@ -314,19 +319,78 @@ else
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  print_status "Next steps:"
-  echo "  1. Make any final fixes on this branch (bug fixes only, no new features)"
-  echo "  2. Push changes: git push"
-  echo "  3. Wait for scheduled release (Tuesday 10:00 UTC)"
-  echo "     OR manually trigger the release workflow"
+  print_status "When should this release go out?"
   echo ""
-  print_status "To trigger release immediately:"
-  echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
+  echo "  1) Tomorrow (next 5 AM ET / 10:00 UTC)"
+  echo "  2) In 2 days"
+  echo "  3) In 1 week"
+  echo "  4) Release immediately (trigger now)"
+  echo "  5) Don't schedule (I'll trigger manually later)"
   echo ""
-  print_status "To do a dry run first:"
-  echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH -f dry_run=true"
+  read -p "Select option [1-5]: " -n 1 -r SCHEDULE_OPTION
   echo ""
-  print_status "To continue development on dev:"
+  echo ""
+
+  case $SCHEDULE_OPTION in
+    1)
+      RELEASE_DATE=$(date -v+1d +%Y-%m-%d 2>/dev/null || date -d "+1 day" +%Y-%m-%d)
+      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
+      echo "$RELEASE_DATE" > RELEASE_DATE
+      git add RELEASE_DATE
+      git commit -m "chore: schedule release for $RELEASE_DATE"
+      git push
+      print_success "Release scheduled for $RELEASE_DATE"
+      ;;
+    2)
+      RELEASE_DATE=$(date -v+2d +%Y-%m-%d 2>/dev/null || date -d "+2 days" +%Y-%m-%d)
+      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
+      echo "$RELEASE_DATE" > RELEASE_DATE
+      git add RELEASE_DATE
+      git commit -m "chore: schedule release for $RELEASE_DATE"
+      git push
+      print_success "Release scheduled for $RELEASE_DATE"
+      ;;
+    3)
+      RELEASE_DATE=$(date -v+7d +%Y-%m-%d 2>/dev/null || date -d "+7 days" +%Y-%m-%d)
+      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
+      echo "$RELEASE_DATE" > RELEASE_DATE
+      git add RELEASE_DATE
+      git commit -m "chore: schedule release for $RELEASE_DATE"
+      git push
+      print_success "Release scheduled for $RELEASE_DATE"
+      ;;
+    4)
+      print_status "Triggering release immediately..."
+      if command -v gh &> /dev/null; then
+        gh workflow run scheduled-release.yml -f release_branch="$RELEASE_BRANCH"
+        print_success "Release workflow triggered!"
+        echo ""
+        print_status "View progress: gh run list --workflow=scheduled-release.yml"
+      else
+        print_error "GitHub CLI (gh) not installed. Trigger manually:"
+        echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
+      fi
+      ;;
+    5|*)
+      print_status "Release not scheduled. To trigger later:"
+      echo ""
+      echo "  # Schedule for a specific date:"
+      echo "  ./scripts/schedule-release.sh 2d"
+      echo ""
+      echo "  # Or trigger immediately:"
+      echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
+      ;;
+  esac
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  print_status "To make final fixes on this branch:"
+  echo "  git switch $RELEASE_BRANCH"
+  echo "  # make changes..."
+  echo "  git push"
+  echo ""
+  print_status "To continue development:"
   echo "  git switch dev"
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

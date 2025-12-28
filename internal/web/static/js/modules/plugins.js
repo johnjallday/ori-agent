@@ -248,11 +248,16 @@ function setupPluginToggles() {
 
       try {
         await togglePlugin(pluginName, pluginPath, isEnabled);
+        if (window.Toast) {
+          Toast.success(`Plugin ${isEnabled ? 'enabled' : 'disabled'}: ${pluginName}`);
+        }
       } catch (error) {
         console.error('Failed to toggle plugin:', error);
         // Revert the toggle state
         e.target.checked = !isEnabled;
-        alert(`Failed to ${isEnabled ? 'enable' : 'disable'} plugin: ${error.message}`);
+        if (window.Toast) {
+          Toast.error(`Failed to ${isEnabled ? 'enable' : 'disable'} plugin: ${error.message}`);
+        }
       }
     });
   });

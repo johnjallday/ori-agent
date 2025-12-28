@@ -17,7 +17,7 @@ import (
 )
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -38,7 +38,14 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 		systemPrompt = "You are a helpful assistant with access to tools. When you use a tool and receive results, report those results directly to the user. Be concise and accurate."
 	}
 	messages = append(messages, llm.NewSystemMessage(systemPrompt))
-	messages = append(messages, llm.NewUserMessage(userMessage))
+
+	// Use message with images if images are present (for vision models like llava)
+	if len(images) > 0 {
+		messages = append(messages, llm.NewUserMessageWithImages(userMessage, images))
+		logger.Info("Ollama chat with images", logger.Fields{"image_count": len(images)})
+	} else {
+		messages = append(messages, llm.NewUserMessage(userMessage))
+	}
 
 	// Call Ollama
 	start := time.Now()

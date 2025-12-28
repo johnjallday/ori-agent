@@ -1,8 +1,6 @@
 package orchestrationhttp
 
 import (
-	"encoding/json"
-
 	"net/http"
 	"time"
 
@@ -41,17 +39,13 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 	agentName := r.URL.Query().Get("name")
 	if agentName == "" {
-		if err := orihttp.RespondBadRequest(w, "name parameter required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "name parameter required")
 		return
 	}
 
 	agent, ok := ch.agentStore.GetAgent(agentName)
 	if !ok {
-		if err := orihttp.RespondNotFound(w, "agent not found"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "agent not found")
 		return
 	}
 
@@ -69,10 +63,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 			Capabilities []string `json:"capabilities"`
 		}
 
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if err := orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+		if !orihttp.ParseJSONBody(w, r, &req) {
 			return
 		}
 
@@ -86,9 +77,7 @@ func (ch *CapabilitiesHandler) AgentCapabilitiesHandler(w http.ResponseWriter, r
 
 		if err := ch.agentStore.SetAgent(agentName, agent); err != nil {
 			logger.Error("Error updating agent capabilities", logger.Fields{"error": err})
-			if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, err.Error())
 			return
 		}
 
@@ -125,41 +114,25 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 		Timeout     int                    `json:"timeout"` // timeout in seconds
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error()); err != nil {
-			logger.
-
-				// Validate required fields
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	// Validate required fields
 
 	if req.WorkspaceID == "" {
-		if err := orihttp.RespondBadRequest(w, "workspace_id is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
 	if req.From == "" {
-		if err := orihttp.RespondBadRequest(w, "from is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "from is required")
 		return
 	}
 	if req.To == "" {
-		if err := orihttp.RespondBadRequest(w, "to is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "to is required")
 		return
 	}
 	if req.Description == "" {
-		if err := orihttp.RespondBadRequest(w, "description is required"); err != nil {
-			logger.
-
-				// Default priority to 3 (medium) if not specified
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "description is required")
 		return
 	}
 
@@ -185,10 +158,8 @@ func (ch *CapabilitiesHandler) DelegateHandler(w http.ResponseWriter, r *http.Re
 	})
 
 	if err != nil {
-		logger.Error("Failed to delegate task", logger.Fields{"task_id": err})
-		if err := orihttp.RespondBadRequest(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		logger.Error("Failed to delegate task", logger.Fields{"error": err})
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 

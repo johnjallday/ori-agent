@@ -1,7 +1,6 @@
 package modelcategoryhttp
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -70,8 +69,7 @@ func (h *Handler) CreateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -116,8 +114,7 @@ func (h *Handler) UpdateCategoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -187,8 +184,7 @@ func (h *Handler) ReorderCategoriesHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -224,8 +220,7 @@ func (h *Handler) SetVisibilityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -263,8 +258,7 @@ func (h *Handler) SetModelAssignmentsHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
@@ -298,8 +292,7 @@ func (h *Handler) SetViewPreferenceHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

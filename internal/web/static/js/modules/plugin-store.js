@@ -160,6 +160,9 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
     }
 
     console.log(`Plugin ${pluginName} installed successfully`);
+    if (window.Toast) {
+      Toast.success(`Plugin "${pluginName}" installed successfully`);
+    }
 
   } catch (error) {
     console.error('Error installing plugin:', error);
@@ -169,7 +172,9 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
     button.innerHTML = originalText;
 
     // Show error message
-    alert(`Failed to install plugin: ${error.message}`);
+    if (window.Toast) {
+      Toast.error(`Failed to install plugin: ${error.message}`);
+    }
   }
 }
 

@@ -4,6 +4,7 @@ let currentAgent = null;
 let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
+let availableProviders = []; // Cache for available providers and models from API
 
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
@@ -17,8 +18,111 @@ function getAgentNameFromURL() {
     return params.get('name');
 }
 
+// Fetch available providers and models from API
+async function loadAvailableProviders() {
+    try {
+        const response = await fetch('/api/providers');
+        if (!response.ok) {
+            throw new Error('Failed to load providers');
+        }
+        const data = await response.json();
+        availableProviders = data.providers || [];
+        return availableProviders;
+    } catch (error) {
+        console.error('Failed to load providers:', error);
+        return [];
+    }
+}
+
+// Populate model select with options from available providers
+function populateEditModelOptions() {
+    const modelSelect = document.getElementById('editModel');
+    const providerFilter = document.getElementById('editProviderFilter');
+    const typeSelect = document.getElementById('editType');
+
+    if (!modelSelect || availableProviders.length === 0) {
+        return;
+    }
+
+    const selectedProvider = providerFilter ? providerFilter.value : '';
+    const selectedAgentType = typeSelect ? typeSelect.value : (currentAgent?.type || 'tool-calling');
+
+    // Store current value to re-select it after populating
+    const currentModelValue = currentAgent?.model || '';
+
+    // Clear existing options
+    modelSelect.innerHTML = '';
+
+    // Map provider display names to our filter values
+    const providerNameMap = {
+        'OpenAI': 'openai',
+        'Anthropic': 'claude',
+        'Ollama': 'ollama'
+    };
+
+    // Find models from the API data
+    availableProviders.forEach(provider => {
+        const providerKey = providerNameMap[provider.display_name] || provider.name;
+
+        // If a specific provider is selected, only show models from that provider
+        if (selectedProvider && providerKey !== selectedProvider) {
+            return;
+        }
+
+        // Create optgroup for this provider
+        const providerGroup = document.createElement('optgroup');
+        providerGroup.label = provider.display_name;
+        let hasMatchingModels = false;
+
+        provider.models.forEach(model => {
+            // Filter by agent type if the model has a type specified
+            if (model.type && model.type !== selectedAgentType) {
+                return;
+            }
+
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-provider', providerKey);
+            if (model.type) {
+                option.setAttribute('data-type', model.type);
+            }
+            providerGroup.appendChild(option);
+            hasMatchingModels = true;
+        });
+
+        // Only add the provider group if it has matching models
+        if (hasMatchingModels) {
+            modelSelect.appendChild(providerGroup);
+        }
+    });
+
+    // If no models found, show a message
+    if (modelSelect.options.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No models available for this configuration';
+        modelSelect.appendChild(option);
+    }
+
+    // Try to select the current model
+    if (currentModelValue) {
+        for (let i = 0; i < modelSelect.options.length; i++) {
+            if (modelSelect.options[i].value === currentModelValue) {
+                modelSelect.selectedIndex = i;
+                break;
+            }
+        }
+    }
+}
+
+// Filter models by provider (called when provider filter changes)
+function filterEditModelOptions() {
+    populateEditModelOptions();
+}
+
 // Initialize page
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Get agent name from URL
     agentName = getAgentNameFromURL();
 
@@ -30,7 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    loadAgentDetails();
+    // Load providers in parallel with agent details
+    await Promise.all([
+        loadAvailableProviders(),
+        loadAgentDetails()
+    ]);
 });
 
 async function fetchAgentDetail() {
@@ -207,26 +315,41 @@ function toggleConfigEditMode() {
 
 function populateConfigForm() {
     if (!currentAgent) return;
-    const modelInput = document.getElementById('editModel');
-    const providerInput = document.getElementById('editProvider');
+    const modelSelect = document.getElementById('editModel');
+    const providerFilter = document.getElementById('editProviderFilter');
     const tempInput = document.getElementById('editTemperature');
     const maxTokensInput = document.getElementById('editMaxTokens');
     const typeSelect = document.getElementById('editType');
     const roleSelect = document.getElementById('editRole');
 
-    if (modelInput) modelInput.value = currentAgent.model || '';
-    if (providerInput) providerInput.value = currentAgent.provider || currentAgent.llm_provider || '';
-    if (tempInput) tempInput.value = currentAgent.temperature ?? '';
-    if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
+    // Set type and role first as they affect model filtering
     if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
     if (roleSelect) roleSelect.value = currentAgent.role || 'general';
+    if (tempInput) tempInput.value = currentAgent.temperature ?? '';
+    if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
+
+    // Reset provider filter and populate models
+    if (providerFilter) providerFilter.value = '';
+
+    // Populate the model dropdown and select current model
+    populateEditModelOptions();
+
+    // Select the current model if available
+    if (modelSelect && currentAgent.model) {
+        for (let i = 0; i < modelSelect.options.length; i++) {
+            if (modelSelect.options[i].value === currentAgent.model) {
+                modelSelect.selectedIndex = i;
+                break;
+            }
+        }
+    }
 }
 
 async function saveConfigChanges() {
     if (!currentAgent) return;
 
-    const model = document.getElementById('editModel')?.value.trim() || '';
-    const provider = document.getElementById('editProvider')?.value.trim() || '';
+    const modelSelect = document.getElementById('editModel');
+    const model = modelSelect?.value || '';
     const tempRaw = document.getElementById('editTemperature')?.value;
     const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
     const type = document.getElementById('editType')?.value || 'tool-calling';
@@ -236,6 +359,10 @@ async function saveConfigChanges() {
         setConfigStatus('Model is required to save configuration.', 'error');
         return;
     }
+
+    // Get provider from the selected model's data attribute
+    const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
+    const provider = selectedOption?.getAttribute('data-provider') || '';
 
     const payload = {
         model,

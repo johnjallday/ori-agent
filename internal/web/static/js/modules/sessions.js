@@ -480,6 +480,20 @@ const sessionManager = {
         e.stopPropagation();
         item.classList.remove('drag-over');
 
+        // Check if files are being dropped from OS
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+          const folderName = item.querySelector('.folder-name')?.textContent?.trim();
+          for (const file of files) {
+            await this.createFileReferenceNote(folderId, file);
+          }
+          item.classList.add('drop-success');
+          setTimeout(() => item.classList.remove('drop-success'), 700);
+          const fileText = files.length === 1 ? 'file reference' : `${files.length} file references`;
+          this.showToast(`Created ${fileText} in ${folderName}`, 'success');
+          return;
+        }
+
         // Check if it's a note being dropped
         const noteId = e.dataTransfer.getData('application/x-ori-note-id');
         const sourceFolderId = e.dataTransfer.getData('application/x-ori-note-folder');
@@ -2194,6 +2208,73 @@ const sessionManager = {
     }
   },
 
+  // Create a file reference note from a dropped file
+  async createFileReferenceNote(folderId, file) {
+    const name = `📎 ${file.name}`;
+    const sizeKB = (file.size / 1024).toFixed(1);
+    const sizeStr = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+      : `${sizeKB} KB`;
+
+    // Upload file to server
+    let serverPath = '';
+    try {
+      const base64 = await this.fileToBase64(file);
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          content: base64,
+          mime_type: file.type || 'application/octet-stream'
+        })
+      });
+      const result = await response.json();
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      serverPath = result.path;
+    } catch (e) {
+      console.error('Failed to upload file:', e);
+      this.showToast('Failed to upload file', 'error');
+      return null;
+    }
+
+    let content = `**File:** ${file.name}\n**Size:** ${sizeStr}\n**Type:** ${file.type || 'unknown'}\n**Path:** ${serverPath}`;
+
+    const textExtensions = ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'csv', 'yaml', 'yml'];
+    const ext = file.name.split('.').pop()?.toLowerCase();
+
+    // For text files, include readable preview
+    if (textExtensions.includes(ext) && file.size < 50 * 1024) { // Under 50KB
+      try {
+        const text = await file.text();
+        const preview = text.length > 2000 ? text.substring(0, 2000) + '\n...' : text;
+        content += `\n\n---\n\n\`\`\`${ext}\n${preview}\n\`\`\``;
+      } catch (e) {
+        console.warn('Could not read file content:', e);
+      }
+    }
+
+    // Store server path for later retrieval
+    content += `\n\n<!-- FILE_PATH:${serverPath} -->`;
+
+    return this.createNote(folderId, name, content);
+  },
+
+  // Convert file to base64
+  fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  },
+
   // Create a new note in a folder
   async createNote(folderId, name = 'Untitled Note', content = '') {
     try {
@@ -2485,6 +2566,9 @@ const sessionManager = {
       case 'edit':
         this.openNoteEditor(noteId);
         break;
+      case 'attach':
+        this.attachNoteFileToChat(noteId);
+        break;
       case 'rename':
         this.promptRenameNote(noteId);
         break;
@@ -2497,6 +2581,88 @@ const sessionManager = {
       case 'delete':
         this.confirmDeleteNote(noteId);
         break;
+    }
+  },
+
+  // Attach file from note to chat
+  async attachNoteFileToChat(noteId) {
+    const note = await this.getNote(noteId);
+    if (!note || !note.content) {
+      this.showToast('No file data found in this note', 'error');
+      return;
+    }
+
+    console.log('Note content for attach:', note.content.substring(note.content.length - 200));
+
+    // Try new format first: FILE_PATH (server storage)
+    const filePathMatch = note.content.match(/<!-- FILE_PATH:(.+?) -->/);
+    if (filePathMatch) {
+      const [, serverPath] = filePathMatch;
+      console.log('Found FILE_PATH:', serverPath);
+      await this.attachFileFromServer(serverPath);
+      return;
+    }
+
+    // Fall back to old format: FILE_DATA (base64 in note)
+    const fileDataMatch = note.content.match(/<!-- FILE_DATA:(.+?):([^:]*):([A-Za-z0-9+/=]+) -->/);
+    if (fileDataMatch) {
+      const [, fileName, mimeType] = fileDataMatch;
+      console.log('Found FILE_DATA:', fileName, mimeType);
+      this.attachFileDirectly(fileName, mimeType, fileDataMatch[3]);
+      return;
+    }
+
+    this.showToast('No attached file found in this note. Re-drop the file to enable this feature.', 'error');
+  },
+
+  // Attach file from server storage
+  async attachFileFromServer(serverPath) {
+    try {
+      const response = await fetch(`/api/files/content?path=${encodeURIComponent(serverPath)}`);
+      const result = await response.json();
+
+      if (result.error) {
+        this.showToast('Failed to load file: ' + result.error, 'error');
+        return;
+      }
+
+      if (typeof window.addFileToUpload === 'function') {
+        const success = window.addFileToUpload({
+          name: result.filename,
+          type: result.mime_type || 'application/octet-stream',
+          size: Math.round(result.content.length * 0.75),
+          content: result.content
+        });
+        if (success) {
+          this.showToast(`Attached "${result.filename}" to chat`, 'success');
+        } else {
+          this.showToast('Chat input not available on this page', 'error');
+        }
+      } else {
+        this.showToast('Chat not available', 'error');
+      }
+    } catch (e) {
+      console.error('Failed to fetch file:', e);
+      this.showToast('Failed to load file', 'error');
+    }
+  },
+
+  // Attach file directly from base64 content (legacy format)
+  attachFileDirectly(fileName, mimeType, base64Content) {
+    if (typeof window.addFileToUpload === 'function') {
+      const success = window.addFileToUpload({
+        name: fileName,
+        type: mimeType || 'application/octet-stream',
+        size: Math.round(base64Content.length * 0.75),
+        content: base64Content
+      });
+      if (success) {
+        this.showToast(`Attached "${fileName}" to chat`, 'success');
+      } else {
+        this.showToast('Chat input not available on this page', 'error');
+      }
+    } else {
+      this.showToast('Chat not available', 'error');
     }
   },
 

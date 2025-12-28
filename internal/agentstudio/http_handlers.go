@@ -38,31 +38,22 @@ type CreateStudioRequest struct {
 // CreateStudio handles POST /api/studios
 func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	var req CreateStudioRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if encodeErr := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); encodeErr != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": encodeErr})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	// Validate request
 	if req.Name == "" {
-		if err := orihttp.RespondBadRequest(w, "Studio name is required"); err != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Studio name is required")
 		return
 	}
 	if len(req.Agents) == 0 {
-		if err := orihttp.RespondBadRequest(w, "At least one agent is required"); err != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "At least one agent is required")
 		return
 	}
 
@@ -84,9 +75,7 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	// Save studio
 	if err := h.store.Save(studio); err != nil {
 		logger.Error("Failed to save studio", logger.Fields{"error": err})
-		if encodeErr := orihttp.RespondInternalError(w, "Failed to create studio"); encodeErr != nil {
-			logger.Error("Failed to write internal error response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.InternalError(w, "Failed to create studio")
 		return
 	}
 
@@ -95,23 +84,21 @@ func (h *HTTPHandler) CreateStudio(w http.ResponseWriter, r *http.Request) {
 	// Return created studio
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":      studio.ID,
 		"name":    studio.Name,
 		"agents":  studio.Agents,
 		"status":  studio.Status,
 		"message": "Studio created successfully",
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // GetStudio handles GET /api/studios/:id
 func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -122,9 +109,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if encodeErr := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); encodeErr != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": encodeErr})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
@@ -136,7 +121,7 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":                 studio.ID,
 		"name":               studio.Name,
 		"description":        studio.Description,
@@ -154,28 +139,23 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		"layout":             studio.Layout,
 		"created_at":         studio.CreatedAt,
 		"updated_at":         studio.UpdatedAt,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // ListStudios handles GET /api/studios
 func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	// Get all studio IDs
 	ids, err := h.store.List()
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to list studios: %v", err)); err != nil {
-			logger.
-				// Get studio details
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to list studios: %v", err))
+		// Get studio details
 		return
 	}
 
@@ -200,11 +180,11 @@ func (h *HTTPHandler) ListStudios(w http.ResponseWriter, r *http.Request) {
 
 	// Return studios
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"studios": studios,
 		"count":   len(studios),
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -214,21 +194,16 @@ func (h *HTTPHandler) GetStudioEvents(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response",
-				// Verify studio exists
-				logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 
+	// Verify studio exists
+
 	if _, err := h.store.Get(studioID); err != nil {
-		if err := orihttp.RespondNotFound(w, "Studio not found"); err != nil {
-			logger.
-				// Set SSE headers
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "Studio not found")
+		// Set SSE headers
 		return
 	}
 

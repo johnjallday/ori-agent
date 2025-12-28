@@ -181,7 +181,8 @@ func (h *hybridStore) AddMessage(ctx context.Context, sessionID string, message 
 		return err
 	}
 
-	// Update cache if session is cached
+	// Update cache if session is cached (protected by mutex for concurrent access)
+	h.mu.Lock()
 	if session := h.cache.Get(sessionID); session != nil {
 		session.Messages = append(session.Messages, *message)
 		session.MessageCount++
@@ -194,6 +195,7 @@ func (h *hybridStore) AddMessage(ctx context.Context, sessionID string, message 
 			_ = h.sqlite.UpdateSession(ctx, session)
 		}
 	}
+	h.mu.Unlock()
 
 	return nil
 }
@@ -219,10 +221,12 @@ func (h *hybridStore) UpdateTags(ctx context.Context, sessionID string, tags []s
 		return err
 	}
 
-	// Update cache if present
+	// Update cache if present (protected by mutex for concurrent access)
+	h.mu.Lock()
 	if session := h.cache.Get(sessionID); session != nil {
 		session.Tags = tags
 	}
+	h.mu.Unlock()
 
 	return nil
 }

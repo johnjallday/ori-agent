@@ -23,51 +23,36 @@ type CreateTaskRequest struct {
 // CreateTask handles POST /api/studios/:id/tasks
 func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-				// Extract studio ID from URL path
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
+	// Extract studio ID from URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response",
-				// Parse request body
-				logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 
+	// Parse request body
+
 	var req CreateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.
-				// Validate request
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-
+	// Validate request
+	// Note: From and To agents are optional - tasks can be created without connections
 	if req.Description == "" {
-		if err := orihttp.RespondBadRequest(w, "Task description is required"); err != nil {
-			logger.
-				// Note: From and To agents are optional - tasks can be created without connections
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Task description is required")
 		return
 	}
 
 	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
@@ -90,18 +75,13 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Add task to studio
 	if err := studio.AddTask(task); err != nil {
 		logger.Error("[DEBUG] CreateTask - AddTask failed", logger.Fields{"task_id": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to add task: %v", err)); err != nil {
-			logger.
-				// Save updated studio
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to add task: %v", err))
 		return
 	}
 
+	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
@@ -110,40 +90,35 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task created successfully",
 		"task_id": task.ID,
 		"task":    task,
 		"studio":  studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // UpdateTask handles PATCH /api/studios/:id/tasks/:task_id
 func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-				// Extract studio ID and task ID from URL path
-				// URL format: /api/studios/{studio_id}/tasks/{task_id}
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{
-				// Parse request body
-				"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
+
+	// Parse request body
 
 	var req struct {
 		Description    *string   `json:"description,omitempty"`
@@ -152,25 +127,18 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		InputTaskIDs   *[]string `json:"input_task_ids,omitempty"`
 		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("Invalid request body: %v", err)); err != nil {
-			logger.
-				// Get studio
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
+	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.
-				// Find and update task
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
+	// Find and update task
 	found := false
 	for i, task := range studio.Tasks {
 		if task.ID == taskID {
@@ -196,18 +164,13 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
-			logger.
-				// Save updated studio
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "Task not found")
 		return
 	}
 
+	// Save updated studio
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to save studio: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
 		return
 	}
 
@@ -215,50 +178,41 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task updated successfully",
 		"task_id": taskID,
 		"studio":  studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // DeleteTask handles DELETE /api/studios/:id/tasks/:task_id
 func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-				// Extract studio ID and task ID from URL path
-				// URL format: /api/studios/{studio_id}/tasks/{task_id}
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{
-				// Get studio
-				"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
 
+	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.
-				// Find and remove task
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
+	// Find and remove task
 	found := false
 	newTasks := make([]Task, 0)
 	for _, task := range studio.Tasks {
@@ -270,20 +224,15 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
-			logger.Error("Failed to write response",
-				// Save updated studio
-				logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "Task not found")
 		return
 	}
 
+	// Save updated studio
 	studio.Tasks = newTasks
 
 	if err := h.store.Save(studio); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to update studio: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to update studio: %v", err))
 		return
 	}
 
@@ -291,50 +240,41 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task deleted successfully",
 		"task_id": taskID,
 		"studio":  studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // ExecuteTaskManually handles POST /api/studios/:id/tasks/:task_id/execute
 func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.
-				// Extract studio ID and task ID from URL path
-				// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
+	// Extract studio ID and task ID from URL path
+	// URL format: /api/studios/{studio_id}/tasks/{task_id}/execute
 	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
-		if err := orihttp.RespondBadRequest(w, "Invalid URL format"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{
-				// Get studio
-				"error": err})
-		}
+		orihttp.BadRequest(w, "Invalid URL format")
 		return
 	}
 	studioID := parts[0]
 	taskID := parts[2]
 
+	// Get studio
 	studio, err := h.store.Get(studioID)
 	if err != nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Studio not found: %v", err)); err != nil {
-			logger.
-				// Find the task
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
 		return
 	}
 
+	// Find the task
 	var targetTask *Task
 	for i := range studio.Tasks {
 		if studio.Tasks[i].ID == taskID {
@@ -344,9 +284,7 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 	}
 
 	if targetTask == nil {
-		if err := orihttp.RespondNotFound(w, "Task not found"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "Task not found")
 		return
 	}
 
@@ -362,11 +300,11 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	// Return success
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Task execution started",
 		"task_id": taskID,
 		"studio":  studioID,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

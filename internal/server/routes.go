@@ -23,8 +23,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-			logger.Error("Failed to encode health response", logger.Fields{"response": err})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); encErr != nil {
+			logger.Error("Failed to encode health response", logger.Fields{"error": encErr})
 		}
 	})
 
@@ -115,6 +115,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Agent capabilities endpoint
 	mux.HandleFunc("/api/agents/capabilities", s.orchestrationHandler.AgentCapabilitiesHandler)
+
+	// Agent auto-config endpoints
+	mux.HandleFunc("/api/agents/auto-config", s.autoConfigHandler.AutoConfigHandler)
+	mux.HandleFunc("/api/agents/auto-config/availability", s.autoConfigHandler.CheckLLMAvailabilityHandler)
 
 	// =============================================================================
 	// Plugin API Endpoints
@@ -260,6 +264,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings", s.settingsHandler.SettingsHandler)
 	mux.HandleFunc("/api/api-key", s.settingsHandler.APIKeyHandler)
 	mux.HandleFunc("/api/providers", s.settingsHandler.ProvidersHandler)
+	mux.HandleFunc("/api/settings/system-model", s.settingsHandler.SystemModelHandler)
+	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
 
 	// Reset endpoints
 	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)
@@ -276,9 +282,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodPost:
 				s.marketplaceHandler.AddMarketplace(w, r)
 			default:
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": err})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		})
 		mux.HandleFunc("/api/marketplaces/reorder", s.marketplaceHandler.ReorderMarketplaces)
@@ -295,14 +299,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.marketplaceHandler.DeleteMarketplace(w, r)
 			default:
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.
-
-						// =============================================================================
-						// Chat Endpoint
-						// =============================================================================
-						Error("Failed to write response", logger.Fields{"error": err})
-				}
+				orihttp.MethodNotAllowed(w)
+				// =============================================================================
+				// Chat Endpoint
+				// =============================================================================
 			}
 		})
 	}
@@ -323,6 +323,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	fileHandler := filehttp.NewHandler()
 	mux.HandleFunc("/api/files/parse", fileHandler.ParseFileHandler)
+	mux.HandleFunc("/api/files/upload", fileHandler.UploadFileHandler)
+	mux.HandleFunc("/api/files/content", fileHandler.GetFileHandler)
 
 	// =============================================================================
 	// Onboarding Endpoints
@@ -341,14 +343,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.onboardingHandler.SetTheme(w, r)
 		default:
-			if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-				logger.
-
-					// =============================================================================
-					// Device Endpoints
-					// =============================================================================
-					Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.MethodNotAllowed(w)
+			// =============================================================================
+			// Device Endpoints
+			// =============================================================================
 		}
 	})
 
@@ -382,9 +380,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				return
 			}
 			// Otherwise, 404
-			if err := orihttp.RespondNotFound(w, "Not found"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.NotFound(w, "Not found")
 		})
 	}
 
@@ -399,9 +395,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.locationHandler.CreateZone(w, r)
 		default:
-			if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/zones/", func(w http.ResponseWriter, r *http.Request) {
@@ -411,9 +405,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodDelete:
 			s.locationHandler.DeleteZone(w, r)
 		default:
-			if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/location/override", s.locationHandler.SetManualLocation)
@@ -428,9 +420,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodPost:
 			s.mcpHandler.AddServerHandler(w, r)
 		default:
-			if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.MethodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/mcp/servers/", func(w http.ResponseWriter, r *http.Request) {
@@ -450,9 +440,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		} else if r.Method == http.MethodDelete {
 			s.mcpHandler.RemoveServerHandler(w, r)
 		} else {
-			if err := orihttp.RespondNotFound(w, "Not found"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.NotFound(w, "Not found")
 		}
 	})
 	mux.HandleFunc("/api/mcp/import", s.mcpHandler.ImportServersHandler)
@@ -572,12 +560,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		case http.MethodGet:
 			s.studioHandler.ListStudios(w, r)
 		default:
-			if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-				logger.
-
-					// Handle routes with studio ID
-					Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.MethodNotAllowed(w)
+			// Handle routes with studio ID
 		}
 	})
 
@@ -596,12 +580,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteTask(w, r)
 			} else {
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{"error":
-
-					// Handle attachment operations
-					err})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/attachments") {
 
@@ -613,12 +592,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.studioHandler.DeleteAttachment(w, r)
 			default:
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": err})
-
-					// Handle canvas store node operations (must be before /store-nodes check)
-				}
+				orihttp.MethodNotAllowed(w)
 			}
+			// Handle canvas store node operations (must be before /store-nodes check)
 		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {
 
 			if strings.HasSuffix(r.URL.Path, "/status") && r.Method == http.MethodGet {
@@ -632,12 +608,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{"error":
-
-					// Handle store node operations
-					err})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		} else if strings.Contains(r.URL.Path, "/store-nodes") {
 
@@ -652,13 +623,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else if r.Method == http.MethodDelete {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{
-
-						// Handle agent add/remove operations
-						"error": err})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
+			// Handle agent add/remove operations
 		} else if strings.Contains(r.URL.Path, "/agents") {
 
 			switch r.Method {
@@ -667,9 +634,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			case http.MethodDelete:
 				s.studioHandler.RemoveAgent(w, r)
 			default:
-				if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-					logger.Error("Failed to write response", logger.Fields{"error": err})
-				}
+				orihttp.MethodNotAllowed(w)
 			}
 		} else {
 			s.studioHandler.GetStudio(w, r)

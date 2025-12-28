@@ -2,7 +2,6 @@
 package sessionhttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -70,8 +69,7 @@ func (h *Handler) runCleanup(w http.ResponseWriter, r *http.Request) {
 		Days int `json:"days"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body")
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

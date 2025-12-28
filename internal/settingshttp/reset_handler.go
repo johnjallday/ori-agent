@@ -1,7 +1,6 @@
 package settingshttp
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -70,8 +69,7 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxResetRequestSize)
 
 	var req ResetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		_ = orihttp.RespondBadRequest(w, "Invalid request body: "+err.Error())
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 

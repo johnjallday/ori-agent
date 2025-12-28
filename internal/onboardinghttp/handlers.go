@@ -39,9 +39,7 @@ type CompleteStepRequest struct {
 // GET /api/onboarding/status
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -57,8 +55,8 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -66,36 +64,26 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/step
 func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	var req CompleteStepRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.StepName == "" {
-		if err := orihttp.RespondBadRequest(w, "step_name is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "step_name is required")
 		return
 	}
 
 	if err := h.onboardingMgr.CompleteStep(req.StepName); err != nil {
-		if err := orihttp.RespondInternalError(w, "Failed to complete step: "+err.Error()); err != nil {
-			logger.
-
-				// Return updated status
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Failed to complete step: "+err.Error())
 		return
 	}
+
+	// Return updated status
 
 	state := h.onboardingMgr.GetState()
 	isComplete := h.onboardingMgr.IsOnboardingComplete()
@@ -109,8 +97,8 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -118,22 +106,18 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/skip
 func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.SkipOnboarding(); err != nil {
-		if err := orihttp.RespondInternalError(w, "Failed to skip onboarding: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Failed to skip onboarding: "+err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(map[string]bool{"success": true}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -141,22 +125,18 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/complete
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.CompleteOnboarding(); err != nil {
-		if err := orihttp.RespondInternalError(w, "Failed to complete onboarding: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Failed to complete onboarding: "+err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(map[string]bool{"success": true}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -164,22 +144,18 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 // POST /api/onboarding/reset
 func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	if err := h.onboardingMgr.ResetOnboarding(); err != nil {
-		if err := orihttp.RespondInternalError(w, "Failed to reset onboarding: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Failed to reset onboarding: "+err.Error())
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]bool{"success": true}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(map[string]bool{"success": true}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -197,9 +173,7 @@ type SetThemeRequest struct {
 // GET /api/theme
 func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -210,8 +184,8 @@ func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -219,38 +193,29 @@ func (h *Handler) GetTheme(w http.ResponseWriter, r *http.Request) {
 // POST /api/theme
 func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	var req SetThemeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Invalid request body"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.Theme == "" {
-		if err := orihttp.RespondBadRequest(w, "theme is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "theme is required")
 		return
 	}
 
 	if err := h.onboardingMgr.SetTheme(req.Theme); err != nil {
-		if err := orihttp.RespondBadRequest(w, "Failed to set theme: "+err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Failed to set theme: "+err.Error())
 		return
 	}
 
 	response := ThemeResponse(req)
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }

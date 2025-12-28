@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Common error codes for consistent error handling across the API
@@ -160,4 +162,92 @@ func RespondMethodNotAllowed(w http.ResponseWriter) error {
 func RespondNotImplemented(w http.ResponseWriter, message string) error {
 	return RespondAPIError(w, http.StatusNotImplemented,
 		NewAPIError(ErrCodeNotImplemented, message))
+}
+
+// =============================================================================
+// Fire-and-forget response functions
+// =============================================================================
+// These functions handle logging internally, eliminating boilerplate in handlers.
+// Use these when you cannot meaningfully handle response write errors.
+//
+// Instead of:
+//
+//	orihttp.BadRequest(w, "message"); respErr != nil {
+//		logger.Error("Failed to write response", logger.Fields{"error": respErr})
+//	}
+//	return
+//
+// Use:
+//
+//	orihttp.BadRequest(w, "message")
+//	return
+
+// BadRequest writes a 400 Bad Request error and logs any write errors internally.
+func BadRequest(w http.ResponseWriter, message string) {
+	if err := RespondBadRequest(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// Unauthorized writes a 401 Unauthorized error and logs any write errors internally.
+func Unauthorized(w http.ResponseWriter, message string) {
+	if err := RespondUnauthorized(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// Forbidden writes a 403 Forbidden error and logs any write errors internally.
+func Forbidden(w http.ResponseWriter, message string) {
+	if err := RespondForbidden(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// NotFound writes a 404 Not Found error and logs any write errors internally.
+func NotFound(w http.ResponseWriter, message string) {
+	if err := RespondNotFound(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// MethodNotAllowed writes a 405 Method Not Allowed error and logs any write errors internally.
+func MethodNotAllowed(w http.ResponseWriter) {
+	if err := RespondMethodNotAllowed(w); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// Conflict writes a 409 Conflict error and logs any write errors internally.
+func Conflict(w http.ResponseWriter, message string) {
+	if err := RespondConflict(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// ValidationError writes a 422 Unprocessable Entity error and logs any write errors internally.
+func ValidationError(w http.ResponseWriter, message string, details interface{}) {
+	if err := RespondValidationError(w, message, details); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// InternalError writes a 500 Internal Server Error and logs any write errors internally.
+func InternalError(w http.ResponseWriter, message string) {
+	if err := RespondInternalError(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// ServiceUnavailable writes a 503 Service Unavailable error and logs any write errors internally.
+func ServiceUnavailable(w http.ResponseWriter, message string) {
+	if err := RespondServiceUnavailable(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
+// NotImplemented writes a 501 Not Implemented error and logs any write errors internally.
+func NotImplemented(w http.ResponseWriter, message string) {
+	if err := RespondNotImplemented(w, message); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
 }

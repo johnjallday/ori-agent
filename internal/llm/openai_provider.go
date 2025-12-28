@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -19,9 +18,7 @@ type OpenAIProvider struct {
 
 // NewOpenAIProvider creates a new OpenAI provider
 func NewOpenAIProvider(config ProviderConfig) *OpenAIProvider {
-	httpClient := &http.Client{
-		Timeout: 10 * time.Minute, // Increased from 30s to support long-running tasks
-	}
+	httpClient := NewHTTPClient(DefaultCloudTimeout)
 
 	var client openai.Client
 	if config.APIKey != "" {
@@ -50,16 +47,7 @@ func (p *OpenAIProvider) Type() ProviderType {
 
 // Capabilities returns OpenAI's capabilities
 func (p *OpenAIProvider) Capabilities() ProviderCapabilities {
-	return ProviderCapabilities{
-		SupportsTools:          true,
-		SupportsStreaming:      true,
-		SupportsSystemPrompt:   true,
-		SupportsTemperature:    true,
-		RequiresAPIKey:         true,
-		SupportsCustomEndpoint: false,
-		MaxContextWindow:       128000, // GPT-4o context window
-		SupportedFormats:       []string{"text"},
-	}
+	return CloudProviderCapabilities(128000) // GPT-4o context window
 }
 
 // ValidateConfig validates the OpenAI configuration
@@ -78,7 +66,7 @@ func (p *OpenAIProvider) DefaultModels() []string {
 	}
 
 	// Try to fetch models from OpenAI API
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultModelFetchTimeout)
 	defer cancel()
 
 	models, err := p.fetchAvailableModels(ctx)

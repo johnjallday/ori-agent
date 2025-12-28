@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadPlugins();
     setupTagsInput();
     loadAvailableProviders();
+    setupAutoConfigListeners();
 });
 
 // Fetch available providers and models from API
@@ -304,4 +305,212 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============================================
+// Auto-Config Functions
+// ============================================
+
+let createLLMAvailable = false;
+let createSystemModelConfigured = false;
+let createAutoConfigApplied = false;
+
+// Setup auto-config event listeners
+function setupAutoConfigListeners() {
+    const configModeManual = document.getElementById('createConfigModeManual');
+    const configModeAuto = document.getElementById('createConfigModeAuto');
+
+    if (configModeManual) {
+        configModeManual.addEventListener('change', function() {
+            if (this.checked) handleCreateConfigModeChange('manual');
+        });
+    }
+
+    if (configModeAuto) {
+        configModeAuto.addEventListener('change', async function() {
+            if (this.checked) {
+                await checkCreateLLMAvailability();
+                handleCreateConfigModeChange('auto');
+            }
+        });
+    }
+
+    const generateBtn = document.getElementById('createGenerateAutoConfigBtn');
+    if (generateBtn) {
+        generateBtn.addEventListener('click', generateCreateAutoConfig);
+    }
+}
+
+// Check if any LLM provider is available
+async function checkCreateLLMAvailability() {
+    try {
+        const response = await fetch('/api/agents/auto-config/availability');
+        const data = await response.json();
+        createLLMAvailable = data.available;
+        createSystemModelConfigured = data.system_model_configured || false;
+        return data;
+    } catch (error) {
+        console.error('Failed to check LLM availability:', error);
+        createLLMAvailable = false;
+        createSystemModelConfigured = false;
+        return { available: false, system_model_configured: false };
+    }
+}
+
+// Handle config mode toggle
+function handleCreateConfigModeChange(mode) {
+    const autoConfigSection = document.getElementById('createAutoConfigSection');
+    const llmWarning = document.getElementById('createLlmNotAvailableWarning');
+    const llmWarningMessage = document.getElementById('createLlmWarningMessage');
+    const autoSelectedIndicator = document.getElementById('createAutoSelectedIndicator');
+
+    if (mode === 'auto') {
+        if (createLLMAvailable) {
+            if (autoConfigSection) autoConfigSection.classList.remove('d-none');
+            if (llmWarning) llmWarning.classList.add('d-none');
+        } else {
+            if (autoConfigSection) autoConfigSection.classList.add('d-none');
+            if (llmWarning) llmWarning.classList.remove('d-none');
+            // Update warning message based on what's missing
+            if (llmWarningMessage) {
+                if (!createSystemModelConfigured) {
+                    llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
+                } else {
+                    llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+                }
+            }
+        }
+    } else {
+        // Manual mode
+        if (autoConfigSection) autoConfigSection.classList.add('d-none');
+        if (llmWarning) llmWarning.classList.add('d-none');
+        if (autoSelectedIndicator) autoSelectedIndicator.classList.add('d-none');
+        createAutoConfigApplied = false;
+    }
+}
+
+// Generate auto-config
+async function generateCreateAutoConfig() {
+    const description = document.getElementById('createAutoConfigDescription').value.trim();
+    const generateBtn = document.getElementById('createGenerateAutoConfigBtn');
+    const autoConfigStatus = document.getElementById('createAutoConfigStatus');
+
+    if (!description) {
+        showError('Please enter a description of what you want your agent to do.');
+        return;
+    }
+
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Generating...';
+    if (autoConfigStatus) {
+        autoConfigStatus.textContent = 'Analyzing...';
+        autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger');
+        autoConfigStatus.classList.add('bg-secondary');
+    }
+
+    try {
+        const response = await fetch('/api/agents/auto-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description })
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'Failed to generate configuration');
+        }
+
+        const config = await response.json();
+
+        // Apply config
+        applyCreateAutoConfig(config);
+
+        if (autoConfigStatus) {
+            autoConfigStatus.textContent = 'Applied!';
+            autoConfigStatus.classList.remove('bg-secondary');
+            autoConfigStatus.classList.add('bg-success');
+        }
+
+        const indicator = document.getElementById('createAutoSelectedIndicator');
+        if (indicator) indicator.classList.remove('d-none');
+        createAutoConfigApplied = true;
+
+        if (config.reasoning) console.log('Auto-config reasoning:', config.reasoning);
+
+    } catch (error) {
+        console.error('Auto-config error:', error);
+        if (autoConfigStatus) {
+            autoConfigStatus.textContent = 'Failed';
+            autoConfigStatus.classList.remove('bg-secondary');
+            autoConfigStatus.classList.add('bg-danger');
+        }
+        showError('Failed to generate configuration: ' + error.message);
+    } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Configuration';
+    }
+}
+
+// Apply auto-generated config to form fields
+function applyCreateAutoConfig(config) {
+    // Apply agent type
+    const typeSelect = document.getElementById('agentType');
+    if (typeSelect && config.agent_type) {
+        typeSelect.value = config.agent_type;
+        // Trigger change to update model list
+        updateModelOptions();
+    }
+
+    // Apply description to the agent description field
+    const descriptionField = document.getElementById('agentDescription');
+    const autoDescription = document.getElementById('createAutoConfigDescription');
+    if (descriptionField && autoDescription && autoDescription.value.trim()) {
+        descriptionField.value = autoDescription.value.trim();
+    }
+
+    // Apply model (need to wait a moment for model list to repopulate)
+    setTimeout(() => {
+        const modelSelect = document.getElementById('llmModel');
+        if (modelSelect && config.model) {
+            for (let i = 0; i < modelSelect.options.length; i++) {
+                if (modelSelect.options[i].value === config.model) {
+                    modelSelect.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+    }, 100);
+
+    // Apply temperature
+    const tempSlider = document.getElementById('temperature');
+    const tempValue = document.getElementById('tempValue');
+    if (tempSlider && config.temperature !== undefined) {
+        tempSlider.value = config.temperature;
+        if (tempValue) tempValue.textContent = config.temperature.toFixed(1);
+    }
+
+    // Apply system prompt
+    const promptTextarea = document.getElementById('systemPrompt');
+    if (promptTextarea && config.system_prompt) {
+        promptTextarea.value = config.system_prompt;
+    }
+
+    // Highlight fields that were auto-configured
+    highlightCreateAutoConfiguredFields();
+}
+
+// Briefly highlight fields that were auto-configured
+function highlightCreateAutoConfiguredFields() {
+    const fields = ['agentType', 'llmModel', 'temperature', 'systemPrompt'];
+
+    fields.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.style.transition = 'box-shadow 0.3s ease';
+            element.style.boxShadow = '0 0 0 2px var(--primary-color)';
+            setTimeout(() => {
+                element.style.boxShadow = '';
+            }, 1500);
+        }
+    });
 }

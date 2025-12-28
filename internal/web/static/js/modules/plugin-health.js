@@ -26,9 +26,41 @@ class PluginHealthManager {
                 throw new Error('Failed to fetch plugin health');
             }
             this.healthData = await response.json();
+            this.renderHealthBadge();
             this.renderHealthDashboard();
         } catch (error) {
             console.error('Error fetching plugin health:', error);
+        }
+    }
+
+    /**
+     * Render the compact health badge in the sidebar Plugins header
+     */
+    renderHealthBadge() {
+        const badge = document.getElementById('pluginHealthBadge');
+        if (!badge || !this.healthData?.plugins) return;
+
+        const plugins = this.healthData.plugins || [];
+        const unhealthy = plugins.filter(p => p.status === 'unhealthy').length;
+        const degraded = plugins.filter(p => p.status === 'degraded').length;
+
+        badge.classList.remove('healthy', 'degraded', 'unhealthy');
+
+        if (unhealthy > 0) {
+            badge.classList.add('unhealthy');
+            badge.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 2px;"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>${unhealthy}`;
+            badge.title = `${unhealthy} unhealthy plugin(s) - click Manage Plugins for details`;
+        } else if (degraded > 0) {
+            badge.classList.add('degraded');
+            badge.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 2px;"><path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/></svg>${degraded}`;
+            badge.title = `${degraded} degraded plugin(s) - click Manage Plugins for details`;
+        } else if (plugins.length > 0) {
+            badge.classList.add('healthy');
+            badge.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>`;
+            badge.title = 'All plugins healthy';
+        } else {
+            badge.innerHTML = '';
+            badge.title = '';
         }
     }
 

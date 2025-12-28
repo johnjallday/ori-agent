@@ -40,8 +40,8 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 			"message": "Plugin not loaded",
 		}
 		w.WriteHeader(http.StatusOK) // Return 200 with success:false instead of 500
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -50,22 +50,18 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 	if defaultSettingsTool, ok := tool.(pluginapi.DefaultSettingsProvider); ok {
 		defaultSettings, err := defaultSettingsTool.GetDefaultSettings()
 		if err != nil {
-			if err := orihttp.RespondInternalError(w, "Failed to get default settings"); err != nil {
-				logger.Error(
-
-					// Check if default settings is empty (plugin doesn't actually have settings)
-					"Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, "Failed to get default settings")
 			return
 		}
 
+		// Check if default settings is empty (plugin doesn't actually have settings)
 		if defaultSettings == "" {
 			response := map[string]interface{}{
 				"success": false,
 				"message": "Plugin does not provide default settings",
 			}
-			if err := json.NewEncoder(w).Encode(response); err != nil {
-				logger.Error("Failed to encode response", logger.Fields{"response": err})
+			if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+				logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 			}
 			return
 		}
@@ -73,21 +69,18 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 		// Parse the JSON settings to ensure it's valid
 		var settings map[string]interface{}
 		if err := json.Unmarshal([]byte(defaultSettings), &settings); err != nil {
-			if err := orihttp.RespondInternalError(w, "Invalid default settings format"); err != nil {
-				logger.Error(
-
-					// Return the default settings
-					"Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, "Invalid default settings format")
 			return
 		}
+
+		// Return the default settings
 
 		response := map[string]interface{}{
 			"success":          true,
 			"default_settings": settings,
 		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 	} else {
 		// Plugin doesn't support default settings
@@ -95,8 +88,8 @@ func (h *InitHandler) handlePluginDefaultSettings(w http.ResponseWriter, tool pl
 			"success": false,
 			"message": "Plugin does not support default settings",
 		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 	}
 }
@@ -112,9 +105,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if len(pathParts) < 2 {
 		fmt.Printf("❌ Invalid path format - not enough parts\n")
-		if err := orihttp.RespondBadRequest(w, "invalid path format"); err != nil {
-			logger.Error("Failed to write bad request response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "invalid path format")
 		return
 	}
 
@@ -124,29 +115,22 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 
 	if pluginName == "" {
 		fmt.Printf("❌ Plugin name is empty\n")
-		if err := orihttp.RespondBadRequest(w, "plugin name required"); err != nil {
-			logger.
-
-				// Get current agent and its plugins
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "plugin name required")
 		return
 	}
 
+	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	fmt.Printf("📁 Current agent: %s\n", current)
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		fmt.Printf("❌ Agent '%s' not found\n", current)
-		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-			logger.
-
-				// Find the plugin
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
+
+	// Find the plugin
 
 	plugin, exists := ag.Plugins[pluginName]
 	if !exists {
@@ -209,9 +193,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !exists {
-		if err := orihttp.RespondNotFound(w, "plugin not found"); err != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "plugin not found")
 		return
 	}
 
@@ -238,9 +220,7 @@ func (h *InitHandler) PluginInitHandler(w http.ResponseWriter, r *http.Request) 
 		h.handlePluginDefaultSettings(w, plugin.Tool, pluginName)
 
 	default:
-		if err := orihttp.RespondBadRequest(w, "invalid action"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "invalid action")
 	}
 }
 
@@ -285,8 +265,8 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 				"current_values":          currentValues,
 			}
 			fmt.Printf("✅ Sending config response: %+v\n", response)
-			if err := json.NewEncoder(w).Encode(response); err != nil {
-				logger.Error("Failed to encode response", logger.Fields{"response": err})
+			if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+				logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 			}
 			return
 		}
@@ -308,9 +288,9 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 				"current_values":          currentValues,
 			}
 
-			if err := json.NewEncoder(w).Encode(response); err != nil {
+			if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 
-				logger.Error("Failed to encode response", logger.Fields{"response": err})
+				logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 
 			}
 			return
@@ -326,9 +306,9 @@ func (h *InitHandler) handlePluginConfigDiscovery(w http.ResponseWriter, tool pl
 		"message":                 "Plugin configuration found in settings file",
 	}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 
 	}
 }
@@ -338,13 +318,7 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 
 	// Parse configuration from request body first
 	var configData map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&configData); err != nil {
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"success": false,
-			"message": "Invalid JSON in request body: " + err.Error(),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &configData) {
 		return
 	}
 
@@ -353,33 +327,33 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 	// Check if plugin implements InitializationProvider (modern plugins)
 	initProvider, ok := tool.(pluginapi.InitializationProvider)
 	if !ok {
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Plugin does not support automatic initialization",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
 
 	// Validate configuration
 	if err := initProvider.ValidateConfig(configData); err != nil {
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Configuration validation failed: " + err.Error(),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
 
 	// Initialize plugin with configuration
 	if err := initProvider.InitializeWithConfig(configData); err != nil {
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "Plugin initialization failed: " + err.Error(),
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -396,11 +370,11 @@ func (h *InitHandler) handlePluginInitialization(w http.ResponseWriter, r *http.
 		agentAware.SetAgentContext(agentContext)
 	}
 
-	if err := json.NewEncoder(w).Encode(map[string]any{
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Plugin initialized successfully",
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
@@ -416,81 +390,60 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 		Parameters map[string]interface{} `json:"parameters"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "invalid JSON"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.PluginName == "" {
-		if err := orihttp.RespondBadRequest(w, "plugin_name required"); err != nil {
-			logger.
-
-				// Get current agent and its plugins
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "plugin_name required")
 		return
 	}
 
+	// Get current agent and its plugins
 	_, current := h.store.ListAgents()
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		if err := orihttp.RespondInternalError(w, "current agent not found"); err != nil {
-			logger.
-
-				// Find the plugin
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "current agent not found")
 		return
 	}
 
+	// Find the plugin
+
 	plugin, exists := ag.Plugins[req.PluginName]
 	if !exists {
-		if err := orihttp.RespondNotFound(w, "plugin not found"); err != nil {
-			logger.Error("Failed to write not found response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, "plugin not found")
 		return
 	}
 
 	// Convert parameters to JSON string
 	argsJSON, err := json.Marshal(req.Parameters)
 	if err != nil {
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err)); err != nil {
-			logger.
-
-				// Execute the plugin function
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("failed to marshal parameters: %v", err))
 		return
 	}
 
+	// Execute the plugin function
 	result, err := plugin.Tool.Call(r.Context(), string(argsJSON))
 	if err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("plugin execution error: %v", err)); err != nil {
-			logger.
-
-				// Return the result
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("plugin execution error: %v", err))
 		return
 	}
 
+	// Return the result
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"result":  result,
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
 
 // PluginInitStatusHandler checks filesystem for settings files
 func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write method not allowed response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -510,11 +463,11 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 	// Get active plugins for current agent
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
-		if err := json.NewEncoder(w).Encode(map[string]any{
+		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": "current agent not found",
-		}); err != nil {
-			logger.Error("Failed to encode response", logger.Fields{"response": err})
+		}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
 	}
@@ -543,9 +496,9 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 		"uninitialized_plugins":   uninitializedPlugins,
 	}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 
 	}
 }

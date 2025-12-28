@@ -16,7 +16,7 @@ import (
 )
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -33,7 +33,14 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	if ag.Settings.SystemPrompt != "" {
 		messages = append(messages, llm.NewSystemMessage(ag.Settings.SystemPrompt))
 	}
-	messages = append(messages, llm.NewUserMessage(userMessage))
+
+	// Use message with images if images are present
+	if len(images) > 0 {
+		messages = append(messages, llm.NewUserMessageWithImages(userMessage, images))
+		logger.Info("Claude chat with images", logger.Fields{"image_count": len(images)})
+	} else {
+		messages = append(messages, llm.NewUserMessage(userMessage))
+	}
 
 	// Call Claude
 	start := time.Now()

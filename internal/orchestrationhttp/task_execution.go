@@ -2,7 +2,7 @@ package orchestrationhttp
 
 import (
 	"context"
-	"encoding/json"
+
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,17 +19,13 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	taskIDsStr := r.URL.Query().Get("task_ids")
 	if taskIDsStr == "" {
-		if err := orihttp.RespondBadRequest(w, "task_ids parameter required (comma-separated)"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "task_ids parameter required (comma-separated)")
 		return
 	}
 
@@ -43,9 +39,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	workspaceIDs, err := th.workspaceStore.List()
 	if err != nil {
 		logger.Error("Error listing workspaces", logger.Fields{"error": err})
-		if err := orihttp.RespondInternalError(w, "Failed to retrieve workspaces"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Failed to retrieve workspaces")
 		return
 	}
 
@@ -90,9 +84,7 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 // ExecuteTaskHandler handles manual task execution
 func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -100,15 +92,12 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		TaskID string `json:"task_id"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Invalid request body", err)
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
 	if req.TaskID == "" {
-		if err := orihttp.RespondBadRequest(w, "task_id is required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "task_id is required")
 		return
 	}
 
@@ -137,9 +126,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if foundTask == nil {
-		if err := orihttp.RespondNotFound(w, fmt.Sprintf("Task %s not found", req.TaskID)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.NotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
 		return
 	}
 
@@ -155,32 +142,24 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		// Save the reset task status
 		if err := foundWorkspace.UpdateTask(*foundTask); err != nil {
 			logger.Error("Failed to reset task status", logger.Fields{"status": err})
-			if err := orihttp.RespondInternalError(w, "Failed to reset task for rerun"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, "Failed to reset task for rerun")
 			return
 		}
 		if err := th.workspaceStore.Save(foundWorkspace); err != nil {
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
-			if err := orihttp.RespondInternalError(w, "Failed to save workspace"); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, "Failed to save workspace")
 			return
 		}
 	}
 
 	if foundTask.Status == agentstudio.TaskStatusInProgress {
-		if err := orihttp.RespondBadRequest(w, "Task is already in progress"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Task is already in progress")
 		return
 	}
 
 	if th.taskHandler == nil {
 		logger.Error("Task handler not set", logger.Fields{})
-		if err := orihttp.RespondInternalError(w, "Task execution not available"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "Task execution not available")
 		return
 	}
 
@@ -189,9 +168,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		if err := th.executeInputTasksIfNeeded(foundWorkspace, foundTask); err != nil {
 			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": foundTask.ID, "error": err})
-			if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err)); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": err})
-			}
+			orihttp.InternalError(w, fmt.Sprintf("Failed to execute input tasks: %v", err))
 			return
 		}
 	}

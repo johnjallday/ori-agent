@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 
+	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -58,6 +59,9 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 	s.resetHandler = settingshttp.NewResetHandler(s.onboardingMgr, ".")
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st)
+
+	// Initialize auto-config handler for agent creation
+	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)
 
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()

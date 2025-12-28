@@ -1,7 +1,6 @@
 package orchestrationhttp
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"net/http"
@@ -45,9 +44,7 @@ func (th *TemplateHandler) TemplatesHandler(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 
 	if th.templateManager == nil {
-		if err := orihttp.RespondInternalError(w, "template manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "template manager not initialized")
 		return
 	}
 
@@ -72,17 +69,14 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 		// Get specific template
 		template, err := th.templateManager.GetTemplate(templateID)
 		if err != nil {
-			if err := orihttp.RespondNotFound(w, err.Error()); err != nil {
-				logger.Error("Failed to write response", logger.Fields{"error":
-
-				// List templates
-				err})
-			}
+			orihttp.NotFound(w, err.Error())
 			return
 		}
 		orihttp.WriteJSON(w, template)
 		return
 	}
+
+	// List templates
 
 	var templateList []*templates.WorkflowTemplate
 	if category != "" {
@@ -100,21 +94,14 @@ func (th *TemplateHandler) handleGetTemplates(w http.ResponseWriter, r *http.Req
 // handleCreateTemplate creates a new custom workflow template
 func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
 	var template templates.WorkflowTemplate
-	if err := json.NewDecoder(r.Body).Decode(&template); err != nil {
-		if err := orihttp.RespondBadRequest(w, "invalid request body"); err != nil {
-			logger.
-
-				// Save template
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &template) {
 		return
 	}
+	// Save template
 
 	if err := th.templateManager.SaveTemplate(&template); err != nil {
 		logger.Error("Failed to save template", logger.Fields{"err": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to save template: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("failed to save template: %v", err))
 		return
 	}
 
@@ -127,17 +114,13 @@ func (th *TemplateHandler) handleCreateTemplate(w http.ResponseWriter, r *http.R
 func (th *TemplateHandler) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	templateID := r.URL.Query().Get("id")
 	if templateID == "" {
-		if err := orihttp.RespondBadRequest(w, "template id required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "template id required")
 		return
 	}
 
 	if err := th.templateManager.DeleteTemplate(templateID); err != nil {
 		logger.Error("Failed to delete template", logger.Fields{"templateID": templateID, "err": err})
-		if err := orihttp.RespondInternalError(w, err.Error()); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, err.Error())
 		return
 	}
 
@@ -156,9 +139,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	}
 
 	if th.templateManager == nil {
-		if err := orihttp.RespondInternalError(w, "template manager not initialized"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, "template manager not initialized")
 		return
 	}
 
@@ -168,28 +149,19 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 		AgentName  string                 `json:"agent_name"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err := orihttp.RespondBadRequest(w, "invalid request body"); err != nil {
-			logger.
-
-				// Instantiate template
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
+	// Instantiate template
 	instance, err := th.templateManager.InstantiateTemplate(req.TemplateID, req.Parameters)
 	if err != nil {
 		logger.Error("Failed to instantiate template", logger.Fields{"templateid": req.TemplateID, "err": err})
-		if err := orihttp.RespondBadRequest(w, fmt.Sprintf("failed to instantiate template: %v", err)); err != nil {
-			logger.
-
-				// Create collaborative task from instance
-				Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, fmt.Sprintf("failed to instantiate template: %v", err))
 		return
 	}
 
+	// Create collaborative task from instance
 	task := orchestration.CollaborativeTask{
 		Goal:          fmt.Sprintf("Execute workflow: %s", instance.TemplateName),
 		RequiredRoles: instance.RequiredRoles,
@@ -201,9 +173,7 @@ func (th *TemplateHandler) InstantiateTemplateHandler(w http.ResponseWriter, r *
 	result, err := th.orchestrator.ExecuteCollaborativeTask(r.Context(), req.AgentName, task)
 	if err != nil {
 		logger.Error("Failed to execute collaborative task", logger.Fields{"task_id": err})
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("failed to execute workflow: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("failed to execute workflow: %v", err))
 		return
 	}
 

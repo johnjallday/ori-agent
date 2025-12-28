@@ -100,3 +100,50 @@ func (f *Factory) Clear() {
 	defer f.mu.Unlock()
 	f.providers = make(map[string]Provider)
 }
+
+// SystemModelResult contains the result of getting the system model provider
+type SystemModelResult struct {
+	Provider Provider
+	Model    string
+}
+
+// ErrSystemModelNotConfigured is returned when the system model is not configured
+var ErrSystemModelNotConfigured = fmt.Errorf("system model not configured")
+
+// GetSystemModelProvider returns the provider and model for system tasks
+// providerName and modelName should come from the config manager
+// Returns ErrSystemModelNotConfigured if provider or model is empty
+// Returns error if provider is not available or model is not supported
+func (f *Factory) GetSystemModelProvider(providerName, modelName string) (*SystemModelResult, error) {
+	// Check if system model is configured
+	if providerName == "" || modelName == "" {
+		return nil, ErrSystemModelNotConfigured
+	}
+
+	// Get the provider
+	provider, err := f.GetProvider(providerName)
+	if err != nil {
+		return nil, fmt.Errorf("system model provider %q not available: %w", providerName, err)
+	}
+
+	// Validate the model is available from this provider
+	models := provider.DefaultModels()
+	modelFound := false
+	for _, m := range models {
+		if strings.EqualFold(m, modelName) {
+			modelFound = true
+			modelName = m // Use the canonical model name
+			break
+		}
+	}
+
+	// For Ollama, we allow any model name since users can pull custom models
+	if !modelFound && strings.ToLower(providerName) != "ollama" {
+		return nil, fmt.Errorf("model %q not available from provider %q", modelName, providerName)
+	}
+
+	return &SystemModelResult{
+		Provider: provider,
+		Model:    modelName,
+	}, nil
+}

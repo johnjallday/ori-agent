@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 )
 
@@ -27,9 +26,7 @@ func NewNotificationsHandler(notifMgr *pluginmanager.NotificationManager) *Notif
 // GET /api/plugins/notifications
 func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
@@ -49,24 +46,18 @@ func (h *NotificationsHandler) HandleGetNotifications(w http.ResponseWriter, r *
 // POST /api/plugins/notifications/:id/dismiss
 func (h *NotificationsHandler) HandleDismissNotification(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		if err := orihttp.RespondMethodNotAllowed(w); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.MethodNotAllowed(w)
 		return
 	}
 
 	notificationID := h.extractNotificationID(r.URL.Path)
 	if notificationID == "" {
-		if err := orihttp.RespondBadRequest(w, "Notification ID required"); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.BadRequest(w, "Notification ID required")
 		return
 	}
 
 	if err := h.NotificationManager.DismissNotification(notificationID); err != nil {
-		if err := orihttp.RespondInternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err)); err != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": err})
-		}
+		orihttp.InternalError(w, fmt.Sprintf("Failed to dismiss notification: %v", err))
 		return
 	}
 

@@ -3,6 +3,9 @@
 {{template "head.tmpl" .}}
 
 <body class="bg-light">
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -13,9 +16,9 @@
     {{template "session-sidebar.tmpl" .}}
 
     <!-- Main Content -->
-    <div class="main-content">
+    <main class="main-content" role="main" aria-label="Chat area">
       {{template "chat-area.tmpl" .}}
-    </div>
+    </main>
   </div>
 
   <!-- Add Agent Modal -->
@@ -33,9 +36,64 @@
         </div>
         <div class="modal-body">
           <form id="addAgentForm">
+            <!-- Config Mode Toggle -->
             <div class="mb-3">
-              <label for="agentName" class="form-label" style="color: var(--text-primary);">Agent Name</label>
-              <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required>
+              <div class="d-flex align-items-center gap-3">
+                <label class="form-label mb-0" style="color: var(--text-primary);">Configuration Mode</label>
+                <div class="btn-group" role="group" aria-label="Configuration mode toggle">
+                  <input type="radio" class="btn-check" name="baseConfigMode" id="baseConfigModeManual" value="manual" checked>
+                  <label class="btn btn-outline-secondary btn-sm" for="baseConfigModeManual">Manual</label>
+                  <input type="radio" class="btn-check" name="baseConfigMode" id="baseConfigModeAuto" value="auto">
+                  <label class="btn btn-outline-secondary btn-sm" for="baseConfigModeAuto">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
+                    </svg>
+                    Auto
+                  </label>
+                </div>
+                <span id="baseAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.7rem;"></span>
+              </div>
+              <small id="baseConfigModeHelp" class="text-muted d-none mt-1">Describe what you want this agent to do, and we'll configure it automatically.</small>
+            </div>
+
+            <!-- Auto-config Description (shown when Auto mode selected) -->
+            <div id="baseAutoConfigSection" class="mb-3 d-none">
+              <label class="form-label" style="color: var(--text-primary);">Describe Your Agent</label>
+              <textarea id="baseAutoConfigDescription" class="form-control" rows="3"
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
+                        placeholder="Example: An agent that helps with file management tasks like organizing documents, searching for files, and creating backups..."></textarea>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <small class="text-muted">Tip: Be specific about the tasks and tools this agent should use.</small>
+                <button type="button" id="baseGenerateAutoConfigBtn" class="btn btn-sm btn-outline-primary">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                  </svg>
+                  Generate Config
+                </button>
+              </div>
+            </div>
+
+            <!-- LLM Not Available Warning -->
+            <div id="baseLlmNotAvailableWarning" class="alert alert-warning d-none mb-3" style="font-size: 0.875rem;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+              </svg>
+              <span id="baseLlmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
+              <a href="/settings" class="alert-link ms-1">Go to Settings</a>
+            </div>
+
+            <!-- Auto-selected Indicator -->
+            <div id="baseAutoSelectedIndicator" class="alert alert-info d-none mb-3" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              <strong>Auto-configured</strong> - Settings below were selected based on your description. You can still adjust them manually.
+            </div>
+
+            <div class="mb-3">
+              <label for="agentName" class="form-label required" style="color: var(--text-primary);">Agent Name</label>
+              <input type="text" id="agentName" class="modern-input w-100" placeholder="Enter agent name..." required minlength="2" maxlength="50" aria-describedby="agentNameHelp">
+              <small id="agentNameHelp" class="form-helper">Use letters, numbers, and hyphens. 2-50 characters.</small>
             </div>
             <div class="mb-3">
               <label for="agentType" class="form-label" style="color: var(--text-primary);">Agent Type</label>
@@ -58,8 +116,8 @@
                 Temperature: <span id="temperatureValue">1.0</span>
               </label>
               <input type="range" id="agentTemperature" class="form-range" min="0" max="2" step="0.1" value="1.0"
-                     style="cursor: pointer;">
-              <div class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
+                     style="cursor: pointer;" aria-describedby="temperatureHelp" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1.0">
+              <div id="temperatureHelp" class="d-flex justify-content-between" style="font-size: 0.75rem; color: rgba(255, 255, 255, 0.85); font-weight: 500;">
                 <span>Focused (0)</span>
                 <span>Balanced (1)</span>
                 <span>Creative (2)</span>
@@ -67,9 +125,11 @@
             </div>
             <div class="mb-3">
               <label for="agentSystemPrompt" class="form-label" style="color: var(--text-primary);">System Prompt</label>
-              <textarea id="agentSystemPrompt" class="form-control" rows="4"
+              <textarea id="agentSystemPrompt" class="form-control" rows="4" maxlength="4000"
                         style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
-                        placeholder="You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."></textarea>
+                        placeholder="Example: You are a helpful assistant with access to various tools. When a user request can be fulfilled by using an available tool, use the tool instead of providing general information. Be concise and direct in your responses."
+                        data-char-counter="true"></textarea>
+              <small class="form-helper">Define the agent's behavior, personality, and instructions. Max 4000 characters.</small>
             </div>
           </form>
         </div>
@@ -259,6 +319,8 @@
   <script src="js/modules/file-upload.js"></script>
   <script src="js/modules/location.js"></script>
   <script src="js/modules/sessions.js"></script>
+  <script src="js/modules/toast.js"></script>
+  <script src="js/modules/form-validation.js"></script>
   <script src="js/app.js?v=1694538177"></script>
 </body>
 </html>
