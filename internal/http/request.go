@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
+	"strings"
 )
 
 // ParseJSONBody reads and parses a JSON request body into the provided struct.
@@ -125,4 +127,48 @@ func ParseFormData(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// ValidateUploadFilename sanitizes and validates an uploaded filename.
+// Returns the sanitized filename and true if valid, or sends an error response and returns false.
+//
+// Security checks performed:
+//   - Path traversal prevention (uses filepath.Base)
+//   - Empty/invalid filename rejection
+//   - Hidden file rejection (files starting with .)
+//   - Character validation (only alphanumeric, hyphens, underscores, dots allowed)
+//
+// Usage:
+//
+//	cleanName, ok := http.ValidateUploadFilename(w, header.Filename)
+//	if !ok {
+//		return // Error response already sent
+//	}
+func ValidateUploadFilename(w http.ResponseWriter, filename string) (string, bool) {
+	// Sanitize filename to prevent path traversal attacks
+	cleanFilename := filepath.Base(filename)
+	if cleanFilename == "" || cleanFilename == "." || cleanFilename == ".." {
+		BadRequest(w, "Invalid filename")
+		return "", false
+	}
+
+	// Reject hidden files (files starting with .)
+	if strings.HasPrefix(cleanFilename, ".") {
+		BadRequest(w, "Hidden files not allowed")
+		return "", false
+	}
+
+	// Only allow alphanumeric characters, hyphens, underscores, and dots
+	for _, c := range cleanFilename {
+		isLower := c >= 'a' && c <= 'z'
+		isUpper := c >= 'A' && c <= 'Z'
+		isDigit := c >= '0' && c <= '9'
+		isAllowed := c == '-' || c == '_' || c == '.'
+		if !isLower && !isUpper && !isDigit && !isAllowed {
+			BadRequest(w, "Invalid characters in filename")
+			return "", false
+		}
+	}
+
+	return cleanFilename, true
 }

@@ -70,7 +70,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		// Parse multipart form to check if it contains actual file uploads
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err := r.ParseMultipartForm(orihttp.MaxFormSize); err != nil {
 			// If parsing multipart fails, try regular form parsing for registry loading
 			h.loadFromRegistry(w, r)
 			return
@@ -236,7 +236,7 @@ func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {
 func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	// Form should already be parsed in ServeHTTP, but ensure it's parsed
 	if r.MultipartForm == nil {
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		if err := r.ParseMultipartForm(orihttp.MaxFormSize); err != nil {
 			orihttp.BadRequest(w, err.Error())
 			return
 		}
@@ -248,29 +248,10 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// SECURITY: Sanitize filename to prevent path traversal attacks
-	cleanFilename := filepath.Base(header.Filename)
-	if cleanFilename == "" || cleanFilename == "." || cleanFilename == ".." {
-		orihttp.BadRequest(w, "Invalid filename")
+	// SECURITY: Validate and sanitize filename
+	cleanFilename, ok := orihttp.ValidateUploadFilename(w, header.Filename)
+	if !ok {
 		return
-	}
-
-	// SECURITY: Reject hidden files (files starting with .)
-	if strings.HasPrefix(cleanFilename, ".") {
-		orihttp.BadRequest(w, "Hidden files not allowed")
-		return
-	}
-
-	// SECURITY: Only allow alphanumeric characters, hyphens, underscores, and dots in filename
-	for _, c := range cleanFilename {
-		isLower := c >= 'a' && c <= 'z'
-		isUpper := c >= 'A' && c <= 'Z'
-		isDigit := c >= '0' && c <= '9'
-		isAllowed := c == '-' || c == '_' || c == '.'
-		if !isLower && !isUpper && !isDigit && !isAllowed {
-			orihttp.BadRequest(w, "Invalid characters in filename")
-			return
-		}
 	}
 
 	// Create a permanent directory for uploaded plugins
@@ -337,11 +318,8 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) loadFromRegistry(w http.ResponseWriter, r *http.Request) {
 	// Try to parse multipart form first, then regular form
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		if err := r.ParseForm(); err != nil {
-			orihttp.BadRequest(w, err.Error())
-			return
-		}
+	if !orihttp.ParseFormData(w, r) {
+		return
 	}
 
 	name := r.FormValue("name")
