@@ -247,6 +247,16 @@ lint: ## Run linter (requires golangci-lint)
 check: fmt vet test ## Run all checks (fmt, vet, test)
 	@echo "$(GREEN)✓ All checks passed$(NC)"
 
+check-cross-platform: ## Check builds for all platforms (Linux, Windows, macOS)
+	@echo "$(BLUE)Checking cross-platform builds...$(NC)"
+	@./scripts/check-cross-platform.sh
+	@echo "$(GREEN)✓ All platforms build successfully$(NC)"
+
+sync-plugin-deps: ## Sync plugin dependencies with main module
+	@echo "$(BLUE)Syncing plugin dependencies...$(NC)"
+	@./scripts/sync-plugin-deps.sh
+	@echo "$(GREEN)✓ Plugin dependencies synced$(NC)"
+
 ## Docker targets
 
 docker-build: ## Build Docker image

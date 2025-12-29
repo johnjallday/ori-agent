@@ -389,6 +389,12 @@ echo ""
 
 run_check "Build Server" "go build -o bin/ori-agent ./cmd/server" || true
 run_check "Build Menubar (macOS)" "go build -o bin/ori-menubar ./cmd/menubar 2>/dev/null || echo 'Skipping menubar (not on macOS)'" || true
+
+# Cross-platform builds - catches issues that only appear on Linux/Windows CI
+run_check "Cross-Platform Builds" "./scripts/check-cross-platform.sh" || true
+
+# Sync plugin dependencies before building plugins
+run_check "Sync Plugin Dependencies" "./scripts/sync-plugin-deps.sh" || true
 run_check "Build Plugins" "./scripts/build-plugins.sh" || true
 
 # External plugins live outside this repo (../plugins/*) and are not required for releasing ori-agent itself.
