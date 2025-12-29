@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // WindowsDetector detects applications on Windows using Prefetch files.
