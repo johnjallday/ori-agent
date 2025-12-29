@@ -26,13 +26,26 @@ type OnboardingState struct {
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 }
 
+// GPUInfo contains GPU/graphics hardware information
+type GPUInfo struct {
+	Name           string `json:"name"`             // GPU name (e.g., "Apple M2 Pro", "NVIDIA GeForce RTX 4090")
+	Vendor         string `json:"vendor"`           // GPU vendor (e.g., "Apple", "NVIDIA", "AMD", "Intel")
+	VRAM           int64  `json:"vram"`             // Dedicated VRAM in bytes (0 for integrated/unified memory)
+	IsDiscrete     bool   `json:"is_discrete"`      // True if discrete GPU, false if integrated
+	IsAppleSilicon bool   `json:"is_apple_silicon"` // True if Apple Silicon (M1/M2/M3/etc.)
+}
+
 // DeviceInfo tracks information about the user's device
 type DeviceInfo struct {
-	Type     string `json:"type"`     // "desktop", "server", "laptop", "unknown"
-	OS       string `json:"os"`       // Operating system (darwin, linux, windows)
-	Arch     string `json:"arch"`     // Architecture (amd64, arm64, etc.)
-	Detected bool   `json:"detected"` // Whether device detection has been completed
-	UserSet  bool   `json:"user_set"` // Whether user manually set device type
+	Type           string   `json:"type"`                       // "desktop", "server", "laptop", "unknown"
+	OS             string   `json:"os"`                         // Operating system (darwin, linux, windows)
+	Arch           string   `json:"arch"`                       // Architecture (amd64, arm64, etc.)
+	Detected       bool     `json:"detected"`                   // Whether device detection has been completed
+	UserSet        bool     `json:"user_set"`                   // Whether user manually set device type
+	GPU            *GPUInfo `json:"gpu,omitempty"`              // GPU information (nil if not detected)
+	TotalRAMBytes  int64    `json:"total_ram_bytes,omitempty"`  // Total system RAM in bytes
+	MaxModelParams string   `json:"max_model_params,omitempty"` // Maximum model parameter size (e.g., "7B", "13B", "70B")
+	MemoryTier     string   `json:"memory_tier,omitempty"`      // Memory tier classification (e.g., "Basic", "Standard", "Advanced", "Professional")
 }
 
 // MenuBarSettings tracks menu bar app preferences

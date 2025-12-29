@@ -206,6 +206,29 @@ func (m *Manager) SetDeviceType(deviceType string) error {
 	return m.saveUnlocked()
 }
 
+// RedetectDevice forces a fresh detection of device hardware
+func (m *Manager) RedetectDevice() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Preserve user-set device type if applicable
+	preservedType := ""
+	if m.state.Device.UserSet {
+		preservedType = m.state.Device.Type
+	}
+
+	// Perform fresh detection
+	m.state.Device = device.Detect()
+
+	// Restore user-set type if it was set
+	if preservedType != "" {
+		m.state.Device.Type = preservedType
+		m.state.Device.UserSet = true
+	}
+
+	return m.saveUnlocked()
+}
+
 // IsDeviceDetected returns true if device detection has been completed
 func (m *Manager) IsDeviceDetected() bool {
 	m.mu.RLock()

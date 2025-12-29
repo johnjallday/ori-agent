@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/device"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // Handler handles device-related HTTP requests
@@ -223,4 +225,74 @@ func (h *Handler) GetOllamaStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orihttp.WriteJSON(w, status)
+}
+
+// DeviceCapabilities represents the device hardware capabilities response
+type DeviceCapabilities struct {
+	GPU               *types.GPUInfo `json:"gpu,omitempty"`
+	TotalRAMBytes     int64          `json:"total_ram_bytes"`
+	TotalRAMFormatted string         `json:"total_ram_formatted"`
+	MaxModelParams    string         `json:"max_model_params"`
+	MemoryTier        string         `json:"memory_tier"`
+	TierDescription   string         `json:"tier_description"`
+	RecommendedModels []string       `json:"recommended_models"`
+	OllamaLibraryURL  string         `json:"ollama_library_url"`
+}
+
+// GetCapabilities returns device hardware capabilities including GPU, RAM, and model recommendations
+// GET /api/device/capabilities
+func (h *Handler) GetCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	// Get device info (triggers detection if needed)
+	deviceInfo := h.onboardingManager.GetDeviceInfo()
+	if !deviceInfo.Detected {
+		if err := h.onboardingManager.DetectAndStoreDevice(); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to detect device", err)
+			return
+		}
+		deviceInfo = h.onboardingManager.GetDeviceInfo()
+	}
+
+	orihttp.WriteJSON(w, h.buildCapabilities(deviceInfo))
+}
+
+// buildCapabilities creates a DeviceCapabilities response from DeviceInfo
+func (h *Handler) buildCapabilities(deviceInfo types.DeviceInfo) DeviceCapabilities {
+	caps := DeviceCapabilities{
+		GPU:               deviceInfo.GPU,
+		TotalRAMBytes:     deviceInfo.TotalRAMBytes,
+		TotalRAMFormatted: device.FormatBytes(deviceInfo.TotalRAMBytes),
+		MaxModelParams:    deviceInfo.MaxModelParams,
+		MemoryTier:        deviceInfo.MemoryTier,
+		OllamaLibraryURL:  "https://ollama.com/library",
+	}
+
+	if deviceInfo.MemoryTier != "" {
+		tier := device.MemoryTier(deviceInfo.MemoryTier)
+		caps.TierDescription = tier.Description()
+		caps.RecommendedModels = tier.RecommendedModels()
+	}
+
+	return caps
+}
+
+// DetectHardware forces a re-detection of hardware capabilities
+// POST /api/device/detect-hardware
+func (h *Handler) DetectHardware(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	// Force re-detection
+	if err := h.onboardingManager.RedetectDevice(); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to re-detect device", err)
+		return
+	}
+
+	// Return updated capabilities
+	deviceInfo := h.onboardingManager.GetDeviceInfo()
+	orihttp.WriteJSON(w, h.buildCapabilities(deviceInfo))
 }
