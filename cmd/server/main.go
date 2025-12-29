@@ -101,27 +101,27 @@ func main() {
 }
 
 // ensureDataDirectory checks if runtime data files exist in current directory.
-// If they don't exist and we're running as a standalone binary, create an ori-agent folder.
+// If they don't exist and we're running as a standalone binary, create an ori-data folder.
 func ensureDataDirectory() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 
-	// Check if we're already in an ori-agent directory or if data files exist
+	// Check if we're already in a data directory or if data files exist
 	baseName := filepath.Base(cwd)
 	hasDataFiles := fileExists("agents.json") ||
 		fileExists("local_plugin_registry.json") ||
 		fileExists("plugin_cache") ||
 		fileExists("uploaded_plugins")
 
-	// If already in ori-agent directory (or OriAgent for installed app) or data files exist, we're good
-	if baseName == "ori-agent" || baseName == "OriAgent" || hasDataFiles {
+	// If already in ori-data directory (or OriAgent for installed app) or data files exist, we're good
+	if baseName == "ori-data" || baseName == "OriAgent" || hasDataFiles {
 		return nil
 	}
 
-	// Create ori-agent directory and change into it
-	dataDir := filepath.Join(cwd, "ori-agent")
+	// Create ori-data directory and change into it
+	dataDir := filepath.Join(cwd, "ori-data")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return err
 	}
