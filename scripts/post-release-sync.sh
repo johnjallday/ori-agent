@@ -3,13 +3,14 @@
 #
 # This script:
 #   1. Checks if the release was successful on GitHub
-#   2. Pulls latest main
+#   2. Syncs main with the release branch (force push if needed)
+#      - Release branch has all commits: features + dependabot + release fixes
 #   3. Merges main to dev
 #   4. Deletes the release branch (local and remote)
 #
 # Usage:
 #   ./scripts/post-release-sync.sh <version>
-#   ./scripts/post-release-sync.sh v0.0.30
+#   ./scripts/post-release-sync.sh v0.0.31
 
 set -e
 
@@ -140,29 +141,63 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
   exit 1
 fi
 
-# Step 3: Pull latest main
-print_status "Pulling latest main..."
-git fetch origin main
+# Step 3: Sync main with release branch
+# The release branch contains all commits (features + dependabot + release fixes)
+# Main needs to be updated to match the release branch
+print_status "Fetching release branch..."
+git fetch origin "$RELEASE_BRANCH"
+
+print_status "Checking if main needs to be synced with release branch..."
 git checkout main
-git pull origin main
-print_success "Main branch updated"
+
+# Check if release branch has commits not in main
+COMMITS_AHEAD=$(git rev-list --count origin/main..origin/"$RELEASE_BRANCH" 2>/dev/null || echo "0")
+
+if [ "$COMMITS_AHEAD" -gt 0 ]; then
+  print_status "Release branch has $COMMITS_AHEAD commits not in main"
+  print_status "Resetting main to match release branch..."
+  git reset --hard origin/"$RELEASE_BRANCH"
+
+  print_status "Force pushing main to origin..."
+  if git push --force-with-lease origin main; then
+    print_success "Main branch synced with release branch"
+  else
+    print_error "Failed to push main. You may need to resolve this manually."
+    exit 1
+  fi
+else
+  print_status "Main is already up-to-date with release branch"
+  git pull origin main
+fi
 echo ""
 
 # Step 4: Merge main to dev
-print_status "Merging main to dev..."
+print_status "Syncing dev with main..."
 git checkout dev
-git pull origin dev
+git fetch origin dev
 
-if git merge main --no-ff -m "Merge main ($VERSION) back to dev"; then
-  git push origin dev
-  print_success "Dev branch updated with $VERSION"
+# Check if dev needs updating
+MAIN_COMMIT=$(git rev-parse main)
+DEV_CONTAINS_MAIN=$(git merge-base --is-ancestor main dev && echo "yes" || echo "no")
+
+if [ "$DEV_CONTAINS_MAIN" = "yes" ]; then
+  print_status "Dev already contains all main commits"
+  git pull origin dev
 else
-  print_error "Merge conflict! Please resolve manually:"
-  print_error "  1. Resolve conflicts"
-  print_error "  2. git add ."
-  print_error "  3. git commit"
-  print_error "  4. git push origin dev"
-  exit 1
+  print_status "Merging main to dev..."
+  git pull origin dev
+
+  if git merge main -m "Merge main ($VERSION release) back to dev"; then
+    git push origin dev
+    print_success "Dev branch updated with $VERSION"
+  else
+    print_error "Merge conflict! Please resolve manually:"
+    print_error "  1. Resolve conflicts"
+    print_error "  2. git add ."
+    print_error "  3. git commit"
+    print_error "  4. git push origin dev"
+    exit 1
+  fi
 fi
 echo ""
 
@@ -194,10 +229,11 @@ echo ""
 print_success "Post-release sync complete for $VERSION!"
 echo ""
 echo "  ✓ Release verified on GitHub ($ASSET_COUNT assets)"
-echo "  ✓ Main branch pulled"
+echo "  ✓ Main branch synced with release branch"
 echo "  ✓ Dev branch synced with main"
 echo "  ✓ Release branch deleted"
 echo ""
+print_status "All branches now at: $(git rev-parse --short main)"
 print_status "Current branch: $(git branch --show-current)"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
