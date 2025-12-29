@@ -18,6 +18,7 @@ func TestPluginLoading(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ensurePluginsBuilt(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -59,6 +60,7 @@ func TestMathPlugin(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ensurePluginsBuilt(t)
 
 	// Check if math plugin exists
@@ -89,6 +91,7 @@ func TestWeatherPlugin(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ensurePluginsBuilt(t)
 
 	// Check if weather plugin exists
@@ -118,6 +121,7 @@ func TestPluginHealthChecks(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ensurePluginsBuilt(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

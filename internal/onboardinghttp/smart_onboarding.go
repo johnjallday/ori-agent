@@ -618,9 +618,10 @@ func extractJSON(content string) string {
 		// Find matching closing brace
 		depth := 0
 		for i := idx; i < len(content); i++ {
-			if content[i] == '{' {
+			switch content[i] {
+			case '{':
 				depth++
-			} else if content[i] == '}' {
+			case '}':
 				depth--
 				if depth == 0 {
 					return content[idx : i+1]
