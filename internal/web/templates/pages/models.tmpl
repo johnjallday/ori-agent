@@ -340,6 +340,57 @@
   color: #ffffff;
 }
 
+.model-tag.use-case {
+  background: #059669;
+  color: #ffffff;
+  font-size: 0.7rem;
+}
+
+.dark-mode .model-tag.use-case {
+  background: #047857;
+  color: #ffffff;
+}
+
+.model-tag.pricing {
+  background: #7c3aed;
+  color: #ffffff;
+  font-size: 0.7rem;
+}
+
+.dark-mode .model-tag.pricing {
+  background: #6d28d9;
+  color: #ffffff;
+}
+
+.model-use-cases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.model-tag.legacy {
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 0.7rem;
+}
+
+.dark-mode .model-tag.legacy {
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.model-tag.deprecating {
+  background: #f59e0b;
+  color: #000000;
+  font-size: 0.7rem;
+}
+
+.dark-mode .model-tag.deprecating {
+  background: #d97706;
+  color: #000000;
+}
+
 .provider-info, .category-info {
   display: flex;
   align-items: center;
@@ -870,10 +921,33 @@ function createModelItem(model, providerName) {
     return `<span class="model-tag" style="background: ${cat.color}"><i class="bi bi-${cat.icon}"></i>${cat.name}</span>`;
   }).join('');
 
+  // Build use-case badges (limit to first 2 for inline display)
+  const goodFor = model.good_for || [];
+  const useCaseTags = goodFor.slice(0, 2).map(useCase =>
+    `<span class="model-tag use-case"><i class="bi bi-check-circle me-1"></i>${useCase}</span>`
+  ).join('');
+  const moreCount = goodFor.length > 2 ? `<span class="model-tag use-case">+${goodFor.length - 2} more</span>` : '';
+
+  // Pricing badge
+  const pricingTag = model.pricing ? `<span class="model-tag pricing"><i class="bi bi-currency-dollar me-1"></i>${model.pricing}</span>` : '';
+
+  // Legacy/Deprecation badge
+  let statusTag = '';
+  if (model.is_legacy) {
+    statusTag = `<span class="model-tag legacy"><i class="bi bi-exclamation-triangle me-1"></i>Legacy</span>`;
+  } else if (model.deprecation_date) {
+    statusTag = `<span class="model-tag deprecating"><i class="bi bi-clock me-1"></i>Deprecates ${model.deprecation_date}</span>`;
+  }
+
   item.innerHTML = `
     <div class="model-info">
       <div class="model-name">${model.label}</div>
-      <div class="model-meta">${categoryTags || '<span class="text-muted small">Click to assign categories</span>'}</div>
+      <div class="model-meta">
+        ${statusTag}
+        ${pricingTag}
+        ${categoryTags || ''}
+      </div>
+      ${goodFor.length > 0 ? `<div class="model-use-cases">${useCaseTags}${moreCount}</div>` : ''}
     </div>
     <i class="bi bi-chevron-right text-muted"></i>
   `;
@@ -887,10 +961,33 @@ function createModelItemForCategory(model) {
   item.className = 'model-item';
   item.dataset.modelId = model.value;
 
+  // Build use-case badges (limit to first 2 for inline display)
+  const goodFor = model.good_for || [];
+  const useCaseTags = goodFor.slice(0, 2).map(useCase =>
+    `<span class="model-tag use-case"><i class="bi bi-check-circle me-1"></i>${useCase}</span>`
+  ).join('');
+  const moreCount = goodFor.length > 2 ? `<span class="model-tag use-case">+${goodFor.length - 2} more</span>` : '';
+
+  // Pricing badge
+  const pricingTag = model.pricing ? `<span class="model-tag pricing"><i class="bi bi-currency-dollar me-1"></i>${model.pricing}</span>` : '';
+
+  // Legacy/Deprecation badge
+  let statusTag = '';
+  if (model.is_legacy) {
+    statusTag = `<span class="model-tag legacy"><i class="bi bi-exclamation-triangle me-1"></i>Legacy</span>`;
+  } else if (model.deprecation_date) {
+    statusTag = `<span class="model-tag deprecating"><i class="bi bi-clock me-1"></i>Deprecates ${model.deprecation_date}</span>`;
+  }
+
   item.innerHTML = `
     <div class="model-info">
       <div class="model-name">${model.label}</div>
-      <div class="model-meta"><span class="text-muted small">${model.providerName || ''}</span></div>
+      <div class="model-meta">
+        ${statusTag}
+        ${pricingTag}
+        <span class="text-muted small">${model.providerName || ''}</span>
+      </div>
+      ${goodFor.length > 0 ? `<div class="model-use-cases">${useCaseTags}${moreCount}</div>` : ''}
     </div>
     <i class="bi bi-chevron-right text-muted"></i>
   `;

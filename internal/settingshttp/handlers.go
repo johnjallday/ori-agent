@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -170,10 +171,14 @@ func maskAnthropicAPIKey(apiKey string) string {
 
 // ProviderModel represents a model for a specific provider
 type ProviderModel struct {
-	Value    string `json:"value"`
-	Label    string `json:"label"`
-	Provider string `json:"provider"`
-	Type     string `json:"type"` // tool-calling, general, research
+	Value           string   `json:"value"`
+	Label           string   `json:"label"`
+	Provider        string   `json:"provider"`
+	Type            string   `json:"type"`                       // tool-calling, general, research
+	GoodFor         []string `json:"good_for"`                   // use-case recommendations
+	Pricing         string   `json:"pricing,omitempty"`          // pricing info (e.g., "$2.50 in / $10 out")
+	DeprecationDate string   `json:"deprecation_date,omitempty"` // when the model will be deprecated (YYYY-MM-DD)
+	IsLegacy        bool     `json:"is_legacy,omitempty"`        // true if model is past deprecation date
 }
 
 // ProviderInfo represents information about an LLM provider
@@ -247,12 +252,25 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 
 			for _, modelName := range defaultModels {
 				categories := getModelCategories(name, modelName)
+				goodFor := modelinfo.GetGoodFor(modelName)
+				pricingInfo := modelinfo.GetPricing(modelName)
+				pricing := modelinfo.FormatPricing(pricingInfo)
+				var deprecationDate string
+				var isLegacy bool
+				if pricingInfo != nil {
+					deprecationDate = pricingInfo.DeprecationDate
+					isLegacy = pricingInfo.IsLegacy()
+				}
 				for _, category := range categories {
 					providerModels = append(providerModels, ProviderModel{
-						Value:    modelName,
-						Label:    modelName,
-						Provider: name,
-						Type:     category,
+						Value:           modelName,
+						Label:           modelName,
+						Provider:        name,
+						Type:            category,
+						GoodFor:         goodFor,
+						Pricing:         pricing,
+						DeprecationDate: deprecationDate,
+						IsLegacy:        isLegacy,
 					})
 				}
 			}
@@ -269,12 +287,25 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 			providerModels = make([]ProviderModel, 0, len(models)*2)
 			for _, modelName := range models {
 				categories := getModelCategories(name, modelName)
+				goodFor := modelinfo.GetGoodFor(modelName)
+				pricingInfo := modelinfo.GetPricing(modelName)
+				pricing := modelinfo.FormatPricing(pricingInfo)
+				var deprecationDate string
+				var isLegacy bool
+				if pricingInfo != nil {
+					deprecationDate = pricingInfo.DeprecationDate
+					isLegacy = pricingInfo.IsLegacy()
+				}
 				for _, category := range categories {
 					providerModels = append(providerModels, ProviderModel{
-						Value:    modelName,
-						Label:    modelName,
-						Provider: name,
-						Type:     category,
+						Value:           modelName,
+						Label:           modelName,
+						Provider:        name,
+						Type:            category,
+						GoodFor:         goodFor,
+						Pricing:         pricing,
+						DeprecationDate: deprecationDate,
+						IsLegacy:        isLegacy,
 					})
 				}
 			}

@@ -1,0 +1,200 @@
+[
+  {
+    "match": "^o1|^o3",
+    "good_for": [
+      "complex reasoning and multi-step problem solving",
+      "hard coding and debugging tasks",
+      "planning with tool orchestration"
+    ]
+  },
+  {
+    "match": "gpt-4o",
+    "good_for": [
+      "general-purpose high quality chat and analysis",
+      "multimodal tasks (vision, audio)",
+      "code review and refactoring",
+      "writing and summarization"
+    ]
+  },
+  {
+    "match": "gpt-4-turbo|gpt-4-1106|gpt-4-0125",
+    "good_for": [
+      "general-purpose high quality chat",
+      "complex analysis and reasoning",
+      "code generation and review"
+    ]
+  },
+  {
+    "match": "^gpt-4",
+    "good_for": [
+      "general-purpose high quality chat and analysis",
+      "writing, summarization, and editing",
+      "code review and refactoring"
+    ]
+  },
+  {
+    "match": "gpt-3.5-turbo",
+    "good_for": [
+      "fast general-purpose chat",
+      "simple code tasks",
+      "classification and extraction"
+    ]
+  },
+  {
+    "match": "mini|nano",
+    "good_for": [
+      "low latency, high volume tasks",
+      "routing, classification, and extraction",
+      "quick summarization"
+    ]
+  },
+  {
+    "match": "claude.*opus",
+    "good_for": [
+      "complex reasoning and analysis",
+      "nuanced writing and creative tasks",
+      "detailed code review and architecture"
+    ]
+  },
+  {
+    "match": "claude.*sonnet",
+    "good_for": [
+      "balanced performance and cost",
+      "general-purpose chat and coding",
+      "document analysis and summarization"
+    ]
+  },
+  {
+    "match": "claude.*haiku",
+    "good_for": [
+      "fast responses for simple tasks",
+      "tool calling and function execution",
+      "classification and extraction"
+    ]
+  },
+  {
+    "match": "llama.*70b|llama3.*70",
+    "good_for": [
+      "high-quality local inference",
+      "complex reasoning (local)",
+      "code generation"
+    ]
+  },
+  {
+    "match": "llama3|llama-3",
+    "good_for": [
+      "fast local chat",
+      "tool calling (local)",
+      "general-purpose tasks"
+    ]
+  },
+  {
+    "match": "llama2|llama-2",
+    "good_for": [
+      "general local chat",
+      "simple code tasks"
+    ]
+  },
+  {
+    "match": "codellama|code-llama",
+    "good_for": [
+      "code generation and completion",
+      "code explanation",
+      "debugging assistance"
+    ]
+  },
+  {
+    "match": "mixtral",
+    "good_for": [
+      "high-quality local inference",
+      "multilingual tasks",
+      "balanced performance"
+    ]
+  },
+  {
+    "match": "mistral",
+    "good_for": [
+      "fast local chat",
+      "efficient inference",
+      "simple coding tasks"
+    ]
+  },
+  {
+    "match": "phi|phi-3|phi3",
+    "good_for": [
+      "lightweight local inference",
+      "reasoning on edge devices",
+      "efficient small-scale tasks"
+    ]
+  },
+  {
+    "match": "qwen",
+    "good_for": [
+      "multilingual tasks",
+      "code generation",
+      "general chat"
+    ]
+  },
+  {
+    "match": "embedding",
+    "good_for": [
+      "semantic search and RAG",
+      "clustering and similarity"
+    ]
+  },
+  {
+    "match": "moderation",
+    "good_for": [
+      "content safety classification"
+    ]
+  },
+  {
+    "match": "whisper|transcribe|audio-to-text",
+    "good_for": [
+      "speech to text and transcription"
+    ]
+  },
+  {
+    "match": "tts|text-to-speech",
+    "good_for": [
+      "text to speech synthesis"
+    ]
+  },
+  {
+    "match": "dall-e|image-gen",
+    "good_for": [
+      "image generation from text prompts"
+    ]
+  },
+  {
+    "match": "vision",
+    "good_for": [
+      "image understanding and analysis"
+    ]
+  },
+  {
+    "match": "realtime",
+    "good_for": [
+      "streaming voice/chat interactions",
+      "low latency conversations"
+    ]
+  },
+  {
+    "match": "chatgpt-image-latest",
+    "good_for": [
+      "image generation from text prompts"
+    ]
+  },
+  {
+    "match": "gpt-image-1",
+    "good_for": [
+      "image generation from text prompts"
+    ]
+  },
+  {
+    "match": "gpt-image-1\\.5",
+    "good_for": [
+      "image generation from text prompts"
+    ]
+  }
+]
