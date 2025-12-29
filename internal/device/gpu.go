@@ -1,6 +1,7 @@
 package device
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -55,5 +56,31 @@ func NewAppleSiliconGPU() *types.GPUInfo {
 		Vendor:         "Apple",
 		IsAppleSilicon: true,
 		IsDiscrete:     false,
+	}
+}
+
+// ParseVRAM parses VRAM strings like "8 GB", "8192 MB" to bytes.
+func ParseVRAM(vramStr string) int64 {
+	vramStr = strings.TrimSpace(vramStr)
+	parts := strings.Fields(vramStr)
+	if len(parts) < 2 {
+		return 0
+	}
+
+	value, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0
+	}
+
+	unit := strings.ToUpper(parts[1])
+	switch unit {
+	case "GB":
+		return int64(value * float64(GB))
+	case "MB":
+		return int64(value * float64(MB))
+	case "KB":
+		return int64(value * float64(KB))
+	default:
+		return int64(value)
 	}
 }
