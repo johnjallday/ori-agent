@@ -6,6 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.7.1
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/anthropics/anthropic-sdk-go v1.19.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getlantern/systray v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
@@ -13,6 +14,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/openai/openai-go/v3 v3.15.0
 	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/sys v0.39.0
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -24,7 +26,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fredbi/uri v1.1.1 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fyne-io/gl-js v0.2.0 // indirect
 	github.com/fyne-io/oksvg v0.2.0 // indirect
 	github.com/getlantern/context v0.0.0-20220418194847-3d5e7a086201 // indirect
@@ -63,7 +64,6 @@ require (
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/image v0.34.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba // indirect
 	modernc.org/libc v1.66.10 // indirect
