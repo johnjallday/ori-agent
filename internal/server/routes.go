@@ -362,6 +362,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
 	mux.HandleFunc("/api/device/ollama", s.deviceHandler.GetOllamaStatus)
+	mux.HandleFunc("/api/device/capabilities", s.deviceHandler.GetCapabilities)
+	mux.HandleFunc("/api/device/detect-hardware", s.deviceHandler.DetectHardware)
 
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints
