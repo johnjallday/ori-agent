@@ -11,7 +11,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,7 +25,6 @@ var configYAML string
 type sessionFilesTool struct {
 	pluginapi.BasePlugin
 	httpClient *http.Client
-	auditLog   *os.File
 }
 
 // SessionFilesParams represents the parameters for this plugin
@@ -168,7 +166,7 @@ func handleList(t *sessionFilesTool, ctx context.Context, params *SessionFilesPa
 	if err != nil {
 		return "", fmt.Errorf("failed to list files: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -220,7 +218,7 @@ func handleRead(t *sessionFilesTool, ctx context.Context, params *SessionFilesPa
 	if err != nil {
 		return "", fmt.Errorf("failed to get file metadata: %w", err)
 	}
-	defer metaResp.Body.Close()
+	defer func() { _ = metaResp.Body.Close() }()
 
 	if metaResp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("file not found: %s", params.FileID)
@@ -264,7 +262,7 @@ func handleRead(t *sessionFilesTool, ctx context.Context, params *SessionFilesPa
 	if err != nil {
 		return "", fmt.Errorf("failed to download file: %w", err)
 	}
-	defer downloadResp.Body.Close()
+	defer func() { _ = downloadResp.Body.Close() }()
 
 	if downloadResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(downloadResp.Body)
@@ -342,7 +340,7 @@ func handleWrite(t *sessionFilesTool, ctx context.Context, params *SessionFilesP
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -441,7 +439,7 @@ func handleModify(t *sessionFilesTool, ctx context.Context, params *SessionFiles
 	if err != nil {
 		return "", fmt.Errorf("failed to get file metadata: %w", err)
 	}
-	defer metaResp.Body.Close()
+	defer func() { _ = metaResp.Body.Close() }()
 
 	if metaResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("file not found: %s", params.FileID)
@@ -463,7 +461,7 @@ func handleModify(t *sessionFilesTool, ctx context.Context, params *SessionFiles
 	if err != nil {
 		return "", fmt.Errorf("failed to delete old file: %w", err)
 	}
-	deleteResp.Body.Close()
+	_ = deleteResp.Body.Close()
 
 	// Create the new file with the same name
 	writeParams := &SessionFilesParams{
@@ -498,7 +496,7 @@ func handleDelete(t *sessionFilesTool, ctx context.Context, params *SessionFiles
 	if err != nil {
 		return "", fmt.Errorf("failed to delete file: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("file not found: %s", params.FileID)

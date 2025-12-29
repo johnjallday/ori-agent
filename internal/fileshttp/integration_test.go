@@ -24,7 +24,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -39,8 +39,8 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	writer := multipart.NewWriter(&buf)
 	part, _ := writer.CreateFormFile("file", "document.pdf")
 	content := []byte("PDF content here - this is a test file with enough content to verify")
-	part.Write(content)
-	writer.Close()
+	_, _ = part.Write(content)
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -71,7 +71,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	}
 
 	var listResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &listResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))
 	if count != 1 {
@@ -88,7 +88,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	}
 
 	var fileResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &fileResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &fileResp)
 
 	if fileResp["name"] != "document.pdf" {
 		t.Errorf("expected name 'document.pdf', got '%v'", fileResp["name"])
@@ -118,7 +118,7 @@ func TestIntegration_FileSystemChangeSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestIntegration_FileSystemChangeSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	// Start the watcher's event processor
 	watcher.Start()
@@ -225,7 +225,7 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -240,8 +240,8 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, _ := writer.CreateFormFile("file", "agent-readable.txt")
-	part.Write([]byte(testContent))
-	writer.Close()
+	_, _ = part.Write([]byte(testContent))
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -254,7 +254,7 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 	}
 
 	var uploadResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &uploadResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &uploadResp)
 	fileData := uploadResp["file"].(map[string]interface{})
 	fileID := fileData["id"].(string)
 
@@ -263,7 +263,7 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("agent read failed: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	// Step 3: Verify content
 	content, err := io.ReadAll(reader)
@@ -289,7 +289,7 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -316,7 +316,7 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 	}
 
 	var listResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &listResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))
 	if count != 1 {
@@ -346,7 +346,7 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -416,7 +416,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -447,7 +447,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 	}
 
 	var linkResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &linkResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &linkResp)
 	fileData := linkResp["file"].(map[string]interface{})
 	fileID := fileData["id"].(string)
 
@@ -461,7 +461,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 	}
 
 	var validateResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &validateResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &validateResp)
 
 	brokenCount := int(validateResp["count"].(float64))
 	if brokenCount != 0 {
@@ -482,7 +482,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 		t.Fatalf("validate failed with status %d", rr.Code)
 	}
 
-	json.Unmarshal(rr.Body.Bytes(), &validateResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &validateResp)
 	brokenCount = int(validateResp["count"].(float64))
 	if brokenCount != 1 {
 		t.Errorf("expected 1 broken link after deleting source, got %d", brokenCount)
@@ -525,7 +525,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 		t.Fatalf("validate failed with status %d", rr.Code)
 	}
 
-	json.Unmarshal(rr.Body.Bytes(), &validateResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &validateResp)
 	brokenCount = int(validateResp["count"].(float64))
 	if brokenCount != 0 {
 		t.Errorf("expected 0 broken links after relink, got %d", brokenCount)
@@ -541,7 +541,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -556,8 +556,8 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 		var buf bytes.Buffer
 		writer := multipart.NewWriter(&buf)
 		part, _ := writer.CreateFormFile("file", "file-"+string(rune('a'+i%26))+".txt")
-		part.Write([]byte("content"))
-		writer.Close()
+		_, _ = part.Write([]byte("content"))
+		_ = writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -574,8 +574,8 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, _ := writer.CreateFormFile("file", "one-too-many.txt")
-	part.Write([]byte("content"))
-	writer.Close()
+	_, _ = part.Write([]byte("content"))
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -589,7 +589,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 
 	// Verify error message (API returns {"code": "...", "message": "..."})
 	var errResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &errResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &errResp)
 
 	errorMsg, ok := errResp["message"].(string)
 	if !ok || errorMsg == "" {
@@ -606,7 +606,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
@@ -632,8 +632,8 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 		var buf bytes.Buffer
 		writer := multipart.NewWriter(&buf)
 		part, _ := writer.CreateFormFile("file", tf.name)
-		part.Write(tf.content)
-		writer.Close()
+		_, _ = part.Write(tf.content)
+		_ = writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -647,7 +647,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 		}
 
 		var resp map[string]interface{}
-		json.Unmarshal(rr.Body.Bytes(), &resp)
+		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 		fileData := resp["file"].(map[string]interface{})
 
 		// Verify MIME type detection (relaxed check - just ensure it's set)
@@ -663,7 +663,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 	handler.ListFiles(rr, req)
 
 	var listResp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &listResp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &listResp)
 
 	count := int(listResp["count"].(float64))
 	if count != len(testFiles) {

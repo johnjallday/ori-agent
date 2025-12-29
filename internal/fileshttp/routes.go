@@ -52,11 +52,12 @@ func RegisterRoutes(mux *http.ServeMux, h *Handler) {
 
 		// Watch control
 		case strings.HasSuffix(path, "/files/watch"):
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				h.StartWatching(w, r)
-			} else if r.Method == http.MethodDelete {
+			case http.MethodDelete:
 				h.StopWatching(w, r)
-			} else {
+			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 
@@ -78,11 +79,12 @@ func RegisterRoutes(mux *http.ServeMux, h *Handler) {
 
 		// Get or delete specific file
 		case strings.Contains(path, "/files/"):
-			if r.Method == http.MethodGet {
+			switch r.Method {
+			case http.MethodGet:
 				h.GetFile(w, r)
-			} else if r.Method == http.MethodDelete {
+			case http.MethodDelete:
 				h.DeleteFile(w, r)
-			} else {
+			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
 

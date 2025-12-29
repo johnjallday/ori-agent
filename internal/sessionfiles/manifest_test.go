@@ -182,7 +182,7 @@ func TestManifest_UpdateFileStatus(t *testing.T) {
 
 func TestManifest_ToJSON_FromJSON(t *testing.T) {
 	m := NewManifest("test-session")
-	m.AddFile(FileEntry{
+	_ = m.AddFile(FileEntry{
 		ID:       "file-1",
 		Name:     "test.txt",
 		Path:     "test.txt",
@@ -217,13 +217,13 @@ func TestLoadSaveManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	manifestPath := filepath.Join(tmpDir, "manifest.json")
 
 	// Create and save manifest
 	m := NewManifest("test-session")
-	m.AddFile(FileEntry{
+	_ = m.AddFile(FileEntry{
 		ID:       "file-1",
 		Name:     "test.txt",
 		Path:     "test.txt",

@@ -411,7 +411,7 @@ func (al *AuditLogger) Log(entry AuditEntry) {
 
 	// Auto-flush every 100 entries
 	if len(al.entries) >= 100 {
-		al.flushLocked()
+		_ = al.flushLocked()
 	}
 }
 
@@ -435,7 +435,7 @@ func (al *AuditLogger) flushLocked() error {
 	if err != nil {
 		return fmt.Errorf("failed to open audit log: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	encoder := json.NewEncoder(f)
 	for _, entry := range al.entries {

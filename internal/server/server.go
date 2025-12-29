@@ -168,7 +168,7 @@ func (s *Server) Shutdown() {
 		s.pluginUpdateService.Stop()
 	}
 	if s.sessionFilesWatcher != nil {
-		s.sessionFilesWatcher.Close()
+		_ = s.sessionFilesWatcher.Close()
 	}
 
 	// Clean up all loaded plugins

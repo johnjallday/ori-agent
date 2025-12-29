@@ -93,7 +93,7 @@ func TestPermissionChecker_CanRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tests := []struct {
 		name       string
@@ -126,7 +126,7 @@ func TestPermissionChecker_CanWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tests := []struct {
 		name       string
@@ -160,7 +160,7 @@ func TestPermissionChecker_CanDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tests := []struct {
 		name       string
@@ -193,7 +193,7 @@ func TestPermissionChecker_SessionOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Agent has full permission
 	pc := NewPermissionChecker(tmpDir, PermissionConfig{
@@ -231,13 +231,13 @@ func TestPermissionChecker_AllowedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	allowedDir, err := os.MkdirTemp("", "allowed-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(allowedDir)
+	defer func() { _ = os.RemoveAll(allowedDir) }()
 
 	pc := NewPermissionChecker(tmpDir, PermissionConfig{
 		Permission:   PermissionReadWrite,
@@ -262,7 +262,7 @@ func TestPermissionChecker_DeniedExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	pc := NewPermissionChecker(tmpDir, PermissionConfig{
 		Permission:       PermissionFull,
@@ -296,7 +296,7 @@ func TestPermissionChecker_AllowedExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	pc := NewPermissionChecker(tmpDir, PermissionConfig{
 		Permission:        PermissionFull,
@@ -330,7 +330,7 @@ func TestPermissionChecker_MaxFileSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	pc := NewPermissionChecker(tmpDir, PermissionConfig{
 		Permission:  PermissionReadWrite,
@@ -360,7 +360,7 @@ func TestAuditLogger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	logger, err := NewAuditLogger(tmpDir, "session-1", "agent-1")
 	if err != nil {
@@ -410,7 +410,7 @@ func TestPermissionChecker_WithAuditLogger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	logDir := filepath.Join(tmpDir, "logs")
 	logger, err := NewAuditLogger(logDir, "session-1", "agent-1")

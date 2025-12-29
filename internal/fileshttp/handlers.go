@@ -69,7 +69,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "File is required: "+err.Error())
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Validate filename
 	filename, ok := orihttp.ValidateUploadFilename(w, header.Filename)
@@ -95,7 +95,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		"size":       entry.Size,
 	})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"message": "File uploaded successfully",
 		"file":    entry,
 	})
@@ -157,7 +157,7 @@ func (h *Handler) LinkFile(w http.ResponseWriter, r *http.Request) {
 		"original_path": req.Path,
 	})
 
-	orihttp.RespondCreated(w, map[string]interface{}{
+	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"message": "File linked successfully",
 		"file":    entry,
 	})
@@ -181,7 +181,7 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"files": files,
 		"count": len(files),
 	})
@@ -205,7 +205,7 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.RespondSuccess(w, entry)
+	_ = orihttp.RespondSuccess(w, entry)
 }
 
 // DownloadFile handles GET /api/sessions/{id}/files/{fileId}/download
@@ -276,7 +276,7 @@ func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		"file_id":    fileID,
 	})
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"message": "File deleted successfully",
 	})
 }
@@ -334,7 +334,7 @@ func (h *Handler) RelinkFile(w http.ResponseWriter, r *http.Request) {
 		"new_path":   req.NewPath,
 	})
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"message": "File relinked successfully",
 		"file":    entry,
 	})
@@ -379,7 +379,7 @@ func (h *Handler) OpenFolder(w http.ResponseWriter, r *http.Request) {
 		"path":       folderPath,
 	})
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"message": "Folder opened",
 		"path":    folderPath,
 	})
@@ -403,7 +403,7 @@ func (h *Handler) ValidateLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"broken_links": brokenLinks,
 		"count":        len(brokenLinks),
 	})
@@ -437,11 +437,11 @@ func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
 	// Start watching if not already
 	filesPath := h.store.GetSessionFilesPath(sessionID)
 	if h.watcher != nil && !h.watcher.IsWatching(sessionID) {
-		h.watcher.Watch(sessionID, filesPath)
+		_ = h.watcher.Watch(sessionID, filesPath)
 	}
 
 	// Send initial connection event
-	fmt.Fprintf(w, "event: connected\ndata: {\"session_id\": \"%s\"}\n\n", sessionID)
+	_, _ = fmt.Fprintf(w, "event: connected\ndata: {\"session_id\": \"%s\"}\n\n", sessionID)
 	flusher.Flush()
 
 	// Listen for events
@@ -460,7 +460,7 @@ func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				data, _ := json.Marshal(event)
-				fmt.Fprintf(w, "event: file_change\ndata: %s\n\n", data)
+				_, _ = fmt.Fprintf(w, "event: file_change\ndata: %s\n\n", data)
 				flusher.Flush()
 			}
 		}
@@ -493,7 +493,7 @@ func (h *Handler) StartWatching(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"message": "Started watching session folder",
 		"path":    filesPath,
 	})
@@ -521,7 +521,7 @@ func (h *Handler) StopWatching(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orihttp.RespondSuccess(w, map[string]interface{}{
+	_ = orihttp.RespondSuccess(w, map[string]interface{}{
 		"message": "Stopped watching session folder",
 	})
 }

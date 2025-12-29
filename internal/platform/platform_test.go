@@ -294,7 +294,7 @@ func TestCreateSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create source file
 	srcPath := filepath.Join(tmpDir, "source.txt")
@@ -345,7 +345,7 @@ func TestCreateSymlink_NonExistentTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	result := CreateSymlink("/nonexistent/file.txt", filepath.Join(tmpDir, "link.txt"), false)
 	if result.Success {
@@ -358,7 +358,7 @@ func TestIsSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create regular file
 	regularPath := filepath.Join(tmpDir, "regular.txt")
@@ -394,7 +394,7 @@ func TestIsSymlinkBroken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create source file
 	srcPath := filepath.Join(tmpDir, "source.txt")
@@ -418,7 +418,7 @@ func TestIsSymlinkBroken(t *testing.T) {
 	}
 
 	// Delete source file
-	os.Remove(srcPath)
+	_ = os.Remove(srcPath)
 
 	// Link should now be broken
 	broken, err = IsSymlinkBroken(linkPath)

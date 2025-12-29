@@ -23,7 +23,7 @@ func setupTestHandler(t *testing.T) (*Handler, string) {
 
 	store, err := sessionfiles.NewStore(tmpDir)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("failed to create store: %v", err)
 	}
 
@@ -42,14 +42,14 @@ func createTestFile(t *testing.T, dir, name, content string) string {
 
 func TestHandler_UploadFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create multipart form
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, _ := writer.CreateFormFile("file", "test.txt")
-	part.Write([]byte("hello world"))
-	writer.Close()
+	_, _ = part.Write([]byte("hello world"))
+	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -62,7 +62,7 @@ func TestHandler_UploadFile(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	if resp["message"] != "File uploaded successfully" {
 		t.Errorf("unexpected message: %v", resp["message"])
@@ -71,7 +71,7 @@ func TestHandler_UploadFile(t *testing.T) {
 
 func TestHandler_UploadFile_NoFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/upload", nil)
 
@@ -85,7 +85,7 @@ func TestHandler_UploadFile_NoFile(t *testing.T) {
 
 func TestHandler_LinkFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a file to link
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
@@ -106,7 +106,7 @@ func TestHandler_LinkFile(t *testing.T) {
 
 func TestHandler_LinkFile_InvalidPath(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	body := map[string]string{"path": "/nonexistent/file.txt"}
 	jsonBody, _ := json.Marshal(body)
@@ -124,11 +124,11 @@ func TestHandler_LinkFile_InvalidPath(t *testing.T) {
 
 func TestHandler_ListFiles(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Upload a file first
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	handler.store.AddFile("session-1", srcPath, "test.txt")
+	_, _ = handler.store.AddFile("session-1", srcPath, "test.txt")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files", nil)
 
@@ -140,7 +140,7 @@ func TestHandler_ListFiles(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))
 	if count != 1 {
@@ -150,7 +150,7 @@ func TestHandler_ListFiles(t *testing.T) {
 
 func TestHandler_ListFiles_Empty(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files", nil)
 
@@ -162,7 +162,7 @@ func TestHandler_ListFiles_Empty(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))
 	if count != 0 {
@@ -172,7 +172,7 @@ func TestHandler_ListFiles_Empty(t *testing.T) {
 
 func TestHandler_GetFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add a file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
@@ -190,7 +190,7 @@ func TestHandler_GetFile(t *testing.T) {
 
 func TestHandler_GetFile_NotFound(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files/nonexistent", nil)
 
@@ -204,7 +204,7 @@ func TestHandler_GetFile_NotFound(t *testing.T) {
 
 func TestHandler_DeleteFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add a file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
@@ -228,7 +228,7 @@ func TestHandler_DeleteFile(t *testing.T) {
 
 func TestHandler_DeleteFile_NotFound(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/session-1/files/nonexistent", nil)
 
@@ -242,7 +242,7 @@ func TestHandler_DeleteFile_NotFound(t *testing.T) {
 
 func TestHandler_DownloadFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add a file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "hello download")
@@ -266,11 +266,11 @@ func TestHandler_DownloadFile(t *testing.T) {
 
 func TestHandler_ValidateLinks(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create and link a file
 	srcPath := createTestFile(t, tmpDir, "original.txt", "content")
-	handler.store.LinkFile("session-1", srcPath, "linked.txt")
+	_, _ = handler.store.LinkFile("session-1", srcPath, "linked.txt")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/validate", nil)
 
@@ -282,7 +282,7 @@ func TestHandler_ValidateLinks(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
 	count := int(resp["count"].(float64))
 	if count != 0 {
@@ -292,7 +292,7 @@ func TestHandler_ValidateLinks(t *testing.T) {
 
 func TestHandler_OpenFolder(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Note: We can't fully test this without actually opening a folder
 	// but we can test the handler accepts the request
@@ -310,7 +310,7 @@ func TestHandler_OpenFolder(t *testing.T) {
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	tests := []struct {
 		name    string
@@ -385,7 +385,7 @@ func TestExtractSessionAndFileID(t *testing.T) {
 
 func TestHandler_ReadFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add a file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "test content")
@@ -395,7 +395,7 @@ func TestHandler_ReadFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	if fileEntry.Name != "test.txt" {
 		t.Errorf("expected name 'test.txt', got '%s'", fileEntry.Name)

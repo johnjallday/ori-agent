@@ -12,7 +12,7 @@ func TestNewWatcher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	if w.fsWatcher == nil {
 		t.Error("fsWatcher should not be nil")
@@ -24,14 +24,14 @@ func TestWatcher_WatchUnwatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "watcher-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Watch
 	if err := w.Watch("session-1", tmpDir); err != nil {
@@ -57,16 +57,16 @@ func TestWatcher_WatchedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	// Create temp directories
 	tmpDir1, _ := os.MkdirTemp("", "watcher-test-1-*")
 	tmpDir2, _ := os.MkdirTemp("", "watcher-test-2-*")
-	defer os.RemoveAll(tmpDir1)
-	defer os.RemoveAll(tmpDir2)
+	defer func() { _ = os.RemoveAll(tmpDir1) }()
+	defer func() { _ = os.RemoveAll(tmpDir2) }()
 
-	w.Watch("session-1", tmpDir1)
-	w.Watch("session-2", tmpDir2)
+	_ = w.Watch("session-1", tmpDir1)
+	_ = w.Watch("session-2", tmpDir2)
 
 	sessions := w.WatchedSessions()
 	if len(sessions) != 2 {
@@ -84,14 +84,14 @@ func TestWatcher_DetectsFileCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "watcher-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Start watcher
 	w.Start()
@@ -138,22 +138,22 @@ func TestWatcher_DetectsFileRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	// Create temp directory with a file
 	tmpDir, _ := os.MkdirTemp("", "watcher-test-*")
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	filePath := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(filePath, []byte("hello"), 0644)
+	_ = os.WriteFile(filePath, []byte("hello"), 0644)
 
 	// Start watcher
 	w.Start()
-	w.Watch("session-1", tmpDir)
+	_ = w.Watch("session-1", tmpDir)
 	time.Sleep(50 * time.Millisecond)
 
 	// Remove the file
-	os.Remove(filePath)
+	_ = os.Remove(filePath)
 
 	// Wait for event
 	select {
@@ -176,18 +176,18 @@ func TestWatcher_IgnoresHiddenFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	tmpDir, _ := os.MkdirTemp("", "watcher-test-*")
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	w.Start()
-	w.Watch("session-1", tmpDir)
+	_ = w.Watch("session-1", tmpDir)
 	time.Sleep(50 * time.Millisecond)
 
 	// Create a hidden file
 	hiddenPath := filepath.Join(tmpDir, ".hidden")
-	os.WriteFile(hiddenPath, []byte("hidden"), 0644)
+	_ = os.WriteFile(hiddenPath, []byte("hidden"), 0644)
 
 	// Should not receive event
 	select {
@@ -208,20 +208,20 @@ func TestWatcher_IgnoresTempFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watcher: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	tmpDir, _ := os.MkdirTemp("", "watcher-test-*")
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	w.Start()
-	w.Watch("session-1", tmpDir)
+	_ = w.Watch("session-1", tmpDir)
 	time.Sleep(50 * time.Millisecond)
 
 	// Create temp files
 	tempFiles := []string{"~$document.docx", "file.tmp", "file.swp"}
 	for _, name := range tempFiles {
 		path := filepath.Join(tmpDir, name)
-		os.WriteFile(path, []byte("temp"), 0644)
+		_ = os.WriteFile(path, []byte("temp"), 0644)
 	}
 
 	// Should not receive events

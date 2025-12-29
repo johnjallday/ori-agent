@@ -249,16 +249,6 @@ func TestBase64Encoding(t *testing.T) {
 	}
 }
 
-// testableSessionFilesTool wraps sessionFilesTool for testing with a configurable server URL
-type testableSessionFilesTool struct {
-	*sessionFilesTool
-	serverURL string
-}
-
-func (t *testableSessionFilesTool) getServerURL() string {
-	return t.serverURL
-}
-
 // TestHandleListWithMockServer tests the list operation with a mock server
 func TestHandleListWithMockServer(t *testing.T) {
 	// Create a mock server
@@ -273,7 +263,7 @@ func TestHandleListWithMockServer(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"session_id": "test-session",
 			"files": [
 				{"id": "f1", "name": "test.txt", "size": 100, "mime_type": "text/plain", "status": "ok"}
@@ -300,7 +290,7 @@ func TestHandleListWithMockServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
@@ -333,7 +323,7 @@ func TestHandleDeleteWithMockServer(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "File deleted"}`))
+		_, _ = w.Write([]byte(`{"message": "File deleted"}`))
 	}))
 	defer server.Close()
 
@@ -348,7 +338,7 @@ func TestHandleDeleteWithMockServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
@@ -416,7 +406,7 @@ func TestMissingRequiredParams(t *testing.T) {
 	// Create a mock server that always returns 200 so we can test param validation
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 

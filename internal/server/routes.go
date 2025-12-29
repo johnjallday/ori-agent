@@ -558,9 +558,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 					return
 				}
 				if strings.Contains(path, "/files/watch") {
-					if r.Method == http.MethodPost {
+					switch r.Method {
+					case http.MethodPost:
 						s.sessionFilesHandler.StartWatching(w, r)
-					} else if r.Method == http.MethodDelete {
+					case http.MethodDelete:
 						s.sessionFilesHandler.StopWatching(w, r)
 					}
 					return

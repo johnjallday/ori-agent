@@ -117,7 +117,7 @@ func (s *Store) AddFile(sessionID string, srcPath string, name string) (*FileEnt
 	if err != nil {
 		return nil, fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	// Get file info
 	srcInfo, err := srcFile.Stat()
@@ -134,10 +134,10 @@ func (s *Store) AddFile(sessionID string, srcPath string, name string) (*FileEnt
 	if err != nil {
 		return nil, fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer destFile.Close()
+	defer func() { _ = destFile.Close() }()
 
 	if _, err := io.Copy(destFile, srcFile); err != nil {
-		os.Remove(destPath) // Cleanup on failure
+		_ = os.Remove(destPath) // Cleanup on failure
 		return nil, fmt.Errorf("failed to copy file: %w", err)
 	}
 
@@ -160,7 +160,7 @@ func (s *Store) AddFile(sessionID string, srcPath string, name string) (*FileEnt
 	s.mu.Lock()
 	if err := manifest.AddFile(entry); err != nil {
 		s.mu.Unlock()
-		os.Remove(destPath) // Cleanup on failure
+		_ = os.Remove(destPath) // Cleanup on failure
 		return nil, err
 	}
 	s.mu.Unlock()
@@ -208,11 +208,11 @@ func (s *Store) AddFileFromReader(sessionID string, reader io.Reader, name strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer destFile.Close()
+	defer func() { _ = destFile.Close() }()
 
 	written, err := io.Copy(destFile, reader)
 	if err != nil {
-		os.Remove(destPath) // Cleanup on failure
+		_ = os.Remove(destPath) // Cleanup on failure
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -235,7 +235,7 @@ func (s *Store) AddFileFromReader(sessionID string, reader io.Reader, name strin
 	s.mu.Lock()
 	if err := manifest.AddFile(entry); err != nil {
 		s.mu.Unlock()
-		os.Remove(destPath)
+		_ = os.Remove(destPath)
 		return nil, err
 	}
 	s.mu.Unlock()
@@ -312,7 +312,7 @@ func (s *Store) LinkFile(sessionID string, originalPath string, name string) (*F
 	s.mu.Lock()
 	if err := manifest.AddFile(entry); err != nil {
 		s.mu.Unlock()
-		os.Remove(linkPath)
+		_ = os.Remove(linkPath)
 		return nil, err
 	}
 	s.mu.Unlock()
@@ -476,7 +476,7 @@ func (s *Store) RelinkFile(sessionID string, fileID string, newPath string) erro
 
 	// Remove old symlink
 	oldLinkPath := filepath.Join(s.getFilesPath(sessionID), entry.Path)
-	os.Remove(oldLinkPath)
+	_ = os.Remove(oldLinkPath)
 
 	// Create new symlink
 	if err := os.Symlink(newPath, oldLinkPath); err != nil {

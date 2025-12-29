@@ -15,7 +15,7 @@ func setupTestStore(t *testing.T) (*Store, string) {
 
 	store, err := NewStore(tmpDir)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("failed to create store: %v", err)
 	}
 
@@ -32,7 +32,7 @@ func createTestFile(t *testing.T, dir, name, content string) string {
 
 func TestNewStore(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	if store == nil {
 		t.Fatal("store should not be nil")
@@ -45,7 +45,7 @@ func TestNewStore(t *testing.T) {
 
 func TestStore_AddFile(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a source file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "hello world")
@@ -77,7 +77,7 @@ func TestStore_AddFile(t *testing.T) {
 
 func TestStore_AddFileFromReader(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	content := "test content from reader"
 	reader := strings.NewReader(content)
@@ -109,7 +109,7 @@ func TestStore_AddFileFromReader(t *testing.T) {
 
 func TestStore_LinkFile(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a source file
 	srcPath := createTestFile(t, tmpDir, "original.txt", "original content")
@@ -146,11 +146,14 @@ func TestStore_LinkFile(t *testing.T) {
 
 func TestStore_RemoveFile(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create and add a file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	entry, _ := store.AddFile("session-1", srcPath, "test.txt")
+	entry, err := store.AddFile("session-1", srcPath, "test.txt")
+	if err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
 
 	// Remove file
 	if err := store.RemoveFile("session-1", entry.ID); err != nil {
@@ -158,7 +161,10 @@ func TestStore_RemoveFile(t *testing.T) {
 	}
 
 	// Verify file is removed from manifest
-	files, _ := store.ListFiles("session-1")
+	files, err := store.ListFiles("session-1")
+	if err != nil {
+		t.Fatalf("failed to list files: %v", err)
+	}
 	if len(files) != 0 {
 		t.Errorf("expected 0 files after removal, got %d", len(files))
 	}
@@ -172,10 +178,13 @@ func TestStore_RemoveFile(t *testing.T) {
 
 func TestStore_GetFile(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	entry, _ := store.AddFile("session-1", srcPath, "test.txt")
+	entry, err := store.AddFile("session-1", srcPath, "test.txt")
+	if err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
 
 	retrieved, err := store.GetFile("session-1", entry.ID)
 	if err != nil {
@@ -189,7 +198,7 @@ func TestStore_GetFile(t *testing.T) {
 
 func TestStore_GetFile_NotFound(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	_, err := store.GetFile("session-1", "nonexistent")
 	if err == nil {
@@ -199,14 +208,20 @@ func TestStore_GetFile_NotFound(t *testing.T) {
 
 func TestStore_ListFiles(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add multiple files
 	srcPath1 := createTestFile(t, tmpDir, "source1.txt", "content1")
 	srcPath2 := createTestFile(t, tmpDir, "source2.txt", "content2")
 
-	store.AddFile("session-1", srcPath1, "file1.txt")
-	store.AddFile("session-1", srcPath2, "file2.txt")
+	_, err := store.AddFile("session-1", srcPath1, "file1.txt")
+	if err != nil {
+		t.Fatalf("failed to add file1: %v", err)
+	}
+	_, err = store.AddFile("session-1", srcPath2, "file2.txt")
+	if err != nil {
+		t.Fatalf("failed to add file2: %v", err)
+	}
 
 	files, err := store.ListFiles("session-1")
 	if err != nil {
@@ -220,23 +235,32 @@ func TestStore_ListFiles(t *testing.T) {
 
 func TestStore_ValidateLinks(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create and link a file
 	srcPath := createTestFile(t, tmpDir, "original.txt", "content")
-	entry, _ := store.LinkFile("session-1", srcPath, "linked.txt")
+	entry, err := store.LinkFile("session-1", srcPath, "linked.txt")
+	if err != nil {
+		t.Fatalf("failed to link file: %v", err)
+	}
 
 	// Validate links (should be OK)
-	brokenLinks, _ := store.ValidateLinks("session-1")
+	brokenLinks, err := store.ValidateLinks("session-1")
+	if err != nil {
+		t.Fatalf("failed to validate links: %v", err)
+	}
 	if len(brokenLinks) != 0 {
 		t.Errorf("expected 0 broken links, got %d", len(brokenLinks))
 	}
 
 	// Remove original file
-	os.Remove(srcPath)
+	_ = os.Remove(srcPath)
 
 	// Validate links (should be broken)
-	brokenLinks, _ = store.ValidateLinks("session-1")
+	brokenLinks, err = store.ValidateLinks("session-1")
+	if err != nil {
+		t.Fatalf("failed to validate links after removal: %v", err)
+	}
 	if len(brokenLinks) != 1 {
 		t.Errorf("expected 1 broken link, got %d", len(brokenLinks))
 	}
@@ -248,11 +272,14 @@ func TestStore_ValidateLinks(t *testing.T) {
 
 func TestStore_GetFilePath(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Test with copied file
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	entry, _ := store.AddFile("session-1", srcPath, "test.txt")
+	entry, err := store.AddFile("session-1", srcPath, "test.txt")
+	if err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
 
 	path, err := store.GetFilePath("session-1", entry.ID)
 	if err != nil {
@@ -267,11 +294,14 @@ func TestStore_GetFilePath(t *testing.T) {
 
 func TestStore_GetFilePath_Link(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Test with linked file
 	srcPath := createTestFile(t, tmpDir, "original.txt", "content")
-	entry, _ := store.LinkFile("session-1", srcPath, "linked.txt")
+	entry, err := store.LinkFile("session-1", srcPath, "linked.txt")
+	if err != nil {
+		t.Fatalf("failed to link file: %v", err)
+	}
 
 	path, err := store.GetFilePath("session-1", entry.ID)
 	if err != nil {
@@ -285,7 +315,7 @@ func TestStore_GetFilePath_Link(t *testing.T) {
 
 func TestStore_MaxFileLimit(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Set a low limit for testing
 	manifest := store.getOrCreateManifest("session-1")
@@ -295,11 +325,17 @@ func TestStore_MaxFileLimit(t *testing.T) {
 	srcPath2 := createTestFile(t, tmpDir, "source2.txt", "content2")
 	srcPath3 := createTestFile(t, tmpDir, "source3.txt", "content3")
 
-	store.AddFile("session-1", srcPath1, "file1.txt")
-	store.AddFile("session-1", srcPath2, "file2.txt")
+	_, err := store.AddFile("session-1", srcPath1, "file1.txt")
+	if err != nil {
+		t.Fatalf("failed to add file1: %v", err)
+	}
+	_, err = store.AddFile("session-1", srcPath2, "file2.txt")
+	if err != nil {
+		t.Fatalf("failed to add file2: %v", err)
+	}
 
 	// Third file should fail
-	_, err := store.AddFile("session-1", srcPath3, "file3.txt")
+	_, err = store.AddFile("session-1", srcPath3, "file3.txt")
 	if err == nil {
 		t.Error("expected error when exceeding max file limit")
 	}
@@ -307,11 +343,14 @@ func TestStore_MaxFileLimit(t *testing.T) {
 
 func TestStore_DeleteSession(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add files to session
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	store.AddFile("session-1", srcPath, "test.txt")
+	_, err := store.AddFile("session-1", srcPath, "test.txt")
+	if err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
 
 	// Verify session directory exists
 	sessionPath := store.getSessionPath("session-1")
@@ -332,11 +371,14 @@ func TestStore_DeleteSession(t *testing.T) {
 
 func TestStore_RelinkFile(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create and link a file
 	srcPath := createTestFile(t, tmpDir, "original.txt", "original content")
-	entry, _ := store.LinkFile("session-1", srcPath, "linked.txt")
+	entry, err := store.LinkFile("session-1", srcPath, "linked.txt")
+	if err != nil {
+		t.Fatalf("failed to link file: %v", err)
+	}
 
 	// Create a new file to link to
 	newPath := createTestFile(t, tmpDir, "new-original.txt", "new content")
@@ -347,7 +389,10 @@ func TestStore_RelinkFile(t *testing.T) {
 	}
 
 	// Verify the link points to new file
-	retrieved, _ := store.GetFile("session-1", entry.ID)
+	retrieved, err := store.GetFile("session-1", entry.ID)
+	if err != nil {
+		t.Fatalf("failed to get file: %v", err)
+	}
 	if retrieved.OriginalPath != newPath {
 		t.Errorf("expected original path '%s', got '%s'", newPath, retrieved.OriginalPath)
 	}
@@ -355,15 +400,18 @@ func TestStore_RelinkFile(t *testing.T) {
 
 func TestStore_RelinkFile_NotALink(t *testing.T) {
 	store, tmpDir := setupTestStore(t)
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Add a copied file (not a link)
 	srcPath := createTestFile(t, tmpDir, "source.txt", "content")
-	entry, _ := store.AddFile("session-1", srcPath, "test.txt")
+	entry, err := store.AddFile("session-1", srcPath, "test.txt")
+	if err != nil {
+		t.Fatalf("failed to add file: %v", err)
+	}
 
 	// Try to relink (should fail)
 	newPath := createTestFile(t, tmpDir, "new.txt", "new content")
-	err := store.RelinkFile("session-1", entry.ID, newPath)
+	err = store.RelinkFile("session-1", entry.ID, newPath)
 	if err == nil {
 		t.Error("expected error when relinking a non-link file")
 	}
