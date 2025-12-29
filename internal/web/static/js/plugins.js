@@ -3,8 +3,18 @@
 // State management
 let allPlugins = [];
 let filteredPlugins = [];
+let paginatedPlugins = [];
 let notifications = [];
 let selectedPlugins = new Set();
+
+// Pagination state
+let currentPage = 1;
+let pageSize = 25;
+let totalPages = 1;
+
+// Sorting state
+let sortColumn = 'name';
+let sortDirection = 'asc';
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
@@ -32,6 +42,11 @@ function initializeEventListeners() {
 
     // Select all checkbox
     document.getElementById('selectAll').addEventListener('change', handleSelectAll);
+
+    // Sortable headers
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', () => handleSort(header.dataset.sort));
+    });
 }
 
 // API calls
@@ -43,8 +58,10 @@ async function loadPlugins() {
 
         if (data.plugins) {
             allPlugins = data.plugins;
-            filteredPlugins = [...allPlugins];
+            filteredPlugins = sortPlugins([...allPlugins]);
+            updatePagination();
             renderPluginsTable();
+            renderMobileCards();
         }
     } catch (error) {
         console.error('Failed to load plugins:', error);
@@ -142,42 +159,216 @@ async function dismissNotification(notificationId) {
     }
 }
 
+// Sorting function
+function handleSort(column) {
+    // Toggle direction if same column, otherwise default to asc
+    if (sortColumn === column) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortColumn = column;
+        sortDirection = 'asc';
+    }
+
+    // Update header UI
+    document.querySelectorAll('.sortable').forEach(h => {
+        h.classList.remove('active', 'desc');
+    });
+    const activeHeader = document.querySelector(`.sortable[data-sort="${column}"]`);
+    if (activeHeader) {
+        activeHeader.classList.add('active');
+        if (sortDirection === 'desc') {
+            activeHeader.classList.add('desc');
+        }
+    }
+
+    applyFilters();
+}
+
+// Sort plugins
+function sortPlugins(plugins) {
+    return [...plugins].sort((a, b) => {
+        let aVal, bVal;
+
+        switch (sortColumn) {
+            case 'name':
+                aVal = (a.name || '').toLowerCase();
+                bVal = (b.name || '').toLowerCase();
+                break;
+            case 'version':
+                aVal = a.version || '';
+                bVal = b.version || '';
+                break;
+            case 'status':
+                aVal = getPluginStatusPriority(a);
+                bVal = getPluginStatusPriority(b);
+                break;
+            case 'category':
+                aVal = (a.category || '').toLowerCase();
+                bVal = (b.category || '').toLowerCase();
+                break;
+            default:
+                return 0;
+        }
+
+        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+}
+
+// Get status priority for sorting (errors first)
+function getPluginStatusPriority(plugin) {
+    if (plugin.health_status === 'error') return 0;
+    if (plugin.needs_update) return 1;
+    if (!plugin.is_configured) return 2;
+    return 3;
+}
+
+// Pagination functions
+function updatePagination() {
+    totalPages = Math.ceil(filteredPlugins.length / pageSize);
+    if (currentPage > totalPages) currentPage = totalPages || 1;
+
+    const start = (currentPage - 1) * pageSize;
+    const end = Math.min(start + pageSize, filteredPlugins.length);
+    paginatedPlugins = filteredPlugins.slice(start, end);
+
+    // Update pagination info
+    document.getElementById('paginationStart').textContent = filteredPlugins.length > 0 ? start + 1 : 0;
+    document.getElementById('paginationEnd').textContent = end;
+    document.getElementById('paginationTotal').textContent = filteredPlugins.length;
+
+    // Update buttons
+    document.getElementById('prevPage').disabled = currentPage <= 1;
+    document.getElementById('nextPage').disabled = currentPage >= totalPages;
+
+    // Render page numbers
+    renderPageNumbers();
+}
+
+function renderPageNumbers() {
+    const container = document.getElementById('pageNumbers');
+    if (!container) return;
+
+    let html = '';
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<button class="pagination-btn" onclick="goToPage(1)">1</button>`;
+        if (startPage > 2) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+        html += `<button class="pagination-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function changePage(delta) {
+    goToPage(currentPage + delta);
+}
+
+function goToPage(page) {
+    currentPage = Math.max(1, Math.min(page, totalPages));
+    updatePagination();
+    renderPluginsTable();
+    renderMobileCards();
+}
+
+function changePageSize(size) {
+    pageSize = parseInt(size, 10);
+    currentPage = 1;
+    updatePagination();
+    renderPluginsTable();
+    renderMobileCards();
+}
+
+// Get plugin icon based on category
+function getPluginIcon(plugin) {
+    const category = (plugin.category || '').toLowerCase();
+    let iconClass = '';
+    let iconSvg = '';
+
+    if (category.includes('system')) {
+        iconClass = 'category-system';
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/></svg>';
+    } else if (category.includes('ai') || category.includes('ml')) {
+        iconClass = 'category-ai';
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M21.33,12.91C21.42,14.46 20.71,15.95 19.44,16.86L20.21,18.35C20.44,18.8 20.47,19.33 20.27,19.8C20.08,20.27 19.69,20.64 19.21,20.8L18.42,21.05C18.25,21.11 18.06,21.14 17.88,21.14C17.37,21.14 16.89,20.91 16.56,20.5L14.44,18C13.55,17.85 12.71,17.47 12,16.9C11.5,17.05 11,17.13 10.5,17.13C9.62,17.13 8.74,16.86 8,16.36L6.73,17.63C6.19,18.17 5.39,18.38 4.66,18.18L4.24,18.07C3.44,17.86 2.79,17.31 2.5,16.57L2.41,16.35C2.05,15.47 2.21,14.47 2.82,13.75L4.11,12.17C3.86,11.08 3.86,9.94 4.12,8.85L2.82,7.27C2.2,6.55 2.04,5.55 2.41,4.67L2.5,4.46C2.79,3.72 3.44,3.16 4.24,2.96L4.66,2.85C5.39,2.64 6.19,2.86 6.73,3.39L8,4.65C8.74,4.15 9.62,3.88 10.5,3.88C11,3.88 11.5,3.96 12,4.11C12.71,3.55 13.55,3.17 14.44,3L16.56,0.5C16.9,0.11 17.37,-0.11 17.89,0.14C18.06,0.14 18.25,0.17 18.42,0.22L19.21,0.48C19.69,0.64 20.08,1.01 20.27,1.48C20.47,1.95 20.44,2.48 20.21,2.93L19.44,4.42C20.7,5.33 21.42,6.82 21.33,8.37L21.33,12.91Z"/></svg>';
+    } else if (category.includes('data')) {
+        iconClass = 'category-data';
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,3C7.58,3 4,4.79 4,7C4,9.21 7.58,11 12,11C16.42,11 20,9.21 20,7C20,4.79 16.42,3 12,3M4,9V12C4,14.21 7.58,16 12,16C16.42,16 20,14.21 20,12V9C20,11.21 16.42,13 12,13C7.58,13 4,11.21 4,9M4,14V17C4,19.21 7.58,21 12,21C16.42,21 20,19.21 20,17V14C20,16.21 16.42,18 12,18C7.58,18 4,16.21 4,14Z"/></svg>';
+    } else if (category.includes('automation')) {
+        iconClass = 'category-automation';
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/></svg>';
+    } else if (category.includes('security')) {
+        iconClass = 'category-security';
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12,12H19C18.47,16.11 15.72,19.78 12,20.92V12H5V6.3L12,3.19M12,1L3,5V11C3,16.55 6.84,21.73 12,23C17.16,21.73 21,16.55 21,11V5L12,1Z"/></svg>';
+    } else {
+        iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/></svg>';
+    }
+
+    return `<div class="plugin-icon ${iconClass}">${iconSvg}</div>`;
+}
+
 // Rendering functions
 function renderPluginsTable() {
     const tbody = document.getElementById('pluginsTableBody');
     const emptyState = document.getElementById('emptyState');
+    const tableContainer = document.querySelector('.plugins-table-container');
+    const paginationContainer = document.getElementById('paginationContainer');
 
     if (filteredPlugins.length === 0) {
         tbody.innerHTML = '';
         emptyState.style.display = 'block';
+        if (tableContainer) tableContainer.style.display = 'none';
         return;
     }
 
     emptyState.style.display = 'none';
+    if (tableContainer) tableContainer.style.display = 'block';
 
-    tbody.innerHTML = filteredPlugins.map(plugin => `
+    // Show/hide pagination based on total items
+    if (paginationContainer) {
+        paginationContainer.style.display = filteredPlugins.length > 10 ? 'flex' : 'none';
+    }
+
+    tbody.innerHTML = paginatedPlugins.map(plugin => `
         <tr data-plugin="${plugin.name}">
             <td>
-                <input type="checkbox" class="plugin-checkbox" data-plugin="${plugin.name}">
+                <input type="checkbox" class="plugin-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
             </td>
             <td>
                 <div class="plugin-name-cell">
+                    ${getPluginIcon(plugin)}
                     <div>
-                        <div class="plugin-name">${plugin.name}</div>
-                        <div class="plugin-description">${plugin.description || 'No description'}</div>
+                        <div class="plugin-name">${escapeHtml(plugin.name)}</div>
+                        <div class="plugin-description">${escapeHtml(plugin.description || 'No description')}</div>
                         ${renderTagBadges(plugin.tags)}
                     </div>
                 </div>
             </td>
-            <td>${plugin.version || 'N/A'}</td>
+            <td>${escapeHtml(plugin.version || 'N/A')}</td>
             <td>${renderStatusBadge(plugin)}</td>
-            <td><span class="category-badge">${plugin.category || 'Uncategorized'}</span></td>
+            <td><span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span></td>
             <td>
                 <div class="action-buttons">
-                    <button class="btn-action" onclick="showPluginDetails('${plugin.name}')">Details</button>
-                    <button class="btn-action" onclick="testPlugin('${plugin.name}')">Test</button>
-                    <button class="btn-action" onclick="rollbackPlugin('${plugin.name}')">Rollback</button>
-                    <button class="btn-action btn-danger" onclick="deletePlugin('${plugin.name}')">Remove</button>
+                    <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                    <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
+                    <button class="btn-action" onclick="rollbackPlugin('${escapeHtml(plugin.name)}')">Rollback</button>
+                    <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
                 </div>
             </td>
         </tr>
@@ -187,6 +378,57 @@ function renderPluginsTable() {
     document.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', handlePluginCheckbox);
     });
+
+    // Update select all state
+    updateSelectAllState();
+}
+
+// Render mobile card view
+function renderMobileCards() {
+    const container = document.getElementById('pluginsCardsContainer');
+    if (!container) return;
+
+    if (paginatedPlugins.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = paginatedPlugins.map(plugin => `
+        <div class="plugin-card" data-plugin="${plugin.name}">
+            <div class="plugin-card-header">
+                <input type="checkbox" class="plugin-checkbox plugin-card-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
+                ${getPluginIcon(plugin)}
+                <div class="plugin-card-info">
+                    <div class="plugin-card-name">${escapeHtml(plugin.name)}</div>
+                    <div class="plugin-card-description">${escapeHtml(plugin.description || 'No description')}</div>
+                </div>
+            </div>
+            <div class="plugin-card-meta">
+                ${renderStatusBadge(plugin)}
+                <span class="category-badge">${escapeHtml(plugin.category || 'Uncategorized')}</span>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">v${escapeHtml(plugin.version || 'N/A')}</span>
+            </div>
+            ${renderTagBadges(plugin.tags)}
+            <div class="plugin-card-actions">
+                <button class="btn-action" onclick="showPluginDetails('${escapeHtml(plugin.name)}')">Details</button>
+                <button class="btn-action" onclick="testPlugin('${escapeHtml(plugin.name)}')">Test</button>
+                <button class="btn-action btn-danger" onclick="deletePlugin('${escapeHtml(plugin.name)}')">Remove</button>
+            </div>
+        </div>
+    `).join('');
+
+    // Add checkbox event listeners for cards
+    container.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', handlePluginCheckbox);
+    });
+}
+
+// HTML escape helper
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 function renderTagBadges(tags) {
@@ -215,6 +457,13 @@ function renderStatusBadge(plugin) {
             <span class="status-badge status-update">
                 <span class="status-dot"></span>
                 Needs Update
+            </span>
+        `;
+    } else if (plugin.is_configured === false) {
+        return `
+            <span class="status-badge status-not-configured">
+                <span class="status-dot"></span>
+                Not Configured
             </span>
         `;
     }
@@ -436,21 +685,37 @@ function applyFilters() {
         return matchesSearch && matchesStatus && matchesCategory;
     });
 
+    // Apply sorting
+    filteredPlugins = sortPlugins(filteredPlugins);
+
+    // Reset to first page when filtering
+    currentPage = 1;
+
+    // Update pagination and render
+    updatePagination();
     renderPluginsTable();
+    renderMobileCards();
 }
 
 function getPluginStatus(plugin) {
     if (plugin.health_status === 'error') return 'error';
     if (plugin.needs_update) return 'update';
-    return ''; // No status for healthy plugins
+    if (plugin.is_configured === false) return 'not-configured';
+    return 'healthy';
 }
 
 function handleSelectAll(e) {
     const checkboxes = document.querySelectorAll('.plugin-checkbox');
     checkboxes.forEach(cb => {
         cb.checked = e.target.checked;
-        handlePluginCheckbox({ target: cb });
+        const pluginName = cb.dataset.plugin;
+        if (e.target.checked) {
+            selectedPlugins.add(pluginName);
+        } else {
+            selectedPlugins.delete(pluginName);
+        }
     });
+    updateBulkActionsBar();
 }
 
 function handlePluginCheckbox(e) {
@@ -459,8 +724,138 @@ function handlePluginCheckbox(e) {
         selectedPlugins.add(pluginName);
     } else {
         selectedPlugins.delete(pluginName);
-        document.getElementById('selectAll').checked = false;
     }
+    updateSelectAllState();
+    updateBulkActionsBar();
+}
+
+function updateSelectAllState() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.plugin-checkbox');
+    const checkedCount = document.querySelectorAll('.plugin-checkbox:checked').length;
+
+    if (checkboxes.length === 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    } else if (checkedCount === 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    } else if (checkedCount === checkboxes.length) {
+        selectAll.checked = true;
+        selectAll.indeterminate = false;
+    } else {
+        selectAll.checked = false;
+        selectAll.indeterminate = true;
+    }
+}
+
+function updateBulkActionsBar() {
+    const bar = document.getElementById('bulkActionsBar');
+    const countSpan = document.getElementById('selectedCount');
+
+    if (selectedPlugins.size > 0) {
+        bar.classList.add('active');
+        countSpan.textContent = selectedPlugins.size;
+    } else {
+        bar.classList.remove('active');
+    }
+}
+
+// Bulk action functions
+async function bulkDeletePlugins() {
+    if (selectedPlugins.size === 0) {
+        showToast('No plugins selected', 'warning');
+        return;
+    }
+
+    const count = selectedPlugins.size;
+    if (!confirm(`Are you sure you want to delete ${count} plugin${count > 1 ? 's' : ''}? This action cannot be undone.`)) {
+        return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const pluginName of selectedPlugins) {
+        try {
+            const response = await fetch(`/api/plugins/${pluginName}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                successCount++;
+            } else {
+                failCount++;
+            }
+        } catch (error) {
+            console.error(`Failed to delete plugin ${pluginName}:`, error);
+            failCount++;
+        }
+    }
+
+    selectedPlugins.clear();
+    updateBulkActionsBar();
+
+    if (successCount > 0) {
+        showToast(`Deleted ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
+    }
+    if (failCount > 0) {
+        showToast(`Failed to delete ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
+    }
+
+    await loadPlugins();
+}
+
+async function bulkUpdatePlugins() {
+    if (selectedPlugins.size === 0) {
+        showToast('No plugins selected', 'warning');
+        return;
+    }
+
+    // Filter to only plugins that need updates
+    const pluginsToUpdate = [...selectedPlugins].filter(name => {
+        const plugin = allPlugins.find(p => p.name === name);
+        return plugin && plugin.needs_update;
+    });
+
+    if (pluginsToUpdate.length === 0) {
+        showToast('No selected plugins need updates', 'info');
+        return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const pluginName of pluginsToUpdate) {
+        try {
+            const response = await fetch(`/api/plugins/${pluginName}/update`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                successCount++;
+            } else {
+                failCount++;
+            }
+        } catch (error) {
+            console.error(`Failed to update plugin ${pluginName}:`, error);
+            failCount++;
+        }
+    }
+
+    selectedPlugins.clear();
+    updateBulkActionsBar();
+
+    if (successCount > 0) {
+        showToast(`Updated ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
+    }
+    if (failCount > 0) {
+        showToast(`Failed to update ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
+    }
+
+    await loadPlugins();
 }
 
 function toggleNotificationDrawer() {

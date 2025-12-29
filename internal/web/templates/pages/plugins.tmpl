@@ -647,17 +647,291 @@
 .empty-state-icon {
     font-size: 4rem;
     margin-bottom: 1rem;
-    opacity: 0.3;
+    opacity: 0.5;
 }
 
 .empty-state-text {
-    font-size: 1.1rem;
+    font-size: 1.25rem;
     margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    font-weight: 500;
 }
 
 .empty-state-subtext {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     color: var(--text-muted);
+    margin-bottom: 1.5rem;
+}
+
+.empty-state-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+/* Bulk Actions Toolbar */
+.bulk-actions-bar {
+    display: none;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--primary-color);
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    animation: slideDown 0.2s ease;
+}
+
+.bulk-actions-bar.active {
+    display: flex;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.bulk-actions-count {
+    font-weight: 500;
+    color: var(--text-primary);
+    padding-right: 1rem;
+    border-right: 1px solid var(--border-color);
+}
+
+.bulk-actions-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Sortable Headers */
+.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s;
+}
+
+.sortable:hover {
+    color: var(--primary-color);
+}
+
+.sort-indicator {
+    display: inline-block;
+    margin-left: 0.5rem;
+    opacity: 0.5;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.sortable.active .sort-indicator {
+    opacity: 1;
+    color: var(--primary-color);
+}
+
+.sortable.desc .sort-indicator {
+    transform: rotate(180deg);
+}
+
+/* Pagination */
+.pagination-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.pagination-info {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pagination-btn {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-btn.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: white;
+}
+
+.page-size-select {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    margin-left: 1rem;
+}
+
+/* Plugin Icon */
+.plugin-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.plugin-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
+.plugin-icon.category-system {
+    background: rgba(29, 78, 216, 0.1);
+    color: var(--primary-color);
+}
+
+.plugin-icon.category-ai {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8b5cf6;
+}
+
+.plugin-icon.category-data {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.plugin-icon.category-automation {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.plugin-icon.category-security {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+/* Mobile Card Layout */
+@media (max-width: 768px) {
+    .plugins-table-container {
+        display: none;
+    }
+
+    .plugins-cards-container {
+        display: block;
+    }
+
+    .plugin-card {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 1rem;
+        margin-bottom: 1rem;
+        box-shadow: var(--shadow-sm);
+    }
+
+    .plugin-card-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .plugin-card-checkbox {
+        margin-top: 0.25rem;
+    }
+
+    .plugin-card-info {
+        flex: 1;
+    }
+
+    .plugin-card-name {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+
+    .plugin-card-description {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+    }
+
+    .plugin-card-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .plugin-card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .plugin-card-actions .btn-action {
+        flex: 1;
+        min-width: 70px;
+        text-align: center;
+    }
+
+    .bulk-actions-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .bulk-actions-count {
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        padding-right: 0;
+        padding-bottom: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .pagination-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+}
+
+@media (min-width: 769px) {
+    .plugins-cards-container {
+        display: none;
+    }
 }
 </style>
 
@@ -712,8 +986,10 @@
                             <label style="color: var(--text-secondary); font-size: 0.9rem;">Status:</label>
                             <select class="filter-select" id="statusFilter">
                                 <option value="">All</option>
+                                <option value="healthy">Healthy</option>
                                 <option value="error">Error</option>
                                 <option value="update">Needs Update</option>
+                                <option value="not-configured">Not Configured</option>
                             </select>
                         </div>
                         <div class="filter-group">
@@ -734,18 +1010,49 @@
                     </div>
                 </div>
 
+                <!-- Bulk Actions Bar -->
+                <div class="bulk-actions-bar" id="bulkActionsBar">
+                    <span class="bulk-actions-count"><span id="selectedCount">0</span> selected</span>
+                    <div class="bulk-actions-buttons">
+                        <button class="btn-action" onclick="bulkUpdatePlugins()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
+                                <path d="M21,10.12H14.22L16.96,7.3C14.23,4.6 9.81,4.5 7.08,7.2C4.35,9.91 4.35,14.28 7.08,17C9.81,19.7 14.23,19.7 16.96,17C18.32,15.65 19,14.08 19,12.1H21C21,14.08 20.12,16.65 18.36,18.39C14.85,21.87 9.15,21.87 5.64,18.39C2.14,14.92 2.11,9.28 5.62,5.81C9.13,2.34 14.76,2.34 18.27,5.81L21,3V10.12Z"/>
+                            </svg>
+                            Update Selected
+                        </button>
+                        <button class="btn-action btn-danger" onclick="bulkDeletePlugins()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: middle; margin-right: 4px;">
+                                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                            </svg>
+                            Delete Selected
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Plugins Table -->
                 <div class="plugins-table-container">
                     <table class="plugins-table">
                         <thead>
                             <tr>
                                 <th style="width: 5%;">
-                                    <input type="checkbox" id="selectAll">
+                                    <input type="checkbox" id="selectAll" aria-label="Select all plugins">
                                 </th>
-                                <th style="width: 35%;">Plugin</th>
-                                <th style="width: 12%;">Version</th>
-                                <th style="width: 15%;">Status</th>
-                                <th style="width: 15%;">Category</th>
+                                <th style="width: 35%;" class="sortable" data-sort="name">
+                                    Plugin
+                                    <span class="sort-indicator">▲</span>
+                                </th>
+                                <th style="width: 12%;" class="sortable" data-sort="version">
+                                    Version
+                                    <span class="sort-indicator">▲</span>
+                                </th>
+                                <th style="width: 15%;" class="sortable" data-sort="status">
+                                    Status
+                                    <span class="sort-indicator">▲</span>
+                                </th>
+                                <th style="width: 15%;" class="sortable" data-sort="category">
+                                    Category
+                                    <span class="sort-indicator">▲</span>
+                                </th>
                                 <th style="width: 18%;">Actions</th>
                             </tr>
                         </thead>
@@ -753,13 +1060,53 @@
                             <!-- Populated dynamically -->
                         </tbody>
                     </table>
+                    <!-- Pagination -->
+                    <div class="pagination-container" id="paginationContainer">
+                        <div class="pagination-info">
+                            Showing <span id="paginationStart">0</span>-<span id="paginationEnd">0</span> of <span id="paginationTotal">0</span> plugins
+                        </div>
+                        <div class="pagination-controls">
+                            <button class="pagination-btn" id="prevPage" onclick="changePage(-1)" disabled>← Previous</button>
+                            <div id="pageNumbers"></div>
+                            <button class="pagination-btn" id="nextPage" onclick="changePage(1)">Next →</button>
+                            <select class="page-size-select" id="pageSizeSelect" onchange="changePageSize(this.value)" aria-label="Items per page">
+                                <option value="10">10 / page</option>
+                                <option value="25" selected>25 / page</option>
+                                <option value="50">50 / page</option>
+                                <option value="100">100 / page</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile Card View -->
+                <div class="plugins-cards-container" id="pluginsCardsContainer">
+                    <!-- Populated dynamically -->
                 </div>
 
                 <!-- Empty State (shown when no plugins) -->
                 <div class="empty-state" id="emptyState" style="display: none;">
-                    <div class="empty-state-icon">📦</div>
-                    <div class="empty-state-text">No plugins found</div>
-                    <div class="empty-state-subtext">Upload a plugin to get started</div>
+                    <div class="empty-state-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.4;">
+                            <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+                        </svg>
+                    </div>
+                    <div class="empty-state-text">No plugins installed yet</div>
+                    <div class="empty-state-subtext">Extend your agent's capabilities by adding plugins from the marketplace or uploading your own.</div>
+                    <div class="empty-state-actions">
+                        <a href="/marketplace" class="btn-modern btn-primary" style="text-decoration: none;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M16 6V4H8V6H3V8L5 12V20H19V12L21 8V6H16M11 18H7V12H11V18M17 18H13V12H17V18M5.67 8H18.33L17.33 10H6.67L5.67 8Z"/>
+                            </svg>
+                            Browse Marketplace
+                        </a>
+                        <button class="btn-modern btn-secondary" onclick="document.getElementById('uploadBtn').click()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+                            </svg>
+                            Upload Plugin
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Loading State -->

@@ -1,0 +1,122 @@
+{{/* File List Component - Displays list of session files with actions */}}
+{{define "file_list"}}
+<div id="fileListContainer" class="file-list-container" data-session-id="{{.SessionID}}">
+  <div class="file-list-header">
+    <h6 class="file-list-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+      </svg>
+      Session Files
+      <span id="fileCount" class="file-count-badge">0</span>
+    </h6>
+    <div class="file-list-actions">
+      <button id="openFolderBtn" class="file-action-btn" title="Open folder in file manager">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H19A2,2 0 0,1 21,8H21L4,8V18L6.14,10H23.21L20.93,18.5C20.7,19.37 19.92,20 19,20Z"/>
+        </svg>
+      </button>
+      <button id="refreshFilesBtn" class="file-action-btn" title="Refresh file list">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="fileList" class="file-list">
+    <!-- Files will be populated dynamically -->
+    <div id="fileListEmpty" class="file-list-empty">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
+        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+      </svg>
+      <p>No files in this session</p>
+      <p class="text-muted small">Drag files here or use the upload button</p>
+    </div>
+    <div id="fileListLoading" class="file-list-loading" style="display: none;">
+      <div class="spinner-border spinner-border-sm" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <span>Loading files...</span>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* File Item Template - Individual file entry */}}
+{{define "file_item"}}
+<div class="file-item" data-file-id="{{.ID}}" data-file-name="{{.Name}}">
+  <div class="file-item-icon">
+    {{if .IsLink}}
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="file-icon-link">
+      <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24V16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/>
+    </svg>
+    {{else}}
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="file-icon-default">
+      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+    </svg>
+    {{end}}
+    {{if eq .Status "broken"}}
+    <span class="file-status-broken" title="Link is broken - original file not found">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+      </svg>
+    </span>
+    {{end}}
+  </div>
+  <div class="file-item-info">
+    <div class="file-item-name" title="{{.Name}}">{{.Name}}</div>
+    <div class="file-item-meta">
+      <span class="file-item-size">{{.SizeFormatted}}</span>
+      <span class="file-item-type">{{.MimeType}}</span>
+    </div>
+  </div>
+  <div class="file-item-actions">
+    {{if ne .Status "broken"}}
+    <button class="file-action-btn file-preview-btn" title="Preview" data-action="preview">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+      </svg>
+    </button>
+    <button class="file-action-btn file-download-btn" title="Download" data-action="download">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+      </svg>
+    </button>
+    {{else}}
+    <button class="file-action-btn file-relink-btn" title="Re-link file" data-action="relink">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+      </svg>
+    </button>
+    {{end}}
+    <button class="file-action-btn file-delete-btn" title="Remove from session" data-action="delete">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+{{end}}
+
+{{/* Upload Progress Item */}}
+{{define "file_upload_progress"}}
+<div class="file-upload-progress" data-upload-id="{{.ID}}">
+  <div class="file-item-icon">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="file-icon-uploading">
+      <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+    </svg>
+  </div>
+  <div class="file-item-info">
+    <div class="file-item-name">{{.Name}}</div>
+    <div class="file-upload-bar">
+      <div class="file-upload-progress-bar" style="width: {{.Progress}}%"></div>
+    </div>
+    <div class="file-upload-status">{{.Status}}</div>
+  </div>
+  <button class="file-action-btn file-cancel-btn" title="Cancel upload" data-action="cancel">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+    </svg>
+  </button>
+</div>
+{{end}}

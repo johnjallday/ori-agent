@@ -4,7 +4,6 @@ package server
 
 import (
 	"encoding/json"
-
 	"net/http"
 	"strings"
 
@@ -335,6 +334,15 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)
 
+	// Smart onboarding endpoints (AI-powered profile inference)
+	mux.HandleFunc("/api/onboarding/detect", s.smartOnboardingHandler.Detect)
+	mux.HandleFunc("/api/onboarding/profile", s.smartOnboardingHandler.InferProfile)
+	mux.HandleFunc("/api/onboarding/describe", s.smartOnboardingHandler.Describe)
+	mux.HandleFunc("/api/onboarding/config", s.smartOnboardingHandler.GenerateConfig)
+	mux.HandleFunc("/api/onboarding/apply-config", s.smartOnboardingHandler.Apply)
+	mux.HandleFunc("/api/onboarding/update-profile", s.smartOnboardingHandler.UpdateProfile)
+	mux.HandleFunc("/api/onboarding/user-profile", s.smartOnboardingHandler.GetStoredProfile)
+
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -354,6 +362,8 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/device/type", s.deviceHandler.SetDeviceType)
 	mux.HandleFunc("/api/device/wifi/current", s.deviceHandler.GetCurrentWiFi)
 	mux.HandleFunc("/api/device/ollama", s.deviceHandler.GetOllamaStatus)
+	mux.HandleFunc("/api/device/capabilities", s.deviceHandler.GetCapabilities)
+	mux.HandleFunc("/api/device/detect-hardware", s.deviceHandler.DetectHardware)
 
 	// =============================================================================
 	// Usage and Cost Tracking Endpoints
@@ -520,13 +530,76 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// =============================================================================
-	// Session Management Endpoints
+	// Session Management Endpoints (including Session Files)
 	// =============================================================================
 	if s.sessionHandler != nil {
 		// Cleanup and stats routes (must be registered before the wildcard routes)
 		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
 		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
-		mux.HandleFunc("/api/sessions/", s.sessionHandler.HandleSessions)
+		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+
+			// Session files routes (check if files handler is available)
+			if s.sessionFilesHandler != nil {
+				if strings.Contains(path, "/files/upload") && r.Method == http.MethodPost {
+					s.sessionFilesHandler.UploadFile(w, r)
+					return
+				}
+				if strings.Contains(path, "/files/link") && r.Method == http.MethodPost {
+					s.sessionFilesHandler.LinkFile(w, r)
+					return
+				}
+				if strings.Contains(path, "/files/validate") && r.Method == http.MethodPost {
+					s.sessionFilesHandler.ValidateLinks(w, r)
+					return
+				}
+				if strings.Contains(path, "/files/events") && r.Method == http.MethodGet {
+					s.sessionFilesHandler.FileEvents(w, r)
+					return
+				}
+				if strings.Contains(path, "/files/watch") {
+					if r.Method == http.MethodPost {
+						s.sessionFilesHandler.StartWatching(w, r)
+					} else if r.Method == http.MethodDelete {
+						s.sessionFilesHandler.StopWatching(w, r)
+					}
+					return
+				}
+				if strings.Contains(path, "/folder/open") && r.Method == http.MethodPost {
+					s.sessionFilesHandler.OpenFolder(w, r)
+					return
+				}
+
+				// File-specific routes (with file ID)
+				if strings.Contains(path, "/files/") {
+					if strings.HasSuffix(path, "/download") {
+						s.sessionFilesHandler.DownloadFile(w, r)
+						return
+					}
+					if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
+						s.sessionFilesHandler.RelinkFile(w, r)
+						return
+					}
+					if r.Method == http.MethodDelete {
+						s.sessionFilesHandler.DeleteFile(w, r)
+						return
+					}
+					if r.Method == http.MethodGet {
+						s.sessionFilesHandler.GetFile(w, r)
+						return
+					}
+				}
+
+				// List files route
+				if strings.HasSuffix(path, "/files") && r.Method == http.MethodGet {
+					s.sessionFilesHandler.ListFiles(w, r)
+					return
+				}
+			}
+
+			// Fall through to session handler
+			s.sessionHandler.HandleSessions(w, r)
+		})
 		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
 
 		// Notes search must be before the wildcard /api/notes/

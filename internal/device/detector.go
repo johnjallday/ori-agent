@@ -21,6 +21,17 @@ func Detect() types.DeviceInfo {
 	// Detect device type based on environment signals
 	info.Type = detectDeviceType()
 
+	// Detect GPU and RAM
+	info.GPU = DetectGPU()
+	info.TotalRAMBytes = DetectTotalRAM()
+
+	// Calculate max model parameters and memory tier
+	if info.TotalRAMBytes > 0 {
+		params := CalculateMaxParams(info.GPU, info.TotalRAMBytes)
+		info.MaxModelParams = params.MaxParams
+		info.MemoryTier = string(params.Tier)
+	}
+
 	return info
 }
 

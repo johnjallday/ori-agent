@@ -5,10 +5,13 @@ package server
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/fileshttp"
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -19,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -62,6 +66,10 @@ func (b *ServerBuilder) initializeHandlers() error {
 
 	// Initialize auto-config handler for agent creation
 	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)
+
+	// Initialize smart onboarding handler
+	systemProvider, systemModel := s.configManager.GetSystemModel()
+	s.smartOnboardingHandler = onboardinghttp.NewSmartOnboardingHandler(s.st, s.llmFactory, s.onboardingMgr, systemProvider, systemModel)
 
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()
@@ -112,6 +120,29 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.sessionHandler = sessionhttp.New(sessionStore)
 		// Wire session store to chat handler for multi-tab support
 		s.chatHandler.SetSessionStore(sessionStore)
+	}
+
+	// Initialize session files store and handler
+	sessionFilesPath := filepath.Join(".", "session_files")
+	sessionFilesStore, err := sessionfiles.NewStore(sessionFilesPath)
+	if err != nil {
+		logger.Error("Failed to create session files store", logger.Fields{"error": err})
+		// Non-fatal: continue without session files management
+	} else {
+		s.sessionFilesStore = sessionFilesStore
+
+		// Create file watcher
+		watcher, err := filewatcher.NewWatcher(filewatcher.DefaultWatcherConfig())
+		if err != nil {
+			logger.Error("Failed to create file watcher", logger.Fields{"error": err})
+		} else {
+			s.sessionFilesWatcher = watcher
+			watcher.Start()
+		}
+
+		// Create files HTTP handler
+		s.sessionFilesHandler = fileshttp.NewHandler(sessionFilesStore, s.sessionFilesWatcher)
+		logger.Info("Session files management initialized", logger.Fields{"path": sessionFilesPath})
 	}
 
 	return nil

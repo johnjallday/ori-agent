@@ -1073,6 +1073,21 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   color: var(--text-primary);
 }
 
+.chat-model-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chat-model-name {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
 .chat-agent-edit-btn {
   font-size: 12px;
   padding: 4px 10px;
@@ -1103,6 +1118,67 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   background: rgba(99, 102, 241, 0.15);
   border-color: var(--primary-color);
   color: var(--primary-color);
+}
+
+.agent-edit-color-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.agent-edit-color-preview {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 2px solid var(--border-color);
+  background: #4f46e5;
+}
+
+.agent-edit-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  min-height: 44px;
+  background: var(--bg-secondary);
+  cursor: text;
+}
+
+.agent-edit-tags-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  min-width: 120px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.agent-edit-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.agent-edit-tag-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.agent-edit-tag-remove:hover {
+  color: var(--text-primary);
 }
 
 /* ============================================================================
@@ -1457,4 +1533,132 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   #toggleSessionSidebarBtn {
     transition: none;
   }
+}
+
+/* ===== Session Files Panel ===== */
+.session-files-panel {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.dark-mode .session-files-panel {
+  background: rgba(0, 0, 0, 0.15);
+  border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.session-files-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: background 0.15s ease;
+}
+
+.session-files-header:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.session-files-header .folder-expand-icon {
+  transition: transform 0.15s ease;
+}
+
+.session-files-header .folder-expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.session-files-header .file-count-badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.session-files-content {
+  padding: 8px 0 0;
+}
+
+.session-files-content.collapsed {
+  display: none;
+}
+
+/* Compact file list for sidebar */
+.file-list-container-compact {
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dark-mode .file-list-container-compact {
+  background: rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.file-list-container-compact .file-list {
+  max-height: none;
+}
+
+.file-list-container-compact .file-item {
+  padding: 6px 8px;
+  gap: 8px;
+}
+
+.file-list-container-compact .file-item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.file-list-container-compact .file-item-name {
+  font-size: 12px;
+}
+
+.file-list-container-compact .file-item-meta {
+  font-size: 10px;
+}
+
+.file-list-container-compact .file-action-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.file-list-container-compact .file-action-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.file-list-empty-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 8px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.file-list-empty-compact svg {
+  margin-bottom: 4px;
+}
+
+/* Compact dropzone for sidebar */
+.session-files-content .file-dropzone-compact {
+  width: 100%;
+  justify-content: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+}
+
+.dark-mode .session-files-content .file-dropzone-compact {
+  background: rgba(0, 0, 0, 0.1);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.session-files-content .file-dropzone-compact:hover {
+  background: rgba(13, 110, 253, 0.1);
 }

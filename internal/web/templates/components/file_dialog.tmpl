@@ -1,0 +1,117 @@
+{{/* File Dialog Component - Modal dialogs for file operations */}}
+
+{{/* File Preview Dialog */}}
+{{define "file_preview_dialog"}}
+<div class="modal fade" id="filePreviewModal" tabindex="-1" aria-labelledby="filePreviewModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="filePreviewModalLabel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+          </svg>
+          <span id="previewFileName">File Preview</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="filePreviewContent" class="file-preview-content">
+          <!-- Preview content will be loaded here -->
+          <div class="file-preview-loading">
+            <div class="spinner-border" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span id="previewFileInfo" class="text-muted small me-auto"></span>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="downloadFromPreview">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          </svg>
+          Download
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* Delete Confirmation Dialog */}}
+{{define "file_delete_dialog"}}
+<div class="modal fade" id="fileDeleteModal" tabindex="-1" aria-labelledby="fileDeleteModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fileDeleteModalLabel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2 text-danger">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+          Remove File
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to remove this file from the session?</p>
+        <p class="mb-0"><strong id="deleteFileName"></strong></p>
+        <p class="text-muted small mt-2" id="deleteFileNote">
+          <!-- Note about linked files -->
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmFileDelete">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+          Remove
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* Re-link Dialog */}}
+{{define "file_relink_dialog"}}
+<div class="modal fade" id="fileRelinkModal" tabindex="-1" aria-labelledby="fileRelinkModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fileRelinkModalLabel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+          </svg>
+          Re-link File
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>The linked file <strong id="relinkFileName"></strong> could not be found at its original location.</p>
+        <p class="text-muted small">Original path: <code id="relinkOriginalPath"></code></p>
+
+        <div class="mb-3">
+          <label for="relinkNewPath" class="form-label">Select new location:</label>
+          <div class="input-group">
+            <input type="text" class="form-control" id="relinkNewPath" placeholder="Enter file path...">
+            <button class="btn btn-outline-secondary" type="button" id="browseRelinkPath">
+              Browse
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="confirmRelink">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
+          </svg>
+          Re-link
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

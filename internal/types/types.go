@@ -26,13 +26,26 @@ type OnboardingState struct {
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 }
 
+// GPUInfo contains GPU/graphics hardware information
+type GPUInfo struct {
+	Name           string `json:"name"`             // GPU name (e.g., "Apple M2 Pro", "NVIDIA GeForce RTX 4090")
+	Vendor         string `json:"vendor"`           // GPU vendor (e.g., "Apple", "NVIDIA", "AMD", "Intel")
+	VRAM           int64  `json:"vram"`             // Dedicated VRAM in bytes (0 for integrated/unified memory)
+	IsDiscrete     bool   `json:"is_discrete"`      // True if discrete GPU, false if integrated
+	IsAppleSilicon bool   `json:"is_apple_silicon"` // True if Apple Silicon (M1/M2/M3/etc.)
+}
+
 // DeviceInfo tracks information about the user's device
 type DeviceInfo struct {
-	Type     string `json:"type"`     // "desktop", "server", "laptop", "unknown"
-	OS       string `json:"os"`       // Operating system (darwin, linux, windows)
-	Arch     string `json:"arch"`     // Architecture (amd64, arm64, etc.)
-	Detected bool   `json:"detected"` // Whether device detection has been completed
-	UserSet  bool   `json:"user_set"` // Whether user manually set device type
+	Type           string   `json:"type"`                       // "desktop", "server", "laptop", "unknown"
+	OS             string   `json:"os"`                         // Operating system (darwin, linux, windows)
+	Arch           string   `json:"arch"`                       // Architecture (amd64, arm64, etc.)
+	Detected       bool     `json:"detected"`                   // Whether device detection has been completed
+	UserSet        bool     `json:"user_set"`                   // Whether user manually set device type
+	GPU            *GPUInfo `json:"gpu,omitempty"`              // GPU information (nil if not detected)
+	TotalRAMBytes  int64    `json:"total_ram_bytes,omitempty"`  // Total system RAM in bytes
+	MaxModelParams string   `json:"max_model_params,omitempty"` // Maximum model parameter size (e.g., "7B", "13B", "70B")
+	MemoryTier     string   `json:"memory_tier,omitempty"`      // Memory tier classification (e.g., "Basic", "Standard", "Advanced", "Professional")
 }
 
 // MenuBarSettings tracks menu bar app preferences
@@ -41,13 +54,26 @@ type MenuBarSettings struct {
 	Port             int  `json:"port,omitempty"`      // Server port (defaults to 8765 if not set)
 }
 
+// UserProfile represents the user's inferred or described profile
+type UserProfile struct {
+	PrimaryCategory     string    `json:"primary_category"`               // developer, devops, designer, data_scientist, writer, project_manager, general
+	SecondaryCategories []string  `json:"secondary_categories,omitempty"` // Additional relevant categories
+	Specializations     []string  `json:"specializations,omitempty"`      // e.g., "Go developer", "iOS developer"
+	Summary             string    `json:"summary"`                        // Natural language description
+	Confidence          float64   `json:"confidence"`                     // AI confidence (0-1)
+	DetectedApps        []string  `json:"detected_apps,omitempty"`        // Apps that influenced this profile
+	Description         string    `json:"description,omitempty"`          // User's self-description (if provided)
+	InferredAt          time.Time `json:"inferred_at,omitempty"`          // When the profile was created
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
-	Onboarding OnboardingState  `json:"onboarding"`
-	Device     DeviceInfo       `json:"device"`
-	Version    string           `json:"version"`
-	Theme      string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
-	MenuBar    *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
+	Onboarding  OnboardingState  `json:"onboarding"`
+	Device      DeviceInfo       `json:"device"`
+	UserProfile *UserProfile     `json:"user_profile,omitempty"` // User's inferred profile from onboarding
+	Version     string           `json:"version"`
+	Theme       string           `json:"theme,omitempty"`   // "light" or "dark", defaults to "light"
+	MenuBar     *MenuBarSettings `json:"menubar,omitempty"` // Menu bar app settings
 }
 
 // LoadedPlugin represents a plugin that has been loaded and is ready to use

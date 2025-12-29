@@ -1,0 +1,34 @@
+{{/* File Dropzone Component - Drag and drop area for file uploads */}}
+{{define "file_dropzone"}}
+<div id="fileDropzone" class="file-dropzone" data-session-id="{{.SessionID}}">
+  <div class="file-dropzone-content">
+    <div class="file-dropzone-icon">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19.35,10.04C18.67,6.59 15.64,4 12,4C9.11,4 6.6,5.64 5.35,8.04C2.34,8.36 0,10.91 0,14A6,6 0 0,0 6,20H19A5,5 0 0,0 24,15C24,12.36 21.95,10.22 19.35,10.04M19,18H6A4,4 0 0,1 2,14C2,11.95 3.53,10.24 5.56,10.03L6.63,9.92L7.13,8.97C8.08,7.14 9.94,6 12,6C14.62,6 16.88,7.86 17.39,10.43L17.69,11.93L19.22,12.04C20.78,12.14 22,13.45 22,15A3,3 0 0,1 19,18M8,13H10.55V16H13.45V13H16L12,9L8,13Z"/>
+      </svg>
+    </div>
+    <p class="file-dropzone-text">Drop files here or <button type="button" class="file-dropzone-browse" id="browseFilesBtn">browse</button></p>
+    <p class="file-dropzone-hint">Maximum 50 files, 100MB each</p>
+  </div>
+  <input type="file" id="fileInput" class="file-input-hidden" multiple>
+  <div class="file-dropzone-overlay">
+    <div class="file-dropzone-overlay-content">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+      </svg>
+      <p>Drop to upload</p>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* Compact dropzone for inline use */}}
+{{define "file_dropzone_compact"}}
+<div id="fileDropzoneCompact" class="file-dropzone-compact" data-session-id="{{.SessionID}}">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+  </svg>
+  <span>Add files</span>
+  <input type="file" id="fileInputCompact" class="file-input-hidden" multiple>
+</div>
+{{end}}

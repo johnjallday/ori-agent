@@ -114,6 +114,53 @@
         <!-- Sessions will be populated dynamically -->
       </div>
 
+      <!-- Session Files Panel (shown when session selected) -->
+      <div id="sessionFilesPanel" class="session-files-panel" style="display: none;">
+        <div class="session-files-header" id="sessionFilesToggle">
+          <svg class="folder-expand-icon expanded" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
+          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+          </svg>
+          <span>Session Files</span>
+          <span id="sessionFileCount" class="file-count-badge">0</span>
+        </div>
+        <div id="sessionFilesContent" class="session-files-content">
+          <!-- Compact Dropzone -->
+          <div id="fileDropzoneCompact" class="file-dropzone-compact mb-2" data-session-id="">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            <span>Add files</span>
+            <input type="file" id="fileInputCompact" class="file-input-hidden" multiple>
+          </div>
+          <!-- File List -->
+          <div id="fileListContainer" class="file-list-container-compact" data-session-id="">
+            <div id="fileList" class="file-list">
+              <div id="fileListEmpty" class="file-list-empty-compact">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+                </svg>
+                <p class="small mb-0">No files attached</p>
+              </div>
+              <div id="fileListLoading" class="file-list-loading" style="display: none;">
+                <div class="spinner-border spinner-border-sm" role="status">
+                  <span class="visually-hidden">Loading...</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Open Folder Button -->
+          <button id="openFolderBtn" class="btn btn-sm btn-outline-secondary w-100 mt-2" style="font-size: 11px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H19A2,2 0 0,1 21,8H21L4,8V18L6.14,10H23.21L20.93,18.5C20.7,19.37 19.92,20 19,20Z"/>
+            </svg>
+            Open Folder
+          </button>
+        </div>
+      </div>
+
       <!-- Empty State -->
       <div id="sessionsEmpty" class="session-empty" style="display: none;">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="session-empty-icon">

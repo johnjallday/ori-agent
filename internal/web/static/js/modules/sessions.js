@@ -19,6 +19,11 @@ const sessionManager = {
   dragHintTimer: null,
   sessionsByFolder: new Map(),
   collapsedFolderIds: new Set(),
+  agentModelCache: new Map(),
+  editAgentOriginalName: '',
+  editAgentSelectedTags: [],
+  editAgentModalInitialized: false,
+  editAgentModelOptionsLoaded: false,
 
   // Tab ID for multi-tab support
   tabId: null,
@@ -194,6 +199,23 @@ const sessionManager = {
     // Session list scroll (for virtual scroll)
     document.getElementById('sessionListContainer')?.addEventListener('scroll',
       () => this.handleScroll());
+
+    // Session files panel toggle
+    document.getElementById('sessionFilesToggle')?.addEventListener('click', () => {
+      const content = document.getElementById('sessionFilesContent');
+      const icon = document.querySelector('#sessionFilesToggle .folder-expand-icon');
+      if (content && icon) {
+        content.classList.toggle('collapsed');
+        icon.classList.toggle('expanded');
+      }
+    });
+
+    // Open folder button (uses FileManager if available)
+    document.getElementById('openFolderBtn')?.addEventListener('click', () => {
+      if (window.sessionFileManager) {
+        window.sessionFileManager.openFolder();
+      }
+    });
   },
 
   // Setup keyboard shortcuts
@@ -874,8 +896,38 @@ const sessionManager = {
 
       // Restore messages to chat area
       this.restoreSessionMessages(session);
+
+      // Initialize/update session file manager
+      this.initializeSessionFiles(sessionId);
     } catch (error) {
       console.error('Failed to switch session:', error);
+    }
+  },
+
+  // Initialize session files panel
+  initializeSessionFiles(sessionId) {
+    const panel = document.getElementById('sessionFilesPanel');
+    const dropzone = document.getElementById('fileDropzoneCompact');
+    const fileList = document.getElementById('fileListContainer');
+
+    if (panel && sessionId) {
+      // Show the panel
+      panel.style.display = 'block';
+
+      // Update session ID in data attributes
+      if (dropzone) dropzone.dataset.sessionId = sessionId;
+      if (fileList) fileList.dataset.sessionId = sessionId;
+
+      // Initialize or update FileManager
+      if (window.FileManager) {
+        if (window.sessionFileManager) {
+          window.sessionFileManager.disconnect();
+        }
+        window.sessionFileManager = new FileManager(sessionId);
+      }
+    } else if (panel) {
+      // Hide panel when no session
+      panel.style.display = 'none';
     }
   },
 
@@ -888,8 +940,11 @@ const sessionManager = {
       window.currentAgent = agentName;
     }
 
-    // Update the chat agent bar (primary location)
-    this.updateChatAgentBar(agentName);
+    const session = this.getActiveSession();
+    this.updateChatInfoBar(session?.title, agentName);
+
+    // Update the model display for the active agent
+    this.updateChatModelForAgent(agentName);
 
     // Update the navbar display (secondary/legacy)
     const agentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
@@ -928,9 +983,20 @@ const sessionManager = {
       agentNameEl.textContent = agentName;
     }
 
-    // Update Edit Agent button href
-    if (editAgentBtn && agentName) {
-      editAgentBtn.href = `/agents/${encodeURIComponent(agentName)}`;
+    if (editAgentBtn) {
+      if (agentName) {
+        editAgentBtn.dataset.agentName = agentName;
+        editAgentBtn.classList.remove('disabled');
+        editAgentBtn.removeAttribute('aria-disabled');
+        editAgentBtn.removeAttribute('tabindex');
+        editAgentBtn.disabled = false;
+      } else {
+        editAgentBtn.dataset.agentName = '';
+        editAgentBtn.classList.add('disabled');
+        editAgentBtn.setAttribute('aria-disabled', 'true');
+        editAgentBtn.setAttribute('tabindex', '-1');
+        editAgentBtn.disabled = true;
+      }
     }
 
     // Show bar if we have either session or agent
@@ -949,15 +1015,59 @@ const sessionManager = {
     }
   },
 
-  // Legacy methods for backward compatibility
-  updateChatAgentBar(agentName) {
-    const session = this.getActiveSession();
-    this.updateChatInfoBar(session?.title, agentName);
+  // Update model display in chat info bar
+  updateChatModelName(modelName) {
+    const modelInfo = document.getElementById('chatModelInfo');
+    const modelNameEl = document.getElementById('chatModelName');
+    if (!modelInfo || !modelNameEl) return;
+
+    if (modelName) {
+      modelNameEl.textContent = modelName;
+      modelNameEl.title = modelName;
+      modelInfo.style.display = 'flex';
+    } else {
+      modelNameEl.textContent = '';
+      modelNameEl.title = '';
+      modelInfo.style.display = 'none';
+    }
   },
 
-  updateChatSessionTitle(title) {
-    const session = this.getActiveSession();
-    this.updateChatInfoBar(title, session?.agent_name);
+  // Fetch and update the model for the current agent
+  async updateChatModelForAgent(agentName) {
+    if (!agentName) {
+      this.updateChatModelName('');
+      return;
+    }
+
+    const cachedModel = this.agentModelCache.get(agentName);
+    if (cachedModel) {
+      this.updateChatModelName(cachedModel);
+      return;
+    }
+
+    this.updateChatModelName('');
+
+    try {
+      const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`);
+      if (!response.ok) {
+        this.updateChatModelName('');
+        return;
+      }
+
+      const data = await response.json();
+      const modelName = data.model || '';
+      if (modelName) {
+        this.agentModelCache.set(agentName, modelName);
+      }
+
+      const activeAgentName = this.getActiveSession()?.agent_name || agentName;
+      if (activeAgentName !== agentName) return;
+
+      this.updateChatModelName(modelName);
+    } catch (error) {
+      console.error('Failed to load agent model:', error);
+      this.updateChatModelName('');
+    }
   },
 
   // Initialize chat agent bar button handler
@@ -977,6 +1087,453 @@ const sessionManager = {
         }
       });
     }
+
+    const editBtn = document.getElementById('chatEditAgentBtn');
+    if (editBtn && !editBtn.dataset.bound) {
+      editBtn.dataset.bound = 'true';
+      editBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        const agentName = editBtn.dataset.agentName || this.getActiveSession()?.agent_name;
+        if (!agentName) {
+          if (window.Toast) {
+            Toast.warning('Select an agent before editing.', { title: 'No Agent Selected' });
+          }
+          return;
+        }
+        this.showEditAgentModal(agentName);
+      });
+    }
+
+    this.initEditAgentModal();
+  },
+
+  initEditAgentModal() {
+    if (this.editAgentModalInitialized) return;
+    const modalEl = document.getElementById('editAgentModal');
+    if (!modalEl) return;
+
+    this.editAgentModalInitialized = true;
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+      this.resetEditAgentModal();
+    });
+
+    const form = document.getElementById('editAgentForm');
+    if (form) {
+      form.addEventListener('submit', (event) => event.preventDefault());
+    }
+
+    const saveBtn = document.getElementById('editAgentSaveBtn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => this.saveEditAgentChanges());
+    }
+
+    const tagsInput = document.getElementById('editAgentTagsInput');
+    if (tagsInput) {
+      tagsInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && tagsInput.value.trim()) {
+          event.preventDefault();
+          this.addEditAgentTag(tagsInput.value.trim());
+          tagsInput.value = '';
+        } else if (event.key === 'Backspace' && !tagsInput.value && this.editAgentSelectedTags.length > 0) {
+          this.removeEditAgentTag(this.editAgentSelectedTags[this.editAgentSelectedTags.length - 1]);
+        }
+      });
+    }
+
+    const tagsContainer = document.getElementById('editAgentTagsContainer');
+    if (tagsContainer && tagsInput) {
+      tagsContainer.addEventListener('click', (event) => {
+        if (event.target === tagsContainer) {
+          tagsInput.focus();
+        }
+      });
+    }
+
+    const colorInput = document.getElementById('editAgentAvatarColor');
+    if (colorInput) {
+      colorInput.addEventListener('input', (event) => {
+        this.updateEditAgentColorPreview(event.target.value);
+      });
+    }
+  },
+
+  async showEditAgentModal(agentName) {
+    const modalEl = document.getElementById('editAgentModal');
+    if (!modalEl) return;
+
+    this.initEditAgentModal();
+    this.editAgentOriginalName = agentName;
+    this.editAgentSelectedTags = [];
+    this.clearEditAgentMessages();
+    this.setEditAgentLoading(true, 'Loading agent...');
+    this.setEditAgentFormEnabled(false);
+
+    const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+    modal.show();
+
+    try {
+      await this.ensureEditAgentModelOptions();
+      await this.loadEditAgentDetails(agentName);
+    } catch (error) {
+      console.error('Failed to load agent details:', error);
+      this.showEditAgentError(error.message || 'Failed to load agent details');
+    } finally {
+      this.setEditAgentLoading(false);
+      this.setEditAgentFormEnabled(true);
+    }
+  },
+
+  async loadEditAgentDetails(agentName) {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Agent not found');
+      }
+      throw new Error('Failed to load agent details');
+    }
+
+    const agent = await response.json();
+    this.populateEditAgentForm(agent);
+  },
+
+  populateEditAgentForm(agent) {
+    const nameInput = document.getElementById('editAgentNameInput');
+    if (nameInput) nameInput.value = agent.name || '';
+
+    const typeSelect = document.getElementById('editAgentTypeSelect');
+    if (typeSelect) {
+      this.ensureEditAgentSelectOption(typeSelect, agent.type);
+      typeSelect.value = agent.type || typeSelect.value;
+    }
+
+    const roleSelect = document.getElementById('editAgentRoleSelect');
+    if (roleSelect) {
+      this.ensureEditAgentSelectOption(roleSelect, agent.role);
+      roleSelect.value = agent.role || roleSelect.value;
+    }
+
+    const modelInput = document.getElementById('editAgentModelInput');
+    if (modelInput) {
+      modelInput.value = agent.model || '';
+      this.ensureEditAgentModelOption(agent.model);
+    }
+
+    const descriptionInput = document.getElementById('editAgentDescription');
+    if (descriptionInput) {
+      descriptionInput.value = agent.metadata?.description || '';
+    }
+
+    const colorInput = document.getElementById('editAgentAvatarColor');
+    const colorValue = agent.metadata?.avatar_color || '#4f46e5';
+    if (colorInput) {
+      colorInput.value = colorValue;
+      this.updateEditAgentColorPreview(colorValue);
+    }
+
+    const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
+    if (favoriteToggle) {
+      favoriteToggle.checked = Boolean(agent.metadata?.favorite);
+    }
+
+    this.editAgentSelectedTags = agent.metadata?.tags || [];
+    this.renderEditAgentTags();
+  },
+
+  async ensureEditAgentModelOptions() {
+    if (this.editAgentModelOptionsLoaded) return;
+    const list = document.getElementById('editAgentModelOptions');
+    if (!list) return;
+
+    let options = [];
+    if (typeof loadAvailableProviders === 'function') {
+      const providers = await loadAvailableProviders();
+      providers.forEach((provider) => {
+        (provider.models || []).forEach((model) => {
+          if (model?.value) {
+            options.push(model.value);
+          }
+        });
+      });
+    }
+
+    if (options.length === 0) {
+      options = [
+        'gpt-5',
+        'gpt-5-mini',
+        'gpt-5-nano',
+        'gpt-4o',
+        'gpt-4o-mini',
+        'claude-3-5-sonnet-20241022',
+        'claude-3-haiku-20240307',
+        'llama3.2',
+        'mistral',
+        'codellama'
+      ];
+    }
+
+    const uniqueOptions = Array.from(new Set(options));
+    list.innerHTML = '';
+    uniqueOptions.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      list.appendChild(option);
+    });
+
+    this.editAgentModelOptionsLoaded = true;
+  },
+
+  ensureEditAgentModelOption(model) {
+    if (!model) return;
+    const list = document.getElementById('editAgentModelOptions');
+    if (!list) return;
+    const exists = Array.from(list.options).some((option) => option.value === model);
+    if (exists) return;
+    const option = document.createElement('option');
+    option.value = model;
+    list.appendChild(option);
+  },
+
+  ensureEditAgentSelectOption(selectEl, value) {
+    if (!selectEl || !value) return;
+    const exists = Array.from(selectEl.options).some((option) => option.value === value);
+    if (exists) return;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    selectEl.appendChild(option);
+  },
+
+  updateEditAgentColorPreview(color) {
+    const preview = document.getElementById('editAgentColorPreview');
+    if (preview) {
+      preview.style.background = color;
+    }
+  },
+
+  renderEditAgentTags() {
+    const container = document.getElementById('editAgentTagsContainer');
+    const input = document.getElementById('editAgentTagsInput');
+    if (!container || !input) return;
+
+    container.querySelectorAll('.agent-edit-tag').forEach((tag) => tag.remove());
+
+    this.editAgentSelectedTags.forEach((tag) => {
+      const tagEl = document.createElement('span');
+      tagEl.className = 'agent-edit-tag';
+
+      const label = document.createElement('span');
+      label.textContent = tag;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'agent-edit-tag-remove';
+      removeBtn.setAttribute('aria-label', `Remove tag ${tag}`);
+      removeBtn.textContent = 'x';
+      removeBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.removeEditAgentTag(tag);
+      });
+
+      tagEl.appendChild(label);
+      tagEl.appendChild(removeBtn);
+      container.insertBefore(tagEl, input);
+    });
+  },
+
+  addEditAgentTag(tag) {
+    const cleanTag = tag.trim();
+    if (!cleanTag) return;
+    if (!this.editAgentSelectedTags.includes(cleanTag)) {
+      this.editAgentSelectedTags.push(cleanTag);
+      this.renderEditAgentTags();
+    }
+  },
+
+  removeEditAgentTag(tag) {
+    this.editAgentSelectedTags = this.editAgentSelectedTags.filter((item) => item !== tag);
+    this.renderEditAgentTags();
+  },
+
+  async saveEditAgentChanges() {
+    const nameInput = document.getElementById('editAgentNameInput');
+    const typeSelect = document.getElementById('editAgentTypeSelect');
+    const roleSelect = document.getElementById('editAgentRoleSelect');
+    const modelInput = document.getElementById('editAgentModelInput');
+    const descriptionInput = document.getElementById('editAgentDescription');
+    const colorInput = document.getElementById('editAgentAvatarColor');
+    const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
+
+    const newName = nameInput?.value.trim();
+    const type = typeSelect?.value;
+    const role = roleSelect?.value;
+    const model = modelInput?.value.trim();
+
+    if (!newName) {
+      this.showEditAgentError('Name is required.');
+      nameInput?.focus();
+      return;
+    }
+    if (!type || !role) {
+      this.showEditAgentError('Type and role are required.');
+      return;
+    }
+    if (!model) {
+      this.showEditAgentError('Model is required.');
+      modelInput?.focus();
+      return;
+    }
+
+    const payload = {
+      name: newName,
+      type,
+      role,
+      model,
+      description: descriptionInput?.value.trim() || '',
+      avatar_color: colorInput?.value || '#4f46e5',
+      tags: this.editAgentSelectedTags,
+      favorite: Boolean(favoriteToggle?.checked)
+    };
+
+    const saveBtn = document.getElementById('editAgentSaveBtn');
+    const originalText = saveBtn?.innerHTML;
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Saving...';
+    }
+
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(this.editAgentOriginalName)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to update agent.';
+        try {
+          const errData = await response.json();
+          errorMessage = errData.error || errData.message || errorMessage;
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      const updatedName = data.name || newName || this.editAgentOriginalName;
+      const previousName = this.editAgentOriginalName;
+      this.editAgentOriginalName = updatedName;
+
+      this.sessions.forEach((session) => {
+        if (session.agent_name === previousName) {
+          session.agent_name = updatedName;
+        }
+      });
+
+      this.agentModelCache.delete(previousName);
+      if (model) {
+        this.agentModelCache.set(updatedName, model);
+      }
+
+      this.updateCurrentAgent(updatedName);
+      this.renderSessions();
+      this.showEditAgentSuccess('Agent updated successfully.');
+
+      const modalEl = document.getElementById('editAgentModal');
+      const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
+      setTimeout(() => {
+        modal?.hide();
+      }, 500);
+    } catch (error) {
+      console.error('Failed to update agent:', error);
+      this.showEditAgentError(error.message || 'Failed to update agent.');
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+      }
+    }
+  },
+
+  setEditAgentLoading(show, message) {
+    const loadingEl = document.getElementById('editAgentModalLoading');
+    const contentEl = document.getElementById('editAgentModalContent');
+    if (loadingEl) {
+      loadingEl.classList.toggle('d-none', !show);
+      const textEl = loadingEl.querySelector('p');
+      if (textEl && message) {
+        textEl.textContent = message;
+      }
+    }
+    if (contentEl) {
+      contentEl.classList.toggle('d-none', show);
+    }
+  },
+
+  setEditAgentFormEnabled(enabled) {
+    const form = document.getElementById('editAgentForm');
+    if (form) {
+      form.querySelectorAll('input, select, textarea, button').forEach((element) => {
+        element.disabled = !enabled;
+      });
+    }
+    const saveBtn = document.getElementById('editAgentSaveBtn');
+    if (saveBtn) {
+      saveBtn.disabled = !enabled;
+    }
+  },
+
+  showEditAgentError(message) {
+    const errorEl = document.getElementById('editAgentError');
+    const successEl = document.getElementById('editAgentSuccess');
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.classList.remove('d-none');
+    }
+    if (successEl) {
+      successEl.classList.add('d-none');
+    }
+  },
+
+  showEditAgentSuccess(message) {
+    const errorEl = document.getElementById('editAgentError');
+    const successEl = document.getElementById('editAgentSuccess');
+    if (successEl) {
+      successEl.textContent = message;
+      successEl.classList.remove('d-none');
+    }
+    if (errorEl) {
+      errorEl.classList.add('d-none');
+    }
+  },
+
+  clearEditAgentMessages() {
+    const errorEl = document.getElementById('editAgentError');
+    const successEl = document.getElementById('editAgentSuccess');
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.classList.add('d-none');
+    }
+    if (successEl) {
+      successEl.classList.add('d-none');
+    }
+  },
+
+  resetEditAgentModal() {
+    this.editAgentOriginalName = '';
+    this.editAgentSelectedTags = [];
+    const form = document.getElementById('editAgentForm');
+    if (form) {
+      form.reset();
+    }
+    this.updateEditAgentColorPreview('#4f46e5');
+    this.renderEditAgentTags();
+    this.clearEditAgentMessages();
+    this.setEditAgentLoading(false);
+    this.setEditAgentFormEnabled(true);
   },
 
   // Restore session messages to chat area
@@ -1019,7 +1576,8 @@ const sessionManager = {
           if (typeof clearChatHistory === 'function') {
             clearChatHistory();
           }
-          this.updateChatSessionTitle('');
+          this.updateChatInfoBar('', '');
+          this.updateChatModelName('');
         }
       }
 
@@ -1046,7 +1604,7 @@ const sessionManager = {
         session.title = newTitle;
         this.renderSessions();
         if (sessionId === this.activeSessionId) {
-          this.updateChatSessionTitle(newTitle);
+          this.updateChatInfoBar(newTitle, session.agent_name);
         }
       }
     } catch (error) {
@@ -2036,6 +2594,9 @@ const sessionManager = {
       if (session.agent_name) {
         this.updateCurrentAgent(session.agent_name);
       }
+
+      // Initialize session files panel
+      this.initializeSessionFiles(savedId);
 
       return true;
     }
