@@ -9,6 +9,8 @@ export class SmartOnboardingManager {
     this.selectedPlugins = [];
     this.addedMarketplaces = [];
     this.mode = null; // 'detect' or 'describe'
+    this.aiRecommendations = []; // AI-generated plugin recommendations
+    this.aiRecommendationsLoaded = false;
   }
 
   // Initialize the smart onboarding step
@@ -569,6 +571,52 @@ export class SmartOnboardingManager {
     this.availablePlugins = onlinePlugins.filter(p => !this.installedPlugins.has(p.name));
   }
 
+  // Fetch AI-generated plugin recommendations
+  async fetchAIRecommendations() {
+    if (!this.userProfile || this.availablePlugins.length === 0) {
+      this.aiRecommendations = [];
+      this.aiRecommendationsLoaded = true;
+      return;
+    }
+
+    try {
+      // Build plugin info for the request
+      const pluginInfos = this.availablePlugins.map(p => ({
+        name: p.name,
+        description: p.description || '',
+        tags: p.tags || []
+      }));
+
+      const response = await fetch('/api/onboarding/recommend-plugins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile: this.userProfile,
+          plugins: pluginInfos,
+          max_count: 5
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get AI recommendations');
+      }
+
+      const data = await response.json();
+      this.aiRecommendations = data.recommendations || [];
+      this.aiRecommendationsLoaded = true;
+    } catch (error) {
+      console.error('Error fetching AI recommendations:', error);
+      // Fall back to keyword-based recommendations
+      this.aiRecommendations = [];
+      this.aiRecommendationsLoaded = true;
+    }
+  }
+
+  // Get AI recommendation for a specific plugin
+  getAIRecommendation(pluginName) {
+    return this.aiRecommendations.find(rec => rec.name === pluginName);
+  }
+
   // Display profile confirmation screen with plugin selection
   showProfileConfirmation() {
     this.showSection('confirmation');
@@ -592,17 +640,16 @@ export class SmartOnboardingManager {
   }
 
   // Display suggested plugins for selection
-  displaySuggestedPlugins() {
+  async displaySuggestedPlugins() {
     const container = document.getElementById('suggestedPluginsList');
     const loadingEl = document.getElementById('pluginsLoadingState');
     const noPluginsEl = document.getElementById('noPluginsMessage');
     const countEl = document.getElementById('selectedPluginCount');
 
-    if (loadingEl) loadingEl.classList.add('d-none');
-
     if (!container) return;
 
     if (this.availablePlugins.length === 0) {
+      if (loadingEl) loadingEl.classList.add('d-none');
       container.classList.add('d-none');
       if (noPluginsEl) noPluginsEl.classList.remove('d-none');
       if (countEl) countEl.textContent = '0';
@@ -612,30 +659,61 @@ export class SmartOnboardingManager {
     if (noPluginsEl) noPluginsEl.classList.add('d-none');
     container.classList.remove('d-none');
 
-    // Sort plugins - recommend some based on profile
-    const sortedPlugins = this.sortPluginsByRelevance(this.availablePlugins);
-
-    const pluginsHtml = sortedPlugins.map((plugin, index) => {
-      const isRecommended = this.isPluginRecommended(plugin);
-      return `
-        <div class="plugin-item mb-2 p-2" style="border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);">
-          <div class="form-check">
-            <input class="form-check-input plugin-checkbox" type="checkbox"
-                   value="${this.escapeHtml(plugin.name)}" id="plugin-${index}" ${isRecommended ? 'checked' : ''}>
-            <label class="form-check-label w-100" for="plugin-${index}">
-              <div class="d-flex justify-content-between align-items-start">
-                <div>
-                  <strong>${this.escapeHtml(plugin.name)}</strong>
-                  ${isRecommended ? '<span class="badge bg-success ms-1" style="font-size: 0.65rem;">Recommended</span>' : ''}
-                  <small class="text-muted d-block">${this.escapeHtml(plugin.description || 'No description')}</small>
-                </div>
-                <span class="badge" style="background: var(--accent-color); color: white; font-size: 0.65rem;">v${plugin.version || '?'}</span>
-              </div>
-            </label>
-          </div>
+    // Show loading state while fetching AI recommendations
+    if (loadingEl) {
+      loadingEl.classList.remove('d-none');
+      loadingEl.innerHTML = `
+        <div class="text-center py-3">
+          <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+          <span class="text-muted">Generating personalized recommendations...</span>
         </div>
       `;
-    }).join('');
+    }
+
+    // Fetch AI recommendations
+    await this.fetchAIRecommendations();
+
+    if (loadingEl) loadingEl.classList.add('d-none');
+
+    // Separate recommended and other plugins
+    const recommendedPluginNames = new Set(this.aiRecommendations.map(r => r.name));
+    const recommendedPlugins = this.availablePlugins.filter(p => recommendedPluginNames.has(p.name));
+    const otherPlugins = this.availablePlugins.filter(p => !recommendedPluginNames.has(p.name));
+
+    // Sort recommended plugins by relevance level
+    const relevanceOrder = { high: 0, medium: 1, low: 2 };
+    recommendedPlugins.sort((a, b) => {
+      const recA = this.getAIRecommendation(a.name);
+      const recB = this.getAIRecommendation(b.name);
+      return (relevanceOrder[recA?.relevance] || 2) - (relevanceOrder[recB?.relevance] || 2);
+    });
+
+    let pluginsHtml = '';
+
+    // Recommended plugins section
+    if (recommendedPlugins.length > 0) {
+      pluginsHtml += `
+        <div class="mb-3">
+          <h6 class="text-muted mb-2" style="font-size: 0.85rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -3px;">
+              <path d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+            </svg>
+            Recommended for You
+          </h6>
+          ${recommendedPlugins.map((plugin, index) => this.renderPluginItem(plugin, index, true)).join('')}
+        </div>
+      `;
+    }
+
+    // Other available plugins section
+    if (otherPlugins.length > 0) {
+      pluginsHtml += `
+        <div class="mb-2">
+          <h6 class="text-muted mb-2" style="font-size: 0.85rem;">Other Available Plugins</h6>
+          ${otherPlugins.map((plugin, index) => this.renderPluginItem(plugin, recommendedPlugins.length + index, false)).join('')}
+        </div>
+      `;
+    }
 
     container.innerHTML = pluginsHtml;
 
@@ -646,6 +724,41 @@ export class SmartOnboardingManager {
 
     // Initial count update
     this.updateSelectedCount();
+  }
+
+  // Render a single plugin item
+  renderPluginItem(plugin, index, isRecommended) {
+    const aiRec = this.getAIRecommendation(plugin.name);
+    const relevanceBadgeColor = aiRec?.relevance === 'high' ? 'bg-success' :
+                                aiRec?.relevance === 'medium' ? 'bg-info' : 'bg-secondary';
+
+    let reasonHtml = '';
+    if (aiRec?.reason) {
+      reasonHtml = `<div class="mt-1 small" style="color: var(--text-secondary); font-style: italic;">"${this.escapeHtml(aiRec.reason)}"</div>`;
+    }
+    if (aiRec?.use_case) {
+      reasonHtml += `<div class="mt-1 small text-muted"><strong>Use case:</strong> ${this.escapeHtml(aiRec.use_case)}</div>`;
+    }
+
+    return `
+      <div class="plugin-item mb-2 p-2" style="border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);">
+        <div class="form-check">
+          <input class="form-check-input plugin-checkbox" type="checkbox"
+                 value="${this.escapeHtml(plugin.name)}" id="plugin-${index}" ${isRecommended ? 'checked' : ''}>
+          <label class="form-check-label w-100" for="plugin-${index}">
+            <div class="d-flex justify-content-between align-items-start">
+              <div style="flex: 1;">
+                <strong>${this.escapeHtml(plugin.name)}</strong>
+                ${isRecommended && aiRec ? `<span class="badge ${relevanceBadgeColor} ms-1" style="font-size: 0.65rem;">${aiRec.relevance === 'high' ? 'Highly Recommended' : 'Recommended'}</span>` : ''}
+                <small class="text-muted d-block">${this.escapeHtml(plugin.description || 'No description')}</small>
+                ${reasonHtml}
+              </div>
+              <span class="badge ms-2" style="background: var(--accent-color); color: white; font-size: 0.65rem; white-space: nowrap;">v${plugin.version || '?'}</span>
+            </div>
+          </label>
+        </div>
+      </div>
+    `;
   }
 
   // Sort plugins by relevance to user profile
@@ -887,6 +1000,8 @@ export class SmartOnboardingManager {
     this.selectedPlugins = [];
     this.addedMarketplaces = [];
     this.mode = null;
+    this.aiRecommendations = [];
+    this.aiRecommendationsLoaded = false;
     this.showSection('mode-selection');
   }
 }

@@ -343,6 +343,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/apply-config", s.smartOnboardingHandler.Apply)
 	mux.HandleFunc("/api/onboarding/update-profile", s.smartOnboardingHandler.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.smartOnboardingHandler.GetStoredProfile)
+	mux.HandleFunc("/api/onboarding/recommend-plugins", s.smartOnboardingHandler.RecommendPlugins)
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
