@@ -4,12 +4,24 @@ import { smartOnboardingManager } from './smartOnboarding.js';
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 7;
+    this.totalSteps = 6;
     this.modal = null;
     this.modalInstance = null;
     this.deviceInfo = null;
     this.availableProviders = [];
     this.smartOnboarding = smartOnboardingManager;
+    this.completedSteps = new Set();
+    this.skippedSteps = new Set();
+
+    // Step names for dynamic title updates
+    this.stepTitles = [
+      'Welcome to Ori Agent',
+      'Device Detection',
+      'Configure API Keys',
+      'Configure System Model',
+      'Personalize Your Experience',
+      'Setup Complete'
+    ];
   }
 
   // Initialize the onboarding system
@@ -132,6 +144,52 @@ export class OnboardingManager {
     };
 
     document.addEventListener('keydown', this.keyboardHandler);
+
+    // Step indicator click handlers
+    this.setupStepIndicatorListeners();
+  }
+
+  // Setup step indicator click handlers
+  setupStepIndicatorListeners() {
+    const stepDots = document.querySelectorAll('#stepIndicator .step-dot');
+    stepDots.forEach((dot) => {
+      dot.addEventListener('click', (e) => {
+        const stepIndex = parseInt(dot.dataset.step, 10);
+        // Only allow clicking on completed steps
+        if (this.completedSteps.has(stepIndex) || this.skippedSteps.has(stepIndex)) {
+          this.navigateToStep(stepIndex);
+        }
+      });
+    });
+  }
+
+  // Navigate to a specific step
+  navigateToStep(stepIndex) {
+    if (stepIndex >= 0 && stepIndex < this.totalSteps) {
+      this.currentStep = stepIndex;
+      this.updateStepDisplay();
+    }
+  }
+
+  // Skip current step (individual step skip)
+  async skipCurrentStep() {
+    const stepName = `step-${this.currentStep}`;
+    this.skippedSteps.add(this.currentStep);
+
+    try {
+      await fetch('/api/onboarding/skip-step', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step_name: stepName }),
+      });
+    } catch (error) {
+      console.error('Error skipping step:', error);
+    }
+
+    if (this.currentStep < this.totalSteps - 1) {
+      this.currentStep++;
+      this.updateStepDisplay();
+    }
   }
 
   // Check onboarding status from backend
@@ -589,23 +647,31 @@ export class OnboardingManager {
   // Move to next step
   async nextStep() {
     if (this.currentStep < this.totalSteps - 1) {
-      // Save API keys if leaving step-1
-      if (this.currentStep === 1) {
+      // Step 1: Device Detection - fetch device info if not already done
+      if (this.currentStep === 1 && !this.deviceInfo) {
+        await this.fetchDeviceInfo();
+      }
+
+      // Step 2: Save API keys if leaving API Keys step
+      if (this.currentStep === 2) {
         const saved = await this.saveApiKeys();
         // Don't proceed if validation failed
         if (saved === false) {
           return;
         }
-        // Load providers for step 2 (system model)
+        // Load providers for step 3 (system model)
         await this.loadSystemModelProviders();
       }
 
-      // Save system model if leaving step-2
-      if (this.currentStep === 2) {
+      // Step 3: Save system model if leaving System Model step
+      if (this.currentStep === 3) {
         await this.saveSystemModel();
       }
 
-      // Mark current step as completed
+      // Track completed step locally
+      this.completedSteps.add(this.currentStep);
+
+      // Mark current step as completed in backend
       await this.completeStep(`step-${this.currentStep}`);
 
       this.currentStep++;
@@ -647,6 +713,15 @@ export class OnboardingManager {
       stepNum.textContent = this.currentStep + 1;
     }
 
+    // Update modal title dynamically
+    const modalTitle = document.getElementById('onboardingModalLabel');
+    if (modalTitle && this.stepTitles[this.currentStep]) {
+      modalTitle.textContent = this.stepTitles[this.currentStep];
+    }
+
+    // Update step indicator
+    this.updateStepIndicator();
+
     // Update button visibility
     const prevBtn = document.getElementById('prevStepBtn');
     const nextBtn = document.getElementById('nextStepBtn');
@@ -672,6 +747,80 @@ export class OnboardingManager {
 
     // Update UI highlights based on current step
     this.updateHighlights();
+
+    // Populate completion summary on last step
+    if (this.currentStep === this.totalSteps - 1) {
+      this.populateCompletionSummary();
+    }
+  }
+
+  // Update step indicator dots and connectors
+  updateStepIndicator() {
+    const stepDots = document.querySelectorAll('#stepIndicator .step-dot');
+    const connectors = document.querySelectorAll('#stepIndicator .step-connector');
+
+    stepDots.forEach((dot, index) => {
+      dot.classList.remove('active', 'completed');
+      dot.setAttribute('aria-selected', 'false');
+
+      if (index === this.currentStep) {
+        dot.classList.add('active');
+        dot.setAttribute('aria-selected', 'true');
+        dot.setAttribute('aria-current', 'step');
+      } else if (this.completedSteps.has(index) || this.skippedSteps.has(index) || index < this.currentStep) {
+        dot.classList.add('completed');
+        dot.removeAttribute('aria-current');
+      } else {
+        dot.removeAttribute('aria-current');
+      }
+    });
+
+    // Update connectors
+    connectors.forEach((connector, index) => {
+      connector.classList.remove('completed');
+      if (this.completedSteps.has(index) || this.skippedSteps.has(index) || index < this.currentStep) {
+        connector.classList.add('completed');
+      }
+    });
+  }
+
+  // Populate completion summary with gathered info
+  populateCompletionSummary() {
+    // Device info
+    const deviceEl = document.getElementById('completionDeviceInfo');
+    if (deviceEl && this.deviceInfo) {
+      deviceEl.textContent = `${this.deviceInfo.machine_name || this.deviceInfo.type || 'Detected'}`;
+    }
+
+    // API Keys info
+    const apiKeysEl = document.getElementById('completionApiKeysInfo');
+    if (apiKeysEl) {
+      const providers = [];
+      if (this.availableProviders.some(p => p.available && p.name === 'openai')) providers.push('OpenAI');
+      if (this.availableProviders.some(p => p.available && p.name === 'anthropic')) providers.push('Claude');
+      if (this.availableProviders.some(p => p.available && p.name === 'ollama')) providers.push('Ollama');
+      apiKeysEl.textContent = providers.length > 0 ? providers.join(', ') : 'Configure in Settings';
+    }
+
+    // Profile info
+    const profileEl = document.getElementById('completionProfileInfo');
+    if (profileEl && this.smartOnboarding && this.smartOnboarding.userProfile) {
+      const profile = this.smartOnboarding.userProfile;
+      profileEl.textContent = profile.primary_category || 'General';
+    }
+
+    // Installed plugins
+    const pluginsSummary = document.getElementById('completionPluginsSummary');
+    const pluginsList = document.getElementById('completionPluginsList');
+    if (pluginsSummary && pluginsList && this.smartOnboarding && this.smartOnboarding.installedPlugins) {
+      const plugins = this.smartOnboarding.installedPlugins;
+      if (plugins.length > 0) {
+        pluginsSummary.classList.remove('d-none');
+        pluginsList.innerHTML = plugins.map(p =>
+          `<span class="badge bg-secondary">${p}</span>`
+        ).join('');
+      }
+    }
   }
 
   // Highlight UI elements based on current onboarding step
@@ -681,28 +830,8 @@ export class OnboardingManager {
       el.classList.remove('onboarding-highlight');
     });
 
-    // Add highlights based on current step
-    switch (this.currentStep) {
-      case 5: // Create Agent step - highlight the sidebar toggle button (hamburger menu)
-        // Try various selectors for the sidebar toggle button
-        const sidebarToggle = document.querySelector(
-          '#sidebarToggle, .sidebar-toggle, [data-bs-toggle="collapse"][data-bs-target*="sidebar"], ' +
-          'button.navbar-toggler, .hamburger-menu, .menu-toggle, ' +
-          'header button:first-of-type, .navbar button:first-of-type'
-        );
-        if (sidebarToggle) {
-          sidebarToggle.classList.add('onboarding-highlight');
-        }
-        break;
-
-      case 6: // Plugins step - highlight Plugins nav link
-        document.querySelectorAll('.navbar a, .nav a, header a').forEach(link => {
-          if (link.textContent.trim() === 'Plugins') {
-            link.classList.add('onboarding-highlight');
-          }
-        });
-        break;
-    }
+    // No highlights needed for the new simplified flow
+    // The step indicator provides clear navigation
   }
 
   // Remove all highlights (called when modal closes)

@@ -28,6 +28,12 @@ type StatusResponse struct {
 	Completed       bool     `json:"completed"`
 	Skipped         bool     `json:"skipped"`
 	StepsCompleted  []string `json:"steps_completed"`
+	StepsSkipped    []string `json:"steps_skipped,omitempty"`
+}
+
+// SkipStepRequest represents a request to skip a step
+type SkipStepRequest struct {
+	StepName string `json:"step_name"`
 }
 
 // CompleteStepRequest represents a request to complete a step
@@ -52,6 +58,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		Completed:       state.Completed,
 		Skipped:         !state.SkippedAt.IsZero(),
 		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -94,6 +101,49 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 		Completed:       state.Completed,
 		Skipped:         !state.SkippedAt.IsZero(),
 		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SkipStep marks a step as skipped and advances to the next step
+// POST /api/onboarding/skip-step
+func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req SkipStepRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.StepName == "" {
+		orihttp.BadRequest(w, "step_name is required")
+		return
+	}
+
+	if err := h.onboardingMgr.SkipStep(req.StepName); err != nil {
+		orihttp.InternalError(w, "Failed to skip step: "+err.Error())
+		return
+	}
+
+	// Return updated status
+	state := h.onboardingMgr.GetState()
+	isComplete := h.onboardingMgr.IsOnboardingComplete()
+
+	response := StatusResponse{
+		NeedsOnboarding: !isComplete,
+		CurrentStep:     state.CurrentStep,
+		Completed:       state.Completed,
+		Skipped:         !state.SkippedAt.IsZero(),
+		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

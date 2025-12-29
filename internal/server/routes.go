@@ -330,6 +330,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	mux.HandleFunc("/api/onboarding/status", s.onboardingHandler.GetStatus)
 	mux.HandleFunc("/api/onboarding/step", s.onboardingHandler.CompleteStep)
+	mux.HandleFunc("/api/onboarding/skip-step", s.onboardingHandler.SkipStep)
 	mux.HandleFunc("/api/onboarding/skip", s.onboardingHandler.Skip)
 	mux.HandleFunc("/api/onboarding/complete", s.onboardingHandler.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.onboardingHandler.Reset)

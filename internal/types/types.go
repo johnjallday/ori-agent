@@ -22,6 +22,7 @@ type OnboardingState struct {
 	Completed      bool      `json:"completed"`
 	CurrentStep    int       `json:"current_step"`
 	StepsCompleted []string  `json:"steps_completed"`
+	StepsSkipped   []string  `json:"steps_skipped,omitempty"`
 	SkippedAt      time.Time `json:"skipped_at,omitempty"`
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 }

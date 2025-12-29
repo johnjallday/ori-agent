@@ -192,6 +192,85 @@
     z-index: 1061;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
+
+  /* Step Indicator Styles */
+  .step-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    position: relative;
+    transition: all 0.3s ease;
+    padding: 0;
+  }
+
+  .step-dot:disabled {
+    cursor: default;
+  }
+
+  .step-dot.completed {
+    background: #28a745;
+    border-color: #28a745;
+    color: white;
+    cursor: pointer;
+  }
+
+  .step-dot.completed:hover {
+    transform: scale(1.1);
+  }
+
+  .step-dot.active {
+    background: #0d6efd;
+    border-color: #0d6efd;
+    color: white;
+    box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.25);
+  }
+
+  .step-dot .step-label {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: var(--text-secondary);
+  }
+
+  .step-dot.active .step-label,
+  .step-dot.completed .step-label {
+    color: var(--text-primary);
+  }
+
+  .step-connector {
+    width: 20px;
+    height: 2px;
+    background: var(--border-color);
+    transition: background 0.3s ease;
+  }
+
+  .step-connector.completed {
+    background: #28a745;
+  }
+
+  /* Hide labels on small screens */
+  @media (max-width: 576px) {
+    .step-dot .step-label {
+      display: none;
+    }
+    .step-connector {
+      width: 12px;
+    }
+  }
 </style>
 
 <div class="modal fade" id="onboardingModal" tabindex="-1" aria-labelledby="onboardingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" role="dialog" aria-modal="true">
@@ -199,22 +278,79 @@
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
       <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
         <h1 class="modal-title fs-5" id="onboardingModalLabel" style="color: var(--text-primary);">Welcome to Ori Agent</h1>
-        <button type="button" class="btn-close" id="onboardingCloseBtn" aria-label="Close" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; z-index: 10001;"></button>
+        <button type="button" class="btn-close" id="onboardingCloseBtn" aria-label="Close" style="pointer-events: auto !important; cursor: pointer !important; z-index: 10001;"></button>
       </div>
       <div class="modal-body" style="color: var(--text-primary);">
-        <!-- Progress indicator -->
+        <!-- Step Indicator -->
         <div class="mb-4">
+          <div class="d-flex justify-content-center align-items-center gap-2 mb-3" id="stepIndicator" role="tablist" aria-label="Onboarding steps">
+            <button type="button" class="step-dot active" data-step="0" role="tab" aria-selected="true" aria-label="Welcome">
+              <span class="step-label">Welcome</span>
+            </button>
+            <div class="step-connector"></div>
+            <button type="button" class="step-dot" data-step="1" role="tab" aria-selected="false" aria-label="Device">
+              <span class="step-label">Device</span>
+            </button>
+            <div class="step-connector"></div>
+            <button type="button" class="step-dot" data-step="2" role="tab" aria-selected="false" aria-label="API Keys">
+              <span class="step-label">API Keys</span>
+            </button>
+            <div class="step-connector"></div>
+            <button type="button" class="step-dot" data-step="3" role="tab" aria-selected="false" aria-label="Model">
+              <span class="step-label">Model</span>
+            </button>
+            <div class="step-connector"></div>
+            <button type="button" class="step-dot" data-step="4" role="tab" aria-selected="false" aria-label="Profile">
+              <span class="step-label">Profile</span>
+            </button>
+            <div class="step-connector"></div>
+            <button type="button" class="step-dot" data-step="5" role="tab" aria-selected="false" aria-label="Done">
+              <span class="step-label">Done</span>
+            </button>
+          </div>
           <div class="d-flex justify-content-between mb-2">
-            <span class="text-muted small">Step <span id="currentStepNum">1</span> of <span id="totalStepsNum">7</span></span>
+            <span class="text-muted small">Step <span id="currentStepNum">1</span> of <span id="totalStepsNum">6</span></span>
           </div>
           <div class="progress" style="height: 4px;">
-            <div id="onboardingProgress" class="progress-bar" role="progressbar" style="width: 14.29%;" aria-valuenow="14.29" aria-valuemin="0" aria-valuemax="100"></div>
+            <div id="onboardingProgress" class="progress-bar" role="progressbar" style="width: 16.67%;" aria-valuenow="16.67" aria-valuemin="0" aria-valuemax="100"></div>
           </div>
         </div>
 
-        <!-- Step 0: Device Detection -->
+        <!-- Step 0: Welcome -->
         <div class="onboarding-step" id="step-0" role="tabpanel" aria-labelledby="step-0-title">
-          <h3 class="mb-3" id="step-0-title">Device Detection</h3>
+          <h3 class="mb-3" id="step-0-title">Welcome to Ori Agent</h3>
+          <p class="lead mb-4">Your AI-powered assistant with customizable plugins and tools.</p>
+          <div class="alert alert-info mb-3">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+            </svg>
+            This quick setup will configure Ori Agent for your needs. It only takes a minute.
+          </div>
+          <ul class="list-unstyled mb-0">
+            <li class="mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              Detect your device capabilities
+            </li>
+            <li class="mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              Configure AI providers (OpenAI, Anthropic, Ollama)
+            </li>
+            <li class="mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              Get personalized plugin recommendations
+            </li>
+          </ul>
+        </div>
+
+        <!-- Step 1: Device Detection -->
+        <div class="onboarding-step d-none" id="step-1" role="tabpanel" aria-labelledby="step-1-title">
+          <h3 class="mb-3" id="step-1-title">Device Detection</h3>
           <p class="mb-4">We've detected information about your device to optimize your experience.</p>
 
           <div class="card mb-3" id="deviceInfoCard">
@@ -293,9 +429,9 @@
           </div>
         </div>
 
-        <!-- Step 1: API Keys Configuration -->
-        <div class="onboarding-step d-none" id="step-1" role="tabpanel" aria-labelledby="step-1-title">
-          <h3 class="mb-3" id="step-1-title">Configure API Keys</h3>
+        <!-- Step 2: API Keys Configuration -->
+        <div class="onboarding-step d-none" id="step-2" role="tabpanel" aria-labelledby="step-2-title">
+          <h3 class="mb-3" id="step-2-title">Configure API Keys</h3>
           <p class="mb-4">To use AI models, you'll need to configure at least one API key. You can add multiple providers.</p>
 
           <!-- Placeholder for environment variable info (populated by JavaScript) -->
@@ -358,9 +494,9 @@
           </div>
         </div>
 
-        <!-- Step 2: System Model Configuration -->
-        <div class="onboarding-step d-none" id="step-2" role="tabpanel" aria-labelledby="step-2-title">
-          <h3 class="mb-3" id="step-2-title">Configure System Model</h3>
+        <!-- Step 3: System Model Configuration -->
+        <div class="onboarding-step d-none" id="step-3" role="tabpanel" aria-labelledby="step-3-title">
+          <h3 class="mb-3" id="step-3-title">Configure System Model</h3>
           <p class="mb-4">Select the AI model that will be used for internal system tasks like auto-configuration and suggestions.</p>
 
           <div class="alert alert-info mb-3">
@@ -418,9 +554,9 @@
           </div>
         </div>
 
-        <!-- Step 3: Smart Onboarding - AI Profile Detection -->
-        <div class="onboarding-step d-none" id="step-3" role="tabpanel" aria-labelledby="step-3-title">
-          <h3 class="mb-3" id="step-3-title">Personalize Your Experience</h3>
+        <!-- Step 4: Smart Onboarding - AI Profile Detection -->
+        <div class="onboarding-step d-none" id="step-4" role="tabpanel" aria-labelledby="step-4-title">
+          <h3 class="mb-3" id="step-4-title">Personalize Your Experience</h3>
           <p class="mb-4">Let us set up AI agents tailored to your workflow. Choose how you'd like to get started:</p>
 
           <!-- Error message -->
@@ -621,10 +757,19 @@
               <button class="btn btn-outline-secondary" id="marketplaceBackBtn">
                 Back
               </button>
-              <button class="btn btn-primary" id="marketplaceContinueBtn">
+              <button class="btn btn-link text-muted" id="marketplaceSkipBtn">
+                Skip this step
+              </button>
+              <button class="btn btn-primary ms-auto" id="marketplaceContinueBtn">
                 Continue to Plugin Selection
               </button>
             </div>
+            <p class="text-muted small mt-2 mb-0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+              </svg>
+              You can add marketplaces later in Settings → Plugins.
+            </p>
           </div>
 
           <!-- Plugin Selection -->
@@ -708,110 +853,90 @@
           </div>
         </div>
 
-        <!-- Step 4: Welcome -->
-        <div class="onboarding-step d-none" id="step-4" role="tabpanel" aria-labelledby="step-4-title">
-          <h3 class="mb-3" id="step-4-title">Get Started with Ori Agent</h3>
-          <p class="lead mb-4">Your AI-powered assistant with customizable plugins and tools.</p>
-          <div class="alert alert-info mb-3">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-            </svg>
-            This quick tour will help you understand the key features and get you up and running.
-          </div>
-          <ul class="list-unstyled mb-0">
-            <li class="mb-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
-                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-              </svg>
-              Create and manage AI agents
-            </li>
-            <li class="mb-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
-                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-              </svg>
-              Install plugins to extend capabilities
-            </li>
-            <li class="mb-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-success me-2">
-                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-              </svg>
-              Configure API keys and settings
-            </li>
-          </ul>
-        </div>
-
-        <!-- Step 5: Create Agent (Manual) -->
+        <!-- Step 5: Completion -->
         <div class="onboarding-step d-none" id="step-5" role="tabpanel" aria-labelledby="step-5-title">
-          <h3 class="mb-3" id="step-5-title">Create Additional Agents</h3>
-          <p class="mb-4">Agents are AI assistants that can use plugins and tools to help you accomplish tasks.</p>
-
-          <!-- Visual guide -->
-          <div class="card mb-3" style="border: 2px solid var(--primary-color, #0d6efd);">
-            <div class="card-body">
-              <div class="d-flex align-items-start mb-3">
-                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">1</div>
-                <div>
-                  <h6 class="mb-1">Click the menu button</h6>
-                  <p class="mb-0 text-muted small">Click the <strong>☰ menu button</strong> in the top-left corner (highlighted now) to open the sidebar.</p>
-                </div>
-              </div>
-              <div class="d-flex align-items-start mb-3">
-                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">2</div>
-                <div>
-                  <h6 class="mb-1">Click "Agents" in the sidebar</h6>
-                  <p class="mb-0 text-muted small">Find and click <strong>"Agents"</strong> in the sidebar menu to go to the Agents page.</p>
-                </div>
-              </div>
-              <div class="d-flex align-items-start mb-3">
-                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">3</div>
-                <div>
-                  <h6 class="mb-1">Click "+ New Agent"</h6>
-                  <p class="mb-0 text-muted small">Click the <strong>+ New Agent</strong> button to start creating your first AI assistant.</p>
-                </div>
-              </div>
-              <div class="d-flex align-items-start">
-                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-3" style="width: 32px; height: 32px; min-width: 32px;">4</div>
-                <div>
-                  <h6 class="mb-1">Configure your agent</h6>
-                  <p class="mb-0 text-muted small">Give it a name, select an AI model (GPT-4, Claude, Ollama, etc.), and optionally add a system prompt.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="alert alert-info mb-0">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-            </svg>
-            <strong>Tip:</strong> You can create multiple agents for different purposes - one for coding help, another for writing, etc.
-          </div>
-        </div>
-
-        <!-- Step 6: Plugins -->
-        <div class="onboarding-step d-none" id="step-6" role="tabpanel" aria-labelledby="step-6-title">
-          <h3 class="mb-3" id="step-6-title">Extend with Plugins</h3>
-          <p class="mb-4">Plugins give your agents special abilities like web search, file operations, and more.</p>
-          <div class="card mb-3">
-            <div class="card-body">
-              <h5 class="card-title">Installing plugins:</h5>
-              <ol class="mb-0">
-                <li class="mb-2">Navigate to <strong>Settings → Plugins</strong></li>
-                <li class="mb-2">Browse the plugin registry</li>
-                <li class="mb-2">Click <strong>Install</strong> on any plugin you want</li>
-                <li class="mb-2">Enable plugins for specific agents in their settings</li>
-              </ol>
-            </div>
-          </div>
-          <div class="alert alert-success">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+          <h3 class="mb-3" id="step-5-title">You're All Set!</h3>
+          <div class="alert alert-success mb-4">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M16.59,7.58L10,14.17L7.41,11.59L6,13L10,17L18,9L16.59,7.58Z"/>
             </svg>
-            You're all set! Start chatting with your agents and exploring the features.
+            <strong>Setup complete!</strong> Ori Agent is ready to use.
+          </div>
+
+          <!-- Summary Cards -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <div class="card h-100" style="border-color: var(--border-color);">
+                <div class="card-body text-center">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="mb-2 text-primary">
+                    <path d="M4,6H20V16H4M20,18A2,2 0 0,0 22,16V6C22,4.89 21.1,4 20,4H4C2.89,4 2,4.89 2,6V16A2,2 0 0,0 4,18H0V20H24V18H20Z"/>
+                  </svg>
+                  <h6 class="mb-1">Device</h6>
+                  <small id="completionDeviceInfo" class="text-muted">Detected</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="card h-100" style="border-color: var(--border-color);">
+                <div class="card-body text-center">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="mb-2 text-primary">
+                    <path d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/>
+                  </svg>
+                  <h6 class="mb-1">API Keys</h6>
+                  <small id="completionApiKeysInfo" class="text-muted">Configured</small>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="card h-100" style="border-color: var(--border-color);">
+                <div class="card-body text-center">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="mb-2 text-primary">
+                    <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                  </svg>
+                  <h6 class="mb-1">Profile</h6>
+                  <small id="completionProfileInfo" class="text-muted">Personalized</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Installed Plugins Summary (dynamic) -->
+          <div id="completionPluginsSummary" class="d-none mb-4">
+            <h6 class="mb-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1 text-success">
+                <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+              </svg>
+              Plugins Installed
+            </h6>
+            <div id="completionPluginsList" class="d-flex flex-wrap gap-2"></div>
+          </div>
+
+          <!-- Quick Actions -->
+          <h6 class="mb-3">What's next?</h6>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="/" class="btn btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M12,3C17.5,3 22,6.58 22,11C22,15.42 17.5,19 12,19C10.76,19 9.57,18.82 8.47,18.5C5.55,21 2,21 2,21C4.33,18.67 4.7,17.1 4.75,16.5C3.05,15.07 2,13.13 2,11C2,6.58 6.5,3 12,3Z"/>
+              </svg>
+              Start Chatting
+            </a>
+            <a href="/agents" class="btn btn-outline-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M16,13C15.71,13 15.38,13 15.03,13.05C16.19,13.89 17,15 17,16.5V19H23V16.5C23,14.17 18.33,13 16,13M8,13C5.67,13 1,14.17 1,16.5V19H15V16.5C15,14.17 10.33,13 8,13M8,11A3,3 0 0,0 11,8A3,3 0 0,0 8,5A3,3 0 0,0 5,8A3,3 0 0,0 8,11M16,11A3,3 0 0,0 19,8A3,3 0 0,0 16,5A3,3 0 0,0 13,8A3,3 0 0,0 16,11Z"/>
+              </svg>
+              View Agents
+            </a>
+            <a href="/plugins" class="btn btn-outline-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+              </svg>
+              Browse Plugins
+            </a>
           </div>
         </div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-        <button type="button" class="btn btn-outline-secondary" id="skipOnboardingBtn" onclick="fetch('/api/onboarding/skip', {method: 'POST'}).then(() => location.reload())" style="pointer-events: auto !important; cursor: pointer !important; position: relative; z-index: 10000;">Skip Tour</button>
+        <button type="button" class="btn btn-outline-secondary" id="skipOnboardingBtn" style="pointer-events: auto !important; cursor: pointer !important; position: relative; z-index: 10000;">Skip Tour</button>
         <div class="ms-auto">
           <button type="button" class="btn btn-secondary d-none" id="prevStepBtn">Previous</button>
           <button type="button" class="btn btn-primary" id="nextStepBtn" style="pointer-events: auto !important;">Next</button>

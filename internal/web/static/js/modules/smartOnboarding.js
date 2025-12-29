@@ -32,6 +32,7 @@ export class SmartOnboardingManager {
     const addMarketplaceBtn = document.getElementById('addOnboardingMarketplaceBtn');
     const marketplaceBackBtn = document.getElementById('marketplaceBackBtn');
     const marketplaceContinueBtn = document.getElementById('marketplaceContinueBtn');
+    const marketplaceSkipBtn = document.getElementById('marketplaceSkipBtn');
 
     if (detectBtn) {
       detectBtn.addEventListener('click', () => this.startDetection());
@@ -76,6 +77,10 @@ export class SmartOnboardingManager {
 
     if (marketplaceContinueBtn) {
       marketplaceContinueBtn.addEventListener('click', () => this.continueFromMarketplace());
+    }
+
+    if (marketplaceSkipBtn) {
+      marketplaceSkipBtn.addEventListener('click', () => this.skipMarketplace());
     }
 
     // Quick add marketplace buttons
@@ -522,6 +527,20 @@ export class SmartOnboardingManager {
   async continueFromMarketplace() {
     try {
       // Now fetch plugins (including from any newly added marketplaces)
+      await this.fetchAvailablePlugins();
+
+      // Show the plugin selection screen
+      this.showProfileConfirmation();
+    } catch (error) {
+      console.error('Error loading plugins:', error);
+      this.showError('Failed to load plugins. Please try again.');
+    }
+  }
+
+  // Skip marketplace step and go directly to plugin selection
+  async skipMarketplace() {
+    try {
+      // Fetch plugins from default marketplace only
       await this.fetchAvailablePlugins();
 
       // Show the plugin selection screen

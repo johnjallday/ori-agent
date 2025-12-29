@@ -129,8 +129,47 @@ func (m *Manager) ResetOnboarding() error {
 		Completed:      false,
 		CurrentStep:    0,
 		StepsCompleted: []string{},
+		StepsSkipped:   []string{},
 	}
 	return m.saveUnlocked()
+}
+
+// SkipStep marks a step as skipped and advances to the next step
+func (m *Manager) SkipStep(stepName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Add to skipped steps if not already there
+	found := false
+	for _, s := range m.state.Onboarding.StepsSkipped {
+		if s == stepName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		m.state.Onboarding.StepsSkipped = append(m.state.Onboarding.StepsSkipped, stepName)
+	}
+
+	// Advance current step
+	m.state.Onboarding.CurrentStep++
+
+	return m.saveUnlocked()
+}
+
+// GetSkippedSteps returns a copy of the skipped steps slice
+func (m *Manager) GetSkippedSteps() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.state.Onboarding.StepsSkipped == nil {
+		return []string{}
+	}
+
+	// Return a copy to prevent external modification
+	result := make([]string, len(m.state.Onboarding.StepsSkipped))
+	copy(result, m.state.Onboarding.StepsSkipped)
+	return result
 }
 
 // load reads the state from disk
