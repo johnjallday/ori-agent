@@ -428,7 +428,17 @@ export class SmartOnboardingManager {
     // Show loading state
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+      btn.innerHTML = `
+        <div class="d-flex align-items-center">
+          <div class="me-3" style="background: rgba(255,255,255,0.2); border-radius: 10px; padding: 10px;">
+            <div class="spinner-border text-light" style="width: 28px; height: 28px;" role="status"></div>
+          </div>
+          <div style="flex: 1;">
+            <strong style="font-size: 1.1rem;">Adding Marketplace...</strong>
+            <div style="font-size: 0.85rem; opacity: 0.9;">Please wait</div>
+          </div>
+        </div>
+      `;
     }
 
     try {
@@ -453,17 +463,23 @@ export class SmartOnboardingManager {
           setTimeout(() => resultEl.classList.add('d-none'), 3000);
         }
 
-        // Disable the button since it's now added
+        // Update button to show added state
         if (btn) {
           btn.disabled = true;
+          btn.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
           btn.innerHTML = `
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-              <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-            </svg>
-            Added
+            <div class="d-flex align-items-center">
+              <div class="me-3" style="background: rgba(255,255,255,0.2); border-radius: 10px; padding: 10px;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+                  <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+              </div>
+              <div style="flex: 1;">
+                <strong style="font-size: 1.1rem;">Ori Music Plugins</strong>
+                <div style="font-size: 0.85rem; opacity: 0.9;">Added successfully!</div>
+              </div>
+            </div>
           `;
-          btn.classList.remove('btn-outline-primary');
-          btn.classList.add('btn-success');
         }
       } else {
         if (resultEl) {
@@ -472,12 +488,7 @@ export class SmartOnboardingManager {
         }
         if (btn) {
           btn.disabled = false;
-          btn.innerHTML = `
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-              <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
-            </svg>
-            Ori Music Plugins
-          `;
+          this.resetMusicMarketplaceBtn(btn);
         }
       }
     } catch (error) {
@@ -488,14 +499,30 @@ export class SmartOnboardingManager {
       }
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-            <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
-          </svg>
-          Ori Music Plugins
-        `;
+        this.resetMusicMarketplaceBtn(btn);
       }
     }
+  }
+
+  // Reset the music marketplace button to its original state
+  resetMusicMarketplaceBtn(btn) {
+    btn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    btn.innerHTML = `
+      <div class="d-flex align-items-center">
+        <div class="me-3" style="background: rgba(255,255,255,0.2); border-radius: 10px; padding: 10px;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+            <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
+          </svg>
+        </div>
+        <div style="flex: 1;">
+          <strong style="font-size: 1.1rem;">Ori Music Plugins</strong>
+          <div style="font-size: 0.85rem; opacity: 0.9;">Audio production tools, DAW integration, MIDI utilities</div>
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="opacity: 0.7;">
+          <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+        </svg>
+      </div>
+    `;
   }
 
   // Update the list of added marketplaces

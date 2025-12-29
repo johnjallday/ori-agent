@@ -707,14 +707,30 @@
               The official Ori marketplace is already configured. Add more if you have custom plugin sources.
             </div>
 
-            <!-- Quick Add Suggestions -->
-            <div class="mb-3">
-              <small class="text-muted d-block mb-2">Quick add a community marketplace:</small>
-              <button type="button" class="btn btn-outline-primary btn-sm" id="addMusicMarketplaceBtn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
+            <!-- Quick Add Community Marketplace -->
+            <div class="mb-4">
+              <h6 class="mb-2" style="font-size: 0.9rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -2px;">
+                  <path d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
                 </svg>
-                Ori Music Plugins
+                Community Marketplaces
+              </h6>
+              <button type="button" class="btn w-100 text-start p-3" id="addMusicMarketplaceBtn"
+                      style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 12px; color: white;">
+                <div class="d-flex align-items-center">
+                  <div class="me-3" style="background: rgba(255,255,255,0.2); border-radius: 10px; padding: 10px;">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+                      <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
+                    </svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <strong style="font-size: 1.1rem;">Ori Music Plugins</strong>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">Audio production tools, DAW integration, MIDI utilities</div>
+                  </div>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="white" style="opacity: 0.7;">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                </div>
               </button>
             </div>
 
