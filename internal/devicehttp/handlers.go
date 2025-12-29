@@ -237,6 +237,8 @@ type DeviceCapabilities struct {
 	TierDescription   string         `json:"tier_description"`
 	RecommendedModels []string       `json:"recommended_models"`
 	OllamaLibraryURL  string         `json:"ollama_library_url"`
+	MachineName       string         `json:"machine_name,omitempty"` // Machine/model name (e.g., "MacBook Pro")
+	ChipType          string         `json:"chip_type,omitempty"`    // Chip/processor type (e.g., "Apple M5")
 }
 
 // GetCapabilities returns device hardware capabilities including GPU, RAM, and model recommendations
@@ -268,6 +270,8 @@ func (h *Handler) buildCapabilities(deviceInfo types.DeviceInfo) DeviceCapabilit
 		MaxModelParams:    deviceInfo.MaxModelParams,
 		MemoryTier:        deviceInfo.MemoryTier,
 		OllamaLibraryURL:  "https://ollama.com/library",
+		MachineName:       deviceInfo.MachineName,
+		ChipType:          deviceInfo.ChipType,
 	}
 
 	if deviceInfo.MemoryTier != "" {

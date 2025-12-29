@@ -15,3 +15,8 @@ func detectGPUPlatform() *types.GPUInfo {
 func detectTotalRAMPlatform() int64 {
 	return 0
 }
+
+// detectHardwareInfoPlatform is a stub for unsupported platforms
+func detectHardwareInfoPlatform() *HardwareInfo {
+	return nil
+}

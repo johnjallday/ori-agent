@@ -92,3 +92,10 @@ type memoryStatusEx struct {
 	AvailVirtual         uint64
 	AvailExtendedVirtual uint64
 }
+
+// detectHardwareInfoPlatform detects machine and chip information on Windows
+// Returns nil as detailed hardware info detection is not yet implemented for Windows
+func detectHardwareInfoPlatform() *HardwareInfo {
+	// TODO: Implement Windows hardware detection using wmic or WMI
+	return nil
+}

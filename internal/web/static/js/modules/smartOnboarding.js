@@ -1,9 +1,12 @@
-// Smart Onboarding module - AI-powered profile detection and agent auto-configuration
+// Smart Onboarding module - AI-powered profile detection and plugin suggestions
 export class SmartOnboardingManager {
   constructor() {
     this.detectedApps = [];
     this.userProfile = null;
     this.onboardingConfig = null;
+    this.availablePlugins = [];
+    this.installedPlugins = new Set();
+    this.selectedPlugins = [];
     this.mode = null; // 'detect' or 'describe'
   }
 
@@ -21,6 +24,7 @@ export class SmartOnboardingManager {
     const submitDescriptionBtn = document.getElementById('submitDescriptionBtn');
     const confirmProfileBtn = document.getElementById('confirmProfileBtn');
     const editProfileBtn = document.getElementById('editProfileBtn');
+    const skipPluginsBtn = document.getElementById('skipPluginsBtn');
 
     if (detectBtn) {
       detectBtn.addEventListener('click', () => this.startDetection());
@@ -39,11 +43,15 @@ export class SmartOnboardingManager {
     }
 
     if (confirmProfileBtn) {
-      confirmProfileBtn.addEventListener('click', () => this.confirmProfile());
+      confirmProfileBtn.addEventListener('click', () => this.installSelectedPlugins());
     }
 
     if (editProfileBtn) {
       editProfileBtn.addEventListener('click', () => this.editProfile());
+    }
+
+    if (skipPluginsBtn) {
+      skipPluginsBtn.addEventListener('click', () => this.skipPlugins());
     }
   }
 
@@ -190,32 +198,40 @@ export class SmartOnboardingManager {
     }
   }
 
-  // Generate onboarding configuration from profile
+  // Generate onboarding configuration from profile and load plugins
   async generateConfig() {
     try {
-      const response = await fetch('/api/onboarding/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile: this.userProfile })
-      });
+      // We don't need the old config endpoint anymore, just fetch plugins
+      await this.fetchAvailablePlugins();
 
-      if (!response.ok) {
-        throw new Error('Failed to generate configuration');
-      }
-
-      const data = await response.json();
-      this.onboardingConfig = data.config;
-
-      // Show the profile confirmation screen
+      // Show the plugin selection screen
       this.showProfileConfirmation();
     } catch (error) {
-      console.error('Error generating config:', error);
-      this.showError('Failed to generate configuration. Please try again.');
+      console.error('Error loading plugins:', error);
+      this.showError('Failed to load plugins. Please try again.');
       this.showSection('mode-selection');
     }
   }
 
-  // Display profile confirmation screen
+  // Fetch available plugins from registry
+  async fetchAvailablePlugins() {
+    const response = await fetch('/api/plugin-registry');
+    if (!response.ok) {
+      throw new Error('Failed to fetch plugin registry');
+    }
+
+    const data = await response.json();
+    const allPlugins = data.plugins || [];
+
+    // Separate online (downloadable) and local (installed) plugins
+    const onlinePlugins = allPlugins.filter(p => p.github_repo);
+    const localPlugins = allPlugins.filter(p => !p.github_repo);
+
+    this.installedPlugins = new Set(localPlugins.map(p => p.name));
+    this.availablePlugins = onlinePlugins.filter(p => !this.installedPlugins.has(p.name));
+  }
+
+  // Display profile confirmation screen with plugin selection
   showProfileConfirmation() {
     this.showSection('confirmation');
 
@@ -233,101 +249,238 @@ export class SmartOnboardingManager {
       categoryEl.textContent = this.formatCategory(this.userProfile.primary_category);
     }
 
-    // Display specializations
-    const specsEl = document.getElementById('profileSpecializations');
-    if (specsEl) {
-      const specs = this.userProfile.specializations || [];
-      if (specs.length > 0) {
-        specsEl.innerHTML = specs.map(s =>
-          `<span class="badge bg-info me-1">${this.escapeHtml(s)}</span>`
-        ).join('');
-      } else {
-        specsEl.innerHTML = '<span class="text-muted">None detected</span>';
-      }
-    }
-
-    // Display confidence
-    const confidenceEl = document.getElementById('profileConfidence');
-    if (confidenceEl) {
-      const confidence = Math.round((this.userProfile.confidence || 0) * 100);
-      confidenceEl.innerHTML = `
-        <div class="progress" style="height: 20px;">
-          <div class="progress-bar ${confidence >= 70 ? 'bg-success' : confidence >= 40 ? 'bg-warning' : 'bg-danger'}"
-               role="progressbar" style="width: ${confidence}%;"
-               aria-valuenow="${confidence}" aria-valuemin="0" aria-valuemax="100">
-            ${confidence}%
-          </div>
-        </div>
-      `;
-    }
-
-    // Display suggested agents
-    this.displaySuggestedAgents();
+    // Display suggested plugins
+    this.displaySuggestedPlugins();
   }
 
-  // Display suggested agents for confirmation
-  displaySuggestedAgents() {
-    const container = document.getElementById('suggestedAgentsList');
-    if (!container || !this.onboardingConfig) return;
+  // Display suggested plugins for selection
+  displaySuggestedPlugins() {
+    const container = document.getElementById('suggestedPluginsList');
+    const loadingEl = document.getElementById('pluginsLoadingState');
+    const noPluginsEl = document.getElementById('noPluginsMessage');
+    const countEl = document.getElementById('selectedPluginCount');
 
-    const agents = this.onboardingConfig.agents || [];
+    if (loadingEl) loadingEl.classList.add('d-none');
 
-    if (agents.length === 0) {
-      container.innerHTML = '<p class="text-muted">No agents suggested. You can create agents manually later.</p>';
+    if (!container) return;
+
+    if (this.availablePlugins.length === 0) {
+      container.classList.add('d-none');
+      if (noPluginsEl) noPluginsEl.classList.remove('d-none');
+      if (countEl) countEl.textContent = '0';
       return;
     }
 
-    const agentsHtml = agents.map((agent, index) => `
-      <div class="card mb-2">
-        <div class="card-body py-2">
+    if (noPluginsEl) noPluginsEl.classList.add('d-none');
+    container.classList.remove('d-none');
+
+    // Sort plugins - recommend some based on profile
+    const sortedPlugins = this.sortPluginsByRelevance(this.availablePlugins);
+
+    const pluginsHtml = sortedPlugins.map((plugin, index) => {
+      const isRecommended = this.isPluginRecommended(plugin);
+      return `
+        <div class="plugin-item mb-2 p-2" style="border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary);">
           <div class="form-check">
-            <input class="form-check-input agent-checkbox" type="checkbox"
-                   value="${index}" id="agent-${index}" checked>
-            <label class="form-check-label" for="agent-${index}">
-              <strong>${this.escapeHtml(agent.name)}</strong>
-              <small class="text-muted d-block">${this.escapeHtml(agent.description)}</small>
+            <input class="form-check-input plugin-checkbox" type="checkbox"
+                   value="${this.escapeHtml(plugin.name)}" id="plugin-${index}" ${isRecommended ? 'checked' : ''}>
+            <label class="form-check-label w-100" for="plugin-${index}">
+              <div class="d-flex justify-content-between align-items-start">
+                <div>
+                  <strong>${this.escapeHtml(plugin.name)}</strong>
+                  ${isRecommended ? '<span class="badge bg-success ms-1" style="font-size: 0.65rem;">Recommended</span>' : ''}
+                  <small class="text-muted d-block">${this.escapeHtml(plugin.description || 'No description')}</small>
+                </div>
+                <span class="badge" style="background: var(--accent-color); color: white; font-size: 0.65rem;">v${plugin.version || '?'}</span>
+              </div>
             </label>
           </div>
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
-    container.innerHTML = agentsHtml;
+    container.innerHTML = pluginsHtml;
+
+    // Setup change listeners to update count
+    container.querySelectorAll('.plugin-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => this.updateSelectedCount());
+    });
+
+    // Initial count update
+    this.updateSelectedCount();
   }
 
-  // Confirm profile and create agents
-  async confirmProfile() {
-    const checkboxes = document.querySelectorAll('.agent-checkbox:checked');
-    const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.value));
+  // Sort plugins by relevance to user profile
+  sortPluginsByRelevance(plugins) {
+    return [...plugins].sort((a, b) => {
+      const aRecommended = this.isPluginRecommended(a) ? 1 : 0;
+      const bRecommended = this.isPluginRecommended(b) ? 1 : 0;
+      return bRecommended - aRecommended;
+    });
+  }
 
-    // Filter agents to only selected ones
-    const selectedAgents = selectedIndices.map(i => this.onboardingConfig.agents[i]);
-    const configToApply = {
-      ...this.onboardingConfig,
-      agents: selectedAgents
+  // Check if plugin is recommended based on user profile
+  isPluginRecommended(plugin) {
+    if (!this.userProfile) return false;
+
+    const category = this.userProfile.primary_category || '';
+    const specs = (this.userProfile.specializations || []).map(s => s.toLowerCase());
+    const pluginName = (plugin.name || '').toLowerCase();
+    const pluginDesc = (plugin.description || '').toLowerCase();
+
+    // Define profile-to-plugin mapping
+    const recommendations = {
+      'developer': ['git', 'code', 'script', 'api', 'debug', 'test'],
+      'devops': ['docker', 'kubernetes', 'aws', 'cloud', 'deploy', 'ci', 'monitor'],
+      'data_scientist': ['data', 'python', 'analysis', 'ml', 'chart', 'csv', 'sql'],
+      'designer': ['image', 'design', 'color', 'ui', 'figma'],
+      'writer': ['write', 'text', 'document', 'markdown', 'note'],
+      'project_manager': ['task', 'project', 'calendar', 'team', 'slack']
     };
+
+    const keywords = recommendations[category] || [];
+
+    // Check if plugin matches any keywords
+    for (const keyword of keywords) {
+      if (pluginName.includes(keyword) || pluginDesc.includes(keyword)) {
+        return true;
+      }
+    }
+
+    // Check specializations
+    for (const spec of specs) {
+      if (pluginName.includes(spec) || pluginDesc.includes(spec)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Update selected plugin count
+  updateSelectedCount() {
+    const countEl = document.getElementById('selectedPluginCount');
+    if (countEl) {
+      const checked = document.querySelectorAll('.plugin-checkbox:checked').length;
+      countEl.textContent = checked;
+    }
+  }
+
+  // Install selected plugins
+  async installSelectedPlugins() {
+    const checkboxes = document.querySelectorAll('.plugin-checkbox:checked');
+    this.selectedPlugins = Array.from(checkboxes).map(cb => cb.value);
+
+    if (this.selectedPlugins.length === 0) {
+      this.skipPlugins();
+      return;
+    }
 
     this.showSection('applying');
 
-    try {
-      const response = await fetch('/api/onboarding/apply-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: configToApply })
-      });
+    const progressList = document.getElementById('installProgressList');
+    const installedList = [];
+    const failedList = [];
 
-      if (!response.ok) {
-        throw new Error('Failed to apply configuration');
+    for (const pluginName of this.selectedPlugins) {
+      // Update progress
+      if (progressList) {
+        progressList.innerHTML += `
+          <div class="d-flex align-items-center mb-2" id="progress-${this.escapeHtml(pluginName)}">
+            <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+            <span>${this.escapeHtml(pluginName)}</span>
+          </div>
+        `;
       }
 
-      const data = await response.json();
+      try {
+        const response = await fetch('/api/plugins/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: pluginName })
+        });
 
-      // Show success
-      this.showSuccess(data.agents_created || []);
-    } catch (error) {
-      console.error('Error applying config:', error);
-      this.showError('Failed to create agents. Please try again or create agents manually.');
-      this.showSection('confirmation');
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          installedList.push(pluginName);
+          // Update progress to success
+          const progressEl = document.getElementById(`progress-${pluginName}`);
+          if (progressEl) {
+            progressEl.innerHTML = `
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#28a745" class="me-2">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+              <span>${this.escapeHtml(pluginName)}</span>
+            `;
+          }
+        } else {
+          throw new Error(result.message || 'Install failed');
+        }
+      } catch (error) {
+        console.error(`Failed to install ${pluginName}:`, error);
+        failedList.push(pluginName);
+        // Update progress to failed
+        const progressEl = document.getElementById(`progress-${pluginName}`);
+        if (progressEl) {
+          progressEl.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#dc3545" class="me-2">
+              <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+            </svg>
+            <span class="text-danger">${this.escapeHtml(pluginName)} (failed)</span>
+          `;
+        }
+      }
+    }
+
+    // Show success
+    this.showPluginSuccess(installedList, failedList);
+  }
+
+  // Skip plugin installation
+  skipPlugins() {
+    this.showSection('success');
+    const successMsg = document.getElementById('successMessage');
+    const headerEl = document.getElementById('installedListHeader');
+    const listEl = document.getElementById('createdAgentsList');
+
+    if (successMsg) successMsg.textContent = 'Profile saved! You can install plugins later.';
+    if (headerEl) headerEl.classList.add('d-none');
+    if (listEl) listEl.innerHTML = '';
+  }
+
+  // Show plugin installation success
+  showPluginSuccess(installed, failed) {
+    this.showSection('success');
+
+    const successMsg = document.getElementById('successMessage');
+    const headerEl = document.getElementById('installedListHeader');
+    const listEl = document.getElementById('createdAgentsList');
+
+    if (installed.length > 0) {
+      if (successMsg) successMsg.textContent = `${installed.length} plugin${installed.length > 1 ? 's' : ''} installed successfully!`;
+      if (headerEl) {
+        headerEl.textContent = 'Installed Plugins:';
+        headerEl.classList.remove('d-none');
+      }
+      if (listEl) {
+        listEl.innerHTML = installed.map(name =>
+          `<li class="mb-1"><strong>${this.escapeHtml(name)}</strong></li>`
+        ).join('');
+      }
+    } else {
+      if (successMsg) successMsg.textContent = 'No plugins were installed.';
+      if (headerEl) headerEl.classList.add('d-none');
+      if (listEl) listEl.innerHTML = '';
+    }
+
+    if (failed.length > 0 && listEl) {
+      listEl.innerHTML += `<li class="text-danger mt-2">Failed: ${failed.join(', ')}</li>`;
+    }
+
+    // Refresh plugins in sidebar if available
+    if (typeof window.loadPluginsForSidebar === 'function') {
+      window.loadPluginsForSidebar();
     }
   }
 
@@ -338,20 +491,6 @@ export class SmartOnboardingManager {
     const descriptionInput = document.getElementById('userDescription');
     if (descriptionInput && this.userProfile?.summary) {
       descriptionInput.value = this.userProfile.summary;
-    }
-  }
-
-  // Show success message
-  showSuccess(createdAgents) {
-    this.showSection('success');
-
-    const agentsListEl = document.getElementById('createdAgentsList');
-    if (agentsListEl && createdAgents.length > 0) {
-      agentsListEl.innerHTML = createdAgents.map(name =>
-        `<li class="mb-1"><strong>${this.escapeHtml(name)}</strong></li>`
-      ).join('');
-    } else if (agentsListEl) {
-      agentsListEl.innerHTML = '<li class="text-muted">No new agents created (may already exist)</li>';
     }
   }
 
@@ -410,6 +549,9 @@ export class SmartOnboardingManager {
     this.detectedApps = [];
     this.userProfile = null;
     this.onboardingConfig = null;
+    this.availablePlugins = [];
+    this.installedPlugins = new Set();
+    this.selectedPlugins = [];
     this.mode = null;
     this.showSection('mode-selection');
   }

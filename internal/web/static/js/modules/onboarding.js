@@ -284,6 +284,28 @@ export class OnboardingManager {
     document.getElementById('detectedOS').textContent = this.deviceInfo.os;
     document.getElementById('detectedArch').textContent = this.deviceInfo.arch;
 
+    // Show machine name and chip type if available (macOS)
+    const machineSection = document.getElementById('deviceMachineSection');
+    if (machineSection && (this.deviceInfo.machine_name || this.deviceInfo.chip_type)) {
+      document.getElementById('detectedMachineName').textContent = this.deviceInfo.machine_name || '-';
+      document.getElementById('detectedChipType').textContent = this.deviceInfo.chip_type || '-';
+      machineSection.classList.remove('d-none');
+    }
+
+    // Show RAM in the grid
+    const ramEl = document.getElementById('detectedRAM');
+    if (ramEl && this.deviceInfo.total_ram_bytes > 0) {
+      ramEl.textContent = this.formatBytes(this.deviceInfo.total_ram_bytes);
+    }
+
+    // Show GPU row if available
+    const gpuRow = document.getElementById('deviceGPURow');
+    const gpuEl = document.getElementById('detectedGPU');
+    if (gpuRow && gpuEl && this.deviceInfo.gpu && this.deviceInfo.gpu.name) {
+      gpuEl.textContent = this.deviceInfo.gpu.name;
+      gpuRow.classList.remove('d-none');
+    }
+
     // Set dropdown to detected type
     const deviceTypeSelect = document.getElementById('deviceTypeSelect');
     if (deviceTypeSelect) {
@@ -294,6 +316,20 @@ export class OnboardingManager {
         await this.updateDeviceType(e.target.value);
       });
     }
+  }
+
+  // Format bytes to human-readable string
+  formatBytes(bytes) {
+    if (bytes === 0) return '0 bytes';
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) {
+      return gb === Math.floor(gb) ? `${Math.floor(gb)} GB` : `${gb.toFixed(1)} GB`;
+    }
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1) {
+      return `${Math.floor(mb)} MB`;
+    }
+    return `${bytes} bytes`;
   }
 
   // Update device type when user changes selection
@@ -409,6 +445,9 @@ export class OnboardingManager {
       providerSelect.innerHTML = '<option value="">Select a provider...</option>';
       const availableCount = this.availableProviders.filter(p => p.available).length;
 
+      // Check if Ollama is available to auto-select it
+      const ollamaProvider = this.availableProviders.find(p => p.available && p.name === 'ollama');
+
       this.availableProviders
         .filter(p => p.available)
         .forEach(provider => {
@@ -417,6 +456,13 @@ export class OnboardingManager {
           option.textContent = provider.display_name;
           providerSelect.appendChild(option);
         });
+
+      // Auto-select Ollama if available (local = no API costs)
+      if (ollamaProvider) {
+        providerSelect.value = 'ollama';
+        // Trigger model loading for Ollama
+        await this.loadSystemModelModels('ollama');
+      }
 
       // Update status
       if (availableCount > 0) {

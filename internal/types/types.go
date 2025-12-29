@@ -46,6 +46,8 @@ type DeviceInfo struct {
 	TotalRAMBytes  int64    `json:"total_ram_bytes,omitempty"`  // Total system RAM in bytes
 	MaxModelParams string   `json:"max_model_params,omitempty"` // Maximum model parameter size (e.g., "7B", "13B", "70B")
 	MemoryTier     string   `json:"memory_tier,omitempty"`      // Memory tier classification (e.g., "Basic", "Standard", "Advanced", "Professional")
+	MachineName    string   `json:"machine_name,omitempty"`     // Machine/model name (e.g., "MacBook Pro", "iMac", "Dell XPS")
+	ChipType       string   `json:"chip_type,omitempty"`        // Chip/processor type (e.g., "Apple M5", "Intel Core i9")
 }
 
 // MenuBarSettings tracks menu bar app preferences

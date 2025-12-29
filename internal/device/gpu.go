@@ -14,6 +14,12 @@ const (
 	GB = MB * 1024
 )
 
+// HardwareInfo contains machine and chip information
+type HardwareInfo struct {
+	MachineName string // e.g., "MacBook Pro", "iMac", "Mac mini"
+	ChipType    string // e.g., "Apple M5", "Intel Core i9"
+}
+
 // DetectGPU detects GPU information for the current system.
 // This function is implemented differently for each platform using build tags.
 // Returns nil if GPU detection fails or is not supported on the platform.
@@ -26,6 +32,13 @@ func DetectGPU() *types.GPUInfo {
 // Returns 0 if detection fails.
 func DetectTotalRAM() int64 {
 	return detectTotalRAMPlatform()
+}
+
+// DetectHardwareInfo detects machine and chip information for the current system.
+// This function is implemented differently for each platform using build tags.
+// Returns nil if detection fails or is not supported on the platform.
+func DetectHardwareInfo() *HardwareInfo {
+	return detectHardwareInfoPlatform()
 }
 
 // DetectVendorFromName determines GPU vendor from the GPU name string.

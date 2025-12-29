@@ -63,6 +63,25 @@ const deviceCapabilities = {
    * Render the capabilities data in the UI
    */
   renderCapabilities(data) {
+    // Machine info (if available)
+    const machineNameEl = document.getElementById('deviceMachineName');
+    const chipTypeEl = document.getElementById('deviceChipType');
+    const machineInfoSection = document.getElementById('deviceMachineInfoSection');
+
+    if (machineNameEl && chipTypeEl) {
+      if (data.machine_name || data.chip_type) {
+        machineNameEl.textContent = data.machine_name || '-';
+        chipTypeEl.textContent = data.chip_type || '-';
+        if (machineInfoSection) {
+          machineInfoSection.classList.remove('d-none');
+        }
+      } else {
+        if (machineInfoSection) {
+          machineInfoSection.classList.add('d-none');
+        }
+      }
+    }
+
     // GPU info
     const gpuNameEl = document.getElementById('deviceGPUName');
     const gpuVendorEl = document.getElementById('deviceGPUVendor');

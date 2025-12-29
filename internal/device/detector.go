@@ -25,6 +25,12 @@ func Detect() types.DeviceInfo {
 	info.GPU = DetectGPU()
 	info.TotalRAMBytes = DetectTotalRAM()
 
+	// Detect hardware info (machine name, chip type)
+	if hwInfo := DetectHardwareInfo(); hwInfo != nil {
+		info.MachineName = hwInfo.MachineName
+		info.ChipType = hwInfo.ChipType
+	}
+
 	// Calculate max model parameters and memory tier
 	if info.TotalRAMBytes > 0 {
 		params := CalculateMaxParams(info.GPU, info.TotalRAMBytes)

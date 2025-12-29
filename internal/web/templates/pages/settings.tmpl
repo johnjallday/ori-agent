@@ -190,6 +190,19 @@
 
           <!-- Device Capabilities Display (hidden by default) -->
           <div id="deviceCapabilitiesDisplay" class="d-none">
+            <!-- Machine Info Section (shown only when available) -->
+            <div id="deviceMachineInfoSection" class="mb-4 p-3 d-none" style="background: linear-gradient(135deg, rgba(var(--accent-color-rgb, 79,70,229), 0.1) 0%, rgba(var(--accent-color-rgb, 79,70,229), 0.05) 100%); border-radius: var(--radius-md); border: 1px solid rgba(var(--accent-color-rgb, 79,70,229), 0.2);">
+              <div class="d-flex align-items-center gap-3">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: var(--accent-color);">
+                  <path d="M4,6H20V16H4M20,18A2,2 0 0,0 22,16V6C22,4.89 21.1,4 20,4H4C2.89,4 2,4.89 2,6V16A2,2 0 0,0 4,18H0V20H24V18H20Z"/>
+                </svg>
+                <div class="flex-grow-1">
+                  <div id="deviceMachineName" style="color: var(--text-primary); font-weight: 600; font-size: 1.25rem;">-</div>
+                  <div id="deviceChipType" style="color: var(--accent-color); font-size: 0.95rem; font-weight: 500;">-</div>
+                </div>
+              </div>
+            </div>
+
             <!-- Hardware Info Row -->
             <div class="row g-3 mb-4">
               <!-- GPU Card -->

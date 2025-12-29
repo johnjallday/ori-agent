@@ -46,6 +46,23 @@ type display struct {
 	Resolution string `json:"_spdisplays_resolution,omitempty"`
 }
 
+// systemProfilerHardwareData represents the JSON structure from system_profiler SPHardwareDataType
+type systemProfilerHardwareData struct {
+	SPHardwareDataType []hardwareOverview `json:"SPHardwareDataType"`
+}
+
+type hardwareOverview struct {
+	Name           string `json:"_name,omitempty"`
+	ChipType       string `json:"chip_type,omitempty"`               // Apple Silicon chip (e.g., "Apple M5")
+	MachineName    string `json:"machine_name,omitempty"`            // Model name (e.g., "MacBook Pro")
+	MachineModel   string `json:"machine_model,omitempty"`           // Model identifier (e.g., "Mac17,2")
+	ModelNumber    string `json:"model_number,omitempty"`            // Model number
+	PhysicalMemory string `json:"physical_memory,omitempty"`         // RAM (e.g., "32 GB")
+	CPUType        string `json:"cpu_type,omitempty"`                // Intel CPU type (for non-Apple Silicon)
+	CPUSpeed       string `json:"current_processor_speed,omitempty"` // Intel CPU speed
+	NumProcessors  string `json:"number_processors,omitempty"`       // Processor info
+}
+
 // detectGPUPlatform implements GPU detection for macOS
 func detectGPUPlatform() *types.GPUInfo {
 	isAppleSilicon := runtime.GOARCH == "arm64"
@@ -169,4 +186,40 @@ func detectRAMSysctl() int64 {
 	}
 
 	return int64(memsize)
+}
+
+// detectHardwareInfoPlatform detects machine and chip information on macOS
+func detectHardwareInfoPlatform() *HardwareInfo {
+	cmd := exec.Command("system_profiler", "SPHardwareDataType", "-json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var data systemProfilerHardwareData
+	if err := json.Unmarshal(output, &data); err != nil {
+		return nil
+	}
+
+	if len(data.SPHardwareDataType) == 0 {
+		return nil
+	}
+
+	hw := data.SPHardwareDataType[0]
+	info := &HardwareInfo{
+		MachineName: hw.MachineName,
+	}
+
+	// For Apple Silicon, use chip_type; for Intel, use cpu_type
+	if hw.ChipType != "" {
+		info.ChipType = hw.ChipType
+	} else if hw.CPUType != "" {
+		// Intel Mac - combine CPU type and speed if available
+		info.ChipType = hw.CPUType
+		if hw.CPUSpeed != "" {
+			info.ChipType = hw.CPUType + " @ " + hw.CPUSpeed
+		}
+	}
+
+	return info
 }

@@ -135,3 +135,10 @@ func detectTotalRAMPlatform() int64 {
 
 	return 0
 }
+
+// detectHardwareInfoPlatform detects machine and chip information on Linux
+// Returns nil as detailed hardware info detection is not yet implemented for Linux
+func detectHardwareInfoPlatform() *HardwareInfo {
+	// TODO: Implement Linux hardware detection using /proc/cpuinfo, dmidecode, or lscpu
+	return nil
+}
