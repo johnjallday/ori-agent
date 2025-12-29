@@ -80,7 +80,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 		if encErr := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to marshal arguments: %v", err),
-		}); err != nil {
+		}); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return
@@ -108,7 +108,7 @@ func (h *Handler) DirectToolCallHandler(w http.ResponseWriter, r *http.Request) 
 		if encErr := json.NewEncoder(w).Encode(ToolCallResponse{
 			Success: false,
 			Error:   fmt.Sprintf("Tool call failed: %v", err),
-		}); err != nil {
+		}); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return

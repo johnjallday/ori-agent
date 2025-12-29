@@ -456,7 +456,7 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
 			"message": err.Error(),
-		}); err != nil {
+		}); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
 		return

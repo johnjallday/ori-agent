@@ -7,6 +7,7 @@ export class SmartOnboardingManager {
     this.availablePlugins = [];
     this.installedPlugins = new Set();
     this.selectedPlugins = [];
+    this.addedMarketplaces = [];
     this.mode = null; // 'detect' or 'describe'
   }
 
@@ -25,6 +26,12 @@ export class SmartOnboardingManager {
     const confirmProfileBtn = document.getElementById('confirmProfileBtn');
     const editProfileBtn = document.getElementById('editProfileBtn');
     const skipPluginsBtn = document.getElementById('skipPluginsBtn');
+
+    // Marketplace buttons
+    const testMarketplaceBtn = document.getElementById('testOnboardingMarketplaceBtn');
+    const addMarketplaceBtn = document.getElementById('addOnboardingMarketplaceBtn');
+    const marketplaceBackBtn = document.getElementById('marketplaceBackBtn');
+    const marketplaceContinueBtn = document.getElementById('marketplaceContinueBtn');
 
     if (detectBtn) {
       detectBtn.addEventListener('click', () => this.startDetection());
@@ -52,6 +59,32 @@ export class SmartOnboardingManager {
 
     if (skipPluginsBtn) {
       skipPluginsBtn.addEventListener('click', () => this.skipPlugins());
+    }
+
+    // Marketplace event listeners
+    if (testMarketplaceBtn) {
+      testMarketplaceBtn.addEventListener('click', () => this.testMarketplace());
+    }
+
+    if (addMarketplaceBtn) {
+      addMarketplaceBtn.addEventListener('click', () => this.addMarketplace());
+    }
+
+    if (marketplaceBackBtn) {
+      marketplaceBackBtn.addEventListener('click', () => this.marketplaceBack());
+    }
+
+    if (marketplaceContinueBtn) {
+      marketplaceContinueBtn.addEventListener('click', () => this.continueFromMarketplace());
+    }
+
+    // Quick add marketplace buttons
+    const addMusicMarketplaceBtn = document.getElementById('addMusicMarketplaceBtn');
+    if (addMusicMarketplaceBtn) {
+      addMusicMarketplaceBtn.addEventListener('click', () => this.quickAddMarketplace(
+        'Ori Music Plugins',
+        'https://gitlab.com/johnjallday/ori-music-plugin-registry'
+      ));
     }
   }
 
@@ -198,10 +231,297 @@ export class SmartOnboardingManager {
     }
   }
 
-  // Generate onboarding configuration from profile and load plugins
+  // Generate onboarding configuration from profile and show marketplace step
   async generateConfig() {
     try {
-      // We don't need the old config endpoint anymore, just fetch plugins
+      // Show the marketplace step first (before plugin selection)
+      this.showMarketplaceStep();
+    } catch (error) {
+      console.error('Error in generateConfig:', error);
+      this.showError('Something went wrong. Please try again.');
+      this.showSection('mode-selection');
+    }
+  }
+
+  // Show the marketplace step
+  showMarketplaceStep() {
+    this.showSection('marketplace');
+
+    // Display profile info in marketplace step
+    if (this.userProfile) {
+      const categoryEl = document.getElementById('marketplaceProfileCategory');
+      const summaryEl = document.getElementById('marketplaceProfileSummary');
+
+      if (categoryEl) {
+        categoryEl.textContent = this.formatCategory(this.userProfile.primary_category);
+      }
+      if (summaryEl) {
+        summaryEl.textContent = this.userProfile.summary || 'AI assistant user';
+      }
+    }
+
+    // Reset marketplace form
+    const nameInput = document.getElementById('onboardingMarketplaceName');
+    const sourceInput = document.getElementById('onboardingMarketplaceSource');
+    const resultEl = document.getElementById('onboardingMarketplaceResult');
+    const addBtn = document.getElementById('addOnboardingMarketplaceBtn');
+
+    if (nameInput) nameInput.value = '';
+    if (sourceInput) sourceInput.value = '';
+    if (resultEl) resultEl.classList.add('d-none');
+    if (addBtn) addBtn.disabled = true;
+  }
+
+  // Test marketplace connection
+  async testMarketplace() {
+    const nameInput = document.getElementById('onboardingMarketplaceName');
+    const sourceInput = document.getElementById('onboardingMarketplaceSource');
+    const resultEl = document.getElementById('onboardingMarketplaceResult');
+    const addBtn = document.getElementById('addOnboardingMarketplaceBtn');
+    const testBtn = document.getElementById('testOnboardingMarketplaceBtn');
+
+    const name = nameInput?.value.trim();
+    const source = sourceInput?.value.trim();
+
+    if (!name || !source) {
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-warning py-2">Please enter both name and source.</div>';
+        resultEl.classList.remove('d-none');
+      }
+      return;
+    }
+
+    // Show loading state
+    if (testBtn) {
+      testBtn.disabled = true;
+      testBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing...';
+    }
+
+    try {
+      const response = await fetch('/api/marketplaces/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, source })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.valid) {
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div class="alert alert-success py-2">
+              <strong>Connection successful!</strong> Found ${data.plugin_count || 0} plugins.
+            </div>
+          `;
+          resultEl.classList.remove('d-none');
+        }
+        if (addBtn) addBtn.disabled = false;
+      } else {
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div class="alert alert-danger py-2">
+              ${this.escapeHtml(data.error || 'Failed to connect to marketplace.')}
+            </div>
+          `;
+          resultEl.classList.remove('d-none');
+        }
+        if (addBtn) addBtn.disabled = true;
+      }
+    } catch (error) {
+      console.error('Error testing marketplace:', error);
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to test connection.</div>';
+        resultEl.classList.remove('d-none');
+      }
+      if (addBtn) addBtn.disabled = true;
+    } finally {
+      if (testBtn) {
+        testBtn.disabled = false;
+        testBtn.innerHTML = 'Test Connection';
+      }
+    }
+  }
+
+  // Add marketplace
+  async addMarketplace() {
+    const nameInput = document.getElementById('onboardingMarketplaceName');
+    const sourceInput = document.getElementById('onboardingMarketplaceSource');
+    const resultEl = document.getElementById('onboardingMarketplaceResult');
+    const addBtn = document.getElementById('addOnboardingMarketplaceBtn');
+
+    const name = nameInput?.value.trim();
+    const source = sourceInput?.value.trim();
+
+    if (!name || !source) return;
+
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+    }
+
+    try {
+      const response = await fetch('/api/marketplaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, source })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Add to local list
+        this.addedMarketplaces.push({ name, source });
+
+        // Update UI
+        this.updateAddedMarketplacesList();
+
+        // Clear form
+        if (nameInput) nameInput.value = '';
+        if (sourceInput) sourceInput.value = '';
+        if (resultEl) {
+          resultEl.innerHTML = '<div class="alert alert-success py-2">Marketplace added successfully!</div>';
+          resultEl.classList.remove('d-none');
+          setTimeout(() => resultEl.classList.add('d-none'), 3000);
+        }
+      } else {
+        if (resultEl) {
+          resultEl.innerHTML = `<div class="alert alert-danger py-2">${this.escapeHtml(data.error || 'Failed to add marketplace.')}</div>`;
+          resultEl.classList.remove('d-none');
+        }
+      }
+    } catch (error) {
+      console.error('Error adding marketplace:', error);
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
+        resultEl.classList.remove('d-none');
+      }
+    } finally {
+      if (addBtn) {
+        addBtn.disabled = true;
+        addBtn.innerHTML = 'Add Marketplace';
+      }
+    }
+  }
+
+  // Quick add a predefined marketplace
+  async quickAddMarketplace(name, source) {
+    const resultEl = document.getElementById('onboardingMarketplaceResult');
+    const btn = document.getElementById('addMusicMarketplaceBtn');
+
+    // Check if already added
+    if (this.addedMarketplaces.some(mp => mp.source === source)) {
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-info py-2">This marketplace is already added.</div>';
+        resultEl.classList.remove('d-none');
+        setTimeout(() => resultEl.classList.add('d-none'), 3000);
+      }
+      return;
+    }
+
+    // Show loading state
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+    }
+
+    try {
+      const response = await fetch('/api/marketplaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, source })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Add to local list
+        this.addedMarketplaces.push({ name, source });
+
+        // Update UI
+        this.updateAddedMarketplacesList();
+
+        if (resultEl) {
+          resultEl.innerHTML = `<div class="alert alert-success py-2">${this.escapeHtml(name)} added successfully!</div>`;
+          resultEl.classList.remove('d-none');
+          setTimeout(() => resultEl.classList.add('d-none'), 3000);
+        }
+
+        // Disable the button since it's now added
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+            </svg>
+            Added
+          `;
+          btn.classList.remove('btn-outline-primary');
+          btn.classList.add('btn-success');
+        }
+      } else {
+        if (resultEl) {
+          resultEl.innerHTML = `<div class="alert alert-danger py-2">${this.escapeHtml(data.error || 'Failed to add marketplace.')}</div>`;
+          resultEl.classList.remove('d-none');
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
+            </svg>
+            Ori Music Plugins
+          `;
+        }
+      }
+    } catch (error) {
+      console.error('Error adding marketplace:', error);
+      if (resultEl) {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
+        resultEl.classList.remove('d-none');
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M21,3V15.5A3.5,3.5 0 0,1 17.5,19A3.5,3.5 0 0,1 14,15.5A3.5,3.5 0 0,1 17.5,12C18.04,12 18.55,12.12 19,12.34V6.47L9,8.6V17.5A3.5,3.5 0 0,1 5.5,21A3.5,3.5 0 0,1 2,17.5A3.5,3.5 0 0,1 5.5,14C6.04,14 6.55,14.12 7,14.34V6L21,3Z"/>
+          </svg>
+          Ori Music Plugins
+        `;
+      }
+    }
+  }
+
+  // Update the list of added marketplaces
+  updateAddedMarketplacesList() {
+    const container = document.getElementById('onboardingAddedMarketplaces');
+    const listEl = document.getElementById('onboardingMarketplaceList');
+
+    if (!container || !listEl) return;
+
+    if (this.addedMarketplaces.length === 0) {
+      container.classList.add('d-none');
+      return;
+    }
+
+    container.classList.remove('d-none');
+    listEl.innerHTML = this.addedMarketplaces.map(mp => `
+      <div class="badge bg-success me-1 mb-1">${this.escapeHtml(mp.name)}</div>
+    `).join('');
+  }
+
+  // Go back from marketplace step
+  marketplaceBack() {
+    if (this.mode === 'detect') {
+      this.showSection('apps-detected');
+    } else {
+      this.showSection('describe');
+    }
+  }
+
+  // Continue from marketplace to plugin selection
+  async continueFromMarketplace() {
+    try {
+      // Now fetch plugins (including from any newly added marketplaces)
       await this.fetchAvailablePlugins();
 
       // Show the plugin selection screen
@@ -209,7 +529,6 @@ export class SmartOnboardingManager {
     } catch (error) {
       console.error('Error loading plugins:', error);
       this.showError('Failed to load plugins. Please try again.');
-      this.showSection('mode-selection');
     }
   }
 
@@ -484,21 +803,16 @@ export class SmartOnboardingManager {
     }
   }
 
-  // Edit profile - go back to describe mode
+  // Edit profile - go back to marketplace step
   editProfile() {
-    this.showSection('describe');
-    // Pre-fill with profile summary if available
-    const descriptionInput = document.getElementById('userDescription');
-    if (descriptionInput && this.userProfile?.summary) {
-      descriptionInput.value = this.userProfile.summary;
-    }
+    this.showMarketplaceStep();
   }
 
   // Show a specific section
   showSection(sectionId) {
     const sections = [
       'mode-selection', 'detecting', 'no-apps', 'apps-detected', 'describe',
-      'analyzing', 'confirmation', 'applying', 'success'
+      'analyzing', 'marketplace', 'confirmation', 'applying', 'success'
     ];
 
     sections.forEach(id => {
@@ -552,6 +866,7 @@ export class SmartOnboardingManager {
     this.availablePlugins = [];
     this.installedPlugins = new Set();
     this.selectedPlugins = [];
+    this.addedMarketplaces = [];
     this.mode = null;
     this.showSection('mode-selection');
   }
