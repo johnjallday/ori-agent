@@ -16,7 +16,7 @@ GORUN=$(GO) run
 GOVET=$(GO) vet
 GOFMT=$(GO) fmt
 PORT?=8765
-MONOREPO_ROOT?=$(abspath $(CURDIR)/../..)
+MONOREPO_ROOT?=$(abspath $(CURDIR)/..)
 
 # Version information
 VERSION?=$(shell cat VERSION 2>/dev/null || echo "dev")

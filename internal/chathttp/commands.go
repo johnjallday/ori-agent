@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/version"
+	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // CommandHandler handles special chat commands
@@ -164,7 +165,24 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 					operationParamMap := make(map[string][]string)
 					requiredByOperation := make(map[string]map[string]bool)
-					if def.Parameters != nil {
+
+					// First, try to get operations from OperationsProvider interface
+					if plugin.Tool != nil {
+						if opsProvider, ok := plugin.Tool.(pluginapi.OperationsProvider); ok {
+							operations := opsProvider.GetOperations()
+							for _, op := range operations {
+								operationParamMap[op.Name] = op.Parameters
+								requiredSet := make(map[string]bool)
+								for _, req := range op.RequiredParameters {
+									requiredSet[req] = true
+								}
+								requiredByOperation[op.Name] = requiredSet
+							}
+						}
+					}
+
+					// Fallback: try to extract from oneOf schema (legacy support)
+					if len(operationParamMap) == 0 && def.Parameters != nil {
 						if oneOfRaw, ok := def.Parameters["oneOf"].([]interface{}); ok {
 							for _, option := range oneOfRaw {
 								optionSchema, ok := option.(map[string]any)
@@ -211,17 +229,6 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 						}
 					}
 
-					if len(operationParamMap) == 0 {
-						operationParamMap = map[string][]string{
-							"create_project": {"name", "bpm"},
-							"open_project":   {"path"},
-							"filter_project": {"name"},
-							"get_settings":   {},
-							"scan":           {},
-							"list_projects":  {},
-						}
-					}
-
 					for _, enumValue := range enumValues {
 						// Get parameters for this operation based on operation type
 						var operationParams []string
@@ -249,28 +256,9 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 									operationParams = append(operationParams, displayName)
 								}
 							}
-						} else {
-							// Fallback: show all non-operation parameters for unknown operations
-							for paramName := range parameterInfo {
-								if paramName == enumProperty {
-									continue // Skip the operation parameter itself
-								}
-
-								isRequired := false
-								for _, req := range required {
-									if req == paramName {
-										isRequired = true
-										break
-									}
-								}
-
-								displayName := paramName
-								if isRequired {
-									displayName += "*"
-								}
-								operationParams = append(operationParams, displayName)
-							}
 						}
+						// No fallback - if we don't know the operation-specific params,
+						// show the operation name without params rather than showing all params
 
 						if len(operationParams) > 0 {
 							toolsResponse.WriteString(fmt.Sprintf("  - `%s` (%s)\n", enumValue, strings.Join(operationParams, ", ")))

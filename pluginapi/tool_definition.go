@@ -745,3 +745,39 @@ func validateParameter(name string, param YAMLToolParameter, prefix string) erro
 
 	return nil
 }
+
+// GetOperationsFromYAML extracts operation information from a YAMLToolDefinition.
+// This helper makes it easy for plugins to implement the OperationsProvider interface.
+func GetOperationsFromYAML(toolDef *YAMLToolDefinition) []OperationInfo {
+	if toolDef == nil || len(toolDef.Operations) == 0 {
+		return nil
+	}
+
+	operationNames := sortedOperationNames(toolDef.Operations)
+	operations := make([]OperationInfo, 0, len(operationNames))
+
+	for _, opName := range operationNames {
+		opDef := toolDef.Operations[opName]
+
+		var params []string
+		var requiredParams []string
+
+		for _, param := range opDef.Parameters {
+			params = append(params, param.Name)
+			if param.Required {
+				requiredParams = append(requiredParams, param.Name)
+			}
+		}
+
+		sort.Strings(params)
+		sort.Strings(requiredParams)
+
+		operations = append(operations, OperationInfo{
+			Name:               opName,
+			Parameters:         params,
+			RequiredParameters: requiredParams,
+		})
+	}
+
+	return operations
+}

@@ -247,6 +247,20 @@ func (b *BasePlugin) GetToolDefinition() (Tool, error) {
 	return b.pluginConfig.Tool.ToToolDefinition()
 }
 
+// GetOperations returns the operation information from plugin.yaml.
+// This allows plugins to expose their operation-specific parameters for display
+// in the /tools command without any additional code.
+//
+// Implements OperationsProvider interface.
+//
+// Returns nil if no operations are defined in plugin.yaml.
+func (b *BasePlugin) GetOperations() []OperationInfo {
+	if b.pluginConfig == nil || b.pluginConfig.Tool == nil {
+		return nil
+	}
+	return GetOperationsFromYAML(b.pluginConfig.Tool)
+}
+
 // Definition returns the tool definition, automatically reading from plugin.yaml.
 // This is a default implementation that plugins can inherit without needing to override.
 // The tool definition is read from plugin.yaml's tool_definition section.
@@ -284,3 +298,6 @@ func (b *BasePlugin) Definition() Tool {
 		Parameters:  map[string]interface{}{},
 	}
 }
+
+// Compile-time interface check: BasePlugin implements OperationsProvider
+var _ OperationsProvider = (*BasePlugin)(nil)

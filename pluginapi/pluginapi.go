@@ -168,6 +168,23 @@ type CategoryProvider interface {
 	GetCategory() string
 }
 
+// OperationInfo describes a single operation and its parameters.
+type OperationInfo struct {
+	// Name is the operation name (e.g., "create_project", "list_audio_plugins")
+	Name string
+	// Parameters is a list of parameter names for this operation
+	Parameters []string
+	// RequiredParameters is a list of required parameter names
+	RequiredParameters []string
+}
+
+// OperationsProvider allows plugins to expose their operation-specific parameters.
+// This enables better display in /tools command showing correct params per operation.
+type OperationsProvider interface {
+	// GetOperations returns a list of operations with their specific parameters
+	GetOperations() []OperationInfo
+}
+
 // PermissionType represents the type of system permission a plugin requires.
 type PermissionType string
 

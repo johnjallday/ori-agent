@@ -50,6 +50,9 @@ service ToolService {
 
     // CallWithFiles executes the tool with arguments and file attachments
     rpc CallWithFiles(CallWithFilesRequest) returns (CallResponse);
+
+    // GetOperations returns operation-specific parameter information
+    rpc GetOperations(Empty) returns (OperationsResponse);
 }
 
 // Empty message for RPCs that don't need parameters
