@@ -17,6 +17,7 @@ vendor/
 
 # Go workspace file
 go.work
+go.work.sum
 
 # IDE files
 .vscode/
@@ -140,3 +141,10 @@ marketplace_config.json
 .gomodcache/
 .gomodcache/
 session_files/
+
+# User uploads and custom templates
+uploads/
+workflow_templates/
+
+# Misplaced generated protobuf files
+github.com/
