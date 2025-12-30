@@ -106,6 +106,29 @@ func TestGetPricing(t *testing.T) {
 	}
 }
 
+func TestGetOpenAIModels(t *testing.T) {
+	models := GetOpenAIModels()
+	if len(models) == 0 {
+		t.Error("Expected at least one OpenAI model, got none")
+	}
+	t.Logf("Found %d OpenAI chat models", len(models))
+
+	// Verify we filter out non-chat models
+	for _, m := range models {
+		if m == "text-embedding-3-small" || m == "whisper-1" || m == "dall-e-3" {
+			t.Errorf("Non-chat model %s should be filtered out", m)
+		}
+	}
+}
+
+func TestGetClaudeModels(t *testing.T) {
+	models := GetClaudeModels()
+	if len(models) == 0 {
+		t.Error("Expected at least one Claude model, got none")
+	}
+	t.Logf("Found %d Claude models", len(models))
+}
+
 func TestFormatPricing(t *testing.T) {
 	tests := []struct {
 		pricing *ModelPricing

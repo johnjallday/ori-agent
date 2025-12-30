@@ -236,6 +236,73 @@ func currentDate() string {
 	return time.Now().Format("2006-01-02")
 }
 
+// GetOpenAIModels returns a list of OpenAI model IDs from the pricing data.
+// This provides a curated list of models without requiring an API call.
+func GetOpenAIModels() []string {
+	pricing := loadPricing()
+	models := make([]string, 0, len(pricing.Models))
+	for name := range pricing.Models {
+		// Filter to only include chat-capable models
+		if isChatModel(name) {
+			models = append(models, name)
+		}
+	}
+	return models
+}
+
+// GetClaudeModels returns a list of Claude model IDs from the pricing data.
+// This provides a curated list of models without requiring an API call.
+func GetClaudeModels() []string {
+	pricing := loadPricing()
+	models := make([]string, 0, len(pricing.Claude))
+	for name := range pricing.Claude {
+		models = append(models, name)
+	}
+	return models
+}
+
+// isChatModel checks if a model ID is a chat model (not embedding, tts, etc.)
+func isChatModel(modelID string) bool {
+	// Exclude non-chat models
+	excludePrefixes := []string{
+		"text-embedding",
+		"text-moderation",
+		"whisper",
+		"tts-",
+		"dall-e",
+		"davinci",
+		"babbage",
+		"omni-moderation",
+		"ft:", // fine-tuned models
+	}
+	modelLower := strings.ToLower(modelID)
+	for _, prefix := range excludePrefixes {
+		if strings.HasPrefix(modelLower, prefix) {
+			return false
+		}
+	}
+
+	// Include GPT and O-series models
+	chatPrefixes := []string{
+		"gpt-3.5",
+		"gpt-4",
+		"gpt-5",
+		"o1",
+		"o3",
+		"o4",
+		"chatgpt",
+		"codex",
+		"computer-use",
+	}
+	for _, prefix := range chatPrefixes {
+		if strings.HasPrefix(modelLower, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // FormatPricing returns a human-readable pricing string
 func FormatPricing(pricing *ModelPricing) string {
 	if pricing == nil {
