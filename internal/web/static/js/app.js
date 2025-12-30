@@ -1006,7 +1006,7 @@ function setupSidebarToggle() {
     });
 
     // Handle window resize
-    window.addEventListener('resize', function() {
+    function handleSidebarResponsive() {
       if (window.innerWidth >= 992) { // lg breakpoint
         // Show sidebar on large screens
         sidebar.classList.remove('d-none');
@@ -1023,7 +1023,12 @@ function setupSidebarToggle() {
         // Set sidebar width to 0
         document.documentElement.style.setProperty('--sidebar-width', '0px');
       }
-    });
+    }
+
+    window.addEventListener('resize', handleSidebarResponsive);
+
+    // Run initial check on page load
+    handleSidebarResponsive();
   }
 }
 
