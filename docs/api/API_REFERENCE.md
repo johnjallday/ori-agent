@@ -156,7 +156,7 @@ Get all plugins loaded for the current agent.
       "definition": {
         "name": "math",
         "description": "Perform basic math operations",
-        "parameters": { /* OpenAI function parameters */ }
+        "parameters": { /* OpenAI function parameters (may include oneOf for conditional operations) */ }
       },
       "version": "1.0.0",
       "path": "uploaded_plugins/math.so"

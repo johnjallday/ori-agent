@@ -248,6 +248,38 @@ tool_definition:
 - `min/max` - Numeric constraints
 - `default` - Default value if not provided
 
+**Operation-Specific Parameters (Optional):**
+If your tool uses an `operation` field, you can define per-operation inputs using `operations`.
+The `operation` parameter must be required and list all operations in its enum.
+
+```yaml
+tool_definition:
+  description: "Tool with multiple operations"
+  parameters:
+    - name: operation
+      type: string
+      description: "Operation to perform"
+      required: true
+      enum: [echo, status]
+
+  operations:
+    echo:
+      parameters:
+        - name: message
+          type: string
+          description: "Message to echo"
+          required: true
+        - name: count
+          type: integer
+          description: "Number of repeats"
+          required: false
+
+    status:
+      parameters: []
+```
+
+**Migration Note:** Existing plugins can keep using the flat `parameters` list. To opt in to conditional inputs, move per-operation fields into `operations` and keep only shared fields (like `operation`) in `parameters`.
+
 ### Step 2: Create the Plugin Struct
 
 ```go

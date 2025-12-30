@@ -10,8 +10,15 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ pluginapi.PluginTool = (*result_handlerTool)(nil)
+
+// Optional interface checks (auto-detected from plugin.yaml)
+var (
+	_ pluginapi.VersionedTool       = (*result_handlerTool)(nil)
+	_ pluginapi.MetadataProvider    = (*result_handlerTool)(nil)
+	_ pluginapi.PluginCompatibility = (*result_handlerTool)(nil)
+)
 
 // ResultHandlerParams represents the parameters for this plugin
 type ResultHandlerParams struct {
@@ -23,19 +30,22 @@ type ResultHandlerParams struct {
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *result_handlerTool) Call(ctx context.Context, args string) (string, error) {
-	var params ResultHandlerParams
+	var paramsMap map[string]interface{}
 
-	// Unmarshal JSON arguments
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	// Unmarshal JSON arguments for validation
+	if err := json.Unmarshal([]byte(args), &paramsMap); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Validate required fields
-	if params.Action == "" {
-		return "", fmt.Errorf("required field 'action' is missing")
+	if err := pluginapi.ValidateToolParameters(t.Definition().Parameters, paramsMap); err != nil {
+		return "", err
 	}
-	if params.Path == "" {
-		return "", fmt.Errorf("required field 'path' is missing")
+
+	var params ResultHandlerParams
+
+	// Unmarshal JSON arguments into typed params
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	// Call the Execute method (implemented by you)
