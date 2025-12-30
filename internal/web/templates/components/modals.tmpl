@@ -18,7 +18,7 @@
         <div class="mb-3">
           <label class="form-label">Source</label>
           <input type="text" class="form-control" id="marketplaceSourceInput" required
-                 placeholder="e.g., username/repo or https://gitlab.com/user/repo">
+                 placeholder="e.g., username/repo or /path/to/registry.json">
           <small class="form-text" style="color: var(--text-secondary);">
             Supported formats:
             <ul class="mb-0 mt-1 ps-3">
@@ -26,6 +26,7 @@
               <li><code>https://github.com/user/repo</code> - GitHub URL</li>
               <li><code>https://gitlab.com/user/repo</code> - GitLab URL</li>
               <li><code>https://example.com/registry.json</code> - Direct URL</li>
+              <li><code>/path/to/registry.json</code> - Local file path</li>
             </ul>
           </small>
         </div>
@@ -746,9 +747,9 @@
                 <div class="mb-3">
                   <label class="form-label">Source</label>
                   <input type="text" class="form-control" id="onboardingMarketplaceSource"
-                         placeholder="e.g., username/repo or https://gitlab.com/...">
+                         placeholder="e.g., username/repo or /path/to/registry.json">
                   <small class="form-text text-muted">
-                    GitHub/GitLab shorthand (user/repo), full URL, or direct registry.json URL
+                    GitHub/GitLab shorthand (user/repo), full URL, or local file path
                   </small>
                 </div>
                 <div id="onboardingMarketplaceResult" class="d-none"></div>

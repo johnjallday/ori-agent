@@ -507,13 +507,13 @@ func (h *RegistryHandler) PluginDownloadHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Check if it has a download URL
-	if pluginEntry.DownloadURL == "" {
+	// Check if it has a download URL or local path
+	if pluginEntry.DownloadURL == "" && pluginEntry.Path == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(map[string]any{
 			"success": false,
-			"message": "plugin does not have a download URL",
+			"message": "plugin does not have a download URL or local path",
 		}); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 		}
