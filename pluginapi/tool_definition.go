@@ -315,37 +315,6 @@ func sortedOperationNames(operations map[string]YAMLOperationDefinition) []strin
 	return names
 }
 
-func buildOperationSchema(baseParam YAMLToolParameter, operationName string) map[string]interface{} {
-	schema := map[string]interface{}{
-		"type": "string",
-		"enum": []string{operationName},
-	}
-	if baseParam.Description != "" {
-		schema["description"] = baseParam.Description
-	}
-	return schema
-}
-
-func mergeRequired(globalRequired, opRequired []string) []string {
-	seen := make(map[string]struct{})
-	merged := make([]string, 0, len(globalRequired)+len(opRequired))
-	for _, name := range globalRequired {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		merged = append(merged, name)
-	}
-	for _, name := range opRequired {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		merged = append(merged, name)
-	}
-	return merged
-}
-
 func containsString(list []string, value string) bool {
 	for _, item := range list {
 		if item == value {
@@ -450,27 +419,6 @@ func isMissingParam(param YAMLToolParameter, params map[string]interface{}) bool
 	return false
 }
 
-func operationMatchesSchema(schema map[string]interface{}, operation string) bool {
-	properties := extractProperties(schema)
-	opProperty, ok := properties["operation"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	enumValues, ok := opProperty["enum"]
-	if !ok {
-		return false
-	}
-
-	for _, candidate := range stringSliceFromInterface(enumValues) {
-		if candidate == operation {
-			return true
-		}
-	}
-
-	return false
-}
-
 func extractProperties(schema map[string]interface{}) map[string]interface{} {
 	props, ok := schema["properties"].(map[string]interface{})
 	if !ok {
@@ -548,23 +496,6 @@ func isMissingValue(name string, value interface{}, properties map[string]interf
 		}
 	default:
 		return false
-	}
-}
-
-func stringSliceFromInterface(value interface{}) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		result := make([]string, 0, len(v))
-		for _, item := range v {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	default:
-		return nil
 	}
 }
 
