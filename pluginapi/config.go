@@ -71,11 +71,17 @@ type YAMLToolParameter struct {
 	Pattern    string                       `yaml:"pattern,omitempty"`    // For string regex validation
 }
 
+// YAMLOperationDefinition represents an operation-specific tool definition in YAML format.
+type YAMLOperationDefinition struct {
+	Parameters []YAMLToolParameter `yaml:"parameters,omitempty"` // Array format: - name: foo ...
+}
+
 // YAMLToolDefinition represents a tool definition in YAML format
 type YAMLToolDefinition struct {
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Parameters  []YAMLToolParameter `yaml:"parameters"` // Array format: - name: foo ...
+	Name        string                             `yaml:"name"`
+	Description string                             `yaml:"description"`
+	Parameters  []YAMLToolParameter                `yaml:"parameters,omitempty"` // Array format: - name: foo ...
+	Operations  map[string]YAMLOperationDefinition `yaml:"operations,omitempty"` // Per-operation parameters
 }
 
 // PluginConfig represents the complete plugin configuration from plugin.yaml

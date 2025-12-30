@@ -7,6 +7,19 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Allow overriding monorepo root (where external plugins live).
+MONOREPO_ROOT="${MONOREPO_ROOT:-}"
+if [ -z "$MONOREPO_ROOT" ]; then
+  if [ -d "$PROJECT_ROOT/../plugins" ]; then
+    MONOREPO_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
+  elif [ -d "$PROJECT_ROOT/../../plugins" ]; then
+    MONOREPO_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
+  else
+    MONOREPO_ROOT="$PROJECT_ROOT"
+  fi
+fi
+EXTERNAL_PLUGINS_ROOT="${EXTERNAL_PLUGINS_ROOT:-$MONOREPO_ROOT/plugins}"
 cd "$PROJECT_ROOT"
 
 # Colors for output
@@ -101,12 +114,12 @@ build_external_plugin() {
 # List of external plugins to build
 # Format: "relative_path:plugin_name"
 EXTERNAL_PLUGINS=(
-  "../plugins/ori-reaper:ori-reaper"
-  "../plugins/ori-music-project-manager:ori-music-project-manager"
-  "../plugins/ori-mac-os-tools:ori-mac-os-tools"
-  "../plugins/ori-meta-threads-manager:ori-meta-threads-manager"
-  "../plugins/ori-agent-doc-builder:ori-agent-doc-builder"
-  "../plugins/ori-plugin-manager:ori-plugin-manager"
+  "$EXTERNAL_PLUGINS_ROOT/ori-reaper:ori-reaper"
+  "$EXTERNAL_PLUGINS_ROOT/ori-music-project-manager:ori-music-project-manager"
+  "$EXTERNAL_PLUGINS_ROOT/ori-mac-os-tools:ori-mac-os-tools"
+  "$EXTERNAL_PLUGINS_ROOT/ori-meta-threads-manager:ori-meta-threads-manager"
+  "$EXTERNAL_PLUGINS_ROOT/ori-agent-doc-builder:ori-agent-doc-builder"
+  "$EXTERNAL_PLUGINS_ROOT/ori-plugin-manager:ori-plugin-manager"
 )
 
 # Build each external plugin

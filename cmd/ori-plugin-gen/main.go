@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/format"
 	"os"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -21,11 +22,17 @@ type YAMLToolParameter struct {
 	Enum        []string `yaml:"enum,omitempty"`
 }
 
+// YAMLOperationDefinition represents per-operation parameters in plugin.yaml
+type YAMLOperationDefinition struct {
+	Parameters []YAMLToolParameter `yaml:"parameters"`
+}
+
 // YAMLToolDefinition represents tool definition in plugin.yaml
 type YAMLToolDefinition struct {
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Parameters  []YAMLToolParameter `yaml:"parameters"`
+	Name        string                             `yaml:"name"`
+	Description string                             `yaml:"description"`
+	Parameters  []YAMLToolParameter                `yaml:"parameters"`
+	Operations  map[string]YAMLOperationDefinition `yaml:"operations,omitempty"`
 }
 
 // Maintainer represents a plugin maintainer
@@ -73,7 +80,6 @@ type TemplateData struct {
 	ToolName           string
 	ParamsStruct       string
 	Fields             []FieldInfo
-	Validations        []ValidationInfo
 	OptionalInterfaces []string // Optional interfaces to generate checks for
 }
 
@@ -82,12 +88,6 @@ type FieldInfo struct {
 	Type    string
 	JSONTag string
 	Comment string
-}
-
-type ValidationInfo struct {
-	Field   string
-	Check   string
-	Message string
 }
 
 func main() {
@@ -181,10 +181,13 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	paramsStruct := toPascalCase(toolName) + "Params"
 
 	var fields []FieldInfo
-	var validations []ValidationInfo
+	params, err := collectParameters(config.Tool)
+	if err != nil {
+		return "", err
+	}
 
 	// Convert parameters to struct fields
-	for _, param := range config.Tool.Parameters {
+	for _, param := range params {
 		fieldName := toPascalCase(param.Name)
 		goType := yamlTypeToGoType(param.Type)
 
@@ -195,16 +198,6 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 			Comment: param.Description,
 		}
 		fields = append(fields, field)
-
-		// Add validation for required fields
-		if param.Required {
-			validation := ValidationInfo{
-				Field:   fieldName,
-				Check:   generateRequiredCheck(fieldName, goType),
-				Message: fmt.Sprintf("required field '%s' is missing", param.Name),
-			}
-			validations = append(validations, validation)
-		}
 	}
 
 	// Detect optional interfaces based on plugin.yaml content
@@ -215,7 +208,6 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 		ToolName:           toolName,
 		ParamsStruct:       paramsStruct,
 		Fields:             fields,
-		Validations:        validations,
 		OptionalInterfaces: optionalInterfaces,
 	}
 
@@ -226,6 +218,55 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+func collectParameters(tool *YAMLToolDefinition) ([]YAMLToolParameter, error) {
+	if tool == nil {
+		return nil, fmt.Errorf("tool definition is nil")
+	}
+
+	seen := make(map[string]YAMLToolParameter)
+	var ordered []YAMLToolParameter
+
+	addParam := func(param YAMLToolParameter) error {
+		if param.Name == "" {
+			return fmt.Errorf("parameter name is required")
+		}
+		if existing, ok := seen[param.Name]; ok {
+			if existing.Type != param.Type {
+				return fmt.Errorf("parameter %q has conflicting types: %s vs %s", param.Name, existing.Type, param.Type)
+			}
+			return nil
+		}
+		seen[param.Name] = param
+		ordered = append(ordered, param)
+		return nil
+	}
+
+	for _, param := range tool.Parameters {
+		if err := addParam(param); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(tool.Operations) > 0 {
+		opNames := make([]string, 0, len(tool.Operations))
+		for name := range tool.Operations {
+			opNames = append(opNames, name)
+		}
+		sort.Strings(opNames)
+
+		for _, name := range opNames {
+			op := tool.Operations[name]
+			for _, param := range op.Parameters {
+				if err := addParam(param); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	return ordered, nil
 }
 
 func toPascalCase(s string) string {
@@ -254,19 +295,6 @@ func yamlTypeToGoType(yamlType string) string {
 		return "map[string]interface{}"
 	default:
 		return "interface{}"
-	}
-}
-
-func generateRequiredCheck(fieldName, goType string) string {
-	switch goType {
-	case "string":
-		return fmt.Sprintf("params.%s == \"\"", fieldName)
-	case "int":
-		return fmt.Sprintf("params.%s == 0", fieldName)
-	case "float64":
-		return fmt.Sprintf("params.%s == 0", fieldName)
-	default:
-		return fmt.Sprintf("params.%s == nil", fieldName)
 	}
 }
 
@@ -304,19 +332,23 @@ type {{.ParamsStruct}} struct {
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *{{.ToolName}}Tool) Call(ctx context.Context, args string) (string, error) {
-	var params {{.ParamsStruct}}
+	var paramsMap map[string]interface{}
 
-	// Unmarshal JSON arguments
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	// Unmarshal JSON arguments for validation
+	if err := json.Unmarshal([]byte(args), &paramsMap); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Validate required fields
-{{- range .Validations}}
-	if {{.Check}} {
-		return "", fmt.Errorf("{{.Message}}")
+	if err := pluginapi.ValidateToolParameters(t.Definition().Parameters, paramsMap); err != nil {
+		return "", err
 	}
-{{- end}}
+
+	var params {{.ParamsStruct}}
+
+	// Unmarshal JSON arguments into typed params
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
 
 	// Call the Execute method (implemented by you)
 	return t.Execute(ctx, &params)

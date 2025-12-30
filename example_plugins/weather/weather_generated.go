@@ -10,8 +10,15 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ pluginapi.PluginTool = (*get_weatherTool)(nil)
+
+// Optional interface checks (auto-detected from plugin.yaml)
+var (
+	_ pluginapi.VersionedTool       = (*get_weatherTool)(nil)
+	_ pluginapi.MetadataProvider    = (*get_weatherTool)(nil)
+	_ pluginapi.PluginCompatibility = (*get_weatherTool)(nil)
+)
 
 // GetWeatherParams represents the parameters for this plugin
 type GetWeatherParams struct {
@@ -21,16 +28,22 @@ type GetWeatherParams struct {
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *get_weatherTool) Call(ctx context.Context, args string) (string, error) {
-	var params GetWeatherParams
+	var paramsMap map[string]interface{}
 
-	// Unmarshal JSON arguments
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	// Unmarshal JSON arguments for validation
+	if err := json.Unmarshal([]byte(args), &paramsMap); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Validate required fields
-	if params.Location == "" {
-		return "", fmt.Errorf("required field 'location' is missing")
+	if err := pluginapi.ValidateToolParameters(t.Definition().Parameters, paramsMap); err != nil {
+		return "", err
+	}
+
+	var params GetWeatherParams
+
+	// Unmarshal JSON arguments into typed params
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	// Call the Execute method (implemented by you)

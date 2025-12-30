@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins server menubar run-menubar deps docker-build docker-run check-env
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env
 
 # Default target
 .DEFAULT_GOAL := help
@@ -16,6 +16,7 @@ GORUN=$(GO) run
 GOVET=$(GO) vet
 GOFMT=$(GO) fmt
 PORT?=8765
+MONOREPO_ROOT?=$(abspath $(CURDIR)/../..)
 
 # Version information
 VERSION?=$(shell cat VERSION 2>/dev/null || echo "dev")
@@ -71,10 +72,15 @@ generate: plugin-gen ## Generate code for all plugins
 	@cd example_plugins/webapp && ../../$(BUILD_DIR)/ori-plugin-gen -yaml=plugin.yaml -output=webapp_generated.go
 	@echo "$(GREEN)✓ Code generation complete$(NC)"
 
-plugins: ## Build all plugins
-	@echo "$(BLUE)Building plugins...$(NC)"
+plugins: ## Build external plugins from the monorepo
+	@echo "$(BLUE)Building external plugins...$(NC)"
+	@MONOREPO_ROOT=$(MONOREPO_ROOT) ./scripts/build-external-plugins.sh || (echo "$(RED)External plugin build failed$(NC)" && exit 1)
+	@echo "$(GREEN)✓ External plugins built$(NC)"
+
+plugins-local: ## Build plugins from this worktree
+	@echo "$(BLUE)Building plugins from worktree...$(NC)"
 	@./scripts/build-plugins.sh || (echo "$(RED)Plugin build failed$(NC)" && exit 1)
-	@echo "$(GREEN)✓ Plugins built$(NC)"
+	@echo "$(GREEN)✓ Worktree plugins built$(NC)"
 
 icons: ## Generate menubar and app icons from SVG
 	@echo "$(BLUE)Generating icons...$(NC)"

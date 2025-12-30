@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,12 +161,58 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 
 				for enumProperty, enumValues := range allEnums {
 					toolsResponse.WriteString(fmt.Sprintf("- **%s**:\n", enumProperty))
-					for _, enumValue := range enumValues {
-						// Get parameters for this operation based on operation type
-						var operationParams []string
 
-						// Define operation-specific parameter mappings
-						operationParamMap := map[string][]string{
+					operationParamMap := make(map[string][]string)
+					requiredByOperation := make(map[string]map[string]bool)
+					if def.Parameters != nil {
+						if oneOfRaw, ok := def.Parameters["oneOf"].([]interface{}); ok {
+							for _, option := range oneOfRaw {
+								optionSchema, ok := option.(map[string]any)
+								if !ok {
+									continue
+								}
+
+								props, ok := optionSchema["properties"].(map[string]any)
+								if !ok {
+									continue
+								}
+
+								opValue := ""
+								if opProp, ok := props["operation"].(map[string]any); ok {
+									if enumRaw, ok := opProp["enum"]; ok {
+										enumValues := interfaceSliceToStrings(enumRaw)
+										if len(enumValues) == 1 {
+											opValue = enumValues[0]
+										}
+									}
+								}
+								if opValue == "" {
+									continue
+								}
+
+								requiredSet := make(map[string]bool)
+								if reqRaw, ok := optionSchema["required"]; ok {
+									for _, req := range interfaceSliceToStrings(reqRaw) {
+										requiredSet[req] = true
+									}
+								}
+
+								var params []string
+								for paramName := range props {
+									if paramName == "operation" {
+										continue
+									}
+									params = append(params, paramName)
+								}
+								sort.Strings(params)
+								operationParamMap[opValue] = params
+								requiredByOperation[opValue] = requiredSet
+							}
+						}
+					}
+
+					if len(operationParamMap) == 0 {
+						operationParamMap = map[string][]string{
 							"create_project": {"name", "bpm"},
 							"open_project":   {"path"},
 							"filter_project": {"name"},
@@ -173,16 +220,25 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 							"scan":           {},
 							"list_projects":  {},
 						}
+					}
+
+					for _, enumValue := range enumValues {
+						// Get parameters for this operation based on operation type
+						var operationParams []string
 
 						// Get relevant parameters for this specific operation
 						if relevantParams, exists := operationParamMap[enumValue]; exists {
 							for _, paramName := range relevantParams {
 								if _, paramExists := parameterInfo[paramName]; paramExists {
 									isRequired := false
-									for _, req := range required {
-										if req == paramName {
-											isRequired = true
-											break
+									if requiredByOperation[enumValue] != nil {
+										isRequired = requiredByOperation[enumValue][paramName]
+									} else {
+										for _, req := range required {
+											if req == paramName {
+												isRequired = true
+												break
+											}
 										}
 									}
 
@@ -635,6 +691,23 @@ func (ch *CommandHandler) HandleExit(w http.ResponseWriter, r *http.Request) {
 			os.Exit(0)
 		}
 	}()
+}
+
+func interfaceSliceToStrings(value interface{}) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 // HandleVersion handles the /version command to show app version and build info

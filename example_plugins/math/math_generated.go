@@ -10,8 +10,15 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ pluginapi.PluginTool = (*mathTool)(nil)
+
+// Optional interface checks (auto-detected from plugin.yaml)
+var (
+	_ pluginapi.VersionedTool       = (*mathTool)(nil)
+	_ pluginapi.MetadataProvider    = (*mathTool)(nil)
+	_ pluginapi.PluginCompatibility = (*mathTool)(nil)
+)
 
 // MathParams represents the parameters for this plugin
 type MathParams struct {
@@ -23,22 +30,22 @@ type MathParams struct {
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *mathTool) Call(ctx context.Context, args string) (string, error) {
-	var params MathParams
+	var paramsMap map[string]interface{}
 
-	// Unmarshal JSON arguments
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	// Unmarshal JSON arguments for validation
+	if err := json.Unmarshal([]byte(args), &paramsMap); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Validate required fields
-	if params.Operation == "" {
-		return "", fmt.Errorf("required field 'operation' is missing")
+	if err := pluginapi.ValidateToolParameters(t.Definition().Parameters, paramsMap); err != nil {
+		return "", err
 	}
-	if params.A == 0 {
-		return "", fmt.Errorf("required field 'a' is missing")
-	}
-	if params.B == 0 {
-		return "", fmt.Errorf("required field 'b' is missing")
+
+	var params MathParams
+
+	// Unmarshal JSON arguments into typed params
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	// Call the Execute method (implemented by you)

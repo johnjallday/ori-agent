@@ -10,8 +10,16 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-// Compile-time interface check
+// Compile-time interface checks
 var _ pluginapi.PluginTool = (*webapp_pluginTool)(nil)
+
+// Optional interface checks (auto-detected from plugin.yaml)
+var (
+	_ pluginapi.VersionedTool          = (*webapp_pluginTool)(nil)
+	_ pluginapi.MetadataProvider       = (*webapp_pluginTool)(nil)
+	_ pluginapi.PluginCompatibility    = (*webapp_pluginTool)(nil)
+	_ pluginapi.InitializationProvider = (*webapp_pluginTool)(nil)
+)
 
 // WebappPluginParams represents the parameters for this plugin
 type WebappPluginParams struct {
@@ -23,16 +31,22 @@ type WebappPluginParams struct {
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *webapp_pluginTool) Call(ctx context.Context, args string) (string, error) {
-	var params WebappPluginParams
+	var paramsMap map[string]interface{}
 
-	// Unmarshal JSON arguments
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	// Unmarshal JSON arguments for validation
+	if err := json.Unmarshal([]byte(args), &paramsMap); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Validate required fields
-	if params.Operation == "" {
-		return "", fmt.Errorf("required field 'operation' is missing")
+	if err := pluginapi.ValidateToolParameters(t.Definition().Parameters, paramsMap); err != nil {
+		return "", err
+	}
+
+	var params WebappPluginParams
+
+	// Unmarshal JSON arguments into typed params
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
 	// Call the Execute method (implemented by you)
