@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -58,96 +59,10 @@ func (p *OpenAIProvider) ValidateConfig(config ProviderConfig) error {
 	return nil
 }
 
-// DefaultModels returns available OpenAI models
+// DefaultModels returns available OpenAI models from the curated pricing data.
+// This provides a consistent list without requiring an API call.
 func (p *OpenAIProvider) DefaultModels() []string {
-	// If API key is not set, return fallback models
-	if p.apiKey == "" {
-		return p.getFallbackModels()
-	}
-
-	// Try to fetch models from OpenAI API
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultModelFetchTimeout)
-	defer cancel()
-
-	models, err := p.fetchAvailableModels(ctx)
-	if err != nil {
-		// Log error and return fallback models
-		fmt.Printf("Failed to fetch OpenAI models: %v, using fallback models\n", err)
-		return p.getFallbackModels()
-	}
-
-	return models
-}
-
-// fetchAvailableModels fetches the list of available models from OpenAI API
-func (p *OpenAIProvider) fetchAvailableModels(ctx context.Context) ([]string, error) {
-	// Check if client is initialized (zero value check)
-	// The openai.Client is a struct, so we check if it was properly initialized
-	// by checking if the API key is set (which should have been used during client creation)
-	if p.apiKey == "" {
-		return nil, fmt.Errorf("OpenAI client not initialized: no API key")
-	}
-
-	iter := p.client.Models.ListAutoPaging(ctx)
-
-	var modelIDs []string
-	for iter.Next() {
-		model := iter.Current()
-		// Only include chat models (filter out embeddings, tts, etc.)
-		if isChatModel(model.ID) {
-			modelIDs = append(modelIDs, model.ID)
-		}
-	}
-
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
-
-	// If no models returned, use fallback
-	if len(modelIDs) == 0 {
-		return p.getFallbackModels(), nil
-	}
-
-	return modelIDs, nil
-}
-
-// isChatModel checks if a model ID is a chat model
-func isChatModel(modelID string) bool {
-	// Include GPT models and o1 models
-	chatPrefixes := []string{
-		"gpt-3.5",
-		"gpt-4",
-		"gpt-5",
-		"o1",
-		"o3",
-		"o4",
-	}
-
-	for _, prefix := range chatPrefixes {
-		if len(modelID) >= len(prefix) && modelID[:len(prefix)] == prefix {
-			return true
-		}
-	}
-
-	return false
-}
-
-// getFallbackModels returns a hardcoded list of common models as fallback
-func (p *OpenAIProvider) getFallbackModels() []string {
-	return []string{
-		// Tool-calling tier (cheapest)
-		"gpt-5-nano",
-		"gpt-4o-mini",
-		// General purpose tier
-		"gpt-5-mini",
-		"gpt-4o",
-		// Research tier
-		"gpt-5",
-		"gpt-4-turbo",
-		"gpt-4.1",
-		"o1-preview",
-		"o1-mini",
-	}
+	return modelinfo.GetOpenAIModels()
 }
 
 // Chat sends a chat completion request to OpenAI

@@ -55,22 +55,30 @@ func TestClaudeProviderDefaultModels(t *testing.T) {
 	provider := NewClaudeProvider(config)
 
 	models := provider.DefaultModels()
-	expectedModels := []string{
-		"claude-sonnet-4-5",        // Claude Sonnet 4.5
-		"claude-sonnet-4",          // Claude Sonnet 4
-		"claude-opus-4-1",          // Claude Opus 4.1
-		"claude-3-opus-20240229",   // Claude 3 Opus
-		"claude-3-sonnet-20240229", // Claude 3 Sonnet
-		"claude-3-haiku-20240307",  // Claude 3 Haiku
+
+	// Models are now loaded from model_pricing.json, so we just verify
+	// that we have a reasonable number of models and some expected ones exist
+	if len(models) < 5 {
+		t.Errorf("Expected at least 5 Claude models from pricing data, got %d", len(models))
 	}
 
-	if len(models) != len(expectedModels) {
-		t.Errorf("Expected %d models, got %d", len(expectedModels), len(models))
+	// Verify some key models are present (order doesn't matter)
+	requiredModels := []string{
+		"claude-3-opus-20240229",
+		"claude-3-sonnet-20240229",
+		"claude-3-haiku-20240307",
 	}
 
-	for i, expected := range expectedModels {
-		if i >= len(models) || models[i] != expected {
-			t.Errorf("Expected model '%s' at index %d, got '%s'", expected, i, models[i])
+	for _, required := range requiredModels {
+		found := false
+		for _, m := range models {
+			if m == required {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected model '%s' to be present in models list", required)
 		}
 	}
 }
