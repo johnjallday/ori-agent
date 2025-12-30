@@ -214,66 +214,12 @@ func (h *Handler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			// Provider not registered (likely missing API key)
-			// Still show it but mark as unavailable
+			// Mark as unavailable and return empty models list
 			available = false
 			displayName = getProviderDisplayName(name)
 			providerType = "cloud"
 			requiresKey = true
-
-			// Get default models for unregistered providers
-			var defaultModels []string
-			switch name {
-			case "claude":
-				// Hardcode Claude models since provider isn't registered
-				defaultModels = []string{
-					"claude-sonnet-4-5",
-					"claude-sonnet-4",
-					"claude-opus-4-1",
-					"claude-3-opus-20240229",
-					"claude-3-sonnet-20240229",
-					"claude-3-haiku-20240307",
-				}
-			case "openai":
-				// Hardcode OpenAI models since provider isn't registered
-				defaultModels = []string{
-					"gpt-5-nano",
-					"gpt-4.1-nano",
-					"gpt-5-mini",
-					"gpt-4.1-mini",
-					"gpt-5",
-					"gpt-4.1",
-					"o1-preview",
-					"o1-mini",
-				}
-			default:
-				// Skip other unregistered providers
-				continue
-			}
-
-			for _, modelName := range defaultModels {
-				categories := getModelCategories(name, modelName)
-				goodFor := modelinfo.GetGoodFor(modelName)
-				pricingInfo := modelinfo.GetPricing(modelName)
-				pricing := modelinfo.FormatPricing(pricingInfo)
-				var deprecationDate string
-				var isLegacy bool
-				if pricingInfo != nil {
-					deprecationDate = pricingInfo.DeprecationDate
-					isLegacy = pricingInfo.IsLegacy()
-				}
-				for _, category := range categories {
-					providerModels = append(providerModels, ProviderModel{
-						Value:           modelName,
-						Label:           modelName,
-						Provider:        name,
-						Type:            category,
-						GoodFor:         goodFor,
-						Pricing:         pricing,
-						DeprecationDate: deprecationDate,
-						IsLegacy:        isLegacy,
-					})
-				}
-			}
+			providerModels = []ProviderModel{} // Empty list - no models shown without API key
 		} else {
 			// Provider is registered
 			available = true

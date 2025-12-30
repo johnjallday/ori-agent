@@ -31,6 +31,7 @@
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     :root {
+      --sidebar-width: 300px;
       --primary-color: #1d4ed8;
       --primary-light: #2563eb;
       --primary-dark: #1e40af;
@@ -813,17 +814,18 @@
       min-height: 100vh;
     }
 
-    /* Only apply sidebar margin on large screens where sidebar is visible */
+    /* Global sidebar margin - applies to ALL pages on large screens */
     @media (min-width: 992px) {
+      /* Default: sidebar visible, apply margin */
       .main-content {
-        margin-left: var(--sidebar-width, 300px);
+        margin-left: var(--sidebar-width, 300px) !important;
         max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
         width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
       }
 
-      /* Remove margin when sidebar is hidden */
+      /* When sidebar is hidden, remove margin */
       .sidebar.d-none ~ .main-content {
-        margin-left: 0;
+        margin-left: 0 !important;
         max-width: 100vw;
         width: 100vw;
       }
@@ -1391,8 +1393,8 @@
       }
 
       .main-content {
-        margin-left: 0;
-        max-width: 100vw;
+        margin-left: 0 !important;
+        max-width: 100vw !important;
       }
 
       /* Mobile overlay backdrop - clickable to close sidebar */
@@ -1780,6 +1782,16 @@
     .nav-link-item.active {
       background: var(--bg-tertiary) !important;
       color: var(--primary-color) !important;
+    }
+
+    /* GLOBAL SIDEBAR FIX - Final override to ensure sidebar margin works on ALL pages */
+    @media screen and (min-width: 992px) {
+      body .main-content-wrapper .main-content {
+        margin-left: var(--sidebar-width, 300px) !important;
+      }
+      body .main-content-wrapper .sidebar.d-none ~ .main-content {
+        margin-left: 0 !important;
+      }
     }
   </style>
   <!-- Theme Manager will be initialized in base template -->

@@ -1662,3 +1662,33 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .session-files-content .file-dropzone-compact:hover {
   background: rgba(13, 110, 253, 0.1);
 }
+
+/* ============================================
+   GLOBAL SIDEBAR MARGIN FIX
+   This ensures main-content has proper margin
+   on ALL pages when sidebar is visible
+   ============================================ */
+@media screen and (min-width: 992px) {
+  /* Base rule: all main-content gets sidebar margin */
+  .main-content {
+    margin-left: 300px !important;
+    margin-left: var(--sidebar-width, 300px) !important;
+  }
+
+  /* When sidebar is hidden, remove margin */
+  .sidebar.d-none ~ .main-content {
+    margin-left: 0 !important;
+  }
+
+  /* Pages with session-sidebar visible need extra margin */
+  .session-sidebar:not(.d-none) ~ .main-content {
+    margin-left: calc(300px + 280px) !important;
+    margin-left: calc(var(--sidebar-width, 300px) + var(--session-sidebar-width, 280px)) !important;
+  }
+
+  /* Session sidebar visible but main sidebar hidden */
+  .sidebar.d-none ~ .session-sidebar:not(.d-none) ~ .main-content {
+    margin-left: 280px !important;
+    margin-left: var(--session-sidebar-width, 280px) !important;
+  }
+}
