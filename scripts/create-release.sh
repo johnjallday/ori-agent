@@ -1,20 +1,16 @@
 #!/bin/bash
 
-# create-release.sh - Creates a release branch following Git Flow
+# create-release.sh - Creates a release from main branch (GitHub Flow)
 #
 # Usage:
 #   ./scripts/create-release.sh <version>
 #   ./scripts/create-release.sh v1.3.0
-#   ./scripts/create-release.sh v1.3.0 --immediate   # Skip release branch, release now
 #
-# Git Flow Workflow:
-#   1. Creates release/vX.Y.Z branch from dev
-#   2. Push triggers CI validation
-#   3. Scheduled release (Tuesday 10:00 UTC) or manual trigger merges to main
-#
-# Immediate Release (--immediate flag):
-#   - Skips release branch
-#   - Merges dev to main, tags, and releases via GitHub Actions
+# Workflow:
+#   1. Ensures you're on main branch with clean working tree
+#   2. Runs quick tests
+#   3. Updates VERSION file
+#   4. Creates and pushes tag (triggers GitHub Actions release)
 
 set -e
 
@@ -57,69 +53,39 @@ show_help() {
   echo "╚════════════════════════════════════════════════════════════════╝"
   echo ""
   echo -e "${BLUE}USAGE:${NC}"
-  echo "  ./scripts/create-release.sh <version> [options]"
+  echo "  ./scripts/create-release.sh <version>"
   echo ""
   echo -e "${BLUE}ARGUMENTS:${NC}"
   echo "  <version>       Version to release (e.g., v1.3.0 or 1.3.0)"
   echo "                  The 'v' prefix is added automatically if missing"
   echo ""
   echo -e "${BLUE}OPTIONS:${NC}"
-  echo "  --immediate     Skip release branch, release immediately"
-  echo "                  Merges dev to main, creates tag, triggers release"
   echo "  --help, -h      Show this help message"
   echo ""
   echo -e "${BLUE}EXAMPLES:${NC}"
   echo "  ./scripts/create-release.sh v1.3.0"
-  echo "      Create release branch release/v1.3.0 from dev (Git Flow)"
-  echo ""
-  echo "  ./scripts/create-release.sh v1.3.0 --immediate"
-  echo "      Skip release branch, merge dev to main and release now"
-  echo ""
   echo "  ./scripts/create-release.sh 1.3.0"
-  echo "      Same as v1.3.0 (v prefix added automatically)"
   echo ""
-  echo -e "${BLUE}GIT FLOW WORKFLOW (default):${NC}"
-  echo "  1. Creates release/vX.Y.Z branch from dev"
-  echo "  2. Push triggers CI validation"
-  echo "  3. Make bug fixes on release branch (no new features)"
-  echo "  4. Scheduled release (Tuesday 10:00 UTC) or manual trigger"
-  echo ""
-  echo -e "${BLUE}IMMEDIATE RELEASE WORKFLOW (--immediate):${NC}"
-  echo "  1. Merges dev to main (if needed)"
-  echo "  2. Runs quick tests"
-  echo "  3. Updates VERSION file"
-  echo "  4. Creates and pushes tag (triggers GitHub Actions release)"
-  echo "  5. Syncs release back to dev"
+  echo -e "${BLUE}WORKFLOW:${NC}"
+  echo "  1. Ensures you're on main with clean working tree"
+  echo "  2. Pulls latest changes"
+  echo "  3. Runs quick tests"
+  echo "  4. Updates VERSION file"
+  echo "  5. Creates and pushes tag (triggers GitHub Actions release)"
   echo ""
   echo -e "${BLUE}RELATED COMMANDS:${NC}"
   echo "  ./scripts/pre-release-check.sh <version>   Full validation before release"
   echo "  gh run list --workflow=release.yml         View release workflow progress"
   echo ""
-  echo -e "${BLUE}MANUAL RELEASE TRIGGER:${NC}"
-  echo "  After creating a release branch, you can manually trigger the release:"
-  echo ""
-  echo "  # Trigger release immediately"
-  echo "  gh workflow run scheduled-release.yml -f release_branch=release/vX.Y.Z"
-  echo ""
-  echo "  # Dry run first (validate without releasing)"
-  echo "  gh workflow run scheduled-release.yml -f release_branch=release/vX.Y.Z -f dry_run=true"
-  echo ""
-  echo "  # Force release (skip validation failures)"
-  echo "  gh workflow run scheduled-release.yml -f release_branch=release/vX.Y.Z -f force_release=true"
-  echo ""
   exit 0
 }
 
 # Parse arguments
-IMMEDIATE=false
 VERSION=""
 for arg in "$@"; do
   case $arg in
     --help|-h)
       show_help
-      ;;
-    --immediate)
-      IMMEDIATE=true
       ;;
     *)
       if [ -z "$VERSION" ]; then
@@ -131,10 +97,8 @@ done
 
 # Check if version argument is provided
 if [ -z "$VERSION" ]; then
-  print_error "Usage: $0 <version> [--immediate]"
-  print_error "Examples:"
-  print_error "  $0 v1.3.0              # Create release branch (scheduled release)"
-  print_error "  $0 v1.3.0 --immediate  # Release immediately"
+  print_error "Usage: $0 <version>"
+  print_error "Example: $0 v1.3.0"
   exit 1
 fi
 
@@ -150,13 +114,7 @@ if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-RELEASE_BRANCH="release/$VERSION"
-
-if [ "$IMMEDIATE" = true ]; then
-  print_status "Creating immediate release $VERSION for Ori Agent"
-else
-  print_status "Creating release branch $RELEASE_BRANCH for Ori Agent"
-fi
+print_status "Creating release $VERSION for Ori Agent"
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -180,218 +138,53 @@ fi
 # Check current branch
 CURRENT_BRANCH=$(git branch --show-current)
 
-if [ "$IMMEDIATE" = true ]; then
-  # ============================================
-  # IMMEDIATE RELEASE MODE
-  # ============================================
-
-  # For immediate release, we need to be on main or merge dev to main
-  if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "dev" ]; then
-    print_error "For immediate release, must be on 'main' or 'dev' branch"
-    print_error "Current branch: '$CURRENT_BRANCH'"
-    exit 1
-  fi
-
-  # If on dev, switch to main and merge
-  if [ "$CURRENT_BRANCH" = "dev" ]; then
-    print_status "Switching to main and merging dev..."
-    git switch main
-    git pull origin main
-    git merge dev --no-ff -m "Merge dev for release $VERSION"
-  else
-    # Already on main, just pull
-    print_status "Pulling latest changes..."
-    git pull origin main
-
-    # Check that dev is merged
-    if git show-ref --verify --quiet refs/heads/dev; then
-      DEV_COMMITS=$(git rev-list main..dev --count 2>/dev/null || echo "0")
-      if [ "$DEV_COMMITS" -gt 0 ]; then
-        print_warning "dev branch has $DEV_COMMITS commit(s) not merged to main"
-        read -p "Merge dev to main now? (Y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-          git merge dev --no-ff -m "Merge dev for release $VERSION"
-        fi
-      fi
-    fi
-  fi
-
-  # Run pre-release checks
-  print_status "Running pre-release checks..."
-  if [ -f "./scripts/pre-release-check.sh" ]; then
-    print_warning "Consider running './scripts/pre-release-check.sh $VERSION' for full validation"
-  fi
-
-  # Run quick tests
-  print_status "Running quick tests..."
-  go test -short ./... || {
-    print_error "Tests failed. Fix issues before releasing."
-    exit 1
-  }
-
-  # Update VERSION file
-  VERSION_FILE="VERSION"
-  print_status "Updating VERSION file..."
-  echo "$VERSION" >"$VERSION_FILE"
-  if ! git diff --quiet "$VERSION_FILE" 2>/dev/null; then
-    git add "$VERSION_FILE"
-    git commit -m "chore: bump version to $VERSION"
-  fi
-
-  # Push main
-  print_status "Pushing main branch..."
-  git push origin main
-
-  # Create and push tag (triggers release.yml workflow)
-  print_status "Creating and pushing tag $VERSION..."
-  git tag -a "$VERSION" -m "Release $VERSION"
-  git push origin "$VERSION"
-
-  print_success "Release $VERSION triggered!"
+# Must be on main branch
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  print_error "Must be on 'main' branch to create a release"
+  print_error "Current branch: '$CURRENT_BRANCH'"
   echo ""
-  print_status "The release workflow is now running on GitHub Actions."
-  print_status "View progress: gh run list --workflow=release.yml"
-  echo ""
-
-  # Merge back to dev
-  if git show-ref --verify --quiet refs/heads/dev; then
-    print_status "Syncing release back to dev..."
-    git switch dev
-    git pull origin dev
-    git merge main --no-ff -m "Merge main ($VERSION) back to dev"
-    git push origin dev
-    print_success "dev branch updated with release"
-  fi
-
-else
-  # ============================================
-  # RELEASE BRANCH MODE (Git Flow)
-  # ============================================
-
-  # Must be on dev branch for release branch creation
-  if [ "$CURRENT_BRANCH" != "dev" ]; then
-    print_warning "Not on dev branch (currently on $CURRENT_BRANCH)"
-    read -p "Switch to dev? [Y/n] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-      git switch dev
-    else
-      print_error "Must be on dev branch to create a release branch"
-      exit 1
-    fi
-  fi
-
-  # Pull latest dev
-  print_status "Pulling latest changes from dev..."
-  git pull origin dev
-
-  # Check if release branch already exists
-  if git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH" || \
-     git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
-    print_error "Branch $RELEASE_BRANCH already exists."
-    exit 1
-  fi
-
-  # Update VERSION file on release branch
-  VERSION_FILE="VERSION"
-
-  # Create release branch
-  print_status "Creating branch $RELEASE_BRANCH..."
-  git switch -c "$RELEASE_BRANCH"
-
-  # Update VERSION file
-  print_status "Updating VERSION file..."
-  echo "$VERSION" >"$VERSION_FILE"
-  git add "$VERSION_FILE"
-  # Only commit if there are changes (VERSION might already be set)
-  if ! git diff --cached --quiet; then
-    git commit -m "chore: bump version to $VERSION"
-  else
-    print_status "VERSION already set to $VERSION, no commit needed"
-  fi
-
-  # Push to origin (triggers CI)
-  print_status "Pushing $RELEASE_BRANCH to origin..."
-  git push -u origin "$RELEASE_BRANCH"
-
-  print_success "Release branch created: $RELEASE_BRANCH"
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  print_status "When should this release go out?"
-  echo ""
-  echo "  1) Tomorrow (next 5 AM ET / 10:00 UTC)"
-  echo "  2) In 2 days"
-  echo "  3) In 1 week"
-  echo "  4) Release immediately (trigger now)"
-  echo "  5) Don't schedule (I'll trigger manually later)"
-  echo ""
-  read -p "Select option [1-5]: " -n 1 -r SCHEDULE_OPTION
-  echo ""
-  echo ""
-
-  case $SCHEDULE_OPTION in
-    1)
-      RELEASE_DATE=$(date -v+1d +%Y-%m-%d 2>/dev/null || date -d "+1 day" +%Y-%m-%d)
-      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
-      echo "$RELEASE_DATE" > RELEASE_DATE
-      git add RELEASE_DATE
-      git commit -m "chore: schedule release for $RELEASE_DATE"
-      git push
-      print_success "Release scheduled for $RELEASE_DATE"
-      ;;
-    2)
-      RELEASE_DATE=$(date -v+2d +%Y-%m-%d 2>/dev/null || date -d "+2 days" +%Y-%m-%d)
-      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
-      echo "$RELEASE_DATE" > RELEASE_DATE
-      git add RELEASE_DATE
-      git commit -m "chore: schedule release for $RELEASE_DATE"
-      git push
-      print_success "Release scheduled for $RELEASE_DATE"
-      ;;
-    3)
-      RELEASE_DATE=$(date -v+7d +%Y-%m-%d 2>/dev/null || date -d "+7 days" +%Y-%m-%d)
-      print_status "Scheduling release for $RELEASE_DATE (5 AM ET / 10:00 UTC)..."
-      echo "$RELEASE_DATE" > RELEASE_DATE
-      git add RELEASE_DATE
-      git commit -m "chore: schedule release for $RELEASE_DATE"
-      git push
-      print_success "Release scheduled for $RELEASE_DATE"
-      ;;
-    4)
-      print_status "Triggering release immediately..."
-      if command -v gh &> /dev/null; then
-        gh workflow run scheduled-release.yml -f release_branch="$RELEASE_BRANCH"
-        print_success "Release workflow triggered!"
-        echo ""
-        print_status "View progress: gh run list --workflow=scheduled-release.yml"
-      else
-        print_error "GitHub CLI (gh) not installed. Trigger manually:"
-        echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
-      fi
-      ;;
-    5|*)
-      print_status "Release not scheduled. To trigger later:"
-      echo ""
-      echo "  # Schedule for a specific date:"
-      echo "  ./scripts/schedule-release.sh 2d"
-      echo ""
-      echo "  # Or trigger immediately:"
-      echo "  gh workflow run scheduled-release.yml -f release_branch=$RELEASE_BRANCH"
-      ;;
-  esac
-
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  print_status "To make final fixes on this branch:"
-  echo "  git switch $RELEASE_BRANCH"
-  echo "  # make changes..."
-  echo "  git push"
-  echo ""
-  print_status "To continue development:"
-  echo "  git switch dev"
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  print_status "Switch to main first:"
+  echo "  cd /path/to/main/worktree"
+  echo "  # or: git switch main"
+  exit 1
 fi
+
+# Pull latest changes
+print_status "Pulling latest changes..."
+git pull origin main
+
+# Run pre-release checks reminder
+if [ -f "./scripts/pre-release-check.sh" ]; then
+  print_warning "Consider running './scripts/pre-release-check.sh $VERSION' for full validation"
+fi
+
+# Run quick tests
+print_status "Running quick tests..."
+go test -short ./... || {
+  print_error "Tests failed. Fix issues before releasing."
+  exit 1
+}
+
+# Update VERSION file
+VERSION_FILE="VERSION"
+print_status "Updating VERSION file..."
+echo "$VERSION" >"$VERSION_FILE"
+if ! git diff --quiet "$VERSION_FILE" 2>/dev/null; then
+  git add "$VERSION_FILE"
+  git commit -m "chore: bump version to $VERSION"
+fi
+
+# Push main
+print_status "Pushing main branch..."
+git push origin main
+
+# Create and push tag (triggers release.yml workflow)
+print_status "Creating and pushing tag $VERSION..."
+git tag -a "$VERSION" -m "Release $VERSION"
+git push origin "$VERSION"
+
+print_success "Release $VERSION triggered!"
+echo ""
+print_status "The release workflow is now running on GitHub Actions."
+print_status "View progress: gh run list --workflow=release.yml"
+echo ""
