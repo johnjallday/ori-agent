@@ -993,9 +993,11 @@ function setupSidebarToggle() {
     document.addEventListener('click', function(event) {
       const isClickInSidebar = sidebar.contains(event.target);
       const isClickOnToggle = sidebarToggle.contains(event.target);
+      // Don't close sidebar when clicking on modals or their backdrops
+      const isClickInModal = event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
 
-      // Only close if sidebar is visible and click is outside
-      if (!isClickInSidebar && !isClickOnToggle &&
+      // Only close if sidebar is visible and click is outside (excluding modals)
+      if (!isClickInSidebar && !isClickOnToggle && !isClickInModal &&
           !sidebar.classList.contains('d-none') &&
           window.innerWidth < 992) { // lg breakpoint
         sidebar.classList.add('d-none');

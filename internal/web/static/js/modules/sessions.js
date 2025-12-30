@@ -1156,6 +1156,16 @@ const sessionManager = {
         this.updateEditAgentColorPreview(event.target.value);
       });
     }
+
+    // Listen for Type changes to update Model options
+    const typeSelect = document.getElementById('editAgentTypeSelect');
+    if (typeSelect) {
+      typeSelect.addEventListener('change', (event) => {
+        const modelSelect = document.getElementById('editAgentModelSelect');
+        const currentModel = modelSelect?.value;
+        this.updateEditAgentModelOptions(event.target.value, currentModel);
+      });
+    }
   },
 
   async showEditAgentModal(agentName) {
@@ -1213,11 +1223,9 @@ const sessionManager = {
       roleSelect.value = agent.role || roleSelect.value;
     }
 
-    const modelInput = document.getElementById('editAgentModelInput');
-    if (modelInput) {
-      modelInput.value = agent.model || '';
-      this.ensureEditAgentModelOption(agent.model);
-    }
+    // Update model options based on agent type, then set the current model
+    const agentType = agent.type || 'tool-calling';
+    this.updateEditAgentModelOptions(agentType, agent.model);
 
     const descriptionInput = document.getElementById('editAgentDescription');
     if (descriptionInput) {
@@ -1242,56 +1250,82 @@ const sessionManager = {
 
   async ensureEditAgentModelOptions() {
     if (this.editAgentModelOptionsLoaded) return;
-    const list = document.getElementById('editAgentModelOptions');
-    if (!list) return;
 
-    let options = [];
+    // Load and cache providers data
     if (typeof loadAvailableProviders === 'function') {
-      const providers = await loadAvailableProviders();
-      providers.forEach((provider) => {
-        (provider.models || []).forEach((model) => {
-          if (model?.value) {
-            options.push(model.value);
-          }
-        });
-      });
+      this.editAgentProvidersData = await loadAvailableProviders();
     }
 
-    if (options.length === 0) {
-      options = [
-        'gpt-5',
-        'gpt-5-mini',
-        'gpt-5-nano',
-        'gpt-4o',
-        'gpt-4o-mini',
-        'claude-3-5-sonnet-20241022',
-        'claude-3-haiku-20240307',
-        'llama3.2',
-        'mistral',
-        'codellama'
-      ];
+    // Set default fallback models if no providers loaded
+    if (!this.editAgentProvidersData || this.editAgentProvidersData.length === 0) {
+      this.editAgentProvidersData = [{
+        name: 'default',
+        display_name: 'Default',
+        models: [
+          { value: 'gpt-5', label: 'gpt-5', type: 'research' },
+          { value: 'gpt-5-mini', label: 'gpt-5-mini', type: 'general' },
+          { value: 'gpt-5-nano', label: 'gpt-5-nano', type: 'tool-calling' },
+          { value: 'gpt-4o', label: 'gpt-4o', type: 'general' },
+          { value: 'gpt-4o-mini', label: 'gpt-4o-mini', type: 'tool-calling' },
+          { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet', type: 'general' },
+          { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku', type: 'tool-calling' },
+          { value: 'llama3.2', label: 'llama3.2', type: 'tool-calling' },
+          { value: 'mistral', label: 'mistral', type: 'tool-calling' },
+          { value: 'codellama', label: 'codellama', type: 'general' }
+        ]
+      }];
     }
-
-    const uniqueOptions = Array.from(new Set(options));
-    list.innerHTML = '';
-    uniqueOptions.forEach((value) => {
-      const option = document.createElement('option');
-      option.value = value;
-      list.appendChild(option);
-    });
 
     this.editAgentModelOptionsLoaded = true;
   },
 
-  ensureEditAgentModelOption(model) {
-    if (!model) return;
-    const list = document.getElementById('editAgentModelOptions');
-    if (!list) return;
-    const exists = Array.from(list.options).some((option) => option.value === model);
-    if (exists) return;
-    const option = document.createElement('option');
-    option.value = model;
-    list.appendChild(option);
+  updateEditAgentModelOptions(agentType, currentModel = null) {
+    const select = document.getElementById('editAgentModelSelect');
+    if (!select) return;
+
+    // Clear existing options
+    select.innerHTML = '<option value="">Select a model...</option>';
+
+    if (!this.editAgentProvidersData) return;
+
+    // Group models by provider
+    this.editAgentProvidersData.forEach((provider) => {
+      if (!provider.models || provider.models.length === 0) return;
+
+      // Filter models by agent type
+      const filteredModels = provider.models.filter((model) => {
+        // If model has no type, include it for all agent types
+        if (!model.type) return true;
+        return model.type === agentType;
+      });
+
+      if (filteredModels.length === 0) return;
+
+      // Create optgroup for this provider
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = provider.display_name || provider.name;
+
+      filteredModels.forEach((model) => {
+        const option = document.createElement('option');
+        option.value = model.value;
+        option.textContent = model.label || model.value;
+        if (model.value === currentModel) {
+          option.selected = true;
+        }
+        optgroup.appendChild(option);
+      });
+
+      select.appendChild(optgroup);
+    });
+
+    // If current model wasn't found in filtered list, add it as a custom option
+    if (currentModel && select.value !== currentModel) {
+      const customOption = document.createElement('option');
+      customOption.value = currentModel;
+      customOption.textContent = `${currentModel} (current)`;
+      customOption.selected = true;
+      select.insertBefore(customOption, select.firstChild.nextSibling);
+    }
   },
 
   ensureEditAgentSelectOption(selectEl, value) {
@@ -1359,7 +1393,7 @@ const sessionManager = {
     const nameInput = document.getElementById('editAgentNameInput');
     const typeSelect = document.getElementById('editAgentTypeSelect');
     const roleSelect = document.getElementById('editAgentRoleSelect');
-    const modelInput = document.getElementById('editAgentModelInput');
+    const modelSelect = document.getElementById('editAgentModelSelect');
     const descriptionInput = document.getElementById('editAgentDescription');
     const colorInput = document.getElementById('editAgentAvatarColor');
     const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
@@ -1367,7 +1401,7 @@ const sessionManager = {
     const newName = nameInput?.value.trim();
     const type = typeSelect?.value;
     const role = roleSelect?.value;
-    const model = modelInput?.value.trim();
+    const model = modelSelect?.value;
 
     if (!newName) {
       this.showEditAgentError('Name is required.');
@@ -1380,7 +1414,7 @@ const sessionManager = {
     }
     if (!model) {
       this.showEditAgentError('Model is required.');
-      modelInput?.focus();
+      modelSelect?.focus();
       return;
     }
 
