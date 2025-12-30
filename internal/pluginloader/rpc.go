@@ -194,6 +194,15 @@ func (r *RPCPluginClient) ServeWebPage(path string, query map[string]string) (st
 	return "", "", nil // Plugin doesn't provide web pages
 }
 
+// GetOperations returns operation-specific parameter information if the plugin implements OperationsProvider.
+// Returns nil if the plugin doesn't implement OperationsProvider.
+func (r *RPCPluginClient) GetOperations() []pluginapi.OperationInfo {
+	if opsProvider, ok := r.tool.(pluginapi.OperationsProvider); ok {
+		return opsProvider.GetOperations()
+	}
+	return nil
+}
+
 // AcceptsFiles returns the list of file types this plugin accepts.
 // Returns nil if the plugin doesn't implement FileAttachmentHandler.
 func (r *RPCPluginClient) AcceptsFiles() []string {

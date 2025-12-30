@@ -885,6 +885,7 @@ type PluginMetadata struct {
 	Maintainers   []*Maintainer          `protobuf:"bytes,6,rep,name=maintainers,proto3" json:"maintainers,omitempty"`
 	Platforms     []*Platform            `protobuf:"bytes,7,rep,name=platforms,proto3" json:"platforms,omitempty"`       // Supported platforms
 	Requirements  *Requirements          `protobuf:"bytes,8,opt,name=requirements,proto3" json:"requirements,omitempty"` // Plugin requirements
+	Tags          []string               `protobuf:"bytes,9,rep,name=tags,proto3" json:"tags,omitempty"`                 // Plugin tags (normalized, e.g., "dev-tools", "audio")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -971,6 +972,13 @@ func (x *PluginMetadata) GetPlatforms() []*Platform {
 func (x *PluginMetadata) GetRequirements() *Requirements {
 	if x != nil {
 		return x.Requirements
+	}
+	return nil
+}
+
+func (x *PluginMetadata) GetTags() []string {
+	if x != nil {
+		return x.Tags
 	}
 	return nil
 }
@@ -1248,6 +1256,296 @@ func (x *WebPageResponse) GetError() string {
 	return ""
 }
 
+// ProtoFileAttachment represents a file attached to a plugin call (proto version)
+// Note: Named ProtoFileAttachment to avoid conflict with pluginapi.FileAttachment
+type ProtoFileAttachment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`       // Original filename (e.g., "drums.wav")
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`       // MIME type (e.g., "audio/wav", "application/zip")
+	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`      // File size in bytes
+	Content       []byte                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"` // Raw file content
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProtoFileAttachment) Reset() {
+	*x = ProtoFileAttachment{}
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProtoFileAttachment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProtoFileAttachment) ProtoMessage() {}
+
+func (x *ProtoFileAttachment) ProtoReflect() protoreflect.Message {
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProtoFileAttachment.ProtoReflect.Descriptor instead.
+func (*ProtoFileAttachment) Descriptor() ([]byte, []int) {
+	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ProtoFileAttachment) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProtoFileAttachment) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ProtoFileAttachment) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ProtoFileAttachment) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+// AcceptsFilesResponse contains the list of accepted file types
+type AcceptsFilesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AcceptedTypes []string               `protobuf:"bytes,1,rep,name=accepted_types,json=acceptedTypes,proto3" json:"accepted_types,omitempty"`  // MIME types or extensions (e.g., ".wav", "audio/wav")
+	SupportsFiles bool                   `protobuf:"varint,2,opt,name=supports_files,json=supportsFiles,proto3" json:"supports_files,omitempty"` // True if plugin implements FileAttachmentHandler
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptsFilesResponse) Reset() {
+	*x = AcceptsFilesResponse{}
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptsFilesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptsFilesResponse) ProtoMessage() {}
+
+func (x *AcceptsFilesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptsFilesResponse.ProtoReflect.Descriptor instead.
+func (*AcceptsFilesResponse) Descriptor() ([]byte, []int) {
+	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AcceptsFilesResponse) GetAcceptedTypes() []string {
+	if x != nil {
+		return x.AcceptedTypes
+	}
+	return nil
+}
+
+func (x *AcceptsFilesResponse) GetSupportsFiles() bool {
+	if x != nil {
+		return x.SupportsFiles
+	}
+	return false
+}
+
+// CallWithFilesRequest contains arguments and file attachments for a tool call
+type CallWithFilesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ArgsJson      string                 `protobuf:"bytes,1,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"` // JSON-encoded tool arguments
+	Files         []*ProtoFileAttachment `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`                       // File attachments
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallWithFilesRequest) Reset() {
+	*x = CallWithFilesRequest{}
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallWithFilesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallWithFilesRequest) ProtoMessage() {}
+
+func (x *CallWithFilesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallWithFilesRequest.ProtoReflect.Descriptor instead.
+func (*CallWithFilesRequest) Descriptor() ([]byte, []int) {
+	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *CallWithFilesRequest) GetArgsJson() string {
+	if x != nil {
+		return x.ArgsJson
+	}
+	return ""
+}
+
+func (x *CallWithFilesRequest) GetFiles() []*ProtoFileAttachment {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+// ProtoOperationInfo describes a single operation and its parameters
+type ProtoOperationInfo struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                       // Operation name (e.g., "create_project")
+	Parameters         []string               `protobuf:"bytes,2,rep,name=parameters,proto3" json:"parameters,omitempty"`                                           // Parameter names for this operation
+	RequiredParameters []string               `protobuf:"bytes,3,rep,name=required_parameters,json=requiredParameters,proto3" json:"required_parameters,omitempty"` // Required parameter names
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ProtoOperationInfo) Reset() {
+	*x = ProtoOperationInfo{}
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProtoOperationInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProtoOperationInfo) ProtoMessage() {}
+
+func (x *ProtoOperationInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProtoOperationInfo.ProtoReflect.Descriptor instead.
+func (*ProtoOperationInfo) Descriptor() ([]byte, []int) {
+	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ProtoOperationInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ProtoOperationInfo) GetParameters() []string {
+	if x != nil {
+		return x.Parameters
+	}
+	return nil
+}
+
+func (x *ProtoOperationInfo) GetRequiredParameters() []string {
+	if x != nil {
+		return x.RequiredParameters
+	}
+	return nil
+}
+
+// OperationsResponse contains the list of operations with their parameters
+type OperationsResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Operations         []*ProtoOperationInfo  `protobuf:"bytes,1,rep,name=operations,proto3" json:"operations,omitempty"`
+	SupportsOperations bool                   `protobuf:"varint,2,opt,name=supports_operations,json=supportsOperations,proto3" json:"supports_operations,omitempty"` // True if plugin implements OperationsProvider
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *OperationsResponse) Reset() {
+	*x = OperationsResponse{}
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OperationsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OperationsResponse) ProtoMessage() {}
+
+func (x *OperationsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pluginapi_proto_tool_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OperationsResponse.ProtoReflect.Descriptor instead.
+func (*OperationsResponse) Descriptor() ([]byte, []int) {
+	return file_pluginapi_proto_tool_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *OperationsResponse) GetOperations() []*ProtoOperationInfo {
+	if x != nil {
+		return x.Operations
+	}
+	return nil
+}
+
+func (x *OperationsResponse) GetSupportsOperations() bool {
+	if x != nil {
+		return x.SupportsOperations
+	}
+	return false
+}
+
 var File_pluginapi_proto_tool_proto protoreflect.FileDescriptor
 
 const file_pluginapi_proto_tool_proto_rawDesc = "" +
@@ -1312,7 +1610,7 @@ const file_pluginapi_proto_tool_proto_rawDesc = "" +
 	"\rarchitectures\x18\x02 \x03(\tR\rarchitectures\"Z\n" +
 	"\fRequirements\x12&\n" +
 	"\x0fmin_ori_version\x18\x01 \x01(\tR\rminOriVersion\x12\"\n" +
-	"\fdependencies\x18\x02 \x03(\tR\fdependencies\"\xc3\x02\n" +
+	"\fdependencies\x18\x02 \x03(\tR\fdependencies\"\xd7\x02\n" +
 	"\x0ePluginMetadata\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12 \n" +
@@ -1323,7 +1621,8 @@ const file_pluginapi_proto_tool_proto_rawDesc = "" +
 	"repository\x127\n" +
 	"\vmaintainers\x18\x06 \x03(\v2\x15.pluginapi.MaintainerR\vmaintainers\x121\n" +
 	"\tplatforms\x18\a \x03(\v2\x13.pluginapi.PlatformR\tplatforms\x12;\n" +
-	"\frequirements\x18\b \x01(\v2\x17.pluginapi.RequirementsR\frequirements\"_\n" +
+	"\frequirements\x18\b \x01(\v2\x17.pluginapi.RequirementsR\frequirements\x12\x12\n" +
+	"\x04tags\x18\t \x03(\tR\x04tags\"_\n" +
 	"\x10MetadataResponse\x125\n" +
 	"\bmetadata\x18\x01 \x01(\v2\x19.pluginapi.PluginMetadataR\bmetadata\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x94\x01\n" +
@@ -1344,7 +1643,29 @@ const file_pluginapi_proto_tool_proto_rawDesc = "" +
 	"\x0fWebPageResponse\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12!\n" +
 	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error2\xce\x06\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"k\n" +
+	"\x13ProtoFileAttachment\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x12\n" +
+	"\x04size\x18\x03 \x01(\x03R\x04size\x12\x18\n" +
+	"\acontent\x18\x04 \x01(\fR\acontent\"d\n" +
+	"\x14AcceptsFilesResponse\x12%\n" +
+	"\x0eaccepted_types\x18\x01 \x03(\tR\racceptedTypes\x12%\n" +
+	"\x0esupports_files\x18\x02 \x01(\bR\rsupportsFiles\"i\n" +
+	"\x14CallWithFilesRequest\x12\x1b\n" +
+	"\targs_json\x18\x01 \x01(\tR\bargsJson\x124\n" +
+	"\x05files\x18\x02 \x03(\v2\x1e.pluginapi.ProtoFileAttachmentR\x05files\"y\n" +
+	"\x12ProtoOperationInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1e\n" +
+	"\n" +
+	"parameters\x18\x02 \x03(\tR\n" +
+	"parameters\x12/\n" +
+	"\x13required_parameters\x18\x03 \x03(\tR\x12requiredParameters\"\x84\x01\n" +
+	"\x12OperationsResponse\x12=\n" +
+	"\n" +
+	"operations\x18\x01 \x03(\v2\x1d.pluginapi.ProtoOperationInfoR\n" +
+	"operations\x12/\n" +
+	"\x13supports_operations\x18\x02 \x01(\bR\x12supportsOperations2\x9e\b\n" +
 	"\vToolService\x12<\n" +
 	"\rGetDefinition\x12\x10.pluginapi.Empty\x1a\x19.pluginapi.ToolDefinition\x127\n" +
 	"\x04Call\x12\x16.pluginapi.CallRequest\x1a\x17.pluginapi.CallResponse\x12:\n" +
@@ -1358,7 +1679,10 @@ const file_pluginapi_proto_tool_proto_rawDesc = "" +
 	"\vGetMetadata\x12\x10.pluginapi.Empty\x1a\x1b.pluginapi.MetadataResponse\x12N\n" +
 	"\x14GetCompatibilityInfo\x12\x10.pluginapi.Empty\x1a$.pluginapi.CompatibilityInfoResponse\x12<\n" +
 	"\vGetWebPages\x12\x10.pluginapi.Empty\x1a\x1b.pluginapi.WebPagesResponse\x12E\n" +
-	"\fServeWebPage\x12\x19.pluginapi.WebPageRequest\x1a\x1a.pluginapi.WebPageResponseB,Z*github.com/johnjallday/ori-agent/pluginapib\x06proto3"
+	"\fServeWebPage\x12\x19.pluginapi.WebPageRequest\x1a\x1a.pluginapi.WebPageResponse\x12A\n" +
+	"\fAcceptsFiles\x12\x10.pluginapi.Empty\x1a\x1f.pluginapi.AcceptsFilesResponse\x12I\n" +
+	"\rCallWithFiles\x12\x1f.pluginapi.CallWithFilesRequest\x1a\x17.pluginapi.CallResponse\x12@\n" +
+	"\rGetOperations\x12\x10.pluginapi.Empty\x1a\x1d.pluginapi.OperationsResponseB,Z*github.com/johnjallday/ori-agent/pluginapib\x06proto3"
 
 var (
 	file_pluginapi_proto_tool_proto_rawDescOnce sync.Once
@@ -1372,7 +1696,7 @@ func file_pluginapi_proto_tool_proto_rawDescGZIP() []byte {
 	return file_pluginapi_proto_tool_proto_rawDescData
 }
 
-var file_pluginapi_proto_tool_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_pluginapi_proto_tool_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_pluginapi_proto_tool_proto_goTypes = []any{
 	(*Empty)(nil),                     // 0: pluginapi.Empty
 	(*ToolDefinition)(nil),            // 1: pluginapi.ToolDefinition
@@ -1395,7 +1719,12 @@ var file_pluginapi_proto_tool_proto_goTypes = []any{
 	(*WebPagesResponse)(nil),          // 18: pluginapi.WebPagesResponse
 	(*WebPageRequest)(nil),            // 19: pluginapi.WebPageRequest
 	(*WebPageResponse)(nil),           // 20: pluginapi.WebPageResponse
-	nil,                               // 21: pluginapi.WebPageRequest.QueryEntry
+	(*ProtoFileAttachment)(nil),       // 21: pluginapi.ProtoFileAttachment
+	(*AcceptsFilesResponse)(nil),      // 22: pluginapi.AcceptsFilesResponse
+	(*CallWithFilesRequest)(nil),      // 23: pluginapi.CallWithFilesRequest
+	(*ProtoOperationInfo)(nil),        // 24: pluginapi.ProtoOperationInfo
+	(*OperationsResponse)(nil),        // 25: pluginapi.OperationsResponse
+	nil,                               // 26: pluginapi.WebPageRequest.QueryEntry
 }
 var file_pluginapi_proto_tool_proto_depIdxs = []int32{
 	7,  // 0: pluginapi.ConfigVariablesResponse.config_vars:type_name -> pluginapi.ProtoConfigVariable
@@ -1403,36 +1732,44 @@ var file_pluginapi_proto_tool_proto_depIdxs = []int32{
 	13, // 2: pluginapi.PluginMetadata.platforms:type_name -> pluginapi.Platform
 	14, // 3: pluginapi.PluginMetadata.requirements:type_name -> pluginapi.Requirements
 	15, // 4: pluginapi.MetadataResponse.metadata:type_name -> pluginapi.PluginMetadata
-	21, // 5: pluginapi.WebPageRequest.query:type_name -> pluginapi.WebPageRequest.QueryEntry
-	0,  // 6: pluginapi.ToolService.GetDefinition:input_type -> pluginapi.Empty
-	2,  // 7: pluginapi.ToolService.Call:input_type -> pluginapi.CallRequest
-	0,  // 8: pluginapi.ToolService.GetVersion:input_type -> pluginapi.Empty
-	5,  // 9: pluginapi.ToolService.SetAgentContext:input_type -> pluginapi.AgentContextRequest
-	0,  // 10: pluginapi.ToolService.GetDefaultSettings:input_type -> pluginapi.Empty
-	0,  // 11: pluginapi.ToolService.GetRequiredConfig:input_type -> pluginapi.Empty
-	9,  // 12: pluginapi.ToolService.ValidateConfig:input_type -> pluginapi.ValidateConfigRequest
-	10, // 13: pluginapi.ToolService.InitializeWithConfig:input_type -> pluginapi.InitializeConfigRequest
-	0,  // 14: pluginapi.ToolService.GetMetadata:input_type -> pluginapi.Empty
-	0,  // 15: pluginapi.ToolService.GetCompatibilityInfo:input_type -> pluginapi.Empty
-	0,  // 16: pluginapi.ToolService.GetWebPages:input_type -> pluginapi.Empty
-	19, // 17: pluginapi.ToolService.ServeWebPage:input_type -> pluginapi.WebPageRequest
-	1,  // 18: pluginapi.ToolService.GetDefinition:output_type -> pluginapi.ToolDefinition
-	3,  // 19: pluginapi.ToolService.Call:output_type -> pluginapi.CallResponse
-	4,  // 20: pluginapi.ToolService.GetVersion:output_type -> pluginapi.VersionResponse
-	0,  // 21: pluginapi.ToolService.SetAgentContext:output_type -> pluginapi.Empty
-	6,  // 22: pluginapi.ToolService.GetDefaultSettings:output_type -> pluginapi.SettingsResponse
-	8,  // 23: pluginapi.ToolService.GetRequiredConfig:output_type -> pluginapi.ConfigVariablesResponse
-	11, // 24: pluginapi.ToolService.ValidateConfig:output_type -> pluginapi.ConfigResponse
-	11, // 25: pluginapi.ToolService.InitializeWithConfig:output_type -> pluginapi.ConfigResponse
-	16, // 26: pluginapi.ToolService.GetMetadata:output_type -> pluginapi.MetadataResponse
-	17, // 27: pluginapi.ToolService.GetCompatibilityInfo:output_type -> pluginapi.CompatibilityInfoResponse
-	18, // 28: pluginapi.ToolService.GetWebPages:output_type -> pluginapi.WebPagesResponse
-	20, // 29: pluginapi.ToolService.ServeWebPage:output_type -> pluginapi.WebPageResponse
-	18, // [18:30] is the sub-list for method output_type
-	6,  // [6:18] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	26, // 5: pluginapi.WebPageRequest.query:type_name -> pluginapi.WebPageRequest.QueryEntry
+	21, // 6: pluginapi.CallWithFilesRequest.files:type_name -> pluginapi.ProtoFileAttachment
+	24, // 7: pluginapi.OperationsResponse.operations:type_name -> pluginapi.ProtoOperationInfo
+	0,  // 8: pluginapi.ToolService.GetDefinition:input_type -> pluginapi.Empty
+	2,  // 9: pluginapi.ToolService.Call:input_type -> pluginapi.CallRequest
+	0,  // 10: pluginapi.ToolService.GetVersion:input_type -> pluginapi.Empty
+	5,  // 11: pluginapi.ToolService.SetAgentContext:input_type -> pluginapi.AgentContextRequest
+	0,  // 12: pluginapi.ToolService.GetDefaultSettings:input_type -> pluginapi.Empty
+	0,  // 13: pluginapi.ToolService.GetRequiredConfig:input_type -> pluginapi.Empty
+	9,  // 14: pluginapi.ToolService.ValidateConfig:input_type -> pluginapi.ValidateConfigRequest
+	10, // 15: pluginapi.ToolService.InitializeWithConfig:input_type -> pluginapi.InitializeConfigRequest
+	0,  // 16: pluginapi.ToolService.GetMetadata:input_type -> pluginapi.Empty
+	0,  // 17: pluginapi.ToolService.GetCompatibilityInfo:input_type -> pluginapi.Empty
+	0,  // 18: pluginapi.ToolService.GetWebPages:input_type -> pluginapi.Empty
+	19, // 19: pluginapi.ToolService.ServeWebPage:input_type -> pluginapi.WebPageRequest
+	0,  // 20: pluginapi.ToolService.AcceptsFiles:input_type -> pluginapi.Empty
+	23, // 21: pluginapi.ToolService.CallWithFiles:input_type -> pluginapi.CallWithFilesRequest
+	0,  // 22: pluginapi.ToolService.GetOperations:input_type -> pluginapi.Empty
+	1,  // 23: pluginapi.ToolService.GetDefinition:output_type -> pluginapi.ToolDefinition
+	3,  // 24: pluginapi.ToolService.Call:output_type -> pluginapi.CallResponse
+	4,  // 25: pluginapi.ToolService.GetVersion:output_type -> pluginapi.VersionResponse
+	0,  // 26: pluginapi.ToolService.SetAgentContext:output_type -> pluginapi.Empty
+	6,  // 27: pluginapi.ToolService.GetDefaultSettings:output_type -> pluginapi.SettingsResponse
+	8,  // 28: pluginapi.ToolService.GetRequiredConfig:output_type -> pluginapi.ConfigVariablesResponse
+	11, // 29: pluginapi.ToolService.ValidateConfig:output_type -> pluginapi.ConfigResponse
+	11, // 30: pluginapi.ToolService.InitializeWithConfig:output_type -> pluginapi.ConfigResponse
+	16, // 31: pluginapi.ToolService.GetMetadata:output_type -> pluginapi.MetadataResponse
+	17, // 32: pluginapi.ToolService.GetCompatibilityInfo:output_type -> pluginapi.CompatibilityInfoResponse
+	18, // 33: pluginapi.ToolService.GetWebPages:output_type -> pluginapi.WebPagesResponse
+	20, // 34: pluginapi.ToolService.ServeWebPage:output_type -> pluginapi.WebPageResponse
+	22, // 35: pluginapi.ToolService.AcceptsFiles:output_type -> pluginapi.AcceptsFilesResponse
+	3,  // 36: pluginapi.ToolService.CallWithFiles:output_type -> pluginapi.CallResponse
+	25, // 37: pluginapi.ToolService.GetOperations:output_type -> pluginapi.OperationsResponse
+	23, // [23:38] is the sub-list for method output_type
+	8,  // [8:23] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_pluginapi_proto_tool_proto_init() }
@@ -1446,7 +1783,7 @@ func file_pluginapi_proto_tool_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pluginapi_proto_tool_proto_rawDesc), len(file_pluginapi_proto_tool_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

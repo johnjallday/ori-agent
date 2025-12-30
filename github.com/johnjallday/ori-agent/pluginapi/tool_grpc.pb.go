@@ -31,6 +31,9 @@ const (
 	ToolService_GetCompatibilityInfo_FullMethodName = "/pluginapi.ToolService/GetCompatibilityInfo"
 	ToolService_GetWebPages_FullMethodName          = "/pluginapi.ToolService/GetWebPages"
 	ToolService_ServeWebPage_FullMethodName         = "/pluginapi.ToolService/ServeWebPage"
+	ToolService_AcceptsFiles_FullMethodName         = "/pluginapi.ToolService/AcceptsFiles"
+	ToolService_CallWithFiles_FullMethodName        = "/pluginapi.ToolService/CallWithFiles"
+	ToolService_GetOperations_FullMethodName        = "/pluginapi.ToolService/GetOperations"
 )
 
 // ToolServiceClient is the client API for ToolService service.
@@ -65,6 +68,13 @@ type ToolServiceClient interface {
 	GetWebPages(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*WebPagesResponse, error)
 	// ServeWebPage handles a web page request and returns HTML/JSON content
 	ServeWebPage(ctx context.Context, in *WebPageRequest, opts ...grpc.CallOption) (*WebPageResponse, error)
+	// File attachment support
+	// AcceptsFiles returns the list of file types this plugin accepts
+	AcceptsFiles(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AcceptsFilesResponse, error)
+	// CallWithFiles executes the tool with arguments and file attachments
+	CallWithFiles(ctx context.Context, in *CallWithFilesRequest, opts ...grpc.CallOption) (*CallResponse, error)
+	// GetOperations returns operation-specific parameter information
+	GetOperations(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*OperationsResponse, error)
 }
 
 type toolServiceClient struct {
@@ -195,6 +205,36 @@ func (c *toolServiceClient) ServeWebPage(ctx context.Context, in *WebPageRequest
 	return out, nil
 }
 
+func (c *toolServiceClient) AcceptsFiles(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*AcceptsFilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptsFilesResponse)
+	err := c.cc.Invoke(ctx, ToolService_AcceptsFiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *toolServiceClient) CallWithFiles(ctx context.Context, in *CallWithFilesRequest, opts ...grpc.CallOption) (*CallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CallResponse)
+	err := c.cc.Invoke(ctx, ToolService_CallWithFiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *toolServiceClient) GetOperations(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*OperationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OperationsResponse)
+	err := c.cc.Invoke(ctx, ToolService_GetOperations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ToolServiceServer is the server API for ToolService service.
 // All implementations must embed UnimplementedToolServiceServer
 // for forward compatibility.
@@ -227,6 +267,13 @@ type ToolServiceServer interface {
 	GetWebPages(context.Context, *Empty) (*WebPagesResponse, error)
 	// ServeWebPage handles a web page request and returns HTML/JSON content
 	ServeWebPage(context.Context, *WebPageRequest) (*WebPageResponse, error)
+	// File attachment support
+	// AcceptsFiles returns the list of file types this plugin accepts
+	AcceptsFiles(context.Context, *Empty) (*AcceptsFilesResponse, error)
+	// CallWithFiles executes the tool with arguments and file attachments
+	CallWithFiles(context.Context, *CallWithFilesRequest) (*CallResponse, error)
+	// GetOperations returns operation-specific parameter information
+	GetOperations(context.Context, *Empty) (*OperationsResponse, error)
 	mustEmbedUnimplementedToolServiceServer()
 }
 
@@ -272,6 +319,15 @@ func (UnimplementedToolServiceServer) GetWebPages(context.Context, *Empty) (*Web
 }
 func (UnimplementedToolServiceServer) ServeWebPage(context.Context, *WebPageRequest) (*WebPageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ServeWebPage not implemented")
+}
+func (UnimplementedToolServiceServer) AcceptsFiles(context.Context, *Empty) (*AcceptsFilesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcceptsFiles not implemented")
+}
+func (UnimplementedToolServiceServer) CallWithFiles(context.Context, *CallWithFilesRequest) (*CallResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CallWithFiles not implemented")
+}
+func (UnimplementedToolServiceServer) GetOperations(context.Context, *Empty) (*OperationsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOperations not implemented")
 }
 func (UnimplementedToolServiceServer) mustEmbedUnimplementedToolServiceServer() {}
 func (UnimplementedToolServiceServer) testEmbeddedByValue()                     {}
@@ -510,6 +566,60 @@ func _ToolService_ServeWebPage_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ToolService_AcceptsFiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).AcceptsFiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_AcceptsFiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).AcceptsFiles(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ToolService_CallWithFiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CallWithFilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).CallWithFiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_CallWithFiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).CallWithFiles(ctx, req.(*CallWithFilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ToolService_GetOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ToolServiceServer).GetOperations(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ToolService_GetOperations_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ToolServiceServer).GetOperations(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ToolService_ServiceDesc is the grpc.ServiceDesc for ToolService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -564,6 +674,18 @@ var ToolService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ServeWebPage",
 			Handler:    _ToolService_ServeWebPage_Handler,
+		},
+		{
+			MethodName: "AcceptsFiles",
+			Handler:    _ToolService_AcceptsFiles_Handler,
+		},
+		{
+			MethodName: "CallWithFiles",
+			Handler:    _ToolService_CallWithFiles_Handler,
+		},
+		{
+			MethodName: "GetOperations",
+			Handler:    _ToolService_GetOperations_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

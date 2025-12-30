@@ -221,3 +221,20 @@ message CallWithFilesRequest {
     string args_json = 1;                       // JSON-encoded tool arguments
     repeated ProtoFileAttachment files = 2;     // File attachments
 }
+
+// =============================================================================
+// Operations Provider Support
+// =============================================================================
+
+// ProtoOperationInfo describes a single operation and its parameters
+message ProtoOperationInfo {
+    string name = 1;                           // Operation name (e.g., "create_project")
+    repeated string parameters = 2;            // Parameter names for this operation
+    repeated string required_parameters = 3;   // Required parameter names
+}
+
+// OperationsResponse contains the list of operations with their parameters
+message OperationsResponse {
+    repeated ProtoOperationInfo operations = 1;
+    bool supports_operations = 2;              // True if plugin implements OperationsProvider
+}

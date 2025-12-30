@@ -404,6 +404,37 @@ func (c *grpcClient) ServeWebPage(path string, query map[string]string) (string,
 }
 
 // =============================================================================
+// Operations Provider Support - Server Side
+// =============================================================================
+
+func (s *grpcServer) GetOperations(ctx context.Context, _ *Empty) (*OperationsResponse, error) {
+	// Check if plugin implements OperationsProvider
+	if opsProvider, ok := s.Impl.(OperationsProvider); ok {
+		operations := opsProvider.GetOperations()
+		if operations == nil {
+			return &OperationsResponse{SupportsOperations: false}, nil
+		}
+
+		// Convert OperationInfo to proto
+		protoOps := make([]*ProtoOperationInfo, len(operations))
+		for i, op := range operations {
+			protoOps[i] = &ProtoOperationInfo{
+				Name:               op.Name,
+				Parameters:         op.Parameters,
+				RequiredParameters: op.RequiredParameters,
+			}
+		}
+
+		return &OperationsResponse{
+			Operations:         protoOps,
+			SupportsOperations: true,
+		}, nil
+	}
+	// Plugin doesn't implement OperationsProvider
+	return &OperationsResponse{SupportsOperations: false}, nil
+}
+
+// =============================================================================
 // File Attachment Support - Server Side
 // =============================================================================
 
@@ -502,6 +533,31 @@ func (c *grpcClient) CallWithFiles(ctx context.Context, args string, files []Fil
 	return resp.ResultJson, nil
 }
 
+// =============================================================================
+// Operations Provider Support - Client Side
+// =============================================================================
+
+// GetOperations returns operation-specific parameter information.
+// Returns nil if the plugin doesn't implement OperationsProvider.
+func (c *grpcClient) GetOperations() []OperationInfo {
+	resp, err := c.client.GetOperations(context.Background(), &Empty{})
+	if err != nil || resp == nil || !resp.SupportsOperations {
+		return nil
+	}
+
+	// Convert proto to OperationInfo
+	operations := make([]OperationInfo, len(resp.Operations))
+	for i, op := range resp.Operations {
+		operations[i] = OperationInfo{
+			Name:               op.Name,
+			Parameters:         op.Parameters,
+			RequiredParameters: op.RequiredParameters,
+		}
+	}
+
+	return operations
+}
+
 // Compile-time interface checks
 var (
 	_ PluginTool              = (*grpcClient)(nil)
@@ -513,4 +569,5 @@ var (
 	_ InitializationProvider  = (*grpcClient)(nil)
 	_ WebPageProvider         = (*grpcClient)(nil)
 	_ FileAttachmentHandler   = (*grpcClient)(nil)
+	_ OperationsProvider      = (*grpcClient)(nil)
 )
