@@ -74,6 +74,12 @@ func (y *YAMLToolDefinition) ToToolDefinition() (Tool, error) {
 		}
 	}
 
+	// Auto-derive enum from operations keys if not explicitly provided
+	if opParam, ok := allParams["operation"]; ok && len(opParam.Enum) == 0 {
+		opParam.Enum = operationNames
+		allParams["operation"] = opParam
+	}
+
 	properties := make(map[string]interface{}, len(allParams))
 	for name, param := range allParams {
 		paramSchema, err := buildParameterSchema(name, param)
@@ -83,54 +89,32 @@ func (y *YAMLToolDefinition) ToToolDefinition() (Tool, error) {
 		properties[name] = paramSchema
 	}
 
-	globalProps, globalRequired, err := buildParametersSchema(y.Parameters)
+	_, globalRequired, err := buildParametersSchema(y.Parameters)
 	if err != nil {
 		return Tool{}, err
 	}
 
-	baseOperationParam, ok := allParams["operation"]
+	_, ok := allParams["operation"]
 	if !ok {
 		return Tool{}, fmt.Errorf("operation parameter is required when operations are defined")
 	}
 
-	var oneOf []interface{}
-	for _, opName := range operationNames {
-		opDef := y.Operations[opName]
-		opProps, opRequired, err := buildParametersSchema(opDef.Parameters)
-		if err != nil {
-			return Tool{}, err
-		}
-
-		mergedProps := make(map[string]interface{}, len(globalProps)+len(opProps))
-		for name, schema := range globalProps {
-			mergedProps[name] = schema
-		}
-		for name, schema := range opProps {
-			mergedProps[name] = schema
-		}
-
-		operationSchema := buildOperationSchema(baseOperationParam, opName)
-		mergedProps["operation"] = operationSchema
-
-		required := mergeRequired(globalRequired, opRequired)
-		if !containsString(required, "operation") {
-			required = append(required, "operation")
-		}
-
-		oneOf = append(oneOf, map[string]interface{}{
-			"type":       "object",
-			"properties": mergedProps,
-			"required":   required,
-		})
-	}
-
+	// Build a flat schema for LLM compatibility (OpenAI doesn't support oneOf at top level)
+	// All parameters are included, and operation-specific validation happens server-side
+	// via ValidateToolParametersWithOperations
 	parametersSchema := map[string]interface{}{
 		"type":       "object",
 		"properties": properties,
-		"oneOf":      oneOf,
 	}
-	if len(globalRequired) > 0 {
-		parametersSchema["required"] = globalRequired
+
+	// Only operation is required at top level; operation-specific required params
+	// are validated server-side
+	required := globalRequired
+	if !containsString(required, "operation") {
+		required = append(required, "operation")
+	}
+	if len(required) > 0 {
+		parametersSchema["required"] = required
 	}
 
 	return Tool{
@@ -372,43 +356,98 @@ func containsString(list []string, value string) bool {
 }
 
 // ValidateToolParameters validates tool parameters against the JSON schema generated for the tool.
-// It supports conditional schemas via oneOf keyed by the "operation" field.
+// For basic schemas, it validates required fields. For operation-based tools, use
+// ValidateToolParametersWithOperations for full operation-specific validation.
 func ValidateToolParameters(schema map[string]interface{}, params map[string]interface{}) error {
 	if schema == nil {
 		return nil
 	}
 
-	if oneOfRaw, ok := schema["oneOf"]; ok {
-		operation, ok := params["operation"].(string)
-		if !ok || operation == "" {
-			return fmt.Errorf("required field 'operation' is missing")
-		}
-
-		options, ok := oneOfRaw.([]interface{})
-		if !ok {
-			return fmt.Errorf("invalid conditional schema")
-		}
-
-		for _, option := range options {
-			optionSchema, ok := option.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if !operationMatchesSchema(optionSchema, operation) {
-				continue
-			}
-
-			properties := extractProperties(optionSchema)
-			required := extractRequired(optionSchema)
-			return validateRequiredParams(required, properties, params)
-		}
-
-		return fmt.Errorf("unknown operation: %s", operation)
-	}
-
 	properties := extractProperties(schema)
 	required := extractRequired(schema)
 	return validateRequiredParams(required, properties, params)
+}
+
+// ValidateToolParametersWithOperations validates tool parameters using the YAML tool definition.
+// This provides operation-specific validation where each operation can have its own required parameters.
+func ValidateToolParametersWithOperations(toolDef *YAMLToolDefinition, params map[string]interface{}) error {
+	if toolDef == nil {
+		return nil
+	}
+
+	// If no operations defined, fall back to simple validation
+	if len(toolDef.Operations) == 0 {
+		// Check global required params
+		for _, param := range toolDef.Parameters {
+			if param.Required {
+				if isMissingParam(param, params) {
+					return fmt.Errorf("required field '%s' is missing", param.Name)
+				}
+			}
+		}
+		return nil
+	}
+
+	// Get operation value
+	operation, ok := params["operation"].(string)
+	if !ok || operation == "" {
+		return fmt.Errorf("required field 'operation' is missing")
+	}
+
+	// Find operation definition
+	opDef, ok := toolDef.Operations[operation]
+	if !ok {
+		// Check if operation is valid based on enum or operations keys
+		operationParam, found := findParameter(toolDef.Parameters, "operation")
+		if found && len(operationParam.Enum) > 0 {
+			if !containsString(operationParam.Enum, operation) {
+				return fmt.Errorf("unknown operation: %s", operation)
+			}
+		} else {
+			return fmt.Errorf("unknown operation: %s", operation)
+		}
+	}
+
+	// Validate global required params
+	for _, param := range toolDef.Parameters {
+		if param.Required && param.Name != "operation" {
+			if isMissingParam(param, params) {
+				return fmt.Errorf("required field '%s' is missing", param.Name)
+			}
+		}
+	}
+
+	// Validate operation-specific required params
+	for _, param := range opDef.Parameters {
+		if param.Required {
+			if isMissingParam(param, params) {
+				return fmt.Errorf("required field '%s' is missing", param.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// isMissingParam checks if a required parameter is missing from the params map
+func isMissingParam(param YAMLToolParameter, params map[string]interface{}) bool {
+	value, exists := params[param.Name]
+	if !exists {
+		return true
+	}
+	if value == nil {
+		return true
+	}
+
+	// Type-specific empty checks
+	switch param.Type {
+	case "string":
+		if v, ok := value.(string); ok && v == "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func operationMatchesSchema(schema map[string]interface{}, operation string) bool {
@@ -582,18 +621,23 @@ func ValidateYAMLToolDefinition(toolDef *YAMLToolDefinition) error {
 		if !operationParam.Required {
 			return fmt.Errorf("operation parameter must be required when operations are defined")
 		}
-		if len(operationParam.Enum) == 0 {
-			return fmt.Errorf("operation parameter must include enum values for operations")
-		}
 
+		// Validate operation names
 		for opName := range toolDef.Operations {
 			if opName == "" {
 				return fmt.Errorf("operation name cannot be empty")
 			}
-			if !containsString(operationParam.Enum, opName) {
-				return fmt.Errorf("operation parameter enum missing value %q", opName)
+		}
+
+		// If enum is explicitly provided, validate it matches operations
+		if len(operationParam.Enum) > 0 {
+			for opName := range toolDef.Operations {
+				if !containsString(operationParam.Enum, opName) {
+					return fmt.Errorf("operation parameter enum missing value %q", opName)
+				}
 			}
 		}
+		// If enum is empty, it will be auto-derived from operations keys in ToToolDefinition
 
 		for _, opDef := range toolDef.Operations {
 			for _, param := range opDef.Parameters {
