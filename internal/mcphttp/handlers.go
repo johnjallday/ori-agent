@@ -400,8 +400,7 @@ func (h *Handler) ImportServersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse multipart form
-	if err := r.ParseMultipartForm(orihttp.MaxFormSize); err != nil {
-		orihttp.BadRequest(w, "Failed to parse form")
+	if !orihttp.ParseFormData(w, r) {
 		return
 	}
 

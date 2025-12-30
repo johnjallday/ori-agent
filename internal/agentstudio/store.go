@@ -1,13 +1,12 @@
 package agentstudio
 
 import (
-	"bytes"
 	"fmt"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Store manages workspace persistence and retrieval
@@ -60,22 +59,10 @@ func (s *FileStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// DEBUG: Log task assigned_node_id values before serialization
-	for i, task := range ws.Tasks {
-		if task.AssignedNodeID != "" {
-			logger.Debug("🔍 [BEFORE SAVE] Task (): to=, assigned_node_id=", logger.Fields{"task_id": i, "id[:8]": task.ID[:8], "to": task.To, "assignednodeid": task.AssignedNodeID})
-		}
-	}
-
 	// Serialize workspace
 	data, err := ws.ToJSON()
 	if err != nil {
 		return fmt.Errorf("failed to serialize workspace: %w", err)
-	}
-
-	// DEBUG: Check if assigned_node_id is in the JSON
-	if len(ws.Tasks) > 0 && ws.Tasks[0].AssignedNodeID != "" {
-		logger.Debug("🔍 [JSON DATA] Contains 'assigned_node_id': t", logger.Fields{"contains(data, []byte(\"assigned_node_id\"))": bytes.Contains(data, []byte("assigned_node_id"))})
 	}
 
 	// Write to file
@@ -88,13 +75,6 @@ func (s *FileStore) Save(ws *Workspace) error {
 	freshWS, err := FromJSON(data)
 	if err != nil {
 		return fmt.Errorf("failed to reload workspace after save: %w", err)
-	}
-
-	// DEBUG: Log task assigned_node_id values after deserialization
-	for i, task := range freshWS.Tasks {
-		if task.AssignedNodeID != "" {
-			logger.Debug("🔍 [AFTER RELOAD] Task (): to=, assigned_node_id=", logger.Fields{"task_id": i, "id[:8]": task.ID[:8], "to": task.To, "assignednodeid": task.AssignedNodeID})
-		}
 	}
 
 	// Update cache with fresh copy
