@@ -814,18 +814,17 @@
       min-height: 100vh;
     }
 
-    /* Global sidebar margin - applies to ALL pages on large screens */
+    /* Only apply sidebar margin on large screens where sidebar is visible */
     @media (min-width: 992px) {
-      /* Default: sidebar visible, apply margin */
       .main-content {
-        margin-left: var(--sidebar-width, 300px) !important;
+        margin-left: var(--sidebar-width, 300px);
         max-width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
         width: calc(100vw - var(--sidebar-width, 300px) - 2rem);
       }
 
-      /* When sidebar is hidden, remove margin */
+      /* Remove margin when sidebar is hidden */
       .sidebar.d-none ~ .main-content {
-        margin-left: 0 !important;
+        margin-left: 0;
         max-width: 100vw;
         width: 100vw;
       }
@@ -1393,8 +1392,8 @@
       }
 
       .main-content {
-        margin-left: 0 !important;
-        max-width: 100vw !important;
+        margin-left: 0;
+        max-width: 100vw;
       }
 
       /* Mobile overlay backdrop - clickable to close sidebar */
@@ -1782,16 +1781,6 @@
     .nav-link-item.active {
       background: var(--bg-tertiary) !important;
       color: var(--primary-color) !important;
-    }
-
-    /* GLOBAL SIDEBAR FIX - Final override to ensure sidebar margin works on ALL pages */
-    @media screen and (min-width: 992px) {
-      body .main-content-wrapper .main-content {
-        margin-left: var(--sidebar-width, 300px) !important;
-      }
-      body .main-content-wrapper .sidebar.d-none ~ .main-content {
-        margin-left: 0 !important;
-      }
     }
   </style>
   <!-- Theme Manager will be initialized in base template -->

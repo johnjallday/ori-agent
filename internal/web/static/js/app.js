@@ -970,16 +970,28 @@ function setupSidebarToggle() {
       event.stopPropagation();
 
       // Toggle sidebar visibility
-      sidebar.classList.toggle('d-none');
+      const isHidden = sidebar.classList.toggle('d-none');
 
       // Always remove mobile show class to prevent backdrop on desktop
       sidebar.classList.remove('sidebar-mobile-show');
+
+      if (isHidden) {
+        sidebar.classList.remove('d-lg-block');
+        sidebarToggle.setAttribute('aria-expanded', 'false');
+      } else {
+        if (window.innerWidth >= 992) {
+          sidebar.classList.add('d-lg-block');
+        } else {
+          sidebar.classList.remove('d-lg-block');
+        }
+        sidebarToggle.setAttribute('aria-expanded', 'true');
+      }
 
       console.log('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
       console.log('[SIDEBAR TOGGLE] Sidebar hidden?', sidebar.classList.contains('d-none'));
 
       // Handle sidebar width
-      if (sidebar.classList.contains('d-none')) {
+      if (isHidden) {
         // Set sidebar width to 0 to remove the empty space
         document.documentElement.style.setProperty('--sidebar-width', '0px');
       } else {
@@ -1002,6 +1014,7 @@ function setupSidebarToggle() {
           window.innerWidth < 992) { // lg breakpoint
         sidebar.classList.add('d-none');
         sidebar.classList.remove('sidebar-mobile-show');
+        sidebar.classList.remove('d-lg-block');
         // Set sidebar width to 0 to remove the empty space
         document.documentElement.style.setProperty('--sidebar-width', '0px');
       }

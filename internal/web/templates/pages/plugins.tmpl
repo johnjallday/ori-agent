@@ -4,14 +4,6 @@
 {{template "head.tmpl" .}}
 
 <style>
-/* Force sidebar margin on this page */
-@media (min-width: 992px) {
-  .main-content-wrapper > .main-content {
-    margin-left: 300px !important;
-    margin-left: var(--sidebar-width, 300px) !important;
-  }
-}
-
 /* Plugin Management Page Styles */
 .plugins-container {
     padding: 2rem;
@@ -949,7 +941,7 @@
     <div class="main-content-wrapper">
         {{template "sidebar.tmpl" .}}
 
-        <div class="main-content" style="margin-left: var(--sidebar-width, 300px);">
+        <div class="main-content">
             <div class="plugins-container">
                 <!-- Page Header -->
                 <div class="page-header">
