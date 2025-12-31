@@ -10,6 +10,10 @@ let studiosLLMAvailable = false;
 let studiosSystemModelConfigured = false;
 let studiosAutoConfigApplied = false;
 
+function isStudiosAutoConfigFallback(config) {
+    return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
+}
+
 /**
  * Load providers from API
  */
@@ -350,10 +354,11 @@ async function generateAutoConfig() {
         // Apply the configuration to form fields
         applyAutoConfig(config);
 
+        const fallback = isStudiosAutoConfigFallback(config);
         // Show success status
-        autoConfigStatus.textContent = 'Applied!';
-        autoConfigStatus.classList.remove('bg-secondary');
-        autoConfigStatus.classList.add('bg-success');
+        autoConfigStatus.textContent = fallback ? 'Applied (defaults)' : 'Applied!';
+        autoConfigStatus.classList.remove('bg-secondary', 'bg-success', 'bg-danger', 'bg-warning');
+        autoConfigStatus.classList.add(fallback ? 'bg-warning' : 'bg-success');
 
         // Show the auto-selected indicator
         document.getElementById('autoSelectedIndicator').classList.remove('d-none');
@@ -362,6 +367,9 @@ async function generateAutoConfig() {
         // Log reasoning if available
         if (config.reasoning) {
             console.log('Auto-config reasoning:', config.reasoning);
+        }
+        if (fallback) {
+            console.warn('Auto-config failed, using defaults.');
         }
 
     } catch (error) {

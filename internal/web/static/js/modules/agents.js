@@ -706,6 +706,10 @@ let baseAutoConfigApplied = false;
 let baseLLMAvailable = false;
 let baseSystemModelConfigured = false;
 
+function isBaseAutoConfigFallback(config) {
+  return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
+}
+
 // Setup auto-config event listeners
 function setupAutoConfigListeners() {
   const configModeManual = document.getElementById('baseConfigModeManual');
@@ -828,10 +832,11 @@ async function generateBaseAutoConfig() {
     applyBaseAutoConfig(config);
 
     // Show success status
+    const fallback = isBaseAutoConfigFallback(config);
     if (autoConfigStatus) {
-      autoConfigStatus.textContent = 'Applied!';
-      autoConfigStatus.classList.remove('bg-secondary');
-      autoConfigStatus.classList.add('bg-success');
+      autoConfigStatus.textContent = fallback ? 'Applied (defaults)' : 'Applied!';
+      autoConfigStatus.classList.remove('bg-secondary', 'bg-success', 'bg-danger', 'bg-warning');
+      autoConfigStatus.classList.add(fallback ? 'bg-warning' : 'bg-success');
     }
 
     // Show the auto-selected indicator
@@ -841,6 +846,9 @@ async function generateBaseAutoConfig() {
 
     if (config.reasoning) {
       console.log('Auto-config reasoning:', config.reasoning);
+    }
+    if (fallback && window.Toast) {
+      Toast.warning('Auto-config failed, using defaults. Review the settings before saving.');
     }
 
   } catch (error) {
