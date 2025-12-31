@@ -120,6 +120,25 @@ func ensureDataDirectory() error {
 		return nil
 	}
 
+	// If running from a macOS app bundle, use Application Support directory
+	if runtime.GOOS == "darwin" {
+		if exePath, err := os.Executable(); err == nil && strings.Contains(exePath, ".app/Contents/MacOS") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			dataDir := filepath.Join(homeDir, "Library", "Application Support", "OriAgent")
+			if err := os.MkdirAll(dataDir, 0755); err != nil {
+				return err
+			}
+			if err := os.Chdir(dataDir); err != nil {
+				return err
+			}
+			logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
+			return nil
+		}
+	}
+
 	// Create ori-data directory and change into it
 	dataDir := filepath.Join(cwd, "ori-data")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {

@@ -16,6 +16,7 @@ type SuggestedAgent struct {
 	Description  string   `json:"description"`
 	SystemPrompt string   `json:"system_prompt"`
 	Model        string   `json:"model"`
+	Provider     string   `json:"provider,omitempty"`
 	Temperature  float64  `json:"temperature"`
 	Plugins      []string `json:"plugins"`
 }
@@ -42,12 +43,17 @@ type OnboardingConfig struct {
 // Configurator generates and applies onboarding configurations.
 type Configurator struct {
 	store store.Store
+	// Preferred provider/model for onboarding-created agents.
+	systemProvider string
+	systemModel    string
 }
 
 // New creates a new Configurator with the given store.
-func New(s store.Store) *Configurator {
+func New(s store.Store, systemProvider, systemModel string) *Configurator {
 	return &Configurator{
-		store: s,
+		store:          s,
+		systemProvider: systemProvider,
+		systemModel:    systemModel,
 	}
 }
 
@@ -82,6 +88,7 @@ Help the user with tasks related to your specialty. Be concise, practical, and p
 			Temperature: 0.3,
 			Plugins:     []string{"shell-executor"},
 		}
+		c.applySystemDefaults(&agent)
 		config.Agents = append(config.Agents, agent)
 	}
 
@@ -106,6 +113,7 @@ Help the user with tasks related to your specialty. Be concise, practical, and p
 				}
 			}
 
+			c.applySystemDefaults(&agent)
 			config.Agents = append(config.Agents, agent)
 		}
 	}
@@ -115,6 +123,17 @@ Help the user with tasks related to your specialty. Be concise, practical, and p
 	config.Plugins = c.suggestPlugins(profile, templates)
 
 	return config, nil
+}
+
+func (c *Configurator) applySystemDefaults(agent *SuggestedAgent) {
+	if c.systemModel == "" {
+		return
+	}
+
+	agent.Model = c.systemModel
+	if c.systemProvider != "" {
+		agent.Provider = c.systemProvider
+	}
 }
 
 // suggestPlugins generates plugin recommendations based on profile and templates.
@@ -165,10 +184,10 @@ func (c *Configurator) ApplyConfig(ctx context.Context, config *OnboardingConfig
 		}
 
 		createConfig := &store.CreateAgentConfig{
-			Type:         "tool-calling",
 			Model:        agent.Model,
 			Temperature:  agent.Temperature,
 			SystemPrompt: agent.SystemPrompt,
+			LLMProvider:  agent.Provider,
 		}
 
 		if err := c.store.CreateAgent(agent.Name, createConfig); err != nil {

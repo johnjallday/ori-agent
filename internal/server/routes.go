@@ -195,6 +195,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			}
 			return
 		}
+		// Check if this is a default settings endpoint
+		if strings.HasSuffix(r.URL.Path, "/default-settings") {
+			s.pluginInitHandler.PluginInitHandler(w, r)
+			return
+		}
 		// Check if this is a test endpoint
 		if strings.HasSuffix(r.URL.Path, "/test") {
 			s.pluginsPageHandler.HandleTestPlugin(w, r)

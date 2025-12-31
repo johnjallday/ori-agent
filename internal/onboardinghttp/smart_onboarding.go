@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -166,7 +168,7 @@ func (h *SmartOnboardingHandler) InferProfile(w http.ResponseWriter, r *http.Req
 	defer cancel()
 
 	// Get LLM provider for profile inference
-	provider, err := h.getSystemProvider()
+	provider, model, err := h.getSystemProviderAndModel()
 	if err != nil {
 		logger.Error("Failed to get LLM provider", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to initialize AI provider")
@@ -174,7 +176,7 @@ func (h *SmartOnboardingHandler) InferProfile(w http.ResponseWriter, r *http.Req
 	}
 
 	// Create profiler and infer profile
-	prof := profiler.New(provider, h.systemModel)
+	prof := profiler.New(provider, model)
 	profile, err := prof.InferFromApps(ctx, req.Apps)
 	if err != nil {
 		logger.Error("Failed to infer profile", logger.Fields{"error": err})
@@ -210,7 +212,7 @@ func (h *SmartOnboardingHandler) Describe(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	// Get LLM provider
-	provider, err := h.getSystemProvider()
+	provider, model, err := h.getSystemProviderAndModel()
 	if err != nil {
 		logger.Error("Failed to get LLM provider", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to initialize AI provider")
@@ -218,7 +220,7 @@ func (h *SmartOnboardingHandler) Describe(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create profiler and infer from description
-	prof := profiler.New(provider, h.systemModel)
+	prof := profiler.New(provider, model)
 	profile, err := prof.InferFromDescription(ctx, req.Description)
 	if err != nil {
 		logger.Error("Failed to infer profile from description", logger.Fields{"error": err})
@@ -253,7 +255,8 @@ func (h *SmartOnboardingHandler) GenerateConfig(w http.ResponseWriter, r *http.R
 	}
 
 	// Create configurator and generate config
-	cfg := configurator.New(h.store)
+	providerName, model := h.getConfiguratorDefaults()
+	cfg := configurator.New(h.store, providerName, model)
 	config, err := cfg.GenerateConfig(req.Profile)
 	if err != nil {
 		logger.Error("Failed to generate config", logger.Fields{"error": err})
@@ -289,7 +292,7 @@ func (h *SmartOnboardingHandler) Apply(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Create configurator and apply config
-	cfg := configurator.New(h.store)
+	cfg := configurator.New(h.store, "", "")
 
 	// Get list of agents that will be created
 	agentsToCreate := cfg.GetCreatedAgentNames(req.Config)
@@ -352,14 +355,14 @@ func (h *SmartOnboardingHandler) UpdateProfile(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get LLM provider
-	provider, err := h.getSystemProvider()
+	provider, model, err := h.getSystemProviderAndModel()
 	if err != nil {
 		orihttp.InternalError(w, "Failed to initialize AI provider")
 		return
 	}
 
 	// Infer new profile
-	prof := profiler.New(provider, h.systemModel)
+	prof := profiler.New(provider, model)
 	profile, err := prof.InferFromApps(ctx, apps)
 	if err != nil {
 		orihttp.InternalError(w, "Failed to analyze profile")
@@ -367,7 +370,8 @@ func (h *SmartOnboardingHandler) UpdateProfile(w http.ResponseWriter, r *http.Re
 	}
 
 	// Generate new config suggestions
-	configuratorInstance := configurator.New(h.store)
+	providerName, model := h.getConfiguratorDefaults()
+	configuratorInstance := configurator.New(h.store, providerName, model)
 	config, err := configuratorInstance.GenerateConfig(profile)
 	if err != nil {
 		orihttp.InternalError(w, "Failed to generate suggestions")
@@ -386,13 +390,17 @@ func (h *SmartOnboardingHandler) UpdateProfile(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// getSystemProvider returns the LLM provider for system tasks.
-func (h *SmartOnboardingHandler) getSystemProvider() (llm.Provider, error) {
+// getSystemProviderAndModel returns the LLM provider and model for system tasks.
+func (h *SmartOnboardingHandler) getSystemProviderAndModel() (llm.Provider, string, error) {
 	// Use the configured system provider if set
 	if h.systemProvider != "" {
 		provider, err := h.llmFactory.GetProvider(h.systemProvider)
 		if err == nil {
-			return provider, nil
+			model, err := h.resolveModelForProvider(provider, h.systemProvider)
+			if err != nil {
+				return nil, "", err
+			}
+			return provider, model, nil
 		}
 		logger.Warn("Configured system provider not available, falling back", logger.Fields{
 			"provider": h.systemProvider,
@@ -401,15 +409,68 @@ func (h *SmartOnboardingHandler) getSystemProvider() (llm.Provider, error) {
 	}
 
 	// Fallback: try providers in order
-	providers := []string{"openai", "anthropic", "ollama"}
+	providers := []string{"openai", "claude", "ollama"}
 	for _, name := range providers {
 		provider, err := h.llmFactory.GetProvider(name)
 		if err == nil {
-			return provider, nil
+			model, err := h.resolveModelForProvider(provider, name)
+			if err != nil {
+				return nil, "", err
+			}
+			return provider, model, nil
 		}
 	}
 
-	return nil, fmt.Errorf("no LLM provider available")
+	return nil, "", fmt.Errorf("no LLM provider available")
+}
+
+func (h *SmartOnboardingHandler) resolveModelForProvider(provider llm.Provider, providerName string) (string, error) {
+	if h.systemModel != "" && strings.EqualFold(h.systemProvider, providerName) {
+		return h.systemModel, nil
+	}
+
+	models := provider.DefaultModels()
+	if len(models) == 0 {
+		return "", fmt.Errorf("no default models available for provider %s", providerName)
+	}
+
+	preferred := preferredModelsForProvider(providerName)
+	if len(preferred) > 0 {
+		available := make(map[string]struct{}, len(models))
+		for _, model := range models {
+			available[model] = struct{}{}
+		}
+		for _, model := range preferred {
+			if _, ok := available[model]; ok {
+				return model, nil
+			}
+		}
+	}
+
+	sort.Strings(models)
+	return models[0], nil
+}
+
+func (h *SmartOnboardingHandler) getConfiguratorDefaults() (string, string) {
+	provider, model, err := h.getSystemProviderAndModel()
+	if err != nil {
+		logger.Warn("Failed to resolve onboarding defaults", logger.Fields{"error": err})
+		return "", ""
+	}
+	return provider.Name(), model
+}
+
+func preferredModelsForProvider(providerName string) []string {
+	switch strings.ToLower(providerName) {
+	case "openai":
+		return []string{"gpt-4o-mini", "gpt-5-nano", "gpt-4o", "gpt-5-mini"}
+	case "claude":
+		return []string{"claude-3-haiku-20240307", "claude-3-5-sonnet-20241022", "claude-3-sonnet-20240229"}
+	case "ollama":
+		return []string{"llama3", "llama3:latest", "llama2", "mistral"}
+	default:
+		return nil
+	}
 }
 
 // GetStoredProfile returns the user's stored profile.
@@ -466,7 +527,7 @@ func (h *SmartOnboardingHandler) RecommendPlugins(w http.ResponseWriter, r *http
 	defer cancel()
 
 	// Get LLM provider
-	provider, err := h.getSystemProvider()
+	provider, model, err := h.getSystemProviderAndModel()
 	if err != nil {
 		logger.Error("Failed to get LLM provider", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to initialize AI provider")
@@ -478,7 +539,7 @@ func (h *SmartOnboardingHandler) RecommendPlugins(w http.ResponseWriter, r *http
 
 	// Call the LLM
 	chatReq := llm.ChatRequest{
-		Model: h.systemModel,
+		Model: model,
 		Messages: []llm.Message{
 			{Role: "user", Content: prompt},
 		},
