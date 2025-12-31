@@ -77,7 +77,7 @@ async function loadAgents() {
         console.log('✅ Loaded', dashboardAllAgents.length, 'agents, active:', dashboardActiveAgent);
 
         updateStatistics();
-        renderAgents();
+        renderDashboardAgents();
         showLoading(false);
         console.log('✓ Rendering complete');
 
@@ -131,7 +131,7 @@ function calculateStatistics(agents) {
 }
 
 // Render agents in current view
-function renderAgents() {
+function renderDashboardAgents() {
     if (dashboardFilteredAgents.length === 0) {
         showEmptyState();
         return;
@@ -261,7 +261,7 @@ function filterAgents() {
     });
 
     sortAgents();
-    renderAgents();
+    renderDashboardAgents();
 }
 
 // Sort agents
@@ -292,7 +292,7 @@ function sortAgents() {
         }
     });
 
-    renderAgents();
+    renderDashboardAgents();
 }
 
 // Switch between table and card view
@@ -316,7 +316,7 @@ function switchView(view) {
         cardView.classList.remove('hidden');
     }
 
-    renderAgents();
+    renderDashboardAgents();
 }
 
 // Create new agent
