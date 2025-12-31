@@ -16,9 +16,11 @@ import (
 
 // ToolCallResult holds the result of a tool execution
 type ToolCallResult struct {
-	Function string `json:"function"`
-	Args     string `json:"args"`
-	Result   string `json:"result"`
+	Function   string `json:"function"`
+	Args       string `json:"args"`
+	Result     string `json:"result"`
+	DurationMs int64  `json:"durationMs,omitempty"` // Execution time in milliseconds
+	Success    bool   `json:"success"`              // Whether the tool executed successfully
 }
 
 // ExecuteToolCallsResult holds the results of executing multiple tool calls
@@ -50,10 +52,12 @@ func (h *Handler) executeToolCallsCommon(
 
 		var result string
 		var err error
+		var duration time.Duration
 
 		if !found {
 			result = fmt.Sprintf("❌ Error: Tool %q not found", name)
 			logger.Warn("Tool not found", logger.Fields{"tool": name})
+			err = fmt.Errorf("tool not found: %s", name)
 		} else {
 			toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
 
@@ -64,7 +68,7 @@ func (h *Handler) executeToolCallsCommon(
 			})
 
 			result, err = ExecuteToolWithFiles(toolCtx, tool, name, args, files)
-			duration := time.Since(startTime)
+			duration = time.Since(startTime)
 			toolCancel()
 
 			// Record call stats in health manager
@@ -79,9 +83,11 @@ func (h *Handler) executeToolCallsCommon(
 		}
 
 		results = append(results, ToolCallResult{
-			Function: name,
-			Args:     args,
-			Result:   result,
+			Function:   name,
+			Args:       args,
+			Result:     result,
+			DurationMs: duration.Milliseconds(),
+			Success:    err == nil,
 		})
 	}
 

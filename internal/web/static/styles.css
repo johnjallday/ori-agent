@@ -65,3 +65,251 @@
   --card-bg: var(--bg-secondary);
   --muted-text: var(--text-muted);
 }
+
+/* ============================================
+   Chat State Indicator (next to send button)
+   ============================================ */
+
+.chat-state-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  height: fit-content;
+}
+
+.chat-state-indicator .state-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-state-indicator .state-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: chat-state-spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.chat-state-indicator .state-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.chat-state-indicator .state-elapsed {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chat-state-indicator .state-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.chat-state-indicator .state-cancel svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-state-indicator .state-cancel:hover {
+  background: var(--bg-tertiary);
+  color: var(--danger-color);
+}
+
+.chat-state-indicator .state-cancel:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+@keyframes chat-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* State-specific styling */
+.chat-state-indicator.state-sending .state-spinner {
+  border-top-color: var(--info-color);
+}
+
+.chat-state-indicator.state-thinking .state-spinner {
+  border-top-color: var(--primary-color);
+}
+
+.chat-state-indicator.state-processing .state-spinner {
+  border-top-color: var(--success-color);
+}
+
+/* ============================================
+   Plugin Initialization Banner
+   ============================================ */
+
+.plugin-init-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, var(--warning-color) 0%, #f97316 100%);
+  border-radius: var(--radius-md);
+  color: white;
+}
+
+.plugin-init-banner .banner-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+.plugin-init-banner .banner-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.plugin-init-banner .banner-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-init-banner .banner-title {
+  display: block;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plugin-init-banner .banner-plugins {
+  display: block;
+  font-size: 12px;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plugin-init-banner .banner-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.plugin-init-banner .banner-configure-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--warning-color);
+  background: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.plugin-init-banner .banner-configure-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.plugin-init-banner .banner-dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: white;
+  opacity: 0.7;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.plugin-init-banner .banner-dismiss:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ============================================
+   Jump to Bottom Button (Chat Auto-Scroll)
+   ============================================ */
+
+.jump-to-bottom-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.jump-to-bottom-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.jump-to-bottom-btn:hover {
+  background: var(--bg-secondary);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: var(--shadow-xl);
+}
+
+.jump-to-bottom-btn:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* Highlight when new messages arrive */
+.jump-to-bottom-btn.has-new {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: white;
+}
+
+.jump-to-bottom-btn.has-new:hover {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+  color: white;
+}

@@ -2,7 +2,7 @@
 
 let currentAgent = '';
 let isComposing = false; // IME safety
-let isWaitingForResponse = false; // Chat state
+// Note: Chat state is now managed by chatStateMachine (see modules/chat-state.js)
 
 // Prompt history for up/down arrow navigation
 let promptHistory = [];
@@ -592,8 +592,13 @@ function appendMessageToUI(message, isUser = false, isError = false) {
   messageDiv.appendChild(messageContent);
   chatArea.appendChild(messageDiv);
 
-  // Scroll to bottom
-  chatArea.scrollTop = chatArea.scrollHeight;
+  // Smart scroll - only if user hasn't scrolled up to read history
+  if (window.scrollChatToBottomIfNeeded) {
+    window.scrollChatToBottomIfNeeded(isUser); // Force scroll for user messages
+  } else {
+    // Fallback to simple scroll if module not loaded
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
 }
 
 // Public function: Add message and optionally persist to localStorage
@@ -651,44 +656,13 @@ function escapeHtml(text) {
     .replaceAll("'", '&#039;');
 }
 
-// Show typing indicator
-function showTypingIndicator() {
-  const chatArea = document.getElementById('chatArea');
-  if (!chatArea) return;
-
-  const typingDiv = document.createElement('div');
-  typingDiv.id = 'typingIndicator';
-  typingDiv.className = 'message-container mb-3 assistant-message';
-  
-  const typingContent = document.createElement('div');
-  typingContent.className = 'modern-card p-3 me-auto';
-  typingContent.style.maxWidth = '85%';
-  typingContent.style.background = 'var(--bg-secondary)';
-  typingContent.innerHTML = `
-    <div class="d-flex align-items-center">
-      <span style="margin-right: 8px;">Assistant is typing</span>
-      <div class="typing-dots">
-        <span></span><span></span><span></span>
-      </div>
-    </div>
-  `;
-  
-  typingDiv.appendChild(typingContent);
-  chatArea.appendChild(typingDiv);
-  chatArea.scrollTop = chatArea.scrollHeight;
-}
-
-// Hide typing indicator
-function hideTypingIndicator() {
-  const typingIndicator = document.getElementById('typingIndicator');
-  if (typingIndicator) {
-    typingIndicator.remove();
-  }
-}
+// Chat state machine reference (initialized in initializeApp)
+let chatStateMachine = null;
 
 // Send message to chat API
 async function sendMessage(message) {
-  if (isWaitingForResponse) return;
+  // Check if state machine is active (replaces isWaitingForResponse)
+  if (chatStateMachine && chatStateMachine.isActive()) return;
 
   let trimmedMessage = message.trim();
   if (!trimmedMessage) return;
@@ -721,10 +695,11 @@ async function sendMessage(message) {
     input.style.height = 'auto';
   }
 
-  // Set loading state
-  isWaitingForResponse = true;
+  // Start state machine - shows "Sending..." indicator
+  if (chatStateMachine) {
+    chatStateMachine.send();
+  }
   updateSendButton();
-  showTypingIndicator();
 
   try {
     // Prepare request body with files
@@ -751,13 +726,24 @@ async function sendMessage(message) {
       chatHeaders['X-Session-ID'] = window.sessionManager.getActiveSessionId();
     }
 
-    const response = await fetch('/api/chat', {
+    const fetchOptions = {
       method: 'POST',
       headers: chatHeaders,
       body: JSON.stringify(requestBody)
-    });
+    };
 
-    hideTypingIndicator();
+    // Add abort signal for cancel functionality
+    if (chatStateMachine && chatStateMachine.getSignal()) {
+      fetchOptions.signal = chatStateMachine.getSignal();
+    }
+
+    const response = await fetch('/api/chat', fetchOptions);
+
+    // Transition to thinking state while processing response
+    // Check isActive() to avoid race condition if user cancelled during fetch
+    if (chatStateMachine && chatStateMachine.isActive()) {
+      chatStateMachine.think();
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -772,6 +758,12 @@ async function sendMessage(message) {
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
       window.clearFilesAfterSend();
+    }
+
+    // Transition to processing state while formatting response
+    // Check isActive() to avoid race condition if user cancelled
+    if (chatStateMachine && chatStateMachine.isActive()) {
+      chatStateMachine.process();
     }
 
     const hasResponseField = Object.prototype.hasOwnProperty.call(data, 'response');
@@ -822,32 +814,35 @@ async function sendMessage(message) {
     }
 
   } catch (error) {
+    // Handle user cancellation gracefully
+    if (error.name === 'AbortError') {
+      console.log('Request cancelled by user');
+      return;
+    }
+
     console.error('Chat error:', error);
-    hideTypingIndicator();
     addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
     if (window.Toast) {
       Toast.error('Failed to send message');
     }
   } finally {
-    isWaitingForResponse = false;
+    // Complete state machine (returns to idle, hides indicator)
+    if (chatStateMachine) {
+      chatStateMachine.complete();
+    }
     updateSendButton();
   }
 }
 
-// Update send button state
+// Update send button state based on chat state machine
 function updateSendButton() {
   const sendBtn = document.getElementById('sendBtn');
   if (!sendBtn) return;
 
-  if (isWaitingForResponse) {
-    sendBtn.textContent = 'Sending...';
-    sendBtn.disabled = true;
-    sendBtn.style.opacity = '0.6';
-  } else {
-    sendBtn.textContent = 'Send';
-    sendBtn.disabled = false;
-    sendBtn.style.opacity = '1';
-  }
+  const isActive = chatStateMachine && chatStateMachine.isActive();
+
+  sendBtn.disabled = isActive;
+  sendBtn.style.opacity = isActive ? '0.6' : '1';
 }
 
 // Setup chat event listeners
@@ -864,7 +859,8 @@ function setupChat() {
   // Send button click
   sendBtn.addEventListener('click', () => {
     const message = input.value.trim();
-    if (message && !isWaitingForResponse) {
+    const isActive = chatStateMachine && chatStateMachine.isActive();
+    if (message && !isActive) {
       sendMessage(message);
     }
   });
@@ -876,11 +872,12 @@ function setupChat() {
     // Handle Enter key
     if (e.key === 'Enter') {
       const shouldSend = enterToSend ? enterToSend.checked : true;
-      
+
       if (shouldSend && !e.shiftKey) {
         e.preventDefault();
         const message = input.value.trim();
-        if (message && !isWaitingForResponse) {
+        const isActive = chatStateMachine && chatStateMachine.isActive();
+        if (message && !isActive) {
           sendMessage(message);
         }
       }
@@ -1053,6 +1050,52 @@ window.clearChatHistory = clearChatHistory;
 
 // Initialize application
 async function initializeApp() {
+  // Initialize chat state machine
+  try {
+    const chatStateModule = await import('./modules/chat-state.js');
+    const chatStateUIModule = await import('./modules/chat-state-ui.js');
+
+    chatStateMachine = chatStateModule.chatStateMachine;
+    chatStateUIModule.initChatStateUI();
+
+    // Clean up on page unload to prevent memory leaks
+    window.addEventListener('beforeunload', () => {
+      if (chatStateMachine) {
+        chatStateMachine.cancel();
+      }
+      chatStateUIModule.cleanupChatStateUI();
+    });
+
+    console.log('Chat state machine initialized');
+  } catch (error) {
+    console.error('Failed to initialize chat state machine:', error);
+    // Fall back to simple behavior without state machine
+  }
+
+  // Initialize plugin initialization banner
+  try {
+    const pluginBannerModule = await import('./modules/plugin-init-banner.js');
+    await pluginBannerModule.initPluginBanner();
+    console.log('Plugin init banner initialized');
+  } catch (error) {
+    console.error('Failed to initialize plugin banner:', error);
+  }
+
+  // Initialize chat auto-scroll
+  try {
+    const autoScrollModule = await import('./modules/chat-auto-scroll.js');
+    autoScrollModule.initChatAutoScroll();
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      autoScrollModule.cleanupChatAutoScroll();
+    });
+
+    console.log('Chat auto-scroll initialized');
+  } catch (error) {
+    console.error('Failed to initialize auto-scroll:', error);
+  }
+
   // Set up chat functionality
   setupChat();
 
