@@ -545,17 +545,6 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// truncateString truncates a string to a maximum length with ellipsis
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}
-
 // HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities
 type HTTPServerWrapper struct {
 	Server *http.Server

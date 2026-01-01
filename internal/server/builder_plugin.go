@@ -3,9 +3,7 @@
 package server
 
 import (
-	"log"
 	"os"
-	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -99,65 +97,6 @@ func (b *ServerBuilder) validatePluginPaths() error {
 	}
 
 	return nil
-}
-
-// printHealthSummary prints a formatted health summary table.
-func (b *ServerBuilder) printHealthSummary(healthy, degraded, unhealthy []string) {
-	log.Println("")
-	log.Println("╔════════════════════════════════════════════════════════════════════════════════╗")
-	log.Println("║  🏥 Plugin Health Summary                                                      ║")
-	log.Println("╠════════════════════════════════════════════════════════════════════════════════╣")
-
-	if len(healthy) > 0 {
-		logger.Info("║ Healthy: 66s║", logger.Fields{"value1": len(healthy), "join(healthy, \", \"), 66)": truncateString(strings.Join(healthy, ", "), 66)})
-		if len(healthy) > 1 {
-			healthyList := strings.Join(healthy, ", ")
-			for i := 66; i < len(healthyList); i += 73 {
-				end := i + 73
-				if end > len(healthyList) {
-					end = len(healthyList)
-				}
-				logger.Debug("║ 74s║", logger.Fields{"value1": healthyList[i:end]})
-			}
-		}
-	} else {
-		log.Println("║  ✅ 0 Healthy                                                                  ║")
-	}
-
-	if len(degraded) > 0 {
-		logger.Warn("║ Degraded: 64s║", logger.Fields{"join(degraded, \", \"), 64)": truncateString(strings.Join(degraded, ", "), 64), "value1": len(degraded)})
-		if len(degraded) > 1 {
-			degradedList := strings.Join(degraded, ", ")
-			for i := 64; i < len(degradedList); i += 73 {
-				end := i + 73
-				if end > len(degradedList) {
-					end = len(degradedList)
-				}
-				logger.Debug("║ 74s║", logger.Fields{"value1": degradedList[i:end]})
-			}
-		}
-	} else {
-		log.Println("║  ⚠️  0 Degraded                                                                ║")
-	}
-
-	if len(unhealthy) > 0 {
-		logger.Error("║ Unhealthy: 63s║", logger.Fields{"value1": len(unhealthy), "join(unhealthy, \", \"), 63)": truncateString(strings.Join(unhealthy, ", "), 63)})
-		if len(unhealthy) > 1 {
-			unhealthyList := strings.Join(unhealthy, ", ")
-			for i := 63; i < len(unhealthyList); i += 73 {
-				end := i + 73
-				if end > len(unhealthyList) {
-					end = len(unhealthyList)
-				}
-				logger.Debug("║ 74s║", logger.Fields{"value1": unhealthyList[i:end]})
-			}
-		}
-	} else {
-		log.Println("║  ❌ 0 Unhealthy                                                                ║")
-	}
-
-	log.Println("╚════════════════════════════════════════════════════════════════════════════════╝")
-	log.Println("")
 }
 
 // loadPluginRegistry loads the plugin registry and sets it for the health manager.
