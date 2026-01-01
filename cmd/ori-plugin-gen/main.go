@@ -55,11 +55,21 @@ type ConfigVariable struct {
 	Type         string `yaml:"type"`
 	Required     bool   `yaml:"required"`
 	DefaultValue string `yaml:"default_value"`
+	Validation   string `yaml:"validation,omitempty"` // regex pattern
+	Min          *int   `yaml:"min,omitempty"`        // min value for numeric
+	Max          *int   `yaml:"max,omitempty"`        // max value for numeric
 }
 
 // PluginConfigSection represents the config section
 type PluginConfigSection struct {
 	Variables []ConfigVariable `yaml:"variables"`
+}
+
+// AcceptsFilesSection represents the accepts_files section in plugin.yaml
+type AcceptsFilesSection struct {
+	Extensions     []string `yaml:"extensions"`
+	MimeTypes      []string `yaml:"mime_types,omitempty"`
+	FileOperations []string `yaml:"file_operations,omitempty"` // operations that have WithFiles handlers
 }
 
 // PluginConfig minimal representation
@@ -72,15 +82,44 @@ type PluginConfig struct {
 	Requirements *Requirements        `yaml:"requirements,omitempty"`
 	Config       *PluginConfigSection `yaml:"config,omitempty"`
 	Tool         *YAMLToolDefinition  `yaml:"tool_definition,omitempty"`
+	AcceptsFiles *AcceptsFilesSection `yaml:"accepts_files,omitempty"`
+	WebPages     []string             `yaml:"web_pages,omitempty"`
 }
 
 // TemplateData holds data for code generation template
 type TemplateData struct {
 	PackageName        string
 	ToolName           string
+	ToolNamePascal     string // PascalCase version of tool name
 	ParamsStruct       string
 	Fields             []FieldInfo
 	OptionalInterfaces []string // Optional interfaces to generate checks for
+
+	// Operation handler generation
+	Operations    []OperationInfo
+	HasOperations bool
+
+	// Config generation
+	ConfigVars    []ConfigVariable
+	HasConfig     bool
+	HasValidation bool // true if any config var has validation pattern
+
+	// File attachment generation
+	AcceptsFiles      []string // File extensions
+	HasAcceptsFiles   bool
+	FileOperations    []OperationInfo // Operations with WithFiles handlers
+	HasFileOperations bool
+
+	// Web page generation
+	WebPages        []string
+	WebPageHandlers []OperationInfo // Web page handlers (reusing OperationInfo)
+	HasWebPages     bool
+}
+
+// OperationInfo holds info about an operation for code generation
+type OperationInfo struct {
+	Name        string // operation name from yaml (e.g., "create_project")
+	HandlerName string // handler function name (e.g., "handleCreateProject")
 }
 
 type FieldInfo struct {
@@ -88,6 +127,31 @@ type FieldInfo struct {
 	Type    string
 	JSONTag string
 	Comment string
+}
+
+// buildWebPageHandlers creates handler info for web pages
+func buildWebPageHandlers(pages []string) []OperationInfo {
+	var handlers []OperationInfo
+	for _, page := range pages {
+		handlers = append(handlers, OperationInfo{
+			Name:        page,
+			HandlerName: "serve" + toPascalCase(page) + "Page",
+		})
+	}
+	return handlers
+}
+
+// getOperationNames extracts sorted operation names from tool definition
+func getOperationNames(tool *YAMLToolDefinition) []string {
+	if tool == nil || len(tool.Operations) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(tool.Operations))
+	for name := range tool.Operations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func main() {
@@ -169,8 +233,17 @@ func detectOptionalInterfaces(config *PluginConfig) []string {
 		interfaces = append(interfaces, "pluginapi.InitializationProvider")
 	}
 
-	// Note: AgentAwareTool and WebPageProvider require manual implementation
-	// and cannot be auto-detected from YAML, so they're not included here
+	// FileAttachmentHandler: if accepts_files is specified
+	if config.AcceptsFiles != nil && len(config.AcceptsFiles.Extensions) > 0 {
+		interfaces = append(interfaces, "pluginapi.FileAttachmentHandler")
+	}
+
+	// WebPageProvider: if web_pages is specified
+	if len(config.WebPages) > 0 {
+		interfaces = append(interfaces, "pluginapi.WebPageProvider")
+	}
+
+	// Note: AgentAwareTool requires manual implementation
 
 	return interfaces
 }
@@ -178,7 +251,8 @@ func detectOptionalInterfaces(config *PluginConfig) []string {
 func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	// Build template data
 	toolName := strings.ReplaceAll(config.Name, "-", "_")
-	paramsStruct := toPascalCase(toolName) + "Params"
+	toolNamePascal := toPascalCase(toolName)
+	paramsStruct := toolNamePascal + "Params"
 
 	var fields []FieldInfo
 	params, err := collectParameters(config.Tool)
@@ -203,12 +277,70 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	// Detect optional interfaces based on plugin.yaml content
 	optionalInterfaces := detectOptionalInterfaces(config)
 
+	// Build operation info for handler generation
+	var operations []OperationInfo
+	opNames := getOperationNames(config.Tool)
+	for _, name := range opNames {
+		operations = append(operations, OperationInfo{
+			Name:        name,
+			HandlerName: "handle" + toPascalCase(name),
+		})
+	}
+
+	// Collect config variables and check for validation patterns
+	var configVars []ConfigVariable
+	var hasValidation bool
+	if config.Config != nil {
+		configVars = config.Config.Variables
+		for _, v := range configVars {
+			if v.Validation != "" {
+				hasValidation = true
+				break
+			}
+		}
+	}
+
+	// Collect file extensions and file operations
+	var acceptsFiles []string
+	var fileOperations []OperationInfo
+	if config.AcceptsFiles != nil {
+		acceptsFiles = config.AcceptsFiles.Extensions
+		// Build file operation info for handler generation
+		for _, opName := range config.AcceptsFiles.FileOperations {
+			fileOperations = append(fileOperations, OperationInfo{
+				Name:        opName,
+				HandlerName: "handle" + toPascalCase(opName) + "WithFiles",
+			})
+		}
+	}
+
 	tmplData := TemplateData{
 		PackageName:        pkgName,
 		ToolName:           toolName,
+		ToolNamePascal:     toolNamePascal,
 		ParamsStruct:       paramsStruct,
 		Fields:             fields,
 		OptionalInterfaces: optionalInterfaces,
+
+		// Operations
+		Operations:    operations,
+		HasOperations: len(operations) > 0,
+
+		// Config
+		ConfigVars:    configVars,
+		HasConfig:     len(configVars) > 0,
+		HasValidation: hasValidation,
+
+		// File attachments
+		AcceptsFiles:      acceptsFiles,
+		HasAcceptsFiles:   len(acceptsFiles) > 0,
+		FileOperations:    fileOperations,
+		HasFileOperations: len(fileOperations) > 0,
+
+		// Web pages
+		WebPages:        config.WebPages,
+		WebPageHandlers: buildWebPageHandlers(config.WebPages),
+		HasWebPages:     len(config.WebPages) > 0,
 	}
 
 	// Execute template
@@ -270,6 +402,8 @@ func collectParameters(tool *YAMLToolDefinition) ([]YAMLToolParameter, error) {
 }
 
 func toPascalCase(s string) string {
+	// Replace hyphens with underscores for consistent splitting
+	s = strings.ReplaceAll(s, "-", "_")
 	parts := strings.Split(s, "_")
 	for i, part := range parts {
 		if len(part) > 0 {
@@ -306,6 +440,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+{{- if .HasValidation}}
+	"regexp"
+{{- end}}
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -328,6 +465,29 @@ type {{.ParamsStruct}} struct {
 	{{.Name}} {{.Type}} ` + "`json:\"{{.JSONTag}}\"`" + ` // {{.Comment}}
 {{- end}}
 }
+{{- if .HasOperations}}
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(ctx context.Context, t *{{.ToolName}}Tool, params *{{.ParamsStruct}}) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+// Handler functions must be defined by you with the naming convention handle{PascalCase}
+var operationRegistry = map[string]OperationHandler{
+{{- range .Operations}}
+	"{{.Name}}": {{.HandlerName}},
+{{- end}}
+}
+
+// Execute dispatches to the appropriate operation handler
+// This method is auto-generated from plugin.yaml operations
+func (t *{{.ToolName}}Tool) Execute(ctx context.Context, params *{{.ParamsStruct}}) (string, error) {
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: {{range $i, $op := .Operations}}{{if $i}}, {{end}}{{$op.Name}}{{end}}", params.Operation)
+	}
+	return handler(ctx, t, params)
+}
+{{- end}}
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
@@ -350,7 +510,139 @@ func (t *{{.ToolName}}Tool) Call(ctx context.Context, args string) (string, erro
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
 }
+{{- if .HasConfig}}
+
+// GetRequiredConfig returns the configuration variables needed by this plugin
+// This method is auto-generated from plugin.yaml config section
+func (t *{{.ToolName}}Tool) GetRequiredConfig() []pluginapi.ConfigVariable {
+	return t.GetConfigFromYAML()
+}
+
+// ValidateConfig validates the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *{{.ToolName}}Tool) ValidateConfig(config map[string]interface{}) error {
+{{- range .ConfigVars}}
+{{- if .Required}}
+	// Validate {{.Key}} (required)
+	if val, ok := config["{{.Key}}"]; !ok || val == nil || val == "" {
+		return fmt.Errorf("{{.Key}} is required")
+	}
+{{- end}}
+{{- if .Validation}}
+	// Validate {{.Key}} pattern
+	if val, ok := config["{{.Key}}"].(string); ok && val != "" {
+		if matched, _ := regexp.MatchString(` + "`{{.Validation}}`" + `, val); !matched {
+			return fmt.Errorf("{{.Key}} does not match required pattern")
+		}
+	}
+{{- end}}
+{{- end}}
+	return nil
+}
+
+// InitializeWithConfig initializes the plugin with the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *{{.ToolName}}Tool) InitializeWithConfig(config map[string]interface{}) error {
+	sm := t.Settings()
+	if sm == nil {
+		return fmt.Errorf("settings manager not available")
+	}
+	for key, value := range config {
+		if err := sm.Set(key, value); err != nil {
+			return fmt.Errorf("failed to store config %s: %w", key, err)
+		}
+	}
+	return nil
+}
+{{- end}}
+{{- if .HasAcceptsFiles}}
+
+// AcceptsFiles returns the list of file types this plugin accepts
+// This method is auto-generated from plugin.yaml accepts_files section
+func (t *{{.ToolName}}Tool) AcceptsFiles() []string {
+	return []string{
+{{- range .AcceptsFiles}}
+		"{{.}}",
+{{- end}}
+	}
+}
+{{- if .HasFileOperations}}
+
+// FileOperationHandler is a function that handles a specific operation with file attachments
+type FileOperationHandler func(ctx context.Context, t *{{.ToolName}}Tool, params *{{.ParamsStruct}}, files []pluginapi.FileAttachment) (string, error)
+
+// fileOperationRegistry maps operation names to their file handler functions
+// Handler functions must be defined by you with the naming convention handle{PascalCase}WithFiles
+var fileOperationRegistry = map[string]FileOperationHandler{
+{{- range .FileOperations}}
+	"{{.Name}}": {{.HandlerName}},
+{{- end}}
+}
+
+// CallWithFiles handles file attachments by dispatching to file operation handlers
+// This method is auto-generated from plugin.yaml accepts_files.file_operations section
+func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+	var params {{.ParamsStruct}}
+	if err := json.Unmarshal([]byte(args), &params); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// Check if this operation has a file handler
+	if handler, ok := fileOperationRegistry[params.Operation]; ok {
+		return handler(ctx, t, &params, files)
+	}
+
+	// Fall back to regular Execute for operations without file handlers
+	return t.Execute(ctx, &params)
+}
+{{- else}}
+
+// NOTE: CallWithFiles must be implemented manually in main.go
+// Default implementation (copy if you don't need custom file handling):
+//
+// func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+//     var params {{.ParamsStruct}}
+//     if err := json.Unmarshal([]byte(args), &params); err != nil {
+//         return "", fmt.Errorf("invalid arguments: %w", err)
+//     }
+//     return t.Execute(ctx, &params)
+// }
+{{- end}}
+{{- end}}
+{{- if .HasWebPages}}
+
+// GetWebPages returns the available web pages for this plugin
+// This method is auto-generated from plugin.yaml web_pages section
+func (t *{{.ToolName}}Tool) GetWebPages() []string {
+	return []string{
+{{- range .WebPages}}
+		"{{.}}",
+{{- end}}
+	}
+}
+
+// WebPageHandler is a function that serves a specific web page
+type WebPageHandler func(t *{{.ToolName}}Tool, query map[string]string) (string, string, error)
+
+// webPageRegistry maps page paths to their handler functions
+// Handler functions must be defined by you with the naming convention serve{PascalCase}Page
+var webPageRegistry = map[string]WebPageHandler{
+{{- range .WebPageHandlers}}
+	"{{.Name}}": {{.HandlerName}},
+{{- end}}
+}
+
+// ServeWebPage dispatches to the appropriate page handler
+// This method is auto-generated from plugin.yaml web_pages section
+func (t *{{.ToolName}}Tool) ServeWebPage(path string, query map[string]string) (string, string, error) {
+	handler, ok := webPageRegistry[path]
+	if !ok {
+		return "", "", fmt.Errorf("page not found: %s", path)
+	}
+	return handler(t, query)
+}
+{{- end}}
 `))

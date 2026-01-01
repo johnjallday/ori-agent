@@ -29,11 +29,6 @@ tool_definition:
       type: string
       description: "Operation to perform: add, subtract, multiply, divide"
       required: true
-      enum:
-        - add
-        - subtract
-        - multiply
-        - divide
     - name: a
       type: number
       description: "First operand"
@@ -42,3 +37,12 @@ tool_definition:
       type: number
       description: "Second operand"
       required: true
+  operations:
+    add:
+      description: "Add two numbers together"
+    subtract:
+      description: "Subtract second number from first"
+    multiply:
+      description: "Multiply two numbers"
+    divide:
+      description: "Divide first number by second"

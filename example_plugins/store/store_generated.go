@@ -49,6 +49,6 @@ func (t *storeTool) Call(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
 }

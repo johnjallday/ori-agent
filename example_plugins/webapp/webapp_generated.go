@@ -19,6 +19,7 @@ var (
 	_ pluginapi.MetadataProvider       = (*webapp_pluginTool)(nil)
 	_ pluginapi.PluginCompatibility    = (*webapp_pluginTool)(nil)
 	_ pluginapi.InitializationProvider = (*webapp_pluginTool)(nil)
+	_ pluginapi.WebPageProvider        = (*webapp_pluginTool)(nil)
 )
 
 // WebappPluginParams represents the parameters for this plugin
@@ -49,6 +50,37 @@ func (t *webapp_pluginTool) Call(ctx context.Context, args string) (string, erro
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
+}
+
+// NOTE: Config methods (GetRequiredConfig, ValidateConfig, InitializeWithConfig)
+// are implemented manually in main.go because this plugin has custom validation
+// logic for items_per_page (min/max constraints).
+
+// GetWebPages returns the available web pages for this plugin
+// This method is auto-generated from plugin.yaml web_pages section
+func (t *webapp_pluginTool) GetWebPages() []string {
+	return []string{
+		"dashboard",
+	}
+}
+
+// WebPageHandler is a function that serves a specific web page
+type WebPageHandler func(t *webapp_pluginTool, query map[string]string) (string, string, error)
+
+// webPageRegistry maps page paths to their handler functions
+// Handler functions must be defined by you with the naming convention serve{PascalCase}Page
+var webPageRegistry = map[string]WebPageHandler{
+	"dashboard": serveDashboardPage,
+}
+
+// ServeWebPage dispatches to the appropriate page handler
+// This method is auto-generated from plugin.yaml web_pages section
+func (t *webapp_pluginTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
+	handler, ok := webPageRegistry[path]
+	if !ok {
+		return "", "", fmt.Errorf("page not found: %s", path)
+	}
+	return handler(t, query)
 }

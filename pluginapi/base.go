@@ -81,10 +81,10 @@ func (b *BasePlugin) SetAgentContext(ctx AgentContext) {
 	b.agentContext = ctx
 }
 
-// GetAgentContext returns the stored agent context.
+// GetAgentContext returns a pointer to the stored agent context.
 // This is a convenience method for plugins to access their context.
-func (b *BasePlugin) GetAgentContext() AgentContext {
-	return b.agentContext
+func (b *BasePlugin) GetAgentContext() *AgentContext {
+	return &b.agentContext
 }
 
 // SetMetadata sets the plugin metadata.

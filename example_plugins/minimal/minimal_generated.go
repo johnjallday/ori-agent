@@ -28,6 +28,26 @@ type MinimalPluginParams struct {
 	Count     int    `json:"count"`     // Number of times to repeat the message
 }
 
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(ctx context.Context, t *minimal_pluginTool, params *MinimalPluginParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+// Handler functions must be defined by you with the naming convention handle{PascalCase}
+var operationRegistry = map[string]OperationHandler{
+	"echo":   handleEcho,
+	"status": handleStatus,
+}
+
+// Execute dispatches to the appropriate operation handler
+// This method is auto-generated from plugin.yaml operations
+func (t *minimal_pluginTool) Execute(ctx context.Context, params *MinimalPluginParams) (string, error) {
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: echo, status", params.Operation)
+	}
+	return handler(ctx, t, params)
+}
+
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *minimal_pluginTool) Call(ctx context.Context, args string) (string, error) {
@@ -49,6 +69,37 @@ func (t *minimal_pluginTool) Call(ctx context.Context, args string) (string, err
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
+}
+
+// GetRequiredConfig returns the configuration variables needed by this plugin
+// This method is auto-generated from plugin.yaml config section
+func (t *minimal_pluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+	return t.GetConfigFromYAML()
+}
+
+// ValidateConfig validates the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *minimal_pluginTool) ValidateConfig(config map[string]interface{}) error {
+	// Validate api_endpoint (required)
+	if val, ok := config["api_endpoint"]; !ok || val == nil || val == "" {
+		return fmt.Errorf("api_endpoint is required")
+	}
+	return nil
+}
+
+// InitializeWithConfig initializes the plugin with the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *minimal_pluginTool) InitializeWithConfig(config map[string]interface{}) error {
+	sm := t.Settings()
+	if sm == nil {
+		return fmt.Errorf("settings manager not available")
+	}
+	for key, value := range config {
+		if err := sm.Set(key, value); err != nil {
+			return fmt.Errorf("failed to store config %s: %w", key, err)
+		}
+	}
+	return nil
 }

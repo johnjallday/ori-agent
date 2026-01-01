@@ -191,17 +191,10 @@ func (t *webapp_pluginTool) saveItems(items []Item) error {
 	return sm.Set("items", string(itemsJSON))
 }
 
-// GetWebPages returns the list of available web pages
-func (t *webapp_pluginTool) GetWebPages() []string {
-	return []string{"dashboard"}
-}
+// --- Web page handler ---
+// The naming convention serve{PascalCase}Page is auto-wired by the generator
 
-// ServeWebPage serves the requested web page using template rendering
-func (t *webapp_pluginTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
-	if path != "dashboard" {
-		return "", "", fmt.Errorf("page not found: %s", path)
-	}
-
+func serveDashboardPage(t *webapp_pluginTool, query map[string]string) (string, string, error) {
 	// Get items
 	items := t.getItems()
 

@@ -31,6 +31,9 @@ config:
       default_value: "10"
       placeholder: "10"
 
+web_pages:
+  - dashboard
+
 tool_definition:
   description: "Example tool with web interface. Manages a simple list of items."
   parameters:

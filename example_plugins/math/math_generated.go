@@ -27,6 +27,28 @@ type MathParams struct {
 	B         float64 `json:"b"`         // Second operand
 }
 
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(ctx context.Context, t *mathTool, params *MathParams) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+// Handler functions must be defined by you with the naming convention handle{PascalCase}
+var operationRegistry = map[string]OperationHandler{
+	"add":      handleAdd,
+	"divide":   handleDivide,
+	"multiply": handleMultiply,
+	"subtract": handleSubtract,
+}
+
+// Execute dispatches to the appropriate operation handler
+// This method is auto-generated from plugin.yaml operations
+func (t *mathTool) Execute(ctx context.Context, params *MathParams) (string, error) {
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: add, divide, multiply, subtract", params.Operation)
+	}
+	return handler(ctx, t, params)
+}
+
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
 func (t *mathTool) Call(ctx context.Context, args string) (string, error) {
@@ -48,6 +70,6 @@ func (t *mathTool) Call(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
 }
