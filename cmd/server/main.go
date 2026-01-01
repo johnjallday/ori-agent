@@ -3,15 +3,18 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -97,7 +100,35 @@ func main() {
 		logger.Debug("Auto-open browser disabled. Navigate to", logger.Fields{"url": url})
 	}
 
-	log.Fatal(srv.HTTPServer(addr).ListenAndServe())
+	// Create HTTP server
+	httpServer := srv.HTTPServer(addr)
+
+	// Set up graceful shutdown on SIGINT/SIGTERM
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in background
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-quit
+	logger.Info("Shutting down server...", nil)
+
+	// Clean up plugins and background services
+	srv.Shutdown()
+
+	// Graceful HTTP shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(ctx); err != nil {
+		logger.Error("HTTP server shutdown error", logger.Fields{"error": err.Error()})
+	}
+
+	logger.Info("Server stopped", nil)
 }
 
 // ensureDataDirectory checks if runtime data files exist in current directory.
