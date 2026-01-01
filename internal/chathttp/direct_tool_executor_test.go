@@ -202,7 +202,7 @@ func TestExecuteDirectTool(t *testing.T) {
 			}
 
 			// Execute
-			result := h.executeDirectTool(context.Background(), ag, cmd)
+			result := h.executeDirectTool(context.Background(), ag, "test-agent", cmd)
 
 			// Verify success/failure
 			if result.Success != tt.wantSuccess {
@@ -569,7 +569,7 @@ func TestExecuteDirectToolWithFiles(t *testing.T) {
 			}
 
 			// Execute
-			result := h.executeDirectTool(context.Background(), ag, cmd)
+			result := h.executeDirectTool(context.Background(), ag, "test-agent", cmd)
 
 			// Verify success
 			if result.Success != tt.wantSuccess {

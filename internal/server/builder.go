@@ -120,8 +120,8 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeUpdateManager(); err != nil { // Phase 10
 		return nil, fmt.Errorf("update manager phase failed: %w", err)
 	}
-	if err := b.loadPluginsAndHealthCheck(); err != nil { // Phase 11
-		return nil, fmt.Errorf("plugin loading phase failed: %w", err)
+	if err := b.validatePluginPaths(); err != nil { // Phase 11 - validate paths only, load lazily
+		return nil, fmt.Errorf("plugin validation phase failed: %w", err)
 	}
 	if err := b.loadPluginRegistry(); err != nil { // Phase 12
 		return nil, fmt.Errorf("plugin registry loading phase failed: %w", err)

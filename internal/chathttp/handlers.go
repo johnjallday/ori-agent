@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +20,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -51,6 +54,7 @@ type pluginDefinitionCache struct {
 type Handler struct {
 	defCache       map[string]*pluginDefinitionCache
 	defMu          sync.RWMutex
+	pluginLoadMu   sync.Mutex // Mutex for lazy loading plugins
 	store          store.Store
 	clientFactory  *client.Factory
 	llmFactory     *llm.Factory
@@ -182,12 +186,27 @@ func (h *Handler) getSessionID(r *http.Request) string {
 	return r.Header.Get("X-Session-ID")
 }
 
-// findTool searches for a tool by name in both plugins and MCP servers
-func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTool, bool) {
+// findTool searches for a tool by name in both plugins and MCP servers.
+// If the plugin is not yet loaded, it will be loaded lazily on first use.
+func (h *Handler) findTool(ag *agent.Agent, agentName, toolName string) (pluginapi.PluginTool, bool) {
 	// First check native plugins
-	for _, plugin := range ag.Plugins {
-		if plugin.Definition.Name == toolName && plugin.Tool != nil {
-			return plugin.Tool, true
+	for pluginName, plugin := range ag.Plugins {
+		if plugin.Definition.Name == toolName {
+			// If already loaded, return it
+			if plugin.Tool != nil {
+				return plugin.Tool, true
+			}
+			// Lazy load the plugin
+			tool, err := h.loadPluginLazily(agentName, pluginName, plugin)
+			if err != nil {
+				logger.Error("Failed to lazy load plugin", logger.Fields{
+					"plugin": pluginName,
+					"agent":  agentName,
+					"error":  err.Error(),
+				})
+				return nil, false
+			}
+			return tool, true
 		}
 	}
 
@@ -207,6 +226,60 @@ func (h *Handler) findTool(ag *agent.Agent, toolName string) (pluginapi.PluginTo
 	}
 
 	return nil, false
+}
+
+// loadPluginLazily loads a plugin on first use and updates the agent's plugin map.
+func (h *Handler) loadPluginLazily(agentName, pluginName string, lp types.LoadedPlugin) (pluginapi.PluginTool, error) {
+	h.pluginLoadMu.Lock()
+	defer h.pluginLoadMu.Unlock()
+
+	// Double-check if already loaded (another goroutine may have loaded it)
+	ag, ok := h.store.GetAgent(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", agentName)
+	}
+	if existing, exists := ag.Plugins[pluginName]; exists && existing.Tool != nil {
+		return existing.Tool, nil
+	}
+
+	logger.Info("Lazy loading plugin", logger.Fields{
+		"plugin": pluginName,
+		"agent":  agentName,
+	})
+
+	// Load the plugin
+	tool, err := pluginloader.LoadPluginUnified(lp.Path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load plugin %s: %w", pluginName, err)
+	}
+
+	// Set agent context
+	agentSpecificStorePath := filepath.Join("agents", agentName, "config.json")
+	if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
+		agentSpecificStorePath = abs
+	}
+	pluginloader.SetAgentContext(tool, agentName, agentSpecificStorePath, "")
+
+	// Run health check if health manager is available
+	if h.healthManager != nil {
+		h.healthManager.CheckAndCachePlugin(pluginName, tool)
+	}
+
+	// Update the plugin in the agent
+	lp.Tool = tool
+	lp.Definition = tool.Definition()
+	ag.Plugins[pluginName] = lp
+
+	// Save the updated agent
+	if err := h.store.SetAgent(agentName, ag); err != nil {
+		logger.Warn("Failed to save agent after lazy loading plugin", logger.Fields{
+			"agent":  agentName,
+			"plugin": pluginName,
+			"error":  err.Error(),
+		})
+	}
+
+	return tool, nil
 }
 
 // getClientForAgent returns an OpenAI client using the agent's API key if provided, otherwise the global client
@@ -353,7 +426,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		result := h.executeDirectTool(r.Context(), ag, cmd)
+		result := h.executeDirectTool(r.Context(), ag, current, cmd)
 
 		// Add to conversation history for context
 		ag.Messages = append(ag.Messages, openai.UserMessage(q))

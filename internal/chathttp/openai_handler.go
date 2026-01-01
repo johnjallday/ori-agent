@@ -155,7 +155,7 @@ func (h *Handler) handleOpenAIToolCalls(
 		name := tc.Function.Name
 		args := tc.Function.Arguments
 
-		tool, found := h.findTool(ag, name)
+		tool, found := h.findTool(ag, agentName, name)
 		if !found {
 			orihttp.InternalError(w, fmt.Sprintf("tool %q not found", name))
 			return

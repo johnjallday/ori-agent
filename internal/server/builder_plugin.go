@@ -3,15 +3,12 @@
 package server
 
 import (
-	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	"github.com/johnjallday/ori-agent/internal/version"
 )
@@ -37,11 +34,11 @@ func (b *ServerBuilder) initializeUpdateManager() error {
 	return nil
 }
 
-// loadPluginsAndHealthCheck restores plugins for all agents and runs health checks.
-func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
+// validatePluginPaths validates plugin paths for all agents without loading them.
+// Plugins are loaded lazily on first use to improve startup time.
+func (b *ServerBuilder) validatePluginPaths() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 	names, _ := b.server.st.ListAgents()
-	var healthySummary, degradedSummary, unhealthySummary []string
 
 	for _, agName := range names {
 		ag, ok := b.server.st.GetAgent(agName)
@@ -49,115 +46,56 @@ func (b *ServerBuilder) loadPluginsAndHealthCheck() error {
 			continue
 		}
 
-		var failedPlugins []string
+		var invalidPlugins []string
 
 		for key, lp := range ag.Plugins {
+			// Skip if already loaded (shouldn't happen on startup, but be safe)
 			if lp.Tool != nil {
 				continue
 			}
 
-			tool, err := pluginloader.LoadPluginUnified(lp.Path)
-			if err != nil {
-				logger.Error("Failed to load plugin for agent", logger.Fields{"err": err, "agent": lp.Path, "agName": agName})
-				logger.Error("Removing failed plugin from agent config", logger.Fields{"plugin": key, "agName": agName})
-				failedPlugins = append(failedPlugins, key)
+			// Validate plugin path exists
+			if _, err := os.Stat(lp.Path); os.IsNotExist(err) {
+				logger.Warn("Plugin path does not exist, removing from agent", logger.Fields{
+					"plugin": key,
+					"path":   lp.Path,
+					"agent":  agName,
+				})
+				invalidPlugins = append(invalidPlugins, key)
 				continue
 			}
 
-			// Run health check
-			healthResult := b.server.healthManager.CheckAndCachePlugin(key, tool)
-			if !healthResult.Health.Compatible {
-				if healthResult.Health.Status == "unhealthy" {
-					if verbose {
-						logger.Error("Plugin is UNHEALTHY", logger.Fields{"plugin": key})
-						for _, err := range healthResult.Health.Errors {
-							logger.Error("Error", logger.Fields{"error": err})
-						}
-						if healthResult.Health.Recommendation != "" {
-							logger.Debug("Recommendation", logger.Fields{"recommendation": healthResult.Health.Recommendation})
-						}
-					}
-					unhealthySummary = append(unhealthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
-				} else {
-					if verbose {
-						logger.Warn("Plugin is DEGRADED", logger.Fields{"plugin": key})
-						for _, warn := range healthResult.Health.Warnings {
-							logger.Warn("Warning", logger.Fields{"warn": warn})
-						}
-					}
-					degradedSummary = append(degradedSummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
-				}
-			} else {
-				if verbose {
-					logger.Info("Plugin v health check passed", logger.Fields{"plugin": key, "version": healthResult.Health.Version})
-				}
-				healthySummary = append(healthySummary, fmt.Sprintf("%s v%s", key, healthResult.Health.Version))
+			if verbose {
+				logger.Debug("Plugin registered for lazy loading", logger.Fields{
+					"plugin": key,
+					"agent":  agName,
+				})
 			}
-
-			agentSpecificStorePath := filepath.Join("agents", agName, "config.json")
-			if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
-				agentSpecificStorePath = abs
-			}
-
-			currentLocation := ""
-			if b.server.locationManager != nil {
-				currentLocation = b.server.locationManager.GetCurrentLocation()
-			}
-			pluginloader.SetAgentContext(tool, agName, agentSpecificStorePath, currentLocation)
-
-			if err := pluginloader.ExtractPluginSettingsSchema(tool, agName); err != nil {
-				if verbose {
-					logger.Error("failed to extract settings schema for plugin in agent", logger.Fields{"plugin": lp.Path, "agName": agName, "err": err})
-				}
-			}
-
-			lp.Tool = tool
-			lp.Definition = tool.Definition()
-			ag.Plugins[key] = lp
 		}
 
-		for _, pluginKey := range failedPlugins {
+		// Remove invalid plugins
+		for _, pluginKey := range invalidPlugins {
 			delete(ag.Plugins, pluginKey)
 		}
 
-		if err := b.server.st.SetAgent(agName, ag); err != nil {
-			logger.Error("failed to restore plugins for agent", logger.Fields{"agent": agName, "err": err})
-		}
-	}
-
-	// Print health summary
-	if verbose && (len(healthySummary) > 0 || len(degradedSummary) > 0 || len(unhealthySummary) > 0) {
-		b.printHealthSummary(healthySummary, degradedSummary, unhealthySummary)
-	}
-
-	// Health check all uploaded plugins
-	if verbose {
-		log.Println("Running initial health checks for all uploaded plugins...")
-	}
-	localReg, err := b.server.registryManager.LoadLocal()
-	if err == nil {
-		for _, pluginEntry := range localReg.Plugins {
-			if _, exists := b.server.healthManager.GetPluginHealth(pluginEntry.Name); exists {
-				continue
-			}
-
-			tool, err := pluginloader.LoadPluginRPC(pluginEntry.Path)
-			if err != nil {
-				if verbose {
-					logger.Warn("could not load plugin for initial health check", logger.Fields{"plugin": pluginEntry.Name, "err": err})
-				}
-				continue
-			}
-
-			healthResult := b.server.healthManager.CheckAndCachePlugin(pluginEntry.Name, tool)
-			if verbose {
-				if healthResult.Health.Compatible {
-					logger.Info("Plugin v health check passed", logger.Fields{"plugin": pluginEntry.Name, "version": healthResult.Health.Version})
-				} else {
-					logger.Warn("Plugin v health check issues", logger.Fields{"plugin": pluginEntry.Name, "version": healthResult.Health.Version, "warnings": healthResult.Health.Warnings})
-				}
+		if len(invalidPlugins) > 0 {
+			if err := b.server.st.SetAgent(agName, ag); err != nil {
+				logger.Error("Failed to save agent after removing invalid plugins", logger.Fields{
+					"agent": agName,
+					"err":   err,
+				})
 			}
 		}
+	}
+
+	pluginCount := 0
+	for _, agName := range names {
+		if ag, ok := b.server.st.GetAgent(agName); ok {
+			pluginCount += len(ag.Plugins)
+		}
+	}
+	if pluginCount > 0 {
+		logger.Info("Plugins registered for lazy loading", logger.Fields{"count": pluginCount})
 	}
 
 	return nil

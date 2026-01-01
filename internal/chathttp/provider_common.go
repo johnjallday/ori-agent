@@ -36,6 +36,7 @@ type ExecuteToolCallsResult struct {
 func (h *Handler) executeToolCallsCommon(
 	baseCtx context.Context,
 	ag *agent.Agent,
+	agentName string,
 	toolCalls []llm.ToolCall,
 	files []pluginapi.FileAttachment,
 ) ExecuteToolCallsResult {
@@ -47,8 +48,8 @@ func (h *Handler) executeToolCallsCommon(
 
 		logger.Debug("Executing tool", logger.Fields{"name": name})
 
-		// Find tool by name (searches both plugins and MCP tools)
-		tool, found := h.findTool(ag, name)
+		// Find tool by name (searches both plugins and MCP tools, with lazy loading)
+		tool, found := h.findTool(ag, agentName, name)
 
 		var result string
 		var err error
