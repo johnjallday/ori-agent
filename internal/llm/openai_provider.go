@@ -4,11 +4,21 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
+
+// isReasoningModel checks if the model is an OpenAI reasoning model (o1, o3, o4 series)
+// that requires max_completion_tokens instead of max_tokens
+func isReasoningModel(model string) bool {
+	// o1, o3, o4 series models use different parameter names
+	return strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4")
+}
 
 // OpenAIProvider implements the Provider interface for OpenAI
 type OpenAIProvider struct {
@@ -86,8 +96,13 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Add max tokens if specified
+	// Note: o1/o3 series models use max_completion_tokens instead of max_tokens
 	if req.MaxTokens > 0 {
-		params.MaxTokens = openai.Int(int64(req.MaxTokens))
+		if isReasoningModel(req.Model) {
+			params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
+		} else {
+			params.MaxTokens = openai.Int(int64(req.MaxTokens))
+		}
 	}
 
 	// Add tools if provided
