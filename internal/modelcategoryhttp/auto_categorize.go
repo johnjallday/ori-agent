@@ -308,6 +308,11 @@ Rules:
 	// Parse the JSON response
 	responseText := strings.TrimSpace(resp.Content)
 
+	// Check for empty response
+	if responseText == "" {
+		return nil, fmt.Errorf("LLM returned empty response - the configured System Model may not support this task. Try using a more capable model like gpt-4o-mini or claude-3-haiku")
+	}
+
 	// Try to extract JSON if wrapped in markdown code blocks
 	if strings.HasPrefix(responseText, "```") {
 		lines := strings.Split(responseText, "\n")
