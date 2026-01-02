@@ -121,6 +121,7 @@ type Server struct {
 	marketplaceHandler     *marketplacehttp.Handler
 	modelCategoryStore     store.ModelCategoryStore
 	modelCategoryHandler   *modelcategoryhttp.Handler
+	autoCategorizeHandler  *modelcategoryhttp.AutoCategorizeHandler
 	resetHandler           *settingshttp.ResetHandler
 	autoConfigHandler      *agenthttp.AutoConfigHandler
 	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler

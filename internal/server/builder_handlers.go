@@ -107,6 +107,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	} else {
 		s.modelCategoryStore = modelCategoryStore
 		s.modelCategoryHandler = modelcategoryhttp.NewHandler(modelCategoryStore)
+		s.autoCategorizeHandler = modelcategoryhttp.NewAutoCategorizeHandler(modelCategoryStore, s.llmFactory, s.configManager)
 	}
 
 	// Initialize session store and handler

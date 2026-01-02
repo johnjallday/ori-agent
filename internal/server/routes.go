@@ -401,6 +401,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		})
 	}
 
+	// Auto-categorize endpoints (requires both category store and LLM)
+	if s.autoCategorizeHandler != nil {
+		mux.HandleFunc("/api/models/auto-categorize/availability", s.autoCategorizeHandler.CheckAvailabilityHandler)
+		mux.HandleFunc("/api/models/auto-categorize", s.autoCategorizeHandler.AutoCategorizeHandler)
+	}
+
 	// =============================================================================
 	// Location Management Endpoints
 	// =============================================================================
