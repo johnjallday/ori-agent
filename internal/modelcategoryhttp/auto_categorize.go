@@ -287,8 +287,8 @@ Rules:
 
 	userMessage := modelList.String()
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Create a context with timeout (2 minutes for local models processing large batches)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -297,8 +297,8 @@ Rules:
 			{Role: "user", Content: userMessage},
 		},
 		SystemPrompt: systemPrompt,
-		Temperature:  0.3, // Low temperature for consistent suggestions
-		MaxTokens:    2000,
+		Temperature:  0.3,  // Low temperature for consistent suggestions
+		MaxTokens:    4000, // Allow enough tokens for 50 model suggestions
 	})
 
 	if err != nil {
