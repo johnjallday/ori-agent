@@ -112,7 +112,9 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode base64 content
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to decode file content"})
+		if encErr := json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to decode file content"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
@@ -120,7 +122,9 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	dateDir := time.Now().Format("2006-01")
 	uploadPath := filepath.Join(h.uploadsDir, dateDir)
 	if err := os.MkdirAll(uploadPath, 0755); err != nil {
-		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to create upload directory"})
+		if encErr := json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to create upload directory"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
@@ -138,13 +142,17 @@ func (h *Handler) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Write file
 	if err := os.WriteFile(finalPath, data, 0644); err != nil {
-		_ = json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to save file"})
+		if encErr := json.NewEncoder(w).Encode(UploadFileResponse{Error: "Failed to save file"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
 	// Return relative path
 	relativePath := filepath.Join(dateDir, safeFilename)
-	_ = json.NewEncoder(w).Encode(UploadFileResponse{Path: relativePath})
+	if encErr := json.NewEncoder(w).Encode(UploadFileResponse{Path: relativePath}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
 }
 
 // GetFileRequest represents a file read request
@@ -166,14 +174,18 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "Path parameter required"})
+		if encErr := json.NewEncoder(w).Encode(GetFileResponse{Error: "Path parameter required"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
 	// Security: prevent directory traversal
 	cleanPath := filepath.Clean(path)
 	if strings.Contains(cleanPath, "..") {
-		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "Invalid path"})
+		if encErr := json.NewEncoder(w).Encode(GetFileResponse{Error: "Invalid path"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
@@ -182,7 +194,9 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Read file
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(GetFileResponse{Error: "File not found"})
+		if encErr := json.NewEncoder(w).Encode(GetFileResponse{Error: "File not found"}); encErr != nil {
+			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+		}
 		return
 	}
 
@@ -192,11 +206,13 @@ func (h *Handler) GetFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Determine mime type from extension
 	mimeType := getMimeType(filepath.Ext(fullPath))
 
-	_ = json.NewEncoder(w).Encode(GetFileResponse{
+	if encErr := json.NewEncoder(w).Encode(GetFileResponse{
 		Content:  content,
 		MimeType: mimeType,
 		Filename: filepath.Base(fullPath),
-	})
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
 }
 
 // sanitizeFilename removes unsafe characters from filename

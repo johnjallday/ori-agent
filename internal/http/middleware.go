@@ -128,3 +128,49 @@ func Chain(middlewares ...func(http.Handler) http.Handler) func(http.Handler) ht
 		return final
 	}
 }
+
+// SecurityHeaders returns middleware that adds security headers to all responses.
+// This provides defense-in-depth against common web vulnerabilities including:
+// - MIME type sniffing attacks
+// - Clickjacking
+// - XSS attacks
+// - Information leakage via referrer
+//
+// Usage:
+//
+//	handler := http.SecurityHeaders()(mux)
+func SecurityHeaders() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Prevent MIME type sniffing
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+
+			// Prevent clickjacking by disallowing framing
+			w.Header().Set("X-Frame-Options", "DENY")
+
+			// Enable XSS filter in older browsers
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+
+			// Control referrer information sent with requests
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+
+			// Prevent browser from caching sensitive API responses
+			if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
+				w.Header().Set("Cache-Control", "no-store")
+			}
+
+			// Content Security Policy
+			// Allows inline styles/scripts for the UI, restricts other resources
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; "+
+					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+					"style-src 'self' 'unsafe-inline'; "+
+					"img-src 'self' data: blob:; "+
+					"font-src 'self'; "+
+					"connect-src 'self' ws: wss:; "+
+					"frame-ancestors 'none'")
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}

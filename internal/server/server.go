@@ -148,7 +148,14 @@ func New() (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	registerRoutes(mux, s)
-	return s.CORSMiddleware(mux)
+
+	// Apply middleware chain: SecurityHeaders -> ErrorRecovery -> CORS -> routes
+	handler := orihttp.Chain(
+		orihttp.SecurityHeaders(),
+		orihttp.ErrorRecovery(),
+	)(s.CORSMiddleware(mux))
+
+	return handler
 }
 
 // Start starts background services (task executor, etc.)
@@ -181,6 +188,7 @@ func (s *Server) cleanupPlugins() {
 
 	agentNames, _ := s.Storage.ListAgents()
 	cleanedCount := 0
+	errorCount := 0
 
 	for _, agentName := range agentNames {
 		ag, ok := s.Storage.GetAgentByName(agentName)
@@ -188,17 +196,30 @@ func (s *Server) cleanupPlugins() {
 			continue
 		}
 
-		// Clean up each loaded plugin
+		// Clean up each loaded plugin with panic recovery
+		// This ensures one plugin failure doesn't prevent cleanup of others
 		for pluginName, loadedPlugin := range ag.Plugins {
 			if loadedPlugin.Tool != nil {
-				pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
-				cleanedCount++
-				logger.Debug("Closed plugin '' for agent ''", logger.Fields{"agent": pluginName, "agentName": agentName})
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							errorCount++
+							logger.Error("Panic during plugin cleanup", logger.Fields{
+								"plugin": pluginName,
+								"agent":  agentName,
+								"error":  r,
+							})
+						}
+					}()
+					pluginloader.CloseRPCPlugin(loadedPlugin.Tool)
+					cleanedCount++
+					logger.Debug("Closed plugin for agent", logger.Fields{"plugin": pluginName, "agent": agentName})
+				}()
 			}
 		}
 	}
 
-	logger.Debug("Plugin cleanup complete: closed plugin(s)", logger.Fields{"plugin": cleanedCount})
+	logger.Debug("Plugin cleanup complete", logger.Fields{"closed": cleanedCount, "errors": errorCount})
 }
 
 // HTTPServer returns a fully configured http.Server
