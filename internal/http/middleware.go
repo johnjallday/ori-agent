@@ -163,14 +163,14 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 			}
 
 			// Content Security Policy
-			// Allows inline styles/scripts for the UI, restricts other resources
+			// Allows inline styles/scripts for the UI, CDN resources for Bootstrap/fonts
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'self'; "+
-					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-					"style-src 'self' 'unsafe-inline'; "+
+					"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; "+
+					"style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "+
 					"img-src 'self' data: blob:; "+
-					"font-src 'self'; "+
-					"connect-src 'self' ws: wss:; "+
+					"font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "+
+					"connect-src 'self' ws: wss: https://cdn.jsdelivr.net; "+
 					"frame-ancestors 'none'")
 
 			next.ServeHTTP(w, r)
