@@ -20,13 +20,13 @@
       <p class="text-muted mb-0">Browse all AI models available across different providers</p>
     </div>
     <div class="d-flex gap-2">
-      <button id="toggleSelectionBtn" class="btn btn-outline-secondary d-none" title="Select models for bulk actions">
-        <i class="bi bi-check2-square me-2"></i>Select
+      <button id="autoCategorizeAllBtn" class="btn btn-outline-primary d-none" title="Auto-categorize all models with AI">
+        <i class="bi bi-magic me-2"></i>Auto-Categorize
       </button>
       <button id="manageCategoriesBtn" class="btn btn-outline-secondary">
         <i class="bi bi-tags me-2"></i>Manage Categories
       </button>
-      <button id="refreshModelsBtn" class="btn btn-outline-primary">
+      <button id="refreshModelsBtn" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-clockwise me-2"></i>Refresh
       </button>
     </div>
@@ -797,8 +797,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Selection mode and auto-categorize
-  document.getElementById('toggleSelectionBtn').addEventListener('click', toggleSelectionMode);
+  // Auto-categorize
+  document.getElementById('autoCategorizeAllBtn').addEventListener('click', autoCategorizeAll);
   document.getElementById('cancelSelectionBtn').addEventListener('click', cancelSelection);
   document.getElementById('autoCategorizeSelectedBtn').addEventListener('click', autoCategorizeSelected);
   document.getElementById('selectAllSuggestions').addEventListener('change', toggleAllSuggestions);
@@ -826,8 +826,8 @@ async function loadData() {
     if (autoCatRes.ok) {
       const autoCatData = await autoCatRes.json();
       autoCategorizeAvailable = autoCatData.available;
-      // Show/hide selection button based on availability
-      document.getElementById('toggleSelectionBtn').classList.toggle('d-none', !autoCategorizeAvailable);
+      // Show/hide auto-categorize button based on availability
+      document.getElementById('autoCategorizeAllBtn').classList.toggle('d-none', !autoCategorizeAvailable);
     }
 
     if (!providersRes.ok) throw new Error('Failed to fetch providers');
@@ -1570,6 +1570,42 @@ async function autoCategorizeModel(modelId) {
 async function autoCategorizeSelected() {
   if (selectedModels.size === 0) return;
   await openAutoCategorizeModal(Array.from(selectedModels));
+}
+
+async function autoCategorizeAll() {
+  // Collect all visible model IDs (respecting current filters)
+  const modelIds = [];
+  const providerFilter = document.getElementById('providerFilter').value;
+  const categoryFilter = document.getElementById('categoryFilter').value;
+  const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+
+  allProviders.forEach(provider => {
+    if (providerFilter !== 'all' && provider.name !== providerFilter) return;
+    (provider.models || []).forEach(model => {
+      // Apply filters
+      if (categoryFilter !== 'all') {
+        const modelCats = modelAssignments[model.value] || [];
+        if (!modelCats.includes(categoryFilter)) return;
+      }
+      if (searchFilter && !model.value.toLowerCase().includes(searchFilter)) return;
+      if (!modelIds.includes(model.value)) {
+        modelIds.push(model.value);
+      }
+    });
+  });
+
+  if (modelIds.length === 0) {
+    showToast('No models to categorize', 'warning');
+    return;
+  }
+
+  // Limit to 50 models max
+  const toProcess = modelIds.slice(0, 50);
+  if (modelIds.length > 50) {
+    showToast(`Processing first 50 of ${modelIds.length} models`, 'info');
+  }
+
+  await openAutoCategorizeModal(toProcess);
 }
 
 async function openAutoCategorizeModal(modelIds) {
