@@ -173,9 +173,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Execute the task immediately in a goroutine
+	// Execute the task immediately in a goroutine with a timeout
+	// Default timeout is 30 minutes to prevent runaway tasks
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 
 		// Update task status to in_progress
 		foundTask.Status = agentstudio.TaskStatusInProgress
@@ -390,8 +392,9 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 			}
 		}
 
-		// Execute the input task synchronously
-		ctx := context.Background()
+		// Execute the input task synchronously with a timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 
 		// Update status to in_progress
 		inputTask.Status = agentstudio.TaskStatusInProgress

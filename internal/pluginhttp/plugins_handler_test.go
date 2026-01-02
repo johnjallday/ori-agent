@@ -600,3 +600,79 @@ func TestExtractPluginName(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateExecutableFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid ELF",
+			content: []byte{0x7F, 'E', 'L', 'F', 0, 0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "valid Mach-O 64-bit big-endian",
+			content: []byte{0xFE, 0xED, 0xFA, 0xCF, 0, 0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "valid Mach-O 64-bit little-endian",
+			content: []byte{0xCF, 0xFA, 0xED, 0xFE, 0, 0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "valid Mach-O fat binary",
+			content: []byte{0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "valid PE (Windows)",
+			content: []byte{'M', 'Z', 0, 0, 0, 0, 0, 0},
+			wantErr: false,
+		},
+		{
+			name:    "invalid - shell script",
+			content: []byte{'#', '!', '/', 'b', 'i', 'n', '/', 's'},
+			wantErr: true,
+		},
+		{
+			name:    "invalid - text file",
+			content: []byte("hello world this is a text file"),
+			wantErr: true,
+		},
+		{
+			name:    "invalid - too small",
+			content: []byte{0x7F, 'E'},
+			wantErr: true,
+		},
+		{
+			name:    "invalid - random bytes",
+			content: []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temp file
+			tmpFile, err := os.CreateTemp("", "test-plugin-*")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+
+			if _, err := tmpFile.Write(tt.content); err != nil {
+				t.Fatalf("Failed to write test content: %v", err)
+			}
+			tmpFile.Close()
+
+			err = validateExecutableFormat(tmpFile.Name())
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateExecutableFormat() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Manager handles software update checking and management
@@ -514,7 +513,7 @@ func (m *Manager) fetchChecksum(url string) (string, error) {
 
 // RestartApplication restarts the current application
 func (m *Manager) RestartApplication() {
-	log.Println("Restarting application...")
+	logger.Info("Restarting application...", nil)
 
 	// Get the executable path
 	executable, err := os.Executable()

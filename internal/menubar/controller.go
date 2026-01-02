@@ -3,8 +3,6 @@ package menubar
 import (
 	"context"
 	"fmt"
-	"log"
-
 	"net"
 	"sync"
 	"time"
@@ -172,7 +170,7 @@ func (c *Controller) StopServer(ctx context.Context) error {
 	c.statusMu.Unlock()
 	c.notifyStatusChange(StatusStopped)
 
-	log.Println("Server stopped successfully")
+	logger.Info("Server stopped successfully", nil)
 	return nil
 }
 
@@ -274,7 +272,7 @@ func (c *Controller) runServer(ctx context.Context) {
 	}
 
 	// Server stopped normally
-	log.Println("Server shut down cleanly")
+	logger.Info("Server shut down cleanly", nil)
 }
 
 // notifyStatusChange notifies all subscribers of a status change

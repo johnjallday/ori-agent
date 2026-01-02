@@ -194,3 +194,78 @@ func TestRequireQueryParam(t *testing.T) {
 		})
 	}
 }
+
+func TestParseJSONBody_SizeLimit(t *testing.T) {
+	// Create a body larger than MaxJSONBodySize (1 MB)
+	largeBody := make([]byte, MaxJSONBodySize+1)
+	for i := range largeBody {
+		largeBody[i] = 'a'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(largeBody))
+	w := httptest.NewRecorder()
+
+	var data struct {
+		Name string `json:"name"`
+	}
+
+	ok := ParseJSONBody(w, req, &data)
+
+	if ok {
+		t.Error("ParseJSONBody() should fail for oversized body")
+	}
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status code = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	handler := SecurityHeaders()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		path           string
+		expectedHeader string
+		expectedValue  string
+	}{
+		{"/api/test", "X-Content-Type-Options", "nosniff"},
+		{"/api/test", "X-Frame-Options", "DENY"},
+		{"/api/test", "X-XSS-Protection", "1; mode=block"},
+		{"/api/test", "Referrer-Policy", "strict-origin-when-cross-origin"},
+		{"/api/test", "Cache-Control", "no-store"},
+		{"/page", "X-Content-Type-Options", "nosniff"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path+"_"+tt.expectedHeader, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			got := w.Header().Get(tt.expectedHeader)
+			if got != tt.expectedValue {
+				t.Errorf("Header %s = %q, want %q", tt.expectedHeader, got, tt.expectedValue)
+			}
+		})
+	}
+}
+
+func TestSecurityHeaders_NoCacheControlForNonAPI(t *testing.T) {
+	handler := SecurityHeaders()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/page", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Non-API paths should not have Cache-Control set by SecurityHeaders
+	got := w.Header().Get("Cache-Control")
+	if got == "no-store" {
+		t.Error("Cache-Control should not be 'no-store' for non-API paths")
+	}
+}

@@ -1,12 +1,11 @@
 package http
 
 import (
-	"log"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ErrorRecovery returns middleware that recovers from panics in HTTP handlers.
@@ -28,8 +27,12 @@ func ErrorRecovery() func(http.Handler) http.Handler {
 			defer func() {
 				if err := recover(); err != nil {
 					// Log the panic with stack trace
-					log.Printf("❌ PANIC in %s %s: %v\nStack trace:\n%s",
-						r.Method, r.URL.Path, err, debug.Stack())
+					logger.Error("PANIC in HTTP handler", logger.Fields{
+						"method": r.Method,
+						"path":   r.URL.Path,
+						"error":  err,
+						"stack":  string(debug.Stack()),
+					})
 
 					// Attempt to send error response
 					// If headers were already written, this will have no effect

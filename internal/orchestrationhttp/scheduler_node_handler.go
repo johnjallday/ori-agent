@@ -665,9 +665,10 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Execute task immediately in background
+	// Execute task immediately in background with a timeout
 	go func() {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
 		logger.Info("Executing scheduler-triggered task", logger.Fields{"task_id": taskID, "agent": targetTask.To})
 
 		result, execErr := th.taskHandler.ExecuteTask(ctx, targetTask.To, *targetTask)
