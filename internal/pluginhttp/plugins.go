@@ -274,16 +274,24 @@ func (h *Handler) uploadAndRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = out.Close()
 
-	// Make the plugin executable BEFORE loading - RPC plugins must be executable to validate
-	// Load plugin to get its definition and validate it BEFORE making it executable
-	// This prevents arbitrary code execution if validation is bypassed
+	// SECURITY: Validate file is a valid executable format BEFORE making it executable
+	// This prevents making arbitrary files executable (e.g., shell scripts with malicious content)
+	if err := validateExecutableFormat(pluginFile); err != nil {
+		_ = os.Remove(pluginFile)
+		orihttp.BadRequest(w, "Invalid plugin format: "+err.Error())
+		return
+	}
+
+	// Make the plugin executable - required for RPC plugins to be loaded
+	// Note: The plugin will be executed during validation. This is a necessary trade-off
+	// for RPC-based plugins. If validation fails, the file is immediately removed.
 	if err := os.Chmod(pluginFile, 0755); err != nil {
 		_ = os.Remove(pluginFile)
 		orihttp.InternalError(w, "Failed to set plugin permissions: "+err.Error())
 		return
 	}
 
-	// Load plugin to validate it
+	// Load and validate plugin by executing it
 	tool, err := h.Loader.Load(pluginFile)
 	if err != nil {
 		// Clean up the file if plugin is invalid
@@ -813,4 +821,45 @@ func (h *Handler) isPluginInstalled(pluginName, pluginPath string) bool {
 	}
 
 	return false
+}
+
+// validateExecutableFormat checks if a file is a valid executable format.
+// This provides a security check before making the file executable.
+// Supported formats: ELF (Linux), Mach-O (macOS), PE (Windows)
+func validateExecutableFormat(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Read the first 4 bytes to check magic numbers
+	magic := make([]byte, 4)
+	n, err := f.Read(magic)
+	if err != nil || n < 4 {
+		return fmt.Errorf("file too small to be a valid executable")
+	}
+
+	// Check for ELF format (Linux): 0x7F 'E' 'L' 'F'
+	if magic[0] == 0x7F && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F' {
+		return nil
+	}
+
+	// Check for Mach-O format (macOS)
+	// MH_MAGIC: 0xFEEDFACE (32-bit)
+	// MH_MAGIC_64: 0xFEEDFACF (64-bit)
+	// Also check for fat/universal binaries: 0xCAFEBABE
+	if (magic[0] == 0xFE && magic[1] == 0xED && magic[2] == 0xFA && (magic[3] == 0xCE || magic[3] == 0xCF)) ||
+		(magic[0] == 0xCF && magic[1] == 0xFA && magic[2] == 0xED && magic[3] == 0xFE) || // Little-endian 64-bit
+		(magic[0] == 0xCE && magic[1] == 0xFA && magic[2] == 0xED && magic[3] == 0xFE) || // Little-endian 32-bit
+		(magic[0] == 0xCA && magic[1] == 0xFE && magic[2] == 0xBA && magic[3] == 0xBE) { // Fat/Universal binary
+		return nil
+	}
+
+	// Check for PE format (Windows): 'M' 'Z' (DOS header, followed by PE signature)
+	if magic[0] == 'M' && magic[1] == 'Z' {
+		return nil
+	}
+
+	return fmt.Errorf("unrecognized executable format (expected ELF, Mach-O, or PE)")
 }

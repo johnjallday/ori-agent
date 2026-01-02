@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -129,15 +130,31 @@ func (h *Handler) LinkFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SECURITY: Validate the source path
+	// Clean the path to resolve any .. components
+	cleanPath := filepath.Clean(req.Path)
+
+	// Ensure it's an absolute path (prevents relative path attacks)
+	if !filepath.IsAbs(cleanPath) {
+		orihttp.BadRequest(w, "Path must be an absolute path")
+		return
+	}
+
 	// Use filename from path if not provided
 	name := req.Name
 	if name == "" {
-		parts := strings.Split(req.Path, "/")
-		name = parts[len(parts)-1]
+		name = filepath.Base(cleanPath)
 	}
 
-	// Link file
-	entry, err := h.store.LinkFile(sessionID, req.Path, name)
+	// SECURITY: Validate the name to prevent path traversal in the destination
+	// This prevents symlinks being created outside the session folder
+	safeName, ok := orihttp.ValidateUploadFilename(w, name)
+	if !ok {
+		return // Error already sent
+	}
+
+	// Link file using the validated path and name
+	entry, err := h.store.LinkFile(sessionID, cleanPath, safeName)
 	if err != nil {
 		if strings.Contains(err.Error(), "maximum file limit") {
 			orihttp.BadRequest(w, err.Error())
@@ -312,7 +329,14 @@ func (h *Handler) RelinkFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.RelinkFile(sessionID, fileID, req.NewPath); err != nil {
+	// SECURITY: Validate the new path
+	cleanPath := filepath.Clean(req.NewPath)
+	if !filepath.IsAbs(cleanPath) {
+		orihttp.BadRequest(w, "New path must be an absolute path")
+		return
+	}
+
+	if err := h.store.RelinkFile(sessionID, fileID, cleanPath); err != nil {
 		if strings.Contains(err.Error(), "not a link") {
 			orihttp.BadRequest(w, "File is not a link")
 			return

@@ -8,8 +8,12 @@ import (
 	"strings"
 )
 
+// MaxJSONBodySize is the maximum allowed size for JSON request bodies (1 MB)
+const MaxJSONBodySize = 1 << 20 // 1 MB
+
 // ParseJSONBody reads and parses a JSON request body into the provided struct.
 // It handles common error cases and returns appropriate HTTP errors.
+// The request body is limited to MaxJSONBodySize (1 MB) to prevent memory exhaustion.
 //
 // Usage:
 //
@@ -24,8 +28,15 @@ func ParseJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 		return false
 	}
 
+	// Limit request body size to prevent memory exhaustion attacks
+	r.Body = http.MaxBytesReader(w, r.Body, MaxJSONBodySize)
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if strings.Contains(err.Error(), "request body too large") {
+			BadRequest(w, "Request body too large")
+			return false
+		}
 		BadRequest(w, "Failed to read request body")
 		return false
 	}
