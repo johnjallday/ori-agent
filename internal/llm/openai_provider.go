@@ -93,7 +93,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 
 	// Add temperature if specified (reasoning models only support default temperature of 1)
-	if req.Temperature > 0 && !isReasoningModel(req.Model) {
+	// Use >= 0 to allow temperature 0 for deterministic output; use -1 to skip
+	if req.Temperature >= 0 && !isReasoningModel(req.Model) {
 		params.Temperature = openai.Float(req.Temperature)
 	}
 

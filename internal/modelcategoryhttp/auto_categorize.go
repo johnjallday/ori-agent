@@ -297,7 +297,7 @@ Rules:
 			{Role: "user", Content: userMessage},
 		},
 		SystemPrompt: systemPrompt,
-		Temperature:  0.3,  // Low temperature for consistent suggestions
+		Temperature:  0,    // Deterministic output for consistent suggestions
 		MaxTokens:    4000, // Allow enough tokens for 50 model suggestions
 	})
 
