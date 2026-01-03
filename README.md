@@ -1,7 +1,7 @@
 # <img src="assets/logo.svg" alt="Ori Agent logo" width="48" height="48" align="middle" /> Ori Agent
 
 <!-- AUTO:VERSION -->
-![Version](https://img.shields.io/badge/Version-v0.0.35-blue)
+![Version](https://img.shields.io/badge/Version-v0.0.36-blue)
 <!-- AUTO:VERSION_END -->
 <!-- AUTO:GO_VERSION -->
 ![Go](https://img.shields.io/badge/Go-1.25.5-00add8)
@@ -263,16 +263,20 @@ func (t *MyTool) Definition() pluginapi.Tool {
 }
 ```
 
-#### 2. **Settings API**
-Simple, thread-safe key-value storage for plugin configuration:
 
-```go
-sm := t.Settings()
-sm.Set("api_key", "sk-123")
-apiKey, _ := sm.GetString("api_key")
-```
+Checkout Example Plugins
+<!-- AUTO:PLUGINS -->
+| Plugin | Description | Type |
+|--------|-------------|------|
+| math | Perform basic math operations: add, subtract, multiply, divide | Example |
+| minimal | Minimal example tool demonstrating YAML-based configuration. Supports echo and status operations. | Example |
+| result-handler | Handle actions on chat results like opening directories, files, or URLs | Example |
+| weather | Get weather for a given location | Example |
+| webapp | Example tool with web interface. Manages a simple list of items. | Example |
+<!-- AUTO:PLUGINS_END -->
 
-#### 3. **Template Rendering API**
+
+#### 2. **Template Rendering API**
 Serve beautiful web pages with Go templates:
 
 ```go
@@ -297,18 +301,6 @@ cp minimal-plugin ../../uploaded_plugins/
 ```
 
 Restart Ori Agent, and your plugin will be automatically loaded!
-
-### Available Plugins
-
-<!-- AUTO:PLUGINS -->
-| Plugin | Description | Type |
-|--------|-------------|------|
-| math | Perform basic math operations: add, subtract, multiply, divide | Example |
-| minimal | Minimal example tool demonstrating YAML-based configuration. Supports echo and status operations. | Example |
-| result-handler | Handle actions on chat results like opening directories, files, or URLs | Example |
-| weather | Get weather for a given location | Example |
-| webapp | Example tool with web interface. Manages a simple list of items. | Example |
-<!-- AUTO:PLUGINS_END -->
 
 ## 📄 License
 
