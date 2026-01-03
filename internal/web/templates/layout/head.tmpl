@@ -1405,9 +1405,15 @@
         right: 0;
         bottom: 0;
         background: rgba(0, 0, 0, 0.5);
-        z-index: 1029; /* Below mobile sidebar (1030) but above content */
+        z-index: -1; /* Behind sidebar content but visible outside */
         pointer-events: auto; /* Make it clickable */
         cursor: pointer;
+      }
+
+      /* Ensure sidebar content is clickable above the backdrop */
+      .sidebar-mobile-show .sidebar-content {
+        position: relative;
+        z-index: 1;
       }
     }
 
