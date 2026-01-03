@@ -661,12 +661,12 @@ func TestValidateExecutableFormat(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			defer os.Remove(tmpFile.Name())
+			defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 			if _, err := tmpFile.Write(tt.content); err != nil {
 				t.Fatalf("Failed to write test content: %v", err)
 			}
-			tmpFile.Close()
+			_ = tmpFile.Close()
 
 			err = validateExecutableFormat(tmpFile.Name())
 
