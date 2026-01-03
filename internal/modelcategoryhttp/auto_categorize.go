@@ -248,44 +248,25 @@ func (h *AutoCategorizeHandler) generateSuggestions(
 		categoryList.WriteString(fmt.Sprintf("- ID: %q, Name: %q\n", cat.ID, cat.Name))
 	}
 
-	systemPrompt := fmt.Sprintf(`You are a model categorization assistant. Given a list of AI model names and existing categories, suggest the best category for each model.
-
-Available Categories:
+	systemPrompt := fmt.Sprintf(`Categorize AI models. Categories:
 %s
-For each model, analyze the model name/ID and determine which category best fits based on:
-- Model naming conventions (e.g., "mini" = lightweight/tool-calling, "opus" = research-grade)
-- Provider patterns (e.g., haiku = fast/cheap, sonnet = balanced, opus = powerful)
-- Size indicators (e.g., 7b, 70b parameters suggest capability level)
-- Purpose indicators (e.g., "coder", "instruct", "chat")
-
-You must respond with a valid JSON array (and nothing else):
-[
-  {
-    "model_id": "exact-model-id-from-input",
-    "category_id": "category-id-from-list-or-empty-string",
-    "confidence": 0.0-1.0,
-    "reasoning": "Brief explanation (1 sentence max)"
-  }
-]
-
-Rules:
-- Only use category IDs from the provided list above
-- Use empty string "" for category_id if no category fits well (confidence should be low)
-- Return exactly one suggestion per input model
-- Confidence: 0.9+ = very confident, 0.7-0.9 = confident, 0.4-0.7 = uncertain, <0.4 = guess`, categoryList.String())
+Respond with JSON array only:
+[{"model_id":"<exact-id>","category_id":"<id-or-empty>","confidence":0.0-1.0,"reasoning":"<brief>"}]
+Use "" for category_id if unsure.`, categoryList.String())
 
 	// Build user message with model IDs
 	var modelList strings.Builder
-	modelList.WriteString("Categorize these models:\n")
 	for _, modelID := range modelIDs {
 		modelList.WriteString(fmt.Sprintf("- %s", modelID))
 		if current, ok := currentAssignments[modelID]; ok {
-			modelList.WriteString(fmt.Sprintf(" (currently in: %s)", current))
+			modelList.WriteString(fmt.Sprintf(" (current: %s)", current))
 		}
 		modelList.WriteString("\n")
 	}
 
-	userMessage := modelList.String()
+	// Combine system prompt and model list into user message
+	// (some reasoning models work better without system prompts)
+	userMessage := fmt.Sprintf("%s\n\nModels:\n%s", systemPrompt, modelList.String())
 
 	// Create a context with timeout (2 minutes for local models processing large batches)
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
@@ -296,21 +277,32 @@ Rules:
 		Messages: []llm.Message{
 			{Role: "user", Content: userMessage},
 		},
-		SystemPrompt: systemPrompt,
-		Temperature:  0,    // Deterministic output for consistent suggestions
-		MaxTokens:    4000, // Allow enough tokens for 50 model suggestions
+		Temperature: 0,     // Deterministic output for consistent suggestions
+		MaxTokens:   16000, // Large budget for reasoning models
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("LLM request failed: %w", err)
 	}
 
+	// Debug log the raw response
+	logger.Debug("Auto-categorize LLM response", logger.Fields{
+		"content_length": len(resp.Content),
+		"finish_reason":  resp.FinishReason,
+		"content_preview": func() string {
+			if len(resp.Content) > 200 {
+				return resp.Content[:200] + "..."
+			}
+			return resp.Content
+		}(),
+	})
+
 	// Parse the JSON response
 	responseText := strings.TrimSpace(resp.Content)
 
 	// Check for empty response
 	if responseText == "" {
-		return nil, fmt.Errorf("LLM returned empty response - the configured System Model may not support this task. Try using a more capable model like gpt-4o-mini or claude-3-haiku")
+		return nil, fmt.Errorf("LLM returned empty response (finish_reason: %s) - the model may not support this task or the prompt format", resp.FinishReason)
 	}
 
 	// Try to extract JSON if wrapped in markdown code blocks
