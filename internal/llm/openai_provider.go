@@ -11,13 +11,15 @@ import (
 	"github.com/openai/openai-go/v3/option"
 )
 
-// isReasoningModel checks if the model is an OpenAI reasoning model (o1, o3, o4 series)
-// that requires max_completion_tokens instead of max_tokens
+// isReasoningModel checks if the model is an OpenAI model that requires
+// max_completion_tokens instead of max_tokens
 func isReasoningModel(model string) bool {
-	// o1, o3, o4 series models use different parameter names
+	// o1, o3, o4 series and gpt-5 series models use max_completion_tokens
 	return strings.HasPrefix(model, "o1") ||
 		strings.HasPrefix(model, "o3") ||
-		strings.HasPrefix(model, "o4")
+		strings.HasPrefix(model, "o4") ||
+		strings.HasPrefix(model, "gpt-5") ||
+		strings.Contains(model, "-nano")
 }
 
 // OpenAIProvider implements the Provider interface for OpenAI
@@ -90,13 +92,13 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		Messages: messages,
 	}
 
-	// Add temperature if specified
-	if req.Temperature > 0 {
+	// Add temperature if specified (reasoning models only support default temperature of 1)
+	if req.Temperature > 0 && !isReasoningModel(req.Model) {
 		params.Temperature = openai.Float(req.Temperature)
 	}
 
 	// Add max tokens if specified
-	// Note: o1/o3 series models use max_completion_tokens instead of max_tokens
+	// Note: reasoning models use max_completion_tokens instead of max_tokens
 	if req.MaxTokens > 0 {
 		if isReasoningModel(req.Model) {
 			params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
