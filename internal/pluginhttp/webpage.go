@@ -25,18 +25,16 @@ func NewWebPageHandler(state store.Store) *WebPageHandler {
 }
 
 // ServeHTTP handles plugin web page requests
-// URL format: /api/plugins/{plugin-name}/pages/{page-path}
+// URL format: /api/plugins/{plugin-name}/{page-path}
 func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse URL path: /api/plugins/{plugin-name}/pages/{page-path}
+	// Parse URL path: /api/plugins/{plugin-name}/{page-path}
 	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
-	parts := strings.SplitN(path, "/pages/", 2)
+	parts := strings.SplitN(path, "/", 2)
 
-	if len(parts) != 2 {
-		orihttp.BadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/pages/{page-path}")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		orihttp.BadRequest(w, "Invalid URL format. Expected: /api/plugins/{plugin-name}/{page-path}")
 		return
 	}
-
-	// Get current agent
 
 	pluginName := parts[0]
 	pagePath := parts[1]
@@ -129,6 +127,58 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	// Return as JSON
 	w.Header().Set("Content-Type", "application/json")
 	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(quoteStrings(pages), ","))
+	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
+	}
+}
+
+// ListAllPages returns all available web pages from all loaded plugins
+// URL format: /api/plugins/all-pages
+func (h *WebPageHandler) ListAllPages(w http.ResponseWriter, r *http.Request) {
+	// Get current agent
+	_, current := h.State.ListAgents()
+	ag, ok := h.State.GetAgent(current)
+	if !ok {
+		orihttp.InternalError(w, "Current agent not found")
+		return
+	}
+
+	type PluginPage struct {
+		Plugin string `json:"plugin"`
+		Page   string `json:"page"`
+		URL    string `json:"url"`
+	}
+
+	var allPages []PluginPage
+
+	// Iterate through all loaded plugins
+	for pluginName, loadedPlugin := range ag.Plugins {
+		webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
+		if !ok {
+			continue
+		}
+
+		// Get available pages for this plugin
+		pages := webProvider.GetWebPages()
+		for _, page := range pages {
+			allPages = append(allPages, PluginPage{
+				Plugin: pluginName,
+				Page:   page,
+				URL:    fmt.Sprintf("/api/plugins/%s/%s", pluginName, page),
+			})
+		}
+	}
+
+	// Return as JSON
+	w.Header().Set("Content-Type", "application/json")
+
+	// Build JSON manually to avoid import
+	var pagesJSON []string
+	for _, p := range allPages {
+		pagesJSON = append(pagesJSON, fmt.Sprintf(`{"plugin":"%s","page":"%s","url":"%s"}`, p.Plugin, p.Page, p.URL))
+	}
+	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(pagesJSON, ","))
+
 	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
 		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}

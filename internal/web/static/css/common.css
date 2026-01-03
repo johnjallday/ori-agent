@@ -219,6 +219,28 @@ a:focus-visible {
     color: var(--primary-color) !important;
 }
 
+/* Plugin Pages Dropdown Styles */
+#pluginPagesMenu .dropdown-item {
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 4px;
+    margin: 2px 4px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+#pluginPagesMenu .dropdown-item:hover {
+    background: var(--bg-secondary) !important;
+    color: var(--primary-color) !important;
+}
+
+#pluginPagesMenu .dropdown-item:active {
+    background: var(--bg-tertiary) !important;
+    color: var(--primary-color) !important;
+}
+
 .nav-badge {
     position: absolute;
     top: 6px;
