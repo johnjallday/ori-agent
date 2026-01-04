@@ -3,14 +3,16 @@
 # create-release.sh - Creates a release from main branch (GitHub Flow)
 #
 # Usage:
-#   ./scripts/create-release.sh <version>
+#   ./scripts/create-release.sh [version]
 #   ./scripts/create-release.sh v1.3.0
+#   ./scripts/create-release.sh          # Prompts for version interactively
 #
 # Workflow:
 #   1. Ensures you're on main branch with clean working tree
-#   2. Runs quick tests
-#   3. Updates VERSION file
-#   4. Creates and pushes tag (triggers GitHub Actions release)
+#   2. Confirms version with user (shows current VERSION file)
+#   3. Runs quick tests
+#   4. Updates VERSION file
+#   5. Creates and pushes tag (triggers GitHub Actions release)
 
 set -e
 
@@ -53,16 +55,18 @@ show_help() {
   echo "╚════════════════════════════════════════════════════════════════╝"
   echo ""
   echo -e "${BLUE}USAGE:${NC}"
-  echo "  ./scripts/create-release.sh <version>"
+  echo "  ./scripts/create-release.sh [version]"
   echo ""
   echo -e "${BLUE}ARGUMENTS:${NC}"
-  echo "  <version>       Version to release (e.g., v1.3.0 or 1.3.0)"
+  echo "  [version]       Version to release (e.g., v1.3.0 or 1.3.0)"
+  echo "                  If omitted, you will be prompted to enter it"
   echo "                  The 'v' prefix is added automatically if missing"
   echo ""
   echo -e "${BLUE}OPTIONS:${NC}"
   echo "  --help, -h      Show this help message"
   echo ""
   echo -e "${BLUE}EXAMPLES:${NC}"
+  echo "  ./scripts/create-release.sh           # Interactive mode (prompts for version)"
   echo "  ./scripts/create-release.sh v1.3.0"
   echo "  ./scripts/create-release.sh 1.3.0"
   echo ""
@@ -95,11 +99,26 @@ for arg in "$@"; do
   esac
 done
 
-# Check if version argument is provided
+# Read current VERSION file
+CURRENT_VERSION=""
+VERSION_FILE="VERSION"
+if [ -f "$VERSION_FILE" ]; then
+  CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
+fi
+
+# If no version argument provided, prompt the user
 if [ -z "$VERSION" ]; then
-  print_error "Usage: $0 <version>"
-  print_error "Example: $0 v1.3.0"
-  exit 1
+  echo ""
+  if [ -n "$CURRENT_VERSION" ]; then
+    print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
+  fi
+  echo -n "Enter version to release (e.g., v1.3.0): "
+  read -r VERSION
+
+  if [ -z "$VERSION" ]; then
+    print_error "No version provided. Aborting."
+    exit 1
+  fi
 fi
 
 # Ensure version starts with 'v'
@@ -114,6 +133,26 @@ if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
+# Confirm version with user
+echo ""
+print_status "Release version: ${GREEN}$VERSION${NC}"
+if [ -n "$CURRENT_VERSION" ]; then
+  if [ "$VERSION" = "$CURRENT_VERSION" ]; then
+    print_status "VERSION file: ${GREEN}$CURRENT_VERSION${NC} (matches)"
+  else
+    print_warning "VERSION file: ${YELLOW}$CURRENT_VERSION${NC} (will be updated to $VERSION)"
+  fi
+fi
+echo ""
+echo -n "Proceed with release $VERSION? [y/N]: "
+read -r CONFIRM
+
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  print_status "Release cancelled."
+  exit 0
+fi
+
+echo ""
 print_status "Creating release $VERSION for Ori Agent"
 
 # Check if we're in a git repository
@@ -166,7 +205,6 @@ go test -short ./... || {
 }
 
 # Update VERSION file
-VERSION_FILE="VERSION"
 print_status "Updating VERSION file..."
 echo "$VERSION" >"$VERSION_FILE"
 if ! git diff --quiet "$VERSION_FILE" 2>/dev/null; then
