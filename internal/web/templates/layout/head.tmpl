@@ -1788,6 +1788,29 @@
       background: var(--bg-tertiary) !important;
       color: var(--primary-color) !important;
     }
+
+    /* Plugin pages dropdown hover styling */
+    #pluginPagesMenu .dropdown-item {
+      color: var(--text-primary) !important;
+      padding: 0.5rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 4px;
+      margin: 2px 4px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    #pluginPagesMenu .dropdown-item:hover,
+    #pluginPagesMenu .dropdown-item:focus {
+      background: var(--bg-secondary) !important;
+      color: var(--primary-color) !important;
+    }
+
+    #pluginPagesMenu .dropdown-item:active {
+      background: var(--bg-tertiary) !important;
+      color: var(--primary-color) !important;
+    }
   </style>
   <!-- Theme Manager will be initialized in base template -->
 </head>
