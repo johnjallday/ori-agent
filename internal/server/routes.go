@@ -144,14 +144,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 	// Plugin-specific routes with pattern matching
 	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
+		// Check if this is the all-pages endpoint
+		if r.URL.Path == "/api/plugins/all-pages" {
+			s.webPageHandler.ListAllPages(w, r)
+			return
+		}
 		// Check if this is a notification dismiss request
 		if strings.Contains(r.URL.Path, "/notifications/") && strings.HasSuffix(r.URL.Path, "/dismiss") {
 			s.notificationsHandler.HandleDismissNotification(w, r)
-			return
-		}
-		// Check if this is a web page request
-		if strings.Contains(r.URL.Path, "/pages/") {
-			s.webPageHandler.ServeHTTP(w, r)
 			return
 		}
 		// Check if this is a pages list request
@@ -234,8 +234,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.pluginsPageHandler.HandleDeletePlugin(w, r)
 			return
 		}
-		// Check if this is a plugin details request (GET with plugin name)
+		// Check if this could be a web page request (GET with path after plugin name)
+		// URL format: /api/plugins/{plugin-name}/{page-path}
 		if r.Method == http.MethodGet && !strings.HasSuffix(r.URL.Path, "/plugins/") {
+			// Extract path after /api/plugins/
+			pathAfterPlugins := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
+			// Check if there's a sub-path (e.g., "plugin-name/page-path")
+			if strings.Contains(pathAfterPlugins, "/") {
+				// This has a sub-path, try serving as web page
+				s.webPageHandler.ServeHTTP(w, r)
+				return
+			}
+			// No sub-path, serve plugin details
 			s.pluginsPageHandler.HandleGetPluginDetails(w, r)
 			return
 		}

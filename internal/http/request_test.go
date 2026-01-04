@@ -232,6 +232,7 @@ func TestSecurityHeaders(t *testing.T) {
 	}{
 		{"/api/test", "X-Content-Type-Options", "nosniff"},
 		{"/api/test", "X-Frame-Options", "DENY"},
+		{"/api/plugins/ori-music-project-manager/dashboard?ori_raw=1", "X-Frame-Options", "SAMEORIGIN"},
 		{"/api/test", "X-XSS-Protection", "1; mode=block"},
 		{"/api/test", "Referrer-Policy", "strict-origin-when-cross-origin"},
 		{"/api/test", "Cache-Control", "no-store"},

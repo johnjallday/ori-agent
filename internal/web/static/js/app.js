@@ -969,17 +969,20 @@ function setupSidebarToggle() {
       // Toggle sidebar visibility
       const isHidden = sidebar.classList.toggle('d-none');
 
-      // Always remove mobile show class to prevent backdrop on desktop
-      sidebar.classList.remove('sidebar-mobile-show');
-
       if (isHidden) {
+        // Hiding sidebar
         sidebar.classList.remove('d-lg-block');
+        sidebar.classList.remove('sidebar-mobile-show');
         sidebarToggle.setAttribute('aria-expanded', 'false');
       } else {
+        // Showing sidebar
         if (window.innerWidth >= 992) {
           sidebar.classList.add('d-lg-block');
+          sidebar.classList.remove('sidebar-mobile-show');
         } else {
+          // On mobile, add sidebar-mobile-show to override transform: translateX(-100%)
           sidebar.classList.remove('d-lg-block');
+          sidebar.classList.add('sidebar-mobile-show');
         }
         sidebarToggle.setAttribute('aria-expanded', 'true');
       }

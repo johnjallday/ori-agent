@@ -139,7 +139,6 @@ sessions/
 tasks/
 marketplace_config.json
 .gomodcache/
-.gomodcache/
 session_files/
 
 # User uploads and custom templates
