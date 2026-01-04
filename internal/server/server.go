@@ -434,6 +434,13 @@ func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "usage", data)
 }
 
+func (s *Server) serveReview(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("review")
+	data.Title = "Conversation Review - Ori Agent"
+	data.BrandText = "Ori Agent"
+	s.renderAndWritePage(w, "review", data)
+}
+
 func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	path := "static" + r.URL.Path
 

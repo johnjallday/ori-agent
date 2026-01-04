@@ -48,6 +48,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/studios/", s.handleStudiosRoutes) // Dynamic route handler
 	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
+	mux.HandleFunc("/review", s.serveReview)
 
 	// =============================================================================
 	// Static File Server (CSS, JS, Icons, Assets)
