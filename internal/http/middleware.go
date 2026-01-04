@@ -3,6 +3,7 @@ package http
 import (
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -148,8 +149,14 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 			// Prevent MIME type sniffing
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 
-			// Prevent clickjacking by disallowing framing
-			w.Header().Set("X-Frame-Options", "DENY")
+			// Prevent clickjacking by disallowing framing (allow same-origin for plugin pages)
+			frameAncestors := "frame-ancestors 'none'"
+			if strings.HasPrefix(r.URL.Path, "/api/plugins/") && r.URL.Query().Get("ori_raw") == "1" {
+				w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+				frameAncestors = "frame-ancestors 'self'"
+			} else {
+				w.Header().Set("X-Frame-Options", "DENY")
+			}
 
 			// Enable XSS filter in older browsers
 			w.Header().Set("X-XSS-Protection", "1; mode=block")
@@ -171,7 +178,7 @@ func SecurityHeaders() func(http.Handler) http.Handler {
 					"img-src 'self' data: blob:; "+
 					"font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "+
 					"connect-src 'self' ws: wss: https://cdn.jsdelivr.net; "+
-					"frame-ancestors 'none'")
+					frameAncestors)
 
 			next.ServeHTTP(w, r)
 		})

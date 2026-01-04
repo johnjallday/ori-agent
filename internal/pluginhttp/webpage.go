@@ -9,18 +9,21 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
+	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // WebPageHandler serves custom web pages from plugins
 type WebPageHandler struct {
-	State store.Store
+	State            store.Store
+	TemplateRenderer *web.TemplateRenderer
 }
 
 // NewWebPageHandler creates a new web page handler
-func NewWebPageHandler(state store.Store) *WebPageHandler {
+func NewWebPageHandler(state store.Store, renderer *web.TemplateRenderer) *WebPageHandler {
 	return &WebPageHandler{
-		State: state,
+		State:            state,
+		TemplateRenderer: renderer,
 	}
 }
 
@@ -60,9 +63,25 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.shouldWrapPage(r, pagePath, webProvider) {
+		wrapped, err := h.renderPluginWrapper(r, pluginName, pagePath)
+		if err == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			if _, writeErr := w.Write([]byte(wrapped)); writeErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": writeErr})
+			}
+			return
+		}
+		logger.Warn("Failed to render plugin page wrapper", logger.Fields{"error": err, "plugin": pluginName, "page": pagePath})
+	}
+
 	// Parse query parameters
 	queryParams := make(map[string]string)
 	for key, values := range r.URL.Query() {
+		if key == "ori_raw" {
+			continue
+		}
 		if len(values) > 0 {
 			queryParams[key] = values[0] // Take first value for simplicity
 		}
@@ -86,6 +105,48 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, writeErr := w.Write([]byte(content)); writeErr != nil {
 		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
+}
+
+func (h *WebPageHandler) shouldWrapPage(r *http.Request, pagePath string, webProvider pluginapi.WebPageProvider) bool {
+	if h.TemplateRenderer == nil {
+		return false
+	}
+	if r.URL.Query().Get("ori_raw") == "1" {
+		return false
+	}
+	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+		return false
+	}
+	return containsString(webProvider.GetWebPages(), pagePath)
+}
+
+func (h *WebPageHandler) renderPluginWrapper(r *http.Request, pluginName, pagePath string) (string, error) {
+	rawURL := *r.URL
+	query := rawURL.Query()
+	query.Set("ori_raw", "1")
+	rawURL.RawQuery = query.Encode()
+
+	data := web.GetDefaultData()
+	data.Title = fmt.Sprintf("%s/%s - Ori Agent", pluginName, pagePath)
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = false
+	data.ShowNavLinks = true
+	if data.Extra == nil {
+		data.Extra = make(map[string]interface{})
+	}
+	data.Extra["PluginPageURL"] = rawURL.String()
+	data.Extra["PluginPageTitle"] = fmt.Sprintf("%s/%s", pluginName, pagePath)
+
+	return h.TemplateRenderer.RenderTemplate("plugin-page", data)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // ListPages returns available pages for a plugin

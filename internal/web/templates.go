@@ -88,6 +88,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/plugins.tmpl",
 		"templates/pages/workflows.tmpl",
 		"templates/pages/studios.tmpl",
+		"templates/pages/plugin-page.tmpl",
 		"templates/pages/workspace-dashboard.tmpl",
 		"templates/pages/workspace-canvas.tmpl",
 		"templates/pages/usage.tmpl",
@@ -121,6 +122,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["plugins"] = tmpl
 	tr.templates["workflows"] = tmpl
 	tr.templates["studios"] = tmpl
+	tr.templates["plugin-page"] = tmpl
 	tr.templates["workspace-dashboard"] = tmpl
 	tr.templates["workspace-canvas"] = tmpl
 	tr.templates["usage"] = tmpl
@@ -147,7 +149,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	switch name {
 	case "index":
 		templateName = "base.tmpl"
-	case "marketplace", "settings", "plugins", "workflows", "studios", "workspace-dashboard", "workspace-canvas", "usage", "mcp", "models", "agents-detail", "agents-edit":
+	case "marketplace", "settings", "plugins", "workflows", "studios", "plugin-page", "workspace-dashboard", "workspace-canvas", "usage", "mcp", "models", "agents-detail", "agents-edit":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	case "agents":
