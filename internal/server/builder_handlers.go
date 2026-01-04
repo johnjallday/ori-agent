@@ -21,6 +21,8 @@ import (
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
+	"github.com/johnjallday/ori-agent/internal/review"
+	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -121,6 +123,8 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.sessionHandler = sessionhttp.New(sessionStore)
 		// Wire session store to chat handler for multi-tab support
 		s.chatHandler.SetSessionStore(sessionStore)
+		// Wire tool call store for conversation review
+		s.chatHandler.SetToolCallStore(sessionStore.ToolCallStore())
 	}
 
 	// Initialize session files store and handler
@@ -144,6 +148,23 @@ func (b *ServerBuilder) initializeHandlers() error {
 		// Create files HTTP handler
 		s.sessionFilesHandler = fileshttp.NewHandler(sessionFilesStore, s.sessionFilesWatcher)
 		logger.Info("Session files management initialized", logger.Fields{"path": sessionFilesPath})
+	}
+
+	// Initialize review system
+	if s.sessionStore != nil {
+		reviewStore := review.NewSQLiteStore(s.sessionStore.DB())
+		reviewRunner := review.NewRunner(
+			reviewStore,
+			s.sessionStore,
+			s.sessionStore.ToolCallStore(),
+			review.DefaultDetectionConfig(),
+		)
+		// Wire up agent store for per-agent review settings
+		if s.st != nil {
+			reviewRunner.SetAgentStore(s.st)
+		}
+		s.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
+		logger.Info("Review system initialized", logger.Fields{})
 	}
 
 	return nil

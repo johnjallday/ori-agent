@@ -648,6 +648,17 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Review System API Endpoints
+	// =============================================================================
+	if s.reviewHandler != nil {
+		mux.HandleFunc("/api/review/trigger", s.reviewHandler.HandleTrigger)
+		mux.HandleFunc("/api/review/status/", s.reviewHandler.HandleStatus)
+		mux.HandleFunc("/api/review/issues", s.reviewHandler.HandleIssues)
+		mux.HandleFunc("/api/review/export", s.reviewHandler.HandleExport)
+		mux.HandleFunc("/api/review/runs", s.reviewHandler.HandleRuns)
+	}
+
+	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {

@@ -105,8 +105,8 @@ func (h *Handler) handleOllamaToolCalls(
 	messages = append(messages, assistantMsg)
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 
-	// Execute tool calls using common helper
-	execResult := h.executeToolCallsCommon(baseCtx, ag, agentName, resp.ToolCalls, files)
+	// Execute tool calls using common helper with session tracking
+	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, resp.ToolCalls, files, sessionID)
 
 	// Add tool results to messages
 	for i, tc := range resp.ToolCalls {

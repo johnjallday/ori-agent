@@ -38,6 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
+	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -134,6 +135,9 @@ type Server struct {
 	sessionFilesStore   *sessionfiles.Store
 	sessionFilesWatcher *filewatcher.Watcher
 	sessionFilesHandler *fileshttp.Handler
+
+	// Review system
+	reviewHandler *reviewhttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

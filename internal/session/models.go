@@ -73,6 +73,37 @@ type Session struct {
 	Messages []Message `json:"messages,omitempty"`
 }
 
+// ToolCall represents a tool/function call made during a conversation.
+// Tool calls are stored separately from messages to enable analysis of tool usage patterns.
+type ToolCall struct {
+	// ID is a unique identifier for the tool call (UUID format).
+	ID string `json:"id"`
+
+	// MessageID is the message that triggered this tool call.
+	MessageID string `json:"message_id"`
+
+	// SessionID is the session this tool call belongs to.
+	SessionID string `json:"session_id"`
+
+	// ToolName is the name of the tool/function that was called.
+	ToolName string `json:"tool_name"`
+
+	// Arguments is the JSON-encoded arguments passed to the tool.
+	Arguments string `json:"arguments,omitempty"`
+
+	// Result is the output returned by the tool (if successful).
+	Result string `json:"result,omitempty"`
+
+	// Error is the error message if the tool call failed.
+	Error string `json:"error,omitempty"`
+
+	// DurationMs is how long the tool execution took in milliseconds.
+	DurationMs int `json:"duration_ms,omitempty"`
+
+	// CreatedAt is when the tool call was made.
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // Message represents a single message in a session.
 type Message struct {
 	// ID is a unique identifier for the message (UUID format).

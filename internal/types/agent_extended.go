@@ -32,10 +32,12 @@ type AgentStatistics struct {
 
 // AgentMetadata contains descriptive and organizational information about an agent
 type AgentMetadata struct {
-	Description string   `json:"description,omitempty"`  // Human-readable description of the agent's purpose
-	Tags        []string `json:"tags,omitempty"`         // Organizational tags for filtering and categorization
-	AvatarColor string   `json:"avatar_color,omitempty"` // Color for avatar display (hex color code)
-	Favorite    bool     `json:"favorite,omitempty"`     // Whether this agent is marked as favorite
+	Description       string   `json:"description,omitempty"`        // Human-readable description of the agent's purpose
+	Tags              []string `json:"tags,omitempty"`               // Organizational tags for filtering and categorization
+	AvatarColor       string   `json:"avatar_color,omitempty"`       // Color for avatar display (hex color code)
+	Favorite          bool     `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
+	ReviewEnabled     *bool    `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
+	ReviewSensitivity string   `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
 }
 
 // DashboardStats contains aggregate statistics across all agents
