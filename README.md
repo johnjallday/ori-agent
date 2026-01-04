@@ -1,4 +1,4 @@
-# <img src="assets/logo.svg" alt="Ori Agent logo" width="48" height="48" align="middle" /> Ori Agent
+# <img src="assets/logo.svg" alt="Ori Agent logo" width="48" height="48" style="vertical-align: -0.2em;" /> Ori Agent
 
 <!-- AUTO:VERSION -->
 ![Version](https://img.shields.io/badge/Version-v0.0.36-blue)
