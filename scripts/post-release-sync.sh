@@ -2,11 +2,12 @@
 # post-release-sync.sh - Sync branches after a successful release
 #
 # This script:
-#   1. Checks if the release was successful on GitHub
-#   2. Syncs main with the release branch (force push if needed)
+#   1. Checks if a release workflow is currently running (aborts if so)
+#   2. Checks if the release was successful on GitHub
+#   3. Syncs main with the release branch (force push if needed)
 #      - Release branch has all commits: features + dependabot + release fixes
-#   3. Merges main to dev
-#   4. Deletes the release branch (local and remote)
+#   4. Merges main to dev
+#   5. Deletes the release branch (local and remote)
 #
 # Usage:
 #   ./scripts/post-release-sync.sh <version>
@@ -82,14 +83,57 @@ print_status "Version: $VERSION"
 print_status "Release branch: $RELEASE_BRANCH"
 echo ""
 
-# Step 1: Check if release exists and is successful
-print_status "Checking release status on GitHub..."
-
+# Check if GitHub CLI is available
 if ! command -v gh &> /dev/null; then
   print_error "GitHub CLI (gh) is required but not installed."
   print_error "Install from: https://cli.github.com/"
   exit 1
 fi
+
+# Step 0: Check if a release workflow is currently running
+print_status "Checking for running release workflows..."
+
+# Check release.yml workflow
+RELEASE_IN_PROGRESS=$(gh run list --workflow=release.yml --status=in_progress --json databaseId,headBranch -q '.[0]' 2>/dev/null || echo "")
+
+# Check scheduled-release.yml workflow
+SCHEDULED_IN_PROGRESS=$(gh run list --workflow=scheduled-release.yml --status=in_progress --json databaseId,headBranch -q '.[0]' 2>/dev/null || echo "")
+
+if [ -n "$RELEASE_IN_PROGRESS" ] || [ -n "$SCHEDULED_IN_PROGRESS" ]; then
+  echo ""
+  print_warning "A release workflow is currently running on GitHub!"
+  echo ""
+
+  if [ -n "$RELEASE_IN_PROGRESS" ]; then
+    RUN_ID=$(echo "$RELEASE_IN_PROGRESS" | jq -r '.databaseId')
+    RUN_BRANCH=$(echo "$RELEASE_IN_PROGRESS" | jq -r '.headBranch')
+    print_status "  Workflow: release.yml"
+    print_status "  Run ID: $RUN_ID"
+    print_status "  Branch: $RUN_BRANCH"
+    print_status "  View: gh run view $RUN_ID"
+  fi
+
+  if [ -n "$SCHEDULED_IN_PROGRESS" ]; then
+    RUN_ID=$(echo "$SCHEDULED_IN_PROGRESS" | jq -r '.databaseId')
+    RUN_BRANCH=$(echo "$SCHEDULED_IN_PROGRESS" | jq -r '.headBranch')
+    print_status "  Workflow: scheduled-release.yml"
+    print_status "  Run ID: $RUN_ID"
+    print_status "  Branch: $RUN_BRANCH"
+    print_status "  View: gh run view $RUN_ID"
+  fi
+
+  echo ""
+  print_error "Please wait for the release workflow to complete before running post-release sync."
+  print_status "You can watch the workflow with: gh run watch"
+  echo ""
+  exit 1
+fi
+
+print_success "No release workflows currently running"
+echo ""
+
+# Step 1: Check if release exists and is successful
+print_status "Checking release status on GitHub..."
 
 # Check if release exists
 RELEASE_INFO=$(gh release view "$VERSION" --json tagName,isDraft,assets 2>/dev/null || echo "")
