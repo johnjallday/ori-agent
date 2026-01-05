@@ -440,7 +440,7 @@ func (h *InitHandler) PluginExecuteHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// PluginInitStatusHandler checks filesystem for settings files
+// PluginInitStatusHandler checks which plugins actually need configuration
 func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		orihttp.MethodNotAllowed(w)
@@ -472,20 +472,46 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Check each active plugin for settings file
+	// Check each active plugin - only include those that actually need configuration
 	var uninitializedPlugins []map[string]any
 
-	for pluginName := range ag.Plugins {
-		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
+	for pluginName, pluginEntry := range ag.Plugins {
+		// First check if plugin actually supports/needs configuration
+		needsConfig := false
+		var requiredConfig []pluginapi.ConfigVariable
 
-		// Check if settings file exists
-		if _, err := os.Stat(settingsFilePath); os.IsNotExist(err) {
-			// Settings file doesn't exist, plugin needs initialization
+		if pluginEntry.Tool != nil {
+			// Check if plugin implements InitializationProvider
+			if initProvider, ok := pluginEntry.Tool.(pluginapi.InitializationProvider); ok {
+				requiredConfig = initProvider.GetRequiredConfig()
+				// Plugin needs config only if it has required config variables
+				needsConfig = len(requiredConfig) > 0
+			}
+		}
+
+		// Skip plugins that don't need configuration
+		if !needsConfig {
+			continue
+		}
+
+		// Plugin needs configuration - check if settings file exists
+		settingsFilePath := fmt.Sprintf("agents/%s/%s_settings.json", current, pluginName)
+		normalizedName := registry.NormalizePluginName(pluginName)
+
+		// Check both original and normalized name paths
+		settingsExist := false
+		if _, err := os.Stat(settingsFilePath); err == nil {
+			settingsExist = true
+		} else if _, err := os.Stat(fmt.Sprintf("agents/%s/%s_settings.json", current, normalizedName)); err == nil {
+			settingsExist = true
+		}
+
+		// Only add to uninitialized if plugin needs config AND settings don't exist
+		if !settingsExist {
 			uninitializedPlugins = append(uninitializedPlugins, map[string]any{
 				"name":            pluginName,
 				"description":     fmt.Sprintf("Plugin %s needs configuration", pluginName),
-				"required_config": []map[string]any{}, // Empty for now, could be expanded later
-				"legacy_plugin":   true,
+				"required_config": requiredConfig,
 			})
 		}
 	}
@@ -497,8 +523,6 @@ func (h *InitHandler) PluginInitStatusHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-
 	}
 }
