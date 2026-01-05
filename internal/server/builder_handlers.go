@@ -65,6 +65,7 @@ func (b *ServerBuilder) initializeHandlers() error {
 	s.deviceHandler = devicehttp.NewHandler(s.onboardingMgr)
 	s.resetHandler = settingshttp.NewResetHandler(s.onboardingMgr, ".")
 	s.webPageHandler = pluginhttp.NewWebPageHandler(s.st, s.templateRenderer)
+	s.webPageHandler.SetLoader(pluginhttp.NativeLoader{})
 
 	// Initialize auto-config handler for agent creation
 	s.autoConfigHandler = agenthttp.NewAutoConfigHandler(s.llmFactory, s.configManager)

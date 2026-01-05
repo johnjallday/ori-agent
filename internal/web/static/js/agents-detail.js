@@ -761,6 +761,10 @@ async function togglePlugin(pluginName, enabled) {
             if (pluginManagerVisible) {
                 renderAvailablePlugins();
             }
+            // Refresh plugin pages dropdown
+            if (window.refreshPluginPages) {
+                window.refreshPluginPages();
+            }
         } else {
             const error = await response.text();
             showToast(`Failed: ${error}`, 'error');

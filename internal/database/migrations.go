@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -64,6 +64,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration001InitialSchema(ctx)
 	case 2:
 		return db.migration002ReviewSchema(ctx)
+	case 3:
+		return db.migration003FixToolCallsForeignKey(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -358,6 +360,64 @@ func (db *DB) migration002ReviewSchema(ctx context.Context) error {
 		"CREATE INDEX IF NOT EXISTS idx_review_issues_issue_type ON review_issues(issue_type)",
 		"CREATE INDEX IF NOT EXISTS idx_review_issues_agent_name ON review_issues(agent_name)",
 		"CREATE INDEX IF NOT EXISTS idx_review_runs_status ON review_runs(status)",
+	}
+
+	for _, idx := range indexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migration003FixToolCallsForeignKey removes the invalid foreign key constraint on message_id.
+// The message_id column stores the OpenAI tool call ID (e.g., "call_abc123"), not a reference
+// to the messages table. SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we recreate the table.
+func (db *DB) migration003FixToolCallsForeignKey(ctx context.Context) error {
+	// Create new table without the message_id foreign key constraint
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS tool_calls_new (
+			id TEXT PRIMARY KEY,
+			message_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			arguments TEXT,
+			result TEXT,
+			error TEXT,
+			duration_ms INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new tool_calls table: %w", err)
+	}
+
+	// Copy existing data (if any)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO tool_calls_new (id, message_id, session_id, tool_name, arguments, result, error, duration_ms, created_at)
+		SELECT id, message_id, session_id, tool_name, arguments, result, error, duration_ms, created_at
+		FROM tool_calls
+	`); err != nil {
+		// Ignore error if no data exists
+		logger.Debug("No existing tool_calls data to migrate", nil)
+	}
+
+	// Drop old table
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS tool_calls`); err != nil {
+		return fmt.Errorf("failed to drop old tool_calls table: %w", err)
+	}
+
+	// Rename new table
+	if _, err := db.ExecContext(ctx, `ALTER TABLE tool_calls_new RENAME TO tool_calls`); err != nil {
+		return fmt.Errorf("failed to rename tool_calls table: %w", err)
+	}
+
+	// Recreate indexes
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_name ON tool_calls(tool_name)",
+		"CREATE INDEX IF NOT EXISTS idx_tool_calls_message_id ON tool_calls(message_id)",
 	}
 
 	for _, idx := range indexes {

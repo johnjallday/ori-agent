@@ -261,6 +261,10 @@ function setupPluginToggles() {
         if (window.Toast) {
           Toast.success(`Plugin ${isEnabled ? 'enabled' : 'disabled'}: ${pluginName}`);
         }
+        // Refresh plugin pages dropdown after enabling/disabling
+        if (window.refreshPluginPages) {
+          window.refreshPluginPages();
+        }
       } catch (error) {
         console.error('Failed to toggle plugin:', error);
         // Revert the toggle state

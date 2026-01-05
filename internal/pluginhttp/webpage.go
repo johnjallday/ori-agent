@@ -2,13 +2,17 @@ package pluginhttp
 
 import (
 	"fmt"
+	"path/filepath"
+	"sync"
 
 	"net/http"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
@@ -17,6 +21,8 @@ import (
 type WebPageHandler struct {
 	State            store.Store
 	TemplateRenderer *web.TemplateRenderer
+	Loader           ToolLoader
+	pluginLoadMu     sync.Mutex
 }
 
 // NewWebPageHandler creates a new web page handler
@@ -25,6 +31,11 @@ func NewWebPageHandler(state store.Store, renderer *web.TemplateRenderer) *WebPa
 		State:            state,
 		TemplateRenderer: renderer,
 	}
+}
+
+// SetLoader sets the plugin loader for lazy loading plugins
+func (h *WebPageHandler) SetLoader(loader ToolLoader) {
+	h.Loader = loader
 }
 
 // ServeHTTP handles plugin web page requests
@@ -53,11 +64,26 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
-		// Check if plugin implements WebPageProvider
 		return
 	}
 
-	webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
+	// Lazy load the plugin if not yet loaded
+	tool := loadedPlugin.Tool
+	if tool == nil && h.Loader != nil {
+		loadedTool, err := h.ensurePluginLoaded(current, pluginName, loadedPlugin)
+		if err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to load plugin '%s': %v", pluginName, err))
+			return
+		}
+		tool = loadedTool
+	}
+
+	if tool == nil {
+		orihttp.InternalError(w, fmt.Sprintf("Plugin '%s' could not be loaded", pluginName))
+		return
+	}
+
+	webProvider, ok := tool.(pluginapi.WebPageProvider)
 	if !ok {
 		orihttp.NotImplemented(w, fmt.Sprintf("Plugin '%s' does not support web pages", pluginName))
 		return
@@ -161,18 +187,39 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	ag, ok := h.State.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
-		// Find the plugin
 		return
 	}
 
 	loadedPlugin, exists := ag.Plugins[pluginName]
 	if !exists {
 		orihttp.NotFound(w, fmt.Sprintf("Plugin '%s' not found or not loaded", pluginName))
-		// Check if plugin implements WebPageProvider
 		return
 	}
 
-	webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
+	// Lazy load the plugin if not yet loaded
+	tool := loadedPlugin.Tool
+	if tool == nil && h.Loader != nil {
+		loadedTool, err := h.ensurePluginLoaded(current, pluginName, loadedPlugin)
+		if err != nil {
+			// Plugin couldn't be loaded, return empty list
+			w.Header().Set("Content-Type", "application/json")
+			if _, writeErr := w.Write([]byte(`{"pages":[]}`)); writeErr != nil {
+				logger.Error("Failed to write response", logger.Fields{"error": writeErr})
+			}
+			return
+		}
+		tool = loadedTool
+	}
+
+	if tool == nil {
+		w.Header().Set("Content-Type", "application/json")
+		if _, writeErr := w.Write([]byte(`{"pages":[]}`)); writeErr != nil {
+			logger.Error("Failed to write response", logger.Fields{"error": writeErr})
+		}
+		return
+	}
+
+	webProvider, ok := tool.(pluginapi.WebPageProvider)
 	if !ok {
 		// Plugin doesn't provide web pages, return empty list
 		w.Header().Set("Content-Type", "application/json")
@@ -214,7 +261,25 @@ func (h *WebPageHandler) ListAllPages(w http.ResponseWriter, r *http.Request) {
 
 	// Iterate through all loaded plugins
 	for pluginName, loadedPlugin := range ag.Plugins {
-		webProvider, ok := loadedPlugin.Tool.(pluginapi.WebPageProvider)
+		// Lazy load the plugin if not yet loaded
+		tool := loadedPlugin.Tool
+		if tool == nil && h.Loader != nil {
+			loadedTool, err := h.ensurePluginLoaded(current, pluginName, loadedPlugin)
+			if err != nil {
+				logger.Debug("Failed to lazy load plugin for web pages", logger.Fields{
+					"plugin": pluginName,
+					"error":  err.Error(),
+				})
+				continue
+			}
+			tool = loadedTool
+		}
+
+		if tool == nil {
+			continue
+		}
+
+		webProvider, ok := tool.(pluginapi.WebPageProvider)
 		if !ok {
 			continue
 		}
@@ -243,6 +308,61 @@ func (h *WebPageHandler) ListAllPages(w http.ResponseWriter, r *http.Request) {
 	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
 		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
 	}
+}
+
+// ensurePluginLoaded lazy loads a plugin if not already loaded
+func (h *WebPageHandler) ensurePluginLoaded(agentName, pluginName string, lp types.LoadedPlugin) (pluginapi.PluginTool, error) {
+	h.pluginLoadMu.Lock()
+	defer h.pluginLoadMu.Unlock()
+
+	// Double-check if already loaded (another goroutine may have loaded it)
+	ag, ok := h.State.GetAgent(agentName)
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", agentName)
+	}
+	if existing, exists := ag.Plugins[pluginName]; exists && existing.Tool != nil {
+		return existing.Tool, nil
+	}
+
+	logger.Info("Lazy loading plugin for web pages", logger.Fields{
+		"plugin": pluginName,
+		"agent":  agentName,
+	})
+
+	// Load the plugin
+	tool, err := h.Loader.Load(lp.Path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load plugin %s: %w", pluginName, err)
+	}
+
+	// Set agent context
+	agentSpecificStorePath := filepath.Join("agents", agentName, "config.json")
+	if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
+		agentSpecificStorePath = abs
+	}
+	pluginloader.SetAgentContext(tool, agentName, agentSpecificStorePath, "")
+
+	// Update the plugin in the agent
+	lp.Tool = tool
+	lp.Definition = tool.Definition()
+
+	// Get file support info
+	supportsFiles, acceptedFileTypes := pluginloader.GetPluginFileSupport(tool)
+	lp.SupportsFiles = supportsFiles
+	lp.AcceptedFileTypes = acceptedFileTypes
+
+	ag.Plugins[pluginName] = lp
+
+	// Save the updated agent (ignore errors, non-critical)
+	if err := h.State.SetAgent(agentName, ag); err != nil {
+		logger.Warn("Failed to save agent after lazy loading plugin", logger.Fields{
+			"agent":  agentName,
+			"plugin": pluginName,
+			"error":  err.Error(),
+		})
+	}
+
+	return tool, nil
 }
 
 // Helper function to quote strings for JSON
