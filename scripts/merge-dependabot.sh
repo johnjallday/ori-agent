@@ -39,7 +39,20 @@ FAILED_COUNT=0
 for PR_NUMBER in "${PR_NUMBERS[@]}"; do
   IFS=$'\t' read -r PR_TITLE PR_MERGEABLE PR_MERGE_STATE PR_CHECK_STATE PR_AUTHOR <<<"$(
     gh pr view "$PR_NUMBER" --json title,mergeable,mergeStateStatus,statusCheckRollup,author \
-      --jq '[.title, .mergeable, .mergeStateStatus, (.statusCheckRollup.state // "UNKNOWN"), .author.login] | @tsv'
+      --jq '
+        def check_state:
+          if (.statusCheckRollup | length) == 0 then
+            "UNKNOWN"
+          else
+            ([.statusCheckRollup[] | (.conclusion // .status // .state // "UNKNOWN")]) as $states
+            | if ($states | all(. == "SUCCESS")) then "SUCCESS"
+              elif ($states | any(. == "FAILURE" or . == "CANCELLED" or . == "TIMED_OUT")) then "FAILURE"
+              elif ($states | any(. == "PENDING" or . == "IN_PROGRESS" or . == "QUEUED")) then "PENDING"
+              else "UNKNOWN"
+              end
+          end;
+        [.title, .mergeable, .mergeStateStatus, check_state, .author.login] | @tsv
+      '
   )"
 
   case "$PR_AUTHOR" in
@@ -59,7 +72,14 @@ for PR_NUMBER in "${PR_NUMBERS[@]}"; do
   fi
 
   echo "Merging #$PR_NUMBER ($PR_TITLE)..."
-  if gh pr merge "$PR_NUMBER" --squash --delete-branch --yes; then
+  if gh pr merge --help 2>/dev/null | grep -q -- '--yes'; then
+    if gh pr merge "$PR_NUMBER" --squash --delete-branch --yes; then
+      MERGED_COUNT=$((MERGED_COUNT + 1))
+    else
+      echo "Failed to merge #$PR_NUMBER."
+      FAILED_COUNT=$((FAILED_COUNT + 1))
+    fi
+  elif printf 'y\n' | gh pr merge "$PR_NUMBER" --squash --delete-branch; then
     MERGED_COUNT=$((MERGED_COUNT + 1))
   else
     echo "Failed to merge #$PR_NUMBER."
