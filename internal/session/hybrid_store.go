@@ -14,9 +14,10 @@ import (
 
 // hybridStore implements HybridStore using an LRU memory cache backed by SQLite.
 type hybridStore struct {
-	cache  *MemoryCache
-	sqlite *SQLiteStore
-	db     *database.DB
+	cache         *MemoryCache
+	sqlite        *SQLiteStore
+	toolCallStore *SQLiteToolCallStore
+	db            *database.DB
 
 	mu     sync.RWMutex
 	stopCh chan struct{}
@@ -41,11 +42,12 @@ func NewHybridStore(ctx context.Context, cfg *HybridStoreConfig) (HybridStore, e
 	}
 
 	store := &hybridStore{
-		cache:  NewMemoryCache(cfg.CacheSize),
-		sqlite: NewSQLiteStore(db),
-		db:     db,
-		stopCh: make(chan struct{}),
-		config: cfg,
+		cache:         NewMemoryCache(cfg.CacheSize),
+		sqlite:        NewSQLiteStore(db),
+		toolCallStore: NewSQLiteToolCallStore(db),
+		db:            db,
+		stopCh:        make(chan struct{}),
+		config:        cfg,
 	}
 
 	// Enforce memory limits on startup
@@ -74,11 +76,12 @@ func NewHybridStoreWithDB(db *database.DB, cacheSize int) HybridStore {
 	}
 
 	return &hybridStore{
-		cache:  NewMemoryCache(cacheSize),
-		sqlite: NewSQLiteStore(db),
-		db:     db,
-		stopCh: make(chan struct{}),
-		config: &HybridStoreConfig{CacheSize: cacheSize},
+		cache:         NewMemoryCache(cacheSize),
+		sqlite:        NewSQLiteStore(db),
+		toolCallStore: NewSQLiteToolCallStore(db),
+		db:            db,
+		stopCh:        make(chan struct{}),
+		config:        &HybridStoreConfig{CacheSize: cacheSize},
 	}
 }
 
@@ -448,6 +451,16 @@ func (h *hybridStore) GetStorageStats(ctx context.Context) (*StorageStats, error
 	stats.CachedSessions = h.cache.Len()
 
 	return stats, nil
+}
+
+// ToolCallStore returns the tool call store for persisting tool execution data.
+func (h *hybridStore) ToolCallStore() ToolCallStore {
+	return h.toolCallStore
+}
+
+// DB returns the underlying database connection.
+func (h *hybridStore) DB() *database.DB {
+	return h.db
 }
 
 // getDatabaseSize returns the approximate database size in bytes.

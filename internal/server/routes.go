@@ -48,6 +48,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/studios/", s.handleStudiosRoutes) // Dynamic route handler
 	mux.HandleFunc("/studios", s.serveWorkspaces)
 	mux.HandleFunc("/usage", s.serveUsage)
+	mux.HandleFunc("/review", s.serveReview)
 
 	// =============================================================================
 	// Static File Server (CSS, JS, Icons, Assets)
@@ -645,6 +646,17 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
 		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
+	}
+
+	// =============================================================================
+	// Review System API Endpoints
+	// =============================================================================
+	if s.reviewHandler != nil {
+		mux.HandleFunc("/api/review/trigger", s.reviewHandler.HandleTrigger)
+		mux.HandleFunc("/api/review/status/", s.reviewHandler.HandleStatus)
+		mux.HandleFunc("/api/review/issues", s.reviewHandler.HandleIssues)
+		mux.HandleFunc("/api/review/export", s.reviewHandler.HandleExport)
+		mux.HandleFunc("/api/review/runs", s.reviewHandler.HandleRuns)
 	}
 
 	// =============================================================================

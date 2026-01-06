@@ -40,6 +40,18 @@ func (h *Handler) executeToolCallsCommon(
 	toolCalls []llm.ToolCall,
 	files []pluginapi.FileAttachment,
 ) ExecuteToolCallsResult {
+	return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, "")
+}
+
+// executeToolCallsCommonWithSession executes tool calls and stores them for the given session
+func (h *Handler) executeToolCallsCommonWithSession(
+	baseCtx context.Context,
+	ag *agent.Agent,
+	agentName string,
+	toolCalls []llm.ToolCall,
+	files []pluginapi.FileAttachment,
+	sessionID string,
+) ExecuteToolCallsResult {
 	var results []ToolCallResult
 
 	for _, tc := range toolCalls {
@@ -82,6 +94,15 @@ func (h *Handler) executeToolCallsCommon(
 				logger.Info("Tool execution completed", logger.Fields{"tool": name})
 			}
 		}
+
+		durationMs := int(duration.Milliseconds())
+
+		// Store tool call for review analysis
+		var errorMsg string
+		if err != nil {
+			errorMsg = err.Error()
+		}
+		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
 
 		results = append(results, ToolCallResult{
 			Function:   name,

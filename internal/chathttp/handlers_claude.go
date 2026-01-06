@@ -99,8 +99,8 @@ func (h *Handler) handleClaudeToolCalls(
 	messages = append(messages, llm.NewAssistantMessage(resp.Content))
 	ag.Messages = append(ag.Messages, openai.AssistantMessage(resp.Content))
 
-	// Execute tool calls using common helper
-	execResult := h.executeToolCallsCommon(baseCtx, ag, agentName, resp.ToolCalls, files)
+	// Execute tool calls using common helper with session tracking
+	execResult := h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, resp.ToolCalls, files, sessionID)
 
 	// Add tool results to messages
 	for i, tc := range resp.ToolCalls {

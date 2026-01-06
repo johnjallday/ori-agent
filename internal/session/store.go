@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+
+	"github.com/johnjallday/ori-agent/internal/database"
 )
 
 // Common errors returned by store operations.
@@ -158,6 +160,12 @@ type HybridStore interface {
 
 	// GetStorageStats returns statistics about session storage.
 	GetStorageStats(ctx context.Context) (*StorageStats, error)
+
+	// ToolCallStore returns the tool call store for persisting tool execution data.
+	ToolCallStore() ToolCallStore
+
+	// DB returns the underlying database connection for use by other components.
+	DB() *database.DB
 }
 
 // CacheStats provides information about the memory cache state.

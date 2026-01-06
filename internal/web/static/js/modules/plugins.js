@@ -12,24 +12,34 @@ function normalizePluginName(name = '') {
   return stripVersionSuffix(name.toLowerCase().replace(/_/g, '-').trim());
 }
 
-// Check plugin configuration status - automatically detect by checking default-settings endpoint
+// Check plugin configuration status - only show config button if plugin has required config variables
 async function checkPluginConfigurationStatus(activePluginNames) {
   const configStatus = new Map();
 
-  // Check each active plugin to see if it has configuration
+  // Check each active plugin to see if it actually needs configuration
   for (const pluginName of activePluginNames) {
     let hasConfig = false;
+    let needsInit = false;
+    let configVars = [];
 
     try {
-      // Try to fetch default-settings endpoint for this plugin
-      const response = await fetch(`/api/plugins/${pluginName}/default-settings`);
+      // Check the /config endpoint to see if plugin supports initialization with required config
+      const response = await fetch(`/api/plugins/${pluginName}/config`);
 
       if (response.ok) {
-        // Plugin has default-settings endpoint, so it's configurable
-        hasConfig = true;
-        console.log(`Plugin ${pluginName} has configuration (default-settings endpoint found)`);
+        const data = await response.json();
+        // Plugin has config only if it supports initialization AND has required config variables
+        if (data.supports_initialization && data.required_config && data.required_config.length > 0) {
+          hasConfig = true;
+          configVars = data.required_config;
+          // Needs init if not already initialized
+          needsInit = !data.is_initialized;
+          console.log(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
+        } else {
+          console.log(`Plugin ${pluginName} does not require configuration`);
+        }
       } else {
-        console.log(`Plugin ${pluginName} has no configuration (default-settings returned ${response.status})`);
+        console.log(`Plugin ${pluginName} config check returned ${response.status}`);
       }
     } catch (error) {
       console.log(`Plugin ${pluginName} configuration check failed:`, error);
@@ -37,9 +47,9 @@ async function checkPluginConfigurationStatus(activePluginNames) {
     }
 
     configStatus.set(pluginName, {
-      needsInit: false,        // For simplicity, assume plugins are initialized
-      hasConfig: hasConfig,    // Show config if default-settings endpoint exists
-      configVars: [],
+      needsInit: needsInit,
+      hasConfig: hasConfig,
+      configVars: configVars,
       isLegacy: false
     });
   }
@@ -250,6 +260,10 @@ function setupPluginToggles() {
         await togglePlugin(pluginName, pluginPath, isEnabled);
         if (window.Toast) {
           Toast.success(`Plugin ${isEnabled ? 'enabled' : 'disabled'}: ${pluginName}`);
+        }
+        // Refresh plugin pages dropdown after enabling/disabling
+        if (window.refreshPluginPages) {
+          window.refreshPluginPages();
         }
       } catch (error) {
         console.error('Failed to toggle plugin:', error);
