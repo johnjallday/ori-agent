@@ -42,11 +42,15 @@ for PR_NUMBER in "${PR_NUMBERS[@]}"; do
       --jq '[.title, .mergeable, .mergeStateStatus, (.statusCheckRollup.state // "UNKNOWN"), .author.login] | @tsv'
   )"
 
-  if [ "$PR_AUTHOR" != "dependabot[bot]" ] && [ "$PR_AUTHOR" != "dependabot-preview[bot]" ]; then
-    echo "Skipping #$PR_NUMBER ($PR_TITLE): not a Dependabot PR ($PR_AUTHOR)."
-    SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-    continue
-  fi
+  case "$PR_AUTHOR" in
+    "dependabot[bot]"|"dependabot-preview[bot]"|"app/dependabot")
+      ;;
+    *)
+      echo "Skipping #$PR_NUMBER ($PR_TITLE): not a Dependabot PR ($PR_AUTHOR)."
+      SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+      continue
+      ;;
+  esac
 
   if [ "$PR_MERGEABLE" != "MERGEABLE" ] || [ "$PR_MERGE_STATE" != "CLEAN" ] || [ "$PR_CHECK_STATE" != "SUCCESS" ]; then
     echo "Skipping #$PR_NUMBER ($PR_TITLE): mergeable=$PR_MERGEABLE merge_state=$PR_MERGE_STATE checks=$PR_CHECK_STATE."
