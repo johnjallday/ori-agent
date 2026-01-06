@@ -4,11 +4,9 @@
 # This script:
 #   1. Checks if a release workflow is currently running (aborts if so)
 #   2. Checks if the release was successful on GitHub
-#   3. Syncs main with the release branch (force push if needed)
-#      - Release branch has all commits: features + dependabot + release fixes
+#   3. Updates local main from origin
 #   4. Merges main to dev (in dev worktree)
 #   5. Refreshes other worktrees (optional)
-#   6. Deletes the release branch (local and remote)
 #
 # Usage:
 #   ./scripts/post-release-sync.sh <version>
@@ -130,15 +128,12 @@ if [[ ! "$VERSION" =~ ^v ]]; then
   VERSION="v$VERSION"
 fi
 
-RELEASE_BRANCH="release/$VERSION"
-
 echo ""
 echo "╔════════════════════════════════════════════╗"
 echo "║       Post-Release Sync                    ║"
 echo "╚════════════════════════════════════════════╝"
 echo ""
 print_status "Version: $VERSION"
-print_status "Release branch: $RELEASE_BRANCH"
 echo ""
 
 # Check if GitHub CLI is available
@@ -243,34 +238,12 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
   exit 1
 fi
 
-# Step 3: Sync main with release branch
-# The release branch contains all commits (features + dependabot + release fixes)
-# Main needs to be updated to match the release branch
-print_status "Fetching release branch..."
-git fetch origin "$RELEASE_BRANCH"
-
-print_status "Checking if main needs to be synced with release branch..."
+# Step 3: Update main from origin
+print_status "Updating main from origin..."
 git checkout main
-
-# Check if release branch has commits not in main
-COMMITS_AHEAD=$(git rev-list --count origin/main..origin/"$RELEASE_BRANCH" 2>/dev/null || echo "0")
-
-if [ "$COMMITS_AHEAD" -gt 0 ]; then
-  print_status "Release branch has $COMMITS_AHEAD commits not in main"
-  print_status "Resetting main to match release branch..."
-  git reset --hard origin/"$RELEASE_BRANCH"
-
-  print_status "Force pushing main to origin..."
-  if git push --force-with-lease origin main; then
-    print_success "Main branch synced with release branch"
-  else
-    print_error "Failed to push main. You may need to resolve this manually."
-    exit 1
-  fi
-else
-  print_status "Main is already up-to-date with release branch"
-  git pull origin main
-fi
+git fetch origin main
+git pull --ff-only origin main
+print_success "Main branch updated from origin"
 echo ""
 
 # Step 4: Merge main to dev
@@ -316,37 +289,14 @@ refresh_worktree "$CLAUDE_WORKTREE" "Claude"
 refresh_worktree "$CODEX_WORKTREE" "Codex"
 echo ""
 
-# Step 6: Delete release branch
-print_status "Cleaning up release branch..."
-
-# Delete remote branch
-if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" &>/dev/null; then
-  print_status "Deleting remote branch: origin/$RELEASE_BRANCH"
-  git push origin --delete "$RELEASE_BRANCH" || print_warning "Could not delete remote branch"
-else
-  print_status "Remote branch already deleted"
-fi
-
-# Delete local branch
-if git show-ref --verify --quiet "refs/heads/$RELEASE_BRANCH"; then
-  print_status "Deleting local branch: $RELEASE_BRANCH"
-  git branch -D "$RELEASE_BRANCH" || print_warning "Could not delete local branch"
-else
-  print_status "Local branch already deleted"
-fi
-
-print_success "Release branch cleaned up"
-echo ""
-
 # Summary
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 print_success "Post-release sync complete for $VERSION!"
 echo ""
 echo "  ✓ Release verified on GitHub ($ASSET_COUNT assets)"
-echo "  ✓ Main branch synced with release branch"
+echo "  ✓ Main branch updated from origin"
 echo "  ✓ Dev branch synced with main"
-echo "  ✓ Release branch deleted"
 echo ""
 print_status "All branches now at: $(git rev-parse --short main)"
 print_status "Current branch: $(git branch --show-current)"
