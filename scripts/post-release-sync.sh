@@ -6,8 +6,9 @@
 #   2. Checks if the release was successful on GitHub
 #   3. Syncs main with the release branch (force push if needed)
 #      - Release branch has all commits: features + dependabot + release fixes
-#   4. Merges main to dev
-#   5. Deletes the release branch (local and remote)
+#   4. Merges main to dev (in dev worktree)
+#   5. Refreshes other worktrees (optional)
+#   6. Deletes the release branch (local and remote)
 #
 # Usage:
 #   ./scripts/post-release-sync.sh <version>
@@ -41,6 +42,63 @@ print_error() {
 # Get script directory and change to project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
+
+WORKTREES_ROOT="${WORKTREES_ROOT:-../worktrees}"
+DEV_WORKTREE="${DEV_WORKTREE:-$WORKTREES_ROOT/ori-agent-dev}"
+CLAUDE_WORKTREE="${CLAUDE_WORKTREE:-$WORKTREES_ROOT/ori-agent-claude}"
+CODEX_WORKTREE="${CODEX_WORKTREE:-$WORKTREES_ROOT/ori-agent-codex}"
+
+ensure_clean_worktree() {
+  local worktree_path="$1"
+  local worktree_label="$2"
+
+  if [ ! -d "$worktree_path" ]; then
+    print_error "$worktree_label worktree not found: $worktree_path"
+    exit 1
+  fi
+
+  if ! git -C "$worktree_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    print_error "$worktree_label worktree is not a git worktree: $worktree_path"
+    exit 1
+  fi
+
+  if ! git -C "$worktree_path" diff-index --quiet HEAD -- 2>/dev/null; then
+    print_error "$worktree_label worktree has uncommitted changes. Please commit or stash them first."
+    git -C "$worktree_path" status --short
+    exit 1
+  fi
+}
+
+refresh_worktree() {
+  local worktree_path="$1"
+  local worktree_label="$2"
+
+  if [ ! -d "$worktree_path" ]; then
+    print_status "$worktree_label worktree not found at $worktree_path; skipping"
+    return
+  fi
+
+  if ! git -C "$worktree_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    print_warning "$worktree_label worktree is not a git worktree; skipping"
+    return
+  fi
+
+  if ! git -C "$worktree_path" diff-index --quiet HEAD -- 2>/dev/null; then
+    print_warning "$worktree_label worktree has uncommitted changes; skipping"
+    return
+  fi
+
+  local current_branch
+  current_branch=$(git -C "$worktree_path" branch --show-current)
+  if [ -z "$current_branch" ]; then
+    print_warning "$worktree_label worktree is in detached HEAD; skipping"
+    return
+  fi
+
+  print_status "Updating $worktree_label worktree ($current_branch)..."
+  git -C "$worktree_path" fetch origin "$current_branch" || print_warning "Could not fetch $worktree_label"
+  git -C "$worktree_path" pull --ff-only origin "$current_branch" || print_warning "Could not update $worktree_label"
+}
 
 # Check for version argument
 VERSION="${1:-}"
@@ -216,23 +274,30 @@ fi
 echo ""
 
 # Step 4: Merge main to dev
-print_status "Syncing dev with main..."
-git checkout dev
-git fetch origin dev
+print_status "Syncing dev with main (worktree: $DEV_WORKTREE)..."
+ensure_clean_worktree "$DEV_WORKTREE" "Dev"
+
+CURRENT_BRANCH=$(git -C "$DEV_WORKTREE" branch --show-current)
+if [ "$CURRENT_BRANCH" != "dev" ]; then
+  print_warning "Dev worktree is on '$CURRENT_BRANCH'; checking out dev..."
+  git -C "$DEV_WORKTREE" checkout dev
+fi
+
+print_status "Fetching main and dev in dev worktree..."
+git -C "$DEV_WORKTREE" fetch origin dev main
 
 # Check if dev needs updating
-MAIN_COMMIT=$(git rev-parse main)
-DEV_CONTAINS_MAIN=$(git merge-base --is-ancestor main dev && echo "yes" || echo "no")
+DEV_CONTAINS_MAIN=$(git -C "$DEV_WORKTREE" merge-base --is-ancestor origin/main dev && echo "yes" || echo "no")
 
 if [ "$DEV_CONTAINS_MAIN" = "yes" ]; then
   print_status "Dev already contains all main commits"
-  git pull origin dev
+  git -C "$DEV_WORKTREE" pull origin dev
 else
   print_status "Merging main to dev..."
-  git pull origin dev
+  git -C "$DEV_WORKTREE" pull origin dev
 
-  if git merge main -m "Merge main ($VERSION release) back to dev"; then
-    git push origin dev
+  if git -C "$DEV_WORKTREE" merge origin/main -m "Merge main ($VERSION release) back to dev"; then
+    git -C "$DEV_WORKTREE" push origin dev
     print_success "Dev branch updated with $VERSION"
   else
     print_error "Merge conflict! Please resolve manually:"
@@ -245,7 +310,13 @@ else
 fi
 echo ""
 
-# Step 5: Delete release branch
+# Step 5: Refresh other worktrees
+print_status "Refreshing other worktrees..."
+refresh_worktree "$CLAUDE_WORKTREE" "Claude"
+refresh_worktree "$CODEX_WORKTREE" "Codex"
+echo ""
+
+# Step 6: Delete release branch
 print_status "Cleaning up release branch..."
 
 # Delete remote branch
