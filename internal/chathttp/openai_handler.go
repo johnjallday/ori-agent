@@ -173,6 +173,7 @@ func (h *Handler) handleOpenAIToolCalls(
 
 		result, err := ExecuteToolWithFiles(toolCtx, tool, name, args, files)
 		duration := time.Since(startTime)
+		durationMs := int(duration.Milliseconds())
 
 		if h.healthManager != nil {
 			if err != nil {
@@ -182,13 +183,17 @@ func (h *Handler) handleOpenAIToolCalls(
 			}
 		}
 
+		var errorMsg string
 		if err != nil {
-			errorMsg := fmt.Sprintf("❌ Error executing %s: %v", name, err)
-			result = errorMsg
+			errorMsg = err.Error()
+			result = fmt.Sprintf("❌ Error executing %s: %v", name, err)
 			logger.Error("Tool failed", logger.Fields{"tool": name, "error": err})
 		} else {
 			logger.Info("Tool execution completed", logger.Fields{"tool": name})
 		}
+
+		// Store tool call for review analysis
+		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
 
 		ag.Messages = append(ag.Messages, openai.ToolMessage(result, tc.ID))
 		toolResults = append(toolResults, map[string]string{

@@ -958,6 +958,12 @@ function setupSidebarToggle() {
   const sidebar = document.getElementById('sidebar');
 
   if (sidebarToggle && sidebar) {
+    const isEditableTarget = (target) => {
+      if (!target) return false;
+      const tagName = target.tagName;
+      return target.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+    };
+
     sidebarToggle.addEventListener('click', function(event) {
       console.log('[SIDEBAR TOGGLE] Click detected');
       console.log('[SIDEBAR TOGGLE] Event target:', event.target);
@@ -998,6 +1004,16 @@ function setupSidebarToggle() {
         // Restore sidebar width (get from resizer or use default)
         const savedWidth = localStorage.getItem('sidebarWidth') || '300';
         document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.metaKey && event.code === 'Backquote' && !event.shiftKey && !event.ctrlKey && !event.altKey) {
+        if (isEditableTarget(event.target)) {
+          return;
+        }
+        event.preventDefault();
+        sidebarToggle.click();
       }
     });
 

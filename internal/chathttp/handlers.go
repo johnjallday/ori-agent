@@ -63,6 +63,7 @@ type Handler struct {
 	orchestrator   *orchestration.Orchestrator
 	costTracker    *llm.CostTracker
 	sessionStore   session.HybridStore
+	toolCallStore  session.ToolCallStore
 	mcpRegistry    interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
@@ -159,6 +160,36 @@ func (h *Handler) SetShutdownFunc(fn func()) {
 // SetSessionStore sets the session store for storing chat messages
 func (h *Handler) SetSessionStore(store session.HybridStore) {
 	h.sessionStore = store
+}
+
+// SetToolCallStore sets the tool call store for storing tool execution data
+func (h *Handler) SetToolCallStore(store session.ToolCallStore) {
+	h.toolCallStore = store
+}
+
+// storeToolCall stores a tool call record for analysis
+func (h *Handler) storeToolCall(ctx context.Context, sessionID, messageID, toolName, arguments, result, errorMsg string, durationMs int) {
+	if h.toolCallStore == nil || sessionID == "" {
+		return
+	}
+
+	tc := &session.ToolCall{
+		MessageID:  messageID,
+		SessionID:  sessionID,
+		ToolName:   toolName,
+		Arguments:  arguments,
+		Result:     result,
+		Error:      errorMsg,
+		DurationMs: durationMs,
+	}
+
+	if err := h.toolCallStore.AddToolCall(ctx, tc); err != nil {
+		logger.Warn("Failed to store tool call", logger.Fields{
+			"session_id": sessionID,
+			"tool_name":  toolName,
+			"error":      err,
+		})
+	}
 }
 
 // storeMessageInSession stores a message in the session if session ID is provided

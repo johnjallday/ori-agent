@@ -94,6 +94,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/usage.tmpl",
 		"templates/pages/mcp.tmpl",
 		"templates/pages/models.tmpl",
+		"templates/pages/review.tmpl",
 	}
 
 	for _, path := range templatePaths {
@@ -128,6 +129,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["usage"] = tmpl
 	tr.templates["mcp"] = tmpl
 	tr.templates["models"] = tmpl
+	tr.templates["review"] = tmpl
 	logger.Info("Successfully loaded templates from embedded filesystem", logger.Fields{})
 
 	return nil
@@ -149,7 +151,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	switch name {
 	case "index":
 		templateName = "base.tmpl"
-	case "marketplace", "settings", "plugins", "workflows", "studios", "plugin-page", "workspace-dashboard", "workspace-canvas", "usage", "mcp", "models", "agents-detail", "agents-edit":
+	case "marketplace", "settings", "plugins", "workflows", "studios", "plugin-page", "workspace-dashboard", "workspace-canvas", "usage", "mcp", "models", "review", "agents-detail", "agents-edit":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	case "agents":

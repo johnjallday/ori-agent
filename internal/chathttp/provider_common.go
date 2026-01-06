@@ -31,14 +31,14 @@ type ExecuteToolCallsResult struct {
 	StructuredData      *pluginapi.StructuredResult
 }
 
-// executeToolCallsCommon executes tool calls and returns structured results
-// This consolidates the common tool execution logic from all providers
-func (h *Handler) executeToolCallsCommon(
+// executeToolCallsCommonWithSession executes tool calls and stores them for the given session
+func (h *Handler) executeToolCallsCommonWithSession(
 	baseCtx context.Context,
 	ag *agent.Agent,
 	agentName string,
 	toolCalls []llm.ToolCall,
 	files []pluginapi.FileAttachment,
+	sessionID string,
 ) ExecuteToolCallsResult {
 	var results []ToolCallResult
 
@@ -82,6 +82,15 @@ func (h *Handler) executeToolCallsCommon(
 				logger.Info("Tool execution completed", logger.Fields{"tool": name})
 			}
 		}
+
+		durationMs := int(duration.Milliseconds())
+
+		// Store tool call for review analysis
+		var errorMsg string
+		if err != nil {
+			errorMsg = err.Error()
+		}
+		h.storeToolCall(baseCtx, sessionID, tc.ID, name, args, result, errorMsg, durationMs)
 
 		results = append(results, ToolCallResult{
 			Function:   name,

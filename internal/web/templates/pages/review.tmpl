@@ -1,0 +1,654 @@
+{{define "review"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  <!-- Navigation -->
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="mb-2" style="color: var(--text-primary);">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M9,13V19H7V13H9M15,15V19H17V15H15M11,11V19H13V11H11Z"/>
+                </svg>
+                Conversation Review
+              </h2>
+              <p class="mb-0" style="color: var(--text-secondary);">Analyze conversations to detect problematic patterns for training improvements</p>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="modern-btn modern-btn-secondary" onclick="refreshData()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                </svg>
+                Refresh
+              </button>
+              <button class="modern-btn modern-btn-primary" onclick="showTriggerModal()" id="triggerBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                </svg>
+                Run Review
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Review Progress (hidden by default) -->
+        <div id="activeReviewCard" class="modern-card p-4 mb-4" style="display: none;">
+          <div class="d-flex align-items-center mb-3">
+            <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+              <span class="visually-hidden">Running...</span>
+            </div>
+            <h5 class="mb-0" style="color: var(--text-primary);">Review in Progress</h5>
+          </div>
+          <div class="progress mb-3" style="height: 8px;">
+            <div id="reviewProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+          </div>
+          <div class="d-flex justify-content-between" style="color: var(--text-secondary); font-size: 0.875rem;">
+            <span>Job ID: <code id="activeJobId">-</code></span>
+            <span>Sessions: <span id="activeSessionsReviewed">0</span></span>
+            <span>Issues Found: <span id="activeIssuesFound">0</span></span>
+          </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row g-4 mb-4">
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-warning me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">Total Issues</h5>
+              </div>
+              <div id="totalIssuesCard">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-warning" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-info me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2Z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">Last Review</h5>
+              </div>
+              <div id="lastReviewCard">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-info" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="modern-card p-4 h-100">
+              <div class="d-flex align-items-center mb-3">
+                <div class="modern-icon modern-icon-success me-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                  </svg>
+                </div>
+                <h5 class="mb-0" style="color: var(--text-primary);">Review Runs</h5>
+              </div>
+              <div id="reviewRunsCard">
+                <div class="text-center py-3">
+                  <div class="spinner-border spinner-border-sm text-success" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Issues Section -->
+        <div class="modern-card p-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center mb-4">
+            <h5 class="mb-0" style="color: var(--text-primary);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+              </svg>
+              Detected Issues
+            </h5>
+            <div class="d-flex gap-2">
+              <select id="filterAgent" class="form-select form-select-sm" style="width: auto;" onchange="loadIssues()">
+                <option value="">All Agents</option>
+              </select>
+              <select id="filterType" class="form-select form-select-sm" style="width: auto;" onchange="loadIssues()">
+                <option value="">All Types</option>
+                <option value="user_retry">User Retry</option>
+                <option value="tool_retry_loop">Tool Retry Loop</option>
+                <option value="ignored_error">Ignored Error</option>
+              </select>
+              <button class="modern-btn modern-btn-secondary btn-sm" onclick="exportIssues('json')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                </svg>
+                Export JSON
+              </button>
+              <button class="modern-btn modern-btn-secondary btn-sm" onclick="exportIssues('jsonl')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+                </svg>
+                Export JSONL
+              </button>
+            </div>
+          </div>
+
+          <div id="issuesTable">
+            <div class="text-center py-4">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Runs Section -->
+        <div class="modern-card p-4">
+          <h5 class="mb-4" style="color: var(--text-primary);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+              <path d="M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3"/>
+            </svg>
+            Recent Review Runs
+          </h5>
+
+          <div id="runsTable">
+            <div class="text-center py-4">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trigger Review Modal -->
+  <div class="modal fade" id="triggerModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Run Conversation Review</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Sensitivity</label>
+            <select id="triggerSensitivity" class="form-select">
+              <option value="medium" selected>Medium (default)</option>
+              <option value="low">Low (more lenient)</option>
+              <option value="high">High (more strict)</option>
+            </select>
+            <div class="form-text">Higher sensitivity detects more issues with lower thresholds.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Filter by Agent (optional)</label>
+            <select id="triggerAgent" class="form-select">
+              <option value="">All Agents</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="triggerReview()">Start Review</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/modules/agents.js"></script>
+  <script src="/js/modules/plugins.js"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/themeManager.js"></script>
+
+  <script>
+    let issues = [];
+    let runs = [];
+    let activeJobId = null;
+    let pollInterval = null;
+    let triggerModal = null;
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      triggerModal = new bootstrap.Modal(document.getElementById('triggerModal'));
+      loadAgents();
+      loadIssues();
+      loadRuns();
+      themeManager.initialize();
+    });
+
+    // Load agents for filter dropdowns
+    async function loadAgents() {
+      try {
+        const response = await fetch('/api/agents');
+        if (!response.ok) return;
+        const data = await response.json();
+        const agents = data.agents || [];
+
+        const filterSelect = document.getElementById('filterAgent');
+        const triggerSelect = document.getElementById('triggerAgent');
+
+        agents.forEach(name => {
+          filterSelect.innerHTML += `<option value="${name}">${name}</option>`;
+          triggerSelect.innerHTML += `<option value="${name}">${name}</option>`;
+        });
+      } catch (error) {
+        console.error('Error loading agents:', error);
+      }
+    }
+
+    // Load issues
+    async function loadIssues() {
+      try {
+        const agent = document.getElementById('filterAgent').value;
+        const type = document.getElementById('filterType').value;
+
+        let url = '/api/review/issues?limit=100';
+        if (agent) url += `&agent_name=${encodeURIComponent(agent)}`;
+        if (type) url += `&issue_type=${encodeURIComponent(type)}`;
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to load issues');
+        const data = await response.json();
+        issues = data.issues || [];
+
+        renderIssues();
+        renderTotalIssuesCard();
+      } catch (error) {
+        console.error('Error loading issues:', error);
+        document.getElementById('issuesTable').innerHTML = `
+          <div class="alert alert-danger">Failed to load issues: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Render issues table
+    function renderIssues() {
+      const container = document.getElementById('issuesTable');
+
+      if (issues.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-4" style="color: var(--text-muted);">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-3" style="opacity: 0.5;">
+              <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+            </svg>
+            <p class="mb-0">No issues detected. Run a review to analyze conversations.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const typeColors = {
+        'user_retry': { bg: '#ffc10720', text: '#b8860b', label: 'User Retry' },
+        'tool_retry_loop': { bg: '#fd7e1420', text: '#e65100', label: 'Tool Retry' },
+        'ignored_error': { bg: '#dc354520', text: '#c62828', label: 'Ignored Error' }
+      };
+
+      container.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="color: var(--text-secondary); font-weight: 500;">Type</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Agent</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Tool</th>
+                <th class="text-center" style="color: var(--text-secondary); font-weight: 500;">Count</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Context</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${issues.map(issue => {
+                const typeInfo = typeColors[issue.issue_type] || { bg: '#6c757d20', text: '#6c757d', label: issue.issue_type };
+                const date = new Date(issue.created_at).toLocaleString();
+                return `
+                  <tr>
+                    <td>
+                      <span class="badge" style="background-color: ${typeInfo.bg}; color: ${typeInfo.text};">
+                        ${typeInfo.label}
+                      </span>
+                    </td>
+                    <td style="color: var(--text-primary);">${issue.agent_name || '-'}</td>
+                    <td style="color: var(--text-primary);">${issue.tool_name || '-'}</td>
+                    <td class="text-center">
+                      <span class="badge bg-secondary">${issue.occurrence_count}</span>
+                    </td>
+                    <td style="color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${(issue.context_summary || '').replace(/"/g, '&quot;')}">
+                      ${issue.context_summary || '-'}
+                    </td>
+                    <td style="color: var(--text-muted); font-size: 0.875rem;">${date}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // Render total issues card
+    function renderTotalIssuesCard() {
+      const container = document.getElementById('totalIssuesCard');
+
+      const byType = {
+        user_retry: issues.filter(i => i.issue_type === 'user_retry').length,
+        tool_retry_loop: issues.filter(i => i.issue_type === 'tool_retry_loop').length,
+        ignored_error: issues.filter(i => i.issue_type === 'ignored_error').length
+      };
+
+      container.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Total</span>
+          <span class="fw-bold" style="color: var(--text-primary); font-size: 1.5rem;">${issues.length}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span style="color: #b8860b; font-size: 0.75rem;">User Retries</span>
+          <span style="color: #b8860b;">${byType.user_retry}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span style="color: #e65100; font-size: 0.75rem;">Tool Retry Loops</span>
+          <span style="color: #e65100;">${byType.tool_retry_loop}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <span style="color: #c62828; font-size: 0.75rem;">Ignored Errors</span>
+          <span style="color: #c62828;">${byType.ignored_error}</span>
+        </div>
+      `;
+    }
+
+    // Load runs
+    async function loadRuns() {
+      try {
+        const response = await fetch('/api/review/runs?limit=10');
+        if (!response.ok) throw new Error('Failed to load runs');
+        const data = await response.json();
+        runs = data.runs || [];
+
+        renderRuns();
+        renderLastReviewCard();
+        renderReviewRunsCard();
+      } catch (error) {
+        console.error('Error loading runs:', error);
+        document.getElementById('runsTable').innerHTML = `
+          <div class="alert alert-danger">Failed to load runs: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Render runs table
+    function renderRuns() {
+      const container = document.getElementById('runsTable');
+
+      if (runs.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-4" style="color: var(--text-muted);">
+            <p class="mb-0">No review runs yet. Click "Run Review" to start.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const statusColors = {
+        'running': { bg: '#0d6efd20', text: '#0d6efd' },
+        'completed': { bg: '#19875420', text: '#198754' },
+        'failed': { bg: '#dc354520', text: '#dc3545' }
+      };
+
+      container.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="color: var(--text-secondary); font-weight: 500;">Status</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Started</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Completed</th>
+                <th class="text-center" style="color: var(--text-secondary); font-weight: 500;">Sessions</th>
+                <th class="text-center" style="color: var(--text-secondary); font-weight: 500;">Issues</th>
+                <th style="color: var(--text-secondary); font-weight: 500;">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${runs.map(run => {
+                const statusInfo = statusColors[run.status] || { bg: '#6c757d20', text: '#6c757d' };
+                const started = new Date(run.started_at).toLocaleString();
+                const completed = run.completed_at && !run.completed_at.startsWith('0001')
+                  ? new Date(run.completed_at).toLocaleString()
+                  : '-';
+                return `
+                  <tr>
+                    <td>
+                      <span class="badge" style="background-color: ${statusInfo.bg}; color: ${statusInfo.text};">
+                        ${run.status}
+                      </span>
+                    </td>
+                    <td style="color: var(--text-primary); font-size: 0.875rem;">${started}</td>
+                    <td style="color: var(--text-muted); font-size: 0.875rem;">${completed}</td>
+                    <td class="text-center" style="color: var(--text-primary);">${run.sessions_reviewed}</td>
+                    <td class="text-center">
+                      <span class="badge ${run.issues_found > 0 ? 'bg-warning text-dark' : 'bg-secondary'}">${run.issues_found}</span>
+                    </td>
+                    <td style="color: var(--text-danger); font-size: 0.875rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${(run.error_message || '').replace(/"/g, '&quot;')}">
+                      ${run.error_message || '-'}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // Render last review card
+    function renderLastReviewCard() {
+      const container = document.getElementById('lastReviewCard');
+
+      if (runs.length === 0) {
+        container.innerHTML = `
+          <p class="mb-0" style="color: var(--text-muted);">No reviews run yet</p>
+        `;
+        return;
+      }
+
+      const lastRun = runs[0];
+      const date = new Date(lastRun.started_at).toLocaleString();
+
+      container.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Status</span>
+          <span class="badge ${lastRun.status === 'completed' ? 'bg-success' : lastRun.status === 'running' ? 'bg-primary' : 'bg-danger'}">${lastRun.status}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Sessions</span>
+          <span style="color: var(--text-primary);">${lastRun.sessions_reviewed}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Date</span>
+          <span style="color: var(--text-muted); font-size: 0.75rem;">${date}</span>
+        </div>
+      `;
+    }
+
+    // Render review runs summary card
+    function renderReviewRunsCard() {
+      const container = document.getElementById('reviewRunsCard');
+
+      const completed = runs.filter(r => r.status === 'completed').length;
+      const failed = runs.filter(r => r.status === 'failed').length;
+      const totalIssues = runs.reduce((sum, r) => sum + r.issues_found, 0);
+
+      container.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Total Runs</span>
+          <span class="fw-bold" style="color: var(--text-primary);">${runs.length}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Completed</span>
+          <span style="color: var(--success);">${completed}</span>
+        </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <span style="color: var(--text-secondary); font-size: 0.875rem;">Total Issues Found</span>
+          <span style="color: var(--warning);">${totalIssues}</span>
+        </div>
+      `;
+    }
+
+    // Show trigger modal
+    function showTriggerModal() {
+      triggerModal.show();
+    }
+
+    // Trigger review
+    async function triggerReview() {
+      try {
+        const sensitivity = document.getElementById('triggerSensitivity').value;
+        const agent = document.getElementById('triggerAgent').value;
+
+        const body = { sensitivity };
+        if (agent) body.agent_name = agent;
+
+        const response = await fetch('/api/review/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!response.ok) throw new Error('Failed to start review');
+        const data = await response.json();
+
+        triggerModal.hide();
+        activeJobId = data.job_id;
+        startPolling();
+
+      } catch (error) {
+        console.error('Error triggering review:', error);
+        alert('Failed to start review: ' + error.message);
+      }
+    }
+
+    // Start polling for active job
+    function startPolling() {
+      if (!activeJobId) return;
+
+      document.getElementById('activeReviewCard').style.display = 'block';
+      document.getElementById('activeJobId').textContent = activeJobId.substring(0, 8) + '...';
+      document.getElementById('triggerBtn').disabled = true;
+
+      pollInterval = setInterval(pollJobStatus, 1000);
+      pollJobStatus();
+    }
+
+    // Poll job status
+    async function pollJobStatus() {
+      if (!activeJobId) return;
+
+      try {
+        const response = await fetch(`/api/review/status/${activeJobId}`);
+        if (!response.ok) throw new Error('Failed to get status');
+        const data = await response.json();
+
+        document.getElementById('activeSessionsReviewed').textContent = data.sessions_reviewed;
+        document.getElementById('activeIssuesFound').textContent = data.issues_found;
+
+        // Animate progress (indeterminate since we don't know total)
+        const progress = document.getElementById('reviewProgress');
+        progress.style.width = '100%';
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          stopPolling();
+
+          if (data.status === 'completed') {
+            document.getElementById('activeReviewCard').innerHTML = `
+              <div class="d-flex align-items-center text-success mb-2">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+                </svg>
+                <h5 class="mb-0">Review Complete</h5>
+              </div>
+              <p class="mb-0" style="color: var(--text-secondary);">
+                Reviewed ${data.sessions_reviewed} sessions, found ${data.issues_found} issues.
+              </p>
+            `;
+          } else {
+            document.getElementById('activeReviewCard').innerHTML = `
+              <div class="d-flex align-items-center text-danger mb-2">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
+                </svg>
+                <h5 class="mb-0">Review Failed</h5>
+              </div>
+              <p class="mb-0" style="color: var(--text-danger);">${data.error_message || 'Unknown error'}</p>
+            `;
+          }
+
+          // Refresh data after a short delay
+          setTimeout(() => {
+            loadIssues();
+            loadRuns();
+            document.getElementById('activeReviewCard').style.display = 'none';
+          }, 3000);
+        }
+
+      } catch (error) {
+        console.error('Error polling status:', error);
+      }
+    }
+
+    // Stop polling
+    function stopPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      activeJobId = null;
+      document.getElementById('triggerBtn').disabled = false;
+    }
+
+    // Export issues
+    function exportIssues(format) {
+      const agent = document.getElementById('filterAgent').value;
+      const type = document.getElementById('filterType').value;
+
+      let url = `/api/review/export?format=${format}`;
+      if (agent) url += `&agent_name=${encodeURIComponent(agent)}`;
+      if (type) url += `&issue_type=${encodeURIComponent(type)}`;
+
+      window.location.href = url;
+    }
+
+    // Refresh all data
+    function refreshData() {
+      loadIssues();
+      loadRuns();
+    }
+  </script>
+</body>
+</html>
+{{end}}

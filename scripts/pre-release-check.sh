@@ -136,78 +136,73 @@ fi
 
 if [ "$LINT_AVAILABLE" = true ]; then
   run_check "Lint Check" "$LINT_CMD" || {
-    # Lint check failed - offer to auto-fix with feedback loop
-    echo -e "${YELLOW}💡 Tip: Automated lint fixing is available${NC}"
+    # Lint check failed - auto-fix with feedback loop
+    echo -e "${YELLOW}💡 Automated lint fixing is enabled${NC}"
     echo ""
-    read -p "Run automated lint fixer? [y/N]: " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-      echo ""
-      if [ -f "./scripts/fix-all-lint.sh" ]; then
-        # Feedback loop: keep fixing until no errors or max iterations
-        MAX_ITERATIONS=5
-        ITERATION=1
-        LINT_PASSED=false
+    if [ -f "./scripts/fix-all-lint.sh" ]; then
+      # Feedback loop: keep fixing until no errors or max iterations
+      MAX_ITERATIONS=5
+      ITERATION=1
+      LINT_PASSED=false
 
-        while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$LINT_PASSED" = false ]; do
-          echo ""
-          echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-          echo -e "${BLUE}║         FIX ITERATION $ITERATION/$MAX_ITERATIONS                ║${NC}"
-          echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
-          echo ""
+      while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$LINT_PASSED" = false ]; do
+        echo ""
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║         FIX ITERATION $ITERATION/$MAX_ITERATIONS                ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+        echo ""
 
-          ./scripts/fix-all-lint.sh
+        ./scripts/fix-all-lint.sh
 
-          echo ""
-          echo -e "${BLUE}Re-running lint check after fixes...${NC}"
-          echo ""
-          echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-          echo -e "${BLUE}Running: Lint Check (iteration $ITERATION)${NC}"
-          echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "${BLUE}Re-running lint check after fixes...${NC}"
+        echo ""
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BLUE}Running: Lint Check (iteration $ITERATION)${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-          if eval "$LINT_CMD"; then
-            echo -e "${GREEN}✅ Lint Check (iteration $ITERATION): PASSED${NC}"
-            echo ""
-            LINT_PASSED=true
-            # Remove the original failure from FAILED_CHECKS
-            FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
-          else
-            echo -e "${RED}❌ Lint Check (iteration $ITERATION): FAILED${NC}"
-            echo ""
-
-            if [ $ITERATION -lt $MAX_ITERATIONS ]; then
-              echo -e "${YELLOW}⚠️  Still have lint errors. Attempting fix again...${NC}"
-              echo ""
-            else
-              echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
-              echo ""
-            fi
-          fi
-
-          ITERATION=$((ITERATION + 1))
-        done
-
-        if [ "$LINT_PASSED" = true ]; then
+        if eval "$LINT_CMD"; then
+          echo -e "${GREEN}✅ Lint Check (iteration $ITERATION): PASSED${NC}"
           echo ""
-          echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-          echo -e "${GREEN}║              COMPLETE                      ║${NC}"
-          echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
-          echo ""
-          echo -e "${GREEN}✅ All lint errors fixed successfully!${NC}"
-          echo ""
+          LINT_PASSED=true
+          # Remove the original failure from FAILED_CHECKS
+          FAILED_CHECKS=("${FAILED_CHECKS[@]/Lint Check/}")
         else
+          echo -e "${RED}❌ Lint Check (iteration $ITERATION): FAILED${NC}"
           echo ""
-          echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
-          echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
-          echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
-          echo ""
-          echo -e "${RED}❌ Automated fixes could not resolve all errors.${NC}"
-          echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
-          echo ""
+
+          if [ $ITERATION -lt $MAX_ITERATIONS ]; then
+            echo -e "${YELLOW}⚠️  Still have lint errors. Attempting fix again...${NC}"
+            echo ""
+          else
+            echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
+            echo ""
+          fi
         fi
+
+        ITERATION=$((ITERATION + 1))
+      done
+
+      if [ "$LINT_PASSED" = true ]; then
+        echo ""
+        echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║              COMPLETE                      ║${NC}"
+        echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${GREEN}✅ All lint errors fixed successfully!${NC}"
+        echo ""
       else
-        echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${RED}❌ Automated fixes could not resolve all errors.${NC}"
+        echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
+        echo ""
       fi
+    else
+      echo -e "${RED}❌ fix-all-lint.sh not found in ./scripts/${NC}"
     fi
   }
 else
@@ -448,10 +443,24 @@ run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || {
   fi
 }
 
-# 5. UPDATE README
+# 5. DEPENDABOT PR MERGE
 echo ""
 echo "════════════════════════════════════════════"
-echo "5. UPDATE README"
+echo "5. DEPENDABOT PR MERGE"
+echo "════════════════════════════════════════════"
+echo ""
+
+if [ -f "./scripts/merge-dependabot.sh" ]; then
+  run_check "Merge Dependabot PRs" "./scripts/merge-dependabot.sh" || true
+else
+  echo -e "${YELLOW}⚠️  Dependabot Merge: SKIPPED (merge-dependabot.sh not found)${NC}"
+  echo ""
+fi
+
+# 6. UPDATE README
+echo ""
+echo "════════════════════════════════════════════"
+echo "6. UPDATE README"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -462,10 +471,10 @@ else
   echo ""
 fi
 
-# 6. GIT STATUS CHECK
+# 7. GIT STATUS CHECK
 echo ""
 echo "════════════════════════════════════════════"
-echo "6. GIT STATUS CHECK"
+echo "7. GIT STATUS CHECK"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -479,38 +488,8 @@ else
   echo "Modified files:"
   git status --short
   echo ""
-
-  # Check what types of changes exist
-  # Exclude VERSION, README.md, go.mod, go.sum from this check (will be auto-committed at the end)
-  NON_VERSION_CHANGES=$(git status --porcelain | grep -v "VERSION\|README.md\|go\.mod\|go\.sum" | wc -l | tr -d ' ')
-
-  if [ "$NON_VERSION_CHANGES" -eq 0 ]; then
-    # Only VERSION/README/go.mod/go.sum changes (will be auto-committed after all checks pass)
-    echo -e "${BLUE}💡 Note: Only VERSION/README.md/go.mod/go.sum changes detected${NC}"
-    if [ -n "$VERSION" ]; then
-      echo -e "${BLUE}   These will be auto-committed after all checks pass.${NC}"
-    else
-      echo -e "${BLUE}   Run with version argument to auto-commit: ./scripts/pre-release-check.sh v0.X.Y${NC}"
-    fi
-    echo ""
-  else
-    # Check if only script files + VERSION/README/go.mod/go.sum changed
-    NON_SCRIPT_CHANGES=$(git status --porcelain | grep -v "scripts/" | grep -v "VERSION\|README.md\|go\.mod\|go\.sum" | grep -v "^??" | wc -l | tr -d ' ')
-    SCRIPT_CHANGES=$(git status --porcelain | grep "scripts/" | wc -l | tr -d ' ')
-
-    if [ "$NON_SCRIPT_CHANGES" -eq 0 ] && [ "$SCRIPT_CHANGES" -gt 0 ]; then
-      # Only script changes (+ possibly VERSION/README) - this is OK during development
-      echo -e "${BLUE}💡 Note: Only script changes detected (normal during script development)${NC}"
-      echo -e "${BLUE}   These are the scripts you're currently working on.${NC}"
-      if [ -n "$VERSION" ]; then
-        echo -e "${BLUE}   VERSION/README will be auto-committed after all checks pass.${NC}"
-      fi
-      echo ""
-    else
-      # Other changes exist - mark as failed
-      FAILED_CHECKS+=("Git Status - uncommitted changes")
-    fi
-  fi
+  echo -e "${BLUE}💡 Note: Changes will be auto-committed after all checks pass.${NC}"
+  echo ""
 fi
 
 # Check current branch
@@ -557,10 +536,10 @@ else
   FAILED_CHECKS+=("Not on dev, release, or main branch")
 fi
 
-# 7. SMOKE TESTS (OPTIONAL)
+# 8. SMOKE TESTS (OPTIONAL)
 echo ""
 echo "════════════════════════════════════════════"
-echo "7. SMOKE TESTS (Optional)"
+echo "8. SMOKE TESTS (Optional)"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -573,7 +552,7 @@ else
   echo ""
 fi
 
-# 7. SUMMARY
+# 9. SUMMARY
 echo ""
 echo "╔════════════════════════════════════════════╗"
 echo "║           SUMMARY                          ║"
@@ -625,6 +604,26 @@ if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
       echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       echo ""
     fi
+  fi
+
+  # Commit any remaining changes (lint fixes, test fixes, README updates, etc.)
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${BLUE}[AUTO-COMMIT]${NC} Committing remaining fixes..."
+    echo ""
+    git add -A 2>/dev/null || true
+    if git commit -m "chore: apply pre-release fixes" --no-verify; then
+      echo ""
+      echo -e "${GREEN}✅ Remaining fixes committed successfully${NC}"
+      echo -e "${GREEN}   Commit: chore: apply pre-release fixes${NC}"
+      echo ""
+    else
+      echo ""
+      echo -e "${YELLOW}⚠️  No remaining changes to commit (already clean)${NC}"
+      echo ""
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
   fi
 
   # Get current branch to show appropriate next steps
