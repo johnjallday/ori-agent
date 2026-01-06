@@ -93,9 +93,31 @@ refresh_worktree() {
     return
   fi
 
-  print_status "Updating $worktree_label worktree ($current_branch)..."
-  git -C "$worktree_path" fetch origin "$current_branch" || print_warning "Could not fetch $worktree_label"
-  git -C "$worktree_path" pull --ff-only origin "$current_branch" || print_warning "Could not update $worktree_label"
+  print_status "Updating $worktree_label worktree ($current_branch) with latest main..."
+  git -C "$worktree_path" fetch origin "$current_branch" main || print_warning "Could not fetch $worktree_label"
+
+  if [ "$current_branch" = "main" ]; then
+    if ! git -C "$worktree_path" pull --ff-only origin main; then
+      print_error "Failed to update main in $worktree_label worktree"
+      exit 1
+    fi
+    return
+  fi
+
+  if ! git -C "$worktree_path" pull --ff-only origin "$current_branch"; then
+    print_error "Failed to update $current_branch in $worktree_label worktree"
+    exit 1
+  fi
+
+  if git -C "$worktree_path" merge origin/main -m "Merge main ($VERSION release) into $current_branch"; then
+    if ! git -C "$worktree_path" push origin "$current_branch"; then
+      print_error "Failed to push $current_branch for $worktree_label worktree"
+      exit 1
+    fi
+  else
+    print_error "Merge conflict in $worktree_label worktree ($current_branch). Resolve manually."
+    exit 1
+  fi
 }
 
 # Check for version argument
