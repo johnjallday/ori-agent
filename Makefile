@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
 
 # Default target
 .DEFAULT_GOAL := help
@@ -45,6 +45,9 @@ deps: ## Install dependencies
 	@echo "$(BLUE)Installing dependencies...$(NC)"
 	$(GO) mod download
 	$(GO) mod tidy
+
+merge-dependabot: ## Merge Dependabot PRs with green checks (requires gh)
+	@./scripts/merge-dependabot.sh
 
 build: ## Build the server binary
 	@echo "$(BLUE)Building server...$(NC)"
