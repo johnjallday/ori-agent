@@ -31,18 +31,6 @@ type ExecuteToolCallsResult struct {
 	StructuredData      *pluginapi.StructuredResult
 }
 
-// executeToolCallsCommon executes tool calls and returns structured results
-// This consolidates the common tool execution logic from all providers
-func (h *Handler) executeToolCallsCommon(
-	baseCtx context.Context,
-	ag *agent.Agent,
-	agentName string,
-	toolCalls []llm.ToolCall,
-	files []pluginapi.FileAttachment,
-) ExecuteToolCallsResult {
-	return h.executeToolCallsCommonWithSession(baseCtx, ag, agentName, toolCalls, files, "")
-}
-
 // executeToolCallsCommonWithSession executes tool calls and stores them for the given session
 func (h *Handler) executeToolCallsCommonWithSession(
 	baseCtx context.Context,

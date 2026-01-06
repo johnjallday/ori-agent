@@ -16,7 +16,7 @@ func setupTestStore(t *testing.T) (*SQLiteStore, *database.DB, func()) {
 	}
 
 	store := NewSQLiteStore(db)
-	return store, db, func() { db.Close() }
+	return store, db, func() { _ = db.Close() }
 }
 
 // createTestSession creates a session in the database for foreign key constraints

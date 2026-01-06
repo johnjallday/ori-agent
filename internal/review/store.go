@@ -118,7 +118,7 @@ func (s *SQLiteStore) GetIssues(ctx context.Context, opts IssueQueryOptions) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var issues []Issue
 	for rows.Next() {
@@ -275,7 +275,7 @@ func (s *SQLiteStore) GetReviewRuns(ctx context.Context, limit int) ([]ReviewRun
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var runs []ReviewRun
 	for rows.Next() {

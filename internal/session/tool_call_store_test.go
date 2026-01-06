@@ -24,7 +24,7 @@ func setupTestToolCallStore(t *testing.T) (*SQLiteToolCallStore, func()) {
 	store := NewSQLiteToolCallStore(db)
 
 	cleanup := func() {
-		db.Close()
+		_ = db.Close()
 	}
 
 	return store, cleanup

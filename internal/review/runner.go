@@ -139,7 +139,7 @@ func (r *Runner) executeReview(runID string, opts ReviewOptions) {
 				LastReviewedAt: time.Now(),
 				LastMessageID:  lastMsgID,
 			}
-			r.store.UpdateSessionReviewStatus(ctx, status)
+			_ = r.store.UpdateSessionReviewStatus(ctx, status)
 		}
 
 		// Update run progress
@@ -149,7 +149,7 @@ func (r *Runner) executeReview(runID string, opts ReviewOptions) {
 		r.mu.Unlock()
 
 		// Persist progress periodically
-		r.store.UpdateReviewRun(ctx, run)
+		_ = r.store.UpdateReviewRun(ctx, run)
 	}
 
 	// Mark as completed
@@ -159,7 +159,7 @@ func (r *Runner) executeReview(runID string, opts ReviewOptions) {
 	run.IssuesFound = totalIssues
 	r.mu.Unlock()
 
-	r.store.UpdateReviewRun(ctx, run)
+	_ = r.store.UpdateReviewRun(ctx, run)
 }
 
 // getSessionsToReview retrieves sessions matching the review options.
@@ -230,43 +230,6 @@ func (r *Runner) shouldReviewSession(ctx context.Context, sess session.SessionLi
 	return lastMsg.ID != status.LastMessageID
 }
 
-// reviewSession reviews a single session and returns detected issues.
-func (r *Runner) reviewSession(ctx context.Context, sessionID string, agentName string) ([]Issue, string, error) {
-	var allIssues []Issue
-	var lastMsgID string
-
-	// Get messages for the session
-	messages, err := r.sessionStore.GetMessages(ctx, sessionID)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if len(messages) > 0 {
-		lastMsgID = messages[len(messages)-1].ID
-	}
-
-	// Detect user retries
-	userRetryIssues := r.detector.DetectUserRetries(ctx, messages, agentName)
-	allIssues = append(allIssues, userRetryIssues...)
-
-	// Get tool calls for the session
-	toolCalls, err := r.toolStore.GetToolCalls(ctx, sessionID)
-	if err != nil {
-		// Log but continue with user retry detection
-		return allIssues, lastMsgID, nil
-	}
-
-	// Detect tool retry loops
-	toolRetryIssues := r.detector.DetectToolRetryLoops(ctx, toolCalls, agentName)
-	allIssues = append(allIssues, toolRetryIssues...)
-
-	// Detect ignored errors
-	ignoredErrorIssues := r.detector.DetectIgnoredErrors(ctx, toolCalls, agentName)
-	allIssues = append(allIssues, ignoredErrorIssues...)
-
-	return allIssues, lastMsgID, nil
-}
-
 // failRun marks a run as failed with an error.
 func (r *Runner) failRun(ctx context.Context, run *ReviewRun, err error) {
 	r.mu.Lock()
@@ -275,7 +238,7 @@ func (r *Runner) failRun(ctx context.Context, run *ReviewRun, err error) {
 	run.ErrorMessage = err.Error()
 	r.mu.Unlock()
 
-	r.store.UpdateReviewRun(ctx, run)
+	_ = r.store.UpdateReviewRun(ctx, run)
 }
 
 // getAgentSensitivity returns the sensitivity level for an agent.

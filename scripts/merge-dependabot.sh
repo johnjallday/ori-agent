@@ -17,7 +17,12 @@ if ! gh auth status -h github.com >/dev/null 2>&1; then
   exit 0
 fi
 
-mapfile -t PR_NUMBERS < <(
+PR_NUMBERS=()
+while IFS= read -r PR_NUMBER; do
+  if [ -n "$PR_NUMBER" ]; then
+    PR_NUMBERS+=("$PR_NUMBER")
+  fi
+done < <(
   gh pr list --state open --search "author:app/dependabot" --json number,isDraft \
     --jq '.[] | select(.isDraft == false) | .number'
 )

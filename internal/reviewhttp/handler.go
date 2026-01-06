@@ -87,7 +87,7 @@ func (h *Handler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // StatusResponse is the response for GET /api/review/status/{job_id}
@@ -139,7 +139,7 @@ func (h *Handler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // IssuesResponse is the response for GET /api/review/issues
@@ -199,7 +199,7 @@ func (h *Handler) HandleIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleExport handles GET /api/review/export
@@ -251,21 +251,21 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=review_issues.jsonl")
 
 		bw := bufio.NewWriter(w)
-		defer bw.Flush()
+		defer func() { _ = bw.Flush() }()
 
 		for _, issue := range issues {
 			line, err := json.Marshal(issue)
 			if err != nil {
 				continue
 			}
-			bw.Write(line)
-			bw.WriteByte('\n')
+			_, _ = bw.Write(line)
+			_ = bw.WriteByte('\n')
 		}
 
 	default: // json
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=review_issues.json")
-		json.NewEncoder(w).Encode(issues)
+		_ = json.NewEncoder(w).Encode(issues)
 	}
 }
 
@@ -296,7 +296,7 @@ func (h *Handler) HandleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"runs":  runs,
 		"count": len(runs),
 	})
