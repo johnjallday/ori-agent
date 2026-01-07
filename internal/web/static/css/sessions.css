@@ -458,6 +458,14 @@
   color: var(--text-primary);
 }
 
+.folder-collapse-spacer {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 .folder-sessions.collapsed {
   display: none;
 }
