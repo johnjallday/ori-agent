@@ -456,7 +456,7 @@ function showError(message) {
  * Open workspace canvas view
  */
 function openWorkspaceCanvas(workspaceId) {
-    window.location.href = `/studios/${workspaceId}/canvas`;
+    window.location.href = `/workspaces/${workspaceId}/canvas`;
 }
 
 /**
@@ -499,7 +499,7 @@ function populateCanvasStudioSelect() {
  * View workspace details
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/studios/${workspaceId}`;
+    window.location.href = `/workspaces/${workspaceId}`;
 }
 
 // Export functions for global access

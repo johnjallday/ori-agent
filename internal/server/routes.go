@@ -45,8 +45,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
-	mux.HandleFunc("/studios/", s.handleStudiosRoutes) // Dynamic route handler
-	mux.HandleFunc("/studios", s.serveWorkspaces)
+	// Workspaces page routes (primary)
+	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
+	mux.HandleFunc("/workspaces", s.serveWorkspaces)
+	// Legacy /studios routes (redirect to /workspaces)
+	mux.HandleFunc("/studios/", func(w http.ResponseWriter, r *http.Request) {
+		// Redirect /studios/{path} to /workspaces/{path}
+		newPath := strings.Replace(r.URL.Path, "/studios/", "/workspaces/", 1)
+		http.Redirect(w, r, newPath, http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/studios", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/workspaces", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
 
