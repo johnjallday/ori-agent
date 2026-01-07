@@ -653,8 +653,8 @@ const sessionManager = {
       const hasNestedSessions = folderSessions.length > 0;
       const hasAccent = Boolean(folder.color);
       const accentStyles = hasAccent
-        ? `data-has-accent="true" style="padding-left: ${16 + depth * 16}px; --folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
-        : `style="padding-left: ${16 + depth * 16}px;"`;
+        ? `data-has-accent="true" style="--folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
+        : ``;
       // Get notes for this folder
       const folderNotes = this.notesByFolder?.get(folder.id) || [];
       // Get tasks for this workspace
@@ -665,7 +665,7 @@ const sessionManager = {
       // Tasks section - clickable header that opens the task modal
       const tasksHtml = taskCount > 0
         ? `
-          <div class="folder-tasks-wrapper ${isCollapsed ? 'collapsed' : ''}" style="padding-left: ${16 + depth * 16}px;">
+          <div class="folder-tasks-wrapper ${isCollapsed ? 'collapsed' : ''}">
             <div class="folder-tasks-header" data-workspace-id="${folder.id}">
               <svg class="folder-tasks-header-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,17H7V7H17V17M9,9V15H15V9H9Z"/>
@@ -692,7 +692,7 @@ const sessionManager = {
 
       const notesHtml = folderNotes.length > 0
         ? `
-          <div class="folder-notes-section ${isCollapsed ? 'collapsed' : ''}" style="padding-left: ${16 + depth * 16}px;">
+          <div class="folder-notes-section ${isCollapsed ? 'collapsed' : ''}">
             ${folderNotes.map(note => `
               <div class="folder-note-item" data-note-id="${note.id}" data-folder-id="${folder.id}" draggable="true">
                 <svg class="folder-note-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -707,7 +707,7 @@ const sessionManager = {
 
       const folderTitle = folder.description ? this.escapeHtml(folder.description) : folder.name;
       return `
-        <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 16}px;" title="${folderTitle}">
+        <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 12}px;" title="${folderTitle}">
           ${hasContent ? `
             <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show content' : 'Hide content'}">
               <svg viewBox="0 0 24 24" fill="currentColor">
