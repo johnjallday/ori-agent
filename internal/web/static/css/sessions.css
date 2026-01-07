@@ -364,6 +364,57 @@
   text-overflow: ellipsis;
 }
 
+.folder-name-input {
+  flex: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--primary-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  outline: none;
+  min-width: 0;
+}
+
+/* Folder color picker popup */
+.folder-color-picker-popup {
+  position: fixed;
+  z-index: 10100;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.folder-color-options {
+  display: flex;
+  gap: 6px;
+}
+
+.folder-color-option {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.folder-color-option:hover {
+  transform: scale(1.1);
+  border-color: var(--text-primary);
+}
+
+.folder-color-option[data-color=""] {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
 .folder-count {
   font-size: 10px;
   color: var(--text-muted);
@@ -1276,6 +1327,82 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   display: none;
 }
 
+/* ============================================================================
+   Folder/Workspace Tasks Styles
+   ============================================================================ */
+
+/* Tasks wrapper in folder tree */
+.folder-tasks-wrapper {
+  margin-top: 4px;
+}
+
+.folder-tasks-wrapper.collapsed {
+  display: none;
+}
+
+/* Tasks header row */
+.folder-tasks-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.folder-tasks-header:hover {
+  background: var(--bg-hover);
+}
+
+.folder-tasks-header-icon {
+  flex-shrink: 0;
+  margin-right: 8px;
+  color: var(--text-tertiary);
+}
+
+.folder-tasks-header-text {
+  flex: 1;
+}
+
+.folder-tasks-count {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  margin-right: 8px;
+}
+
+.folder-tasks-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  opacity: 0;
+}
+
+.folder-tasks-header:hover .folder-tasks-add-btn {
+  opacity: 1;
+}
+
+.folder-tasks-add-btn:hover {
+  background: var(--bg-hover);
+  color: var(--primary-color);
+}
+
 /* Note Editor Modal */
 .note-title-input {
   background: transparent;
@@ -1691,254 +1818,6 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .session-files-content .file-dropzone-compact:hover {
   background: rgba(13, 110, 253, 0.1);
-}
-
-/* ===== Session Tasks Panel ===== */
-.session-tasks-panel {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.dark-mode .session-tasks-panel {
-  background: rgba(0, 0, 0, 0.15);
-  border-top-color: rgba(255, 255, 255, 0.05);
-}
-
-.session-tasks-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  transition: background 0.15s ease;
-}
-
-.session-tasks-header:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.session-tasks-header .folder-expand-icon {
-  transition: transform 0.15s ease;
-}
-
-.session-tasks-header .folder-expand-icon.expanded {
-  transform: rotate(90deg);
-}
-
-.task-count-badge {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: var(--primary);
-  color: white;
-}
-
-.task-count-badge.all-complete {
-  background: #22c55e;
-}
-
-.task-count-badge.empty {
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--text-secondary);
-}
-
-.task-add-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  padding: 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  margin-left: 4px;
-}
-
-.task-add-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-}
-
-.session-tasks-content {
-  padding: 8px 0 0;
-}
-
-.session-tasks-content.collapsed {
-  display: none;
-}
-
-/* Task Input */
-.task-input-container {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.task-input {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
-  font-size: 12px;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.dark-mode .task-input {
-  background: rgba(0, 0, 0, 0.2);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-.task-input:focus {
-  border-color: var(--primary);
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.task-input-submit {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  background: var(--primary);
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.task-input-submit:hover {
-  background: var(--primary-hover, #0b5ed7);
-}
-
-/* Task List */
-.session-task-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.dark-mode .session-task-list {
-  background: rgba(0, 0, 0, 0.15);
-  border-color: rgba(255, 255, 255, 0.05);
-}
-
-.session-task-list-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  color: var(--text-secondary);
-}
-
-/* Task Item */
-.session-task-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  transition: background 0.15s ease;
-}
-
-.session-task-item:last-child {
-  border-bottom: none;
-}
-
-.session-task-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.session-task-item.completed {
-  opacity: 0.6;
-}
-
-.session-task-item.completed .session-task-description {
-  text-decoration: line-through;
-}
-
-.session-task-checkbox {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--text-secondary);
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-
-.session-task-checkbox:hover {
-  border-color: var(--primary);
-}
-
-.session-task-checkbox.checked {
-  background: #22c55e;
-  border-color: #22c55e;
-}
-
-.session-task-checkbox svg {
-  width: 10px;
-  height: 10px;
-  color: white;
-  opacity: 0;
-}
-
-.session-task-checkbox.checked svg {
-  opacity: 1;
-}
-
-.session-task-description {
-  flex: 1;
-  font-size: 12px;
-  color: var(--text-primary);
-  word-break: break-word;
-}
-
-.session-task-workspace-badge {
-  font-size: 9px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: rgba(139, 92, 246, 0.2);
-  color: #a78bfa;
-  flex-shrink: 0;
-}
-
-.session-task-delete {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  padding: 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-
-.session-task-item:hover .session-task-delete {
-  opacity: 1;
-}
-
-.session-task-delete:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
 }
 
 /* Session item task badge */

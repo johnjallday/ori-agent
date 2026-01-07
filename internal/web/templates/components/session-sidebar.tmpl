@@ -161,45 +161,6 @@
         </div>
       </div>
 
-      <!-- Session Tasks Panel (shown when session selected) -->
-      <div id="sessionTasksPanel" class="session-tasks-panel" style="display: none;">
-        <div class="session-tasks-header" id="sessionTasksToggle">
-          <svg class="folder-expand-icon expanded" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
-          </svg>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-            <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,8.4L15.6,7L10,12.6L7.4,10L6,11.4L10,15.4L17,8.4Z"/>
-          </svg>
-          <span>Tasks</span>
-          <span id="sessionTaskCount" class="task-count-badge">0</span>
-          <button id="addTaskBtn" class="task-add-btn" title="Add Task">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-            </svg>
-          </button>
-        </div>
-        <div id="sessionTasksContent" class="session-tasks-content">
-          <!-- Task Input -->
-          <div id="taskInputContainer" class="task-input-container" style="display: none;">
-            <input type="text" id="taskInput" class="task-input" placeholder="Enter task description...">
-            <button id="taskInputSubmit" class="task-input-submit" title="Add">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-              </svg>
-            </button>
-          </div>
-          <!-- Task List -->
-          <div id="sessionTaskList" class="session-task-list">
-            <div id="sessionTaskListEmpty" class="session-task-list-empty">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
-                <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,8.4L15.6,7L10,12.6L7.4,10L6,11.4L10,15.4L17,8.4Z"/>
-              </svg>
-              <p class="small mb-0">No tasks</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Empty State -->
       <div id="sessionsEmpty" class="session-empty" style="display: none;">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="session-empty-icon">

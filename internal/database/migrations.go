@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -70,6 +70,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration004SessionTasks(ctx)
 	case 5:
 		return db.migration005TaskDetails(ctx)
+	case 6:
+		return db.migration006TasksWorkspaceOnly(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -506,6 +508,124 @@ func (db *DB) migration005TaskDetails(ctx context.Context) error {
 		ALTER TABLE session_tasks ADD COLUMN details TEXT DEFAULT ''
 	`); err != nil {
 		return fmt.Errorf("failed to add details column to session_tasks: %w", err)
+	}
+
+	return nil
+}
+
+// migration006TasksWorkspaceOnly removes session_id from tasks, making them workspace-scoped only.
+// Tasks now belong to workspaces (folders) and can be viewed/executed from any session in that workspace.
+// SQLite doesn't support DROP COLUMN on columns with foreign keys, so we recreate the tables.
+func (db *DB) migration006TasksWorkspaceOnly(ctx context.Context) error {
+	// Recreate session_tasks without session_id
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE session_tasks_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			description TEXT NOT NULL,
+			details TEXT DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			priority INTEGER DEFAULT 3,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new session_tasks table: %w", err)
+	}
+
+	// Copy data (workspace_id from session's folder_id if session_id was set)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO session_tasks_new (id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at)
+		SELECT
+			t.id,
+			COALESCE(t.workspace_id, s.folder_id) as workspace_id,
+			t.description,
+			t.details,
+			t.status,
+			t.priority,
+			t.created_at,
+			t.updated_at,
+			t.completed_at
+		FROM session_tasks t
+		LEFT JOIN sessions s ON t.session_id = s.id
+	`); err != nil {
+		return fmt.Errorf("failed to copy session_tasks data: %w", err)
+	}
+
+	// Drop old table and rename new one
+	if _, err := db.ExecContext(ctx, `DROP TABLE session_tasks`); err != nil {
+		return fmt.Errorf("failed to drop old session_tasks table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE session_tasks_new RENAME TO session_tasks`); err != nil {
+		return fmt.Errorf("failed to rename session_tasks table: %w", err)
+	}
+
+	// Recreate scheduled_task_reminders without session_id
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE scheduled_task_reminders_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			schedule_type TEXT NOT NULL,
+			execute_at DATETIME,
+			time_of_day TEXT,
+			day_of_week INTEGER,
+			next_run DATETIME,
+			last_run DATETIME,
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new scheduled_task_reminders table: %w", err)
+	}
+
+	// Copy data
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scheduled_task_reminders_new (id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at)
+		SELECT
+			r.id,
+			COALESCE(r.workspace_id, s.folder_id) as workspace_id,
+			r.name,
+			r.description,
+			r.schedule_type,
+			r.execute_at,
+			r.time_of_day,
+			r.day_of_week,
+			r.next_run,
+			r.last_run,
+			r.enabled,
+			r.created_at,
+			r.updated_at
+		FROM scheduled_task_reminders r
+		LEFT JOIN sessions s ON r.session_id = s.id
+	`); err != nil {
+		return fmt.Errorf("failed to copy scheduled_task_reminders data: %w", err)
+	}
+
+	// Drop old table and rename new one
+	if _, err := db.ExecContext(ctx, `DROP TABLE scheduled_task_reminders`); err != nil {
+		return fmt.Errorf("failed to drop old scheduled_task_reminders table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_task_reminders_new RENAME TO scheduled_task_reminders`); err != nil {
+		return fmt.Errorf("failed to rename scheduled_task_reminders table: %w", err)
+	}
+
+	// Create indexes
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_session_tasks_workspace_id ON session_tasks(workspace_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace_id index on session_tasks: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_workspace_id ON scheduled_task_reminders(workspace_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace_id index on scheduled_task_reminders: %w", err)
 	}
 
 	return nil

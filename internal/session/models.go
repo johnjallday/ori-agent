@@ -348,20 +348,15 @@ const (
 	TaskStatusCancelled  TaskStatus = "cancelled"
 )
 
-// SessionTask represents a todo item or task attached to a session or workspace.
-// Tasks can be session-specific or workspace-wide (visible across all sessions in a workspace).
+// SessionTask represents a todo item or task attached to a workspace.
+// Tasks are workspace-scoped and visible from any session within that workspace.
 type SessionTask struct {
 	// ID is a unique identifier for the task (UUID format).
 	ID string `json:"id"`
 
-	// SessionID is the session this task belongs to.
-	// Empty if this is a workspace-level task.
-	SessionID string `json:"session_id,omitempty"`
-
 	// WorkspaceID is the workspace (folder) this task belongs to.
-	// For session tasks, this is derived from the session's folder.
-	// For workspace-level tasks, the session_id is empty.
-	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Tasks are workspace-scoped and can be viewed/executed from any session in that workspace.
+	WorkspaceID string `json:"workspace_id"`
 
 	// Description is the task title/summary.
 	Description string `json:"description"`
@@ -388,8 +383,7 @@ type SessionTask struct {
 // SessionTaskListItem is a lightweight representation of a task for list views.
 type SessionTaskListItem struct {
 	ID          string     `json:"id"`
-	SessionID   string     `json:"session_id,omitempty"`
-	WorkspaceID string     `json:"workspace_id,omitempty"`
+	WorkspaceID string     `json:"workspace_id"`
 	Description string     `json:"description"`
 	Details     string     `json:"details,omitempty"`
 	Status      TaskStatus `json:"status"`
@@ -425,11 +419,8 @@ type ScheduledTaskReminder struct {
 	// ID is a unique identifier for the reminder (UUID format).
 	ID string `json:"id"`
 
-	// SessionID is the session this reminder belongs to (optional).
-	SessionID string `json:"session_id,omitempty"`
-
-	// WorkspaceID is the workspace this reminder belongs to (optional).
-	WorkspaceID string `json:"workspace_id,omitempty"`
+	// WorkspaceID is the workspace this reminder belongs to.
+	WorkspaceID string `json:"workspace_id"`
 
 	// Name is a short title for the reminder.
 	Name string `json:"name"`

@@ -81,7 +81,6 @@ const sessionManager = {
     this.bindNoteEvents();
     this.setupKeyboardShortcuts();
     this.initChatAgentBar();
-    this.initTaskPanel();
     this.initMainTaskPanel();
     await this.loadSessions();
     await this.loadFolders();
@@ -374,6 +373,9 @@ const sessionManager = {
       // Load notes for all folders
       await this.loadAllFolderNotes(this.folders);
 
+      // Load tasks for all workspaces
+      await this.loadAllWorkspaceTasks(this.folders);
+
       this.renderFolderTree();
     } catch (error) {
       console.error('Failed to load folders:', error);
@@ -620,6 +622,24 @@ const sessionManager = {
     });
 
     this.bindSessionItemEvents(container);
+
+    // Bind task section events
+    container.querySelectorAll('.folder-tasks-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        if (e.target.closest('.folder-tasks-add-btn')) return; // Don't open on add click
+        e.stopPropagation();
+        const workspaceId = header.dataset.workspaceId;
+        this.openWorkspaceTaskPanel(workspaceId);
+      });
+    });
+
+    container.querySelectorAll('.folder-tasks-add-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const workspaceId = btn.dataset.workspaceId;
+        this.addWorkspaceTask(workspaceId);
+      });
+    });
   },
 
   // Render folder items recursively
@@ -637,7 +657,30 @@ const sessionManager = {
         : `style="padding-left: ${16 + depth * 16}px;"`;
       // Get notes for this folder
       const folderNotes = this.notesByFolder?.get(folder.id) || [];
+      // Get tasks for this workspace
+      const workspaceTasks = this.tasksByWorkspace?.get(folder.id) || [];
+      const taskCount = workspaceTasks.length;
       const hasContent = folderSessions.length > 0 || folderNotes.length > 0;
+
+      // Tasks section - clickable header that opens the task modal
+      const tasksHtml = taskCount > 0
+        ? `
+          <div class="folder-tasks-wrapper ${isCollapsed ? 'collapsed' : ''}" style="padding-left: ${16 + depth * 16}px;">
+            <div class="folder-tasks-header" data-workspace-id="${folder.id}">
+              <svg class="folder-tasks-header-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,17H7V7H17V17M9,9V15H15V9H9Z"/>
+              </svg>
+              <span class="folder-tasks-header-text">Tasks</span>
+              <span class="folder-tasks-count">${taskCount}</span>
+              <button class="folder-tasks-add-btn" data-workspace-id="${folder.id}" title="Add task">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        `
+        : '';
 
       const sessionsHtml = folderSessions.length > 0
         ? `
@@ -680,6 +723,7 @@ const sessionManager = {
         </div>
         ${notesHtml}
         ${sessionsHtml}
+        ${tasksHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
     }).join('');
@@ -2128,6 +2172,155 @@ const sessionManager = {
     });
   },
 
+  // Start inline rename for folder
+  startFolderRename(folderId) {
+    const folderItem = document.querySelector(`.folder-item[data-folder-id="${folderId}"]`);
+    if (!folderItem) return;
+
+    const nameSpan = folderItem.querySelector('.folder-name');
+    if (!nameSpan) return;
+
+    const currentName = nameSpan.textContent;
+
+    // Create input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'folder-name-input';
+    input.value = currentName;
+
+    // Replace span with input
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    // Handle save
+    const saveRename = async () => {
+      const newName = input.value.trim() || currentName;
+      input.replaceWith(nameSpan);
+      if (newName !== currentName) {
+        await this.renameFolder(folderId, newName);
+      }
+    };
+
+    input.addEventListener('blur', saveRename);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      } else if (e.key === 'Escape') {
+        input.value = currentName;
+        input.blur();
+      }
+    });
+  },
+
+  // Rename folder via API
+  async renameFolder(folderId, newName) {
+    try {
+      const response = await fetch(`/api/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName })
+      });
+
+      if (!response.ok) throw new Error('Failed to rename folder');
+
+      // Update local data
+      const folder = this.findFolderById(folderId, this.folders);
+      if (folder) {
+        folder.name = newName;
+      }
+
+      // Re-render
+      this.renderFolderTree();
+      this.showToast('Workspace renamed', 'success');
+    } catch (error) {
+      console.error('Failed to rename folder:', error);
+      this.showToast('Failed to rename workspace', 'error');
+      // Reload to restore correct state
+      await this.loadFolders();
+    }
+  },
+
+  // Show folder color picker
+  showFolderColorPicker(folderId) {
+    const folder = this.findFolderById(folderId, this.folders);
+    if (!folder) return;
+
+    const folderItem = document.querySelector(`.folder-item[data-folder-id="${folderId}"]`);
+    if (!folderItem) return;
+
+    // Create color picker popup
+    const popup = document.createElement('div');
+    popup.className = 'folder-color-picker-popup';
+    popup.innerHTML = `
+      <div class="folder-color-options">
+        <button class="folder-color-option" data-color="" title="Default">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+        <button class="folder-color-option" data-color="#ef4444" style="background: #ef4444;" title="Red"></button>
+        <button class="folder-color-option" data-color="#f97316" style="background: #f97316;" title="Orange"></button>
+        <button class="folder-color-option" data-color="#eab308" style="background: #eab308;" title="Yellow"></button>
+        <button class="folder-color-option" data-color="#22c55e" style="background: #22c55e;" title="Green"></button>
+        <button class="folder-color-option" data-color="#3b82f6" style="background: #3b82f6;" title="Blue"></button>
+        <button class="folder-color-option" data-color="#8b5cf6" style="background: #8b5cf6;" title="Purple"></button>
+        <button class="folder-color-option" data-color="#ec4899" style="background: #ec4899;" title="Pink"></button>
+      </div>
+    `;
+
+    // Position popup near the folder item
+    const rect = folderItem.getBoundingClientRect();
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.left = `${rect.left}px`;
+
+    document.body.appendChild(popup);
+
+    // Handle color selection
+    popup.querySelectorAll('.folder-color-option').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const color = btn.dataset.color;
+        await this.setFolderColor(folderId, color);
+        popup.remove();
+      });
+    });
+
+    // Close on click outside
+    const closePopup = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.remove();
+        document.removeEventListener('click', closePopup);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closePopup), 0);
+  },
+
+  // Set folder color via API
+  async setFolderColor(folderId, color) {
+    try {
+      const response = await fetch(`/api/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color: color })
+      });
+
+      if (!response.ok) throw new Error('Failed to update folder color');
+
+      // Update local data
+      const folder = this.findFolderById(folderId, this.folders);
+      if (folder) {
+        folder.color = color;
+      }
+
+      // Re-render
+      this.renderFolderTree();
+    } catch (error) {
+      console.error('Failed to set folder color:', error);
+      this.showToast('Failed to update color', 'error');
+    }
+  },
+
   // Show move to folder modal
   showMoveToFolderModal(sessionId) {
     const container = document.getElementById('moveToFolderList');
@@ -3146,6 +3339,7 @@ const sessionManager = {
         const noteId = searchNoteItem.dataset.noteId;
         this.openNoteEditor(noteId);
       }
+
     });
 
     // Note context menu
@@ -3550,41 +3744,13 @@ const sessionManager = {
   // Task state
   sessionTasks: [],
   taskCounts: { total: 0, pending: 0, completed: 0 },
-
-  // Initialize task panel
-  initTaskPanel() {
-    // Task panel toggle
-    document.getElementById('sessionTasksToggle')?.addEventListener('click', () => this.toggleTaskPanel());
-
-    // Add task button
-    document.getElementById('addTaskBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.showTaskInput();
-    });
-
-    // Task input submit
-    document.getElementById('taskInputSubmit')?.addEventListener('click', () => this.submitTask());
-    document.getElementById('taskInput')?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.submitTask();
-    });
-
-    // Hide input on blur (with delay to allow button click)
-    document.getElementById('taskInput')?.addEventListener('blur', () => {
-      setTimeout(() => {
-        const input = document.getElementById('taskInput');
-        if (input && !input.value.trim()) {
-          this.hideTaskInput();
-        }
-      }, 200);
-    });
-  },
+  tasksByWorkspace: new Map(), // Tasks keyed by workspace (folder) ID
 
   // Load tasks for current session
   async loadSessionTasks() {
     if (!this.activeSessionId) {
       this.sessionTasks = [];
       this.taskCounts = { total: 0, pending: 0, completed: 0 };
-      this.renderTaskPanel();
       return;
     }
 
@@ -3601,69 +3767,74 @@ const sessionManager = {
       this.updateSessionTaskBadges();
       this.updateChatTaskBadge();
 
-      this.renderTaskPanel();
-
       // Update main panel if open
       if (this.mainTaskPanelOpen) {
         this.renderMainTaskPanel();
+      }
+
+      // Update workspace tasks in sidebar
+      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+      if (activeSession && activeSession.folder_id) {
+        this.tasksByWorkspace.set(activeSession.folder_id, this.sessionTasks);
+        this.renderFolderTree();
       }
     } catch (error) {
       console.error('Failed to load session tasks:', error);
       this.sessionTasks = [];
       this.taskCounts = { total: 0, pending: 0, completed: 0 };
-      this.renderTaskPanel();
       this.updateChatTaskBadge();
     }
   },
 
-  // Toggle task panel expand/collapse
-  toggleTaskPanel() {
-    const content = document.getElementById('sessionTasksContent');
-    const icon = document.querySelector('#sessionTasksToggle .folder-expand-icon');
-    if (content && icon) {
-      content.classList.toggle('collapsed');
-      icon.classList.toggle('expanded');
+  // Load tasks for a workspace (folder)
+  async loadWorkspaceTasks(workspaceId) {
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`);
+      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      const data = await response.json();
+      this.tasksByWorkspace.set(workspaceId, data.tasks || []);
+      return data.tasks || [];
+    } catch (error) {
+      console.error('Failed to load workspace tasks:', error);
+      return [];
     }
   },
 
-  // Show task input
-  showTaskInput() {
-    const container = document.getElementById('taskInputContainer');
-    const input = document.getElementById('taskInput');
-    if (container && input) {
-      container.style.display = 'flex';
-      input.focus();
+  // Load tasks for all workspaces recursively
+  async loadAllWorkspaceTasks(folders) {
+    for (const folder of folders) {
+      await this.loadWorkspaceTasks(folder.id);
+      if (folder.children && folder.children.length > 0) {
+        await this.loadAllWorkspaceTasks(folder.children);
+      }
     }
   },
 
-  // Hide task input
-  hideTaskInput() {
-    const container = document.getElementById('taskInputContainer');
-    const input = document.getElementById('taskInput');
-    if (container && input) {
-      container.style.display = 'none';
-      input.value = '';
-    }
-  },
-
-  // Submit new task
-  async submitTask() {
-    const input = document.getElementById('taskInput');
-    const description = input?.value?.trim();
-    if (!description || !this.activeSessionId) return;
+  // Add task to workspace from sidebar
+  async addWorkspaceTask(workspaceId) {
+    // Prompt for task description
+    const description = prompt('Enter task description:');
+    if (!description || !description.trim()) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description })
+        body: JSON.stringify({ description: description.trim() })
       });
 
       if (!response.ok) throw new Error('Failed to create task');
 
-      this.hideTaskInput();
-      await this.loadSessionTasks();
+      // Reload workspace tasks
+      await this.loadWorkspaceTasks(workspaceId);
+      this.renderFolderTree();
       this.showToast('Task created', 'success');
+
+      // Also reload session tasks if active session is in this workspace
+      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+      if (activeSession && activeSession.folder_id === workspaceId) {
+        await this.loadSessionTasks();
+      }
     } catch (error) {
       console.error('Failed to create task:', error);
       this.showToast('Failed to create task', 'error');
@@ -3715,87 +3886,6 @@ const sessionManager = {
     } catch (error) {
       console.error('Failed to delete task:', error);
       this.showToast('Failed to delete task', 'error');
-    }
-  },
-
-  // Render task panel
-  renderTaskPanel() {
-    const panel = document.getElementById('sessionTasksPanel');
-    const countBadge = document.getElementById('sessionTaskCount');
-    const listContainer = document.getElementById('sessionTaskList');
-    const emptyState = document.getElementById('sessionTaskListEmpty');
-
-    if (!panel) return;
-
-    // Show/hide panel based on active session
-    if (this.activeSessionId) {
-      panel.style.display = 'block';
-    } else {
-      panel.style.display = 'none';
-      return;
-    }
-
-    // Update count badge
-    if (countBadge) {
-      countBadge.textContent = this.taskCounts.pending || 0;
-      countBadge.classList.remove('all-complete', 'empty');
-      if (this.taskCounts.total === 0) {
-        countBadge.classList.add('empty');
-      } else if (this.taskCounts.pending === 0) {
-        countBadge.classList.add('all-complete');
-        countBadge.textContent = this.taskCounts.completed;
-      }
-    }
-
-    // Render task list
-    if (listContainer) {
-      if (this.sessionTasks.length === 0) {
-        if (emptyState) emptyState.style.display = 'flex';
-        // Remove any task items
-        listContainer.querySelectorAll('.session-task-item').forEach(el => el.remove());
-      } else {
-        if (emptyState) emptyState.style.display = 'none';
-
-        // Clear and render tasks
-        listContainer.querySelectorAll('.session-task-item').forEach(el => el.remove());
-
-        this.sessionTasks.forEach(task => {
-          const isCompleted = task.status === 'completed';
-          const isWorkspaceTask = !task.session_id && task.workspace_id;
-
-          const taskEl = document.createElement('div');
-          taskEl.className = `session-task-item ${isCompleted ? 'completed' : ''}`;
-          taskEl.dataset.taskId = task.id;
-          taskEl.innerHTML = `
-            <div class="session-task-checkbox ${isCompleted ? 'checked' : ''}" data-task-id="${task.id}">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-              </svg>
-            </div>
-            <span class="session-task-description">${this.escapeHtml(task.description)}</span>
-            ${isWorkspaceTask ? '<span class="session-task-workspace-badge">Workspace</span>' : ''}
-            <button class="session-task-delete" data-task-id="${task.id}" title="Delete">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-              </svg>
-            </button>
-          `;
-
-          // Checkbox click
-          taskEl.querySelector('.session-task-checkbox')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleTaskComplete(task.id);
-          });
-
-          // Delete click
-          taskEl.querySelector('.session-task-delete')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.deleteTask(task.id);
-          });
-
-          listContainer.appendChild(taskEl);
-        });
-      }
     }
   },
 
@@ -3878,6 +3968,68 @@ const sessionManager = {
 
     // Update button state
     document.getElementById('chatTasksBtn')?.classList.remove('active');
+  },
+
+  // Open workspace task panel from sidebar
+  async openWorkspaceTaskPanel(workspaceId) {
+    // Check if current session is in this workspace
+    const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+
+    if (activeSession && activeSession.folder_id === workspaceId) {
+      // Current session is in the workspace - open main task panel
+      await this.loadSessionTasks();
+      this.openMainTaskPanel();
+    } else {
+      // Need to switch to a session in this workspace or create one
+      const workspaceSessions = this.sessionsByFolder?.get(workspaceId) || [];
+
+      if (workspaceSessions.length > 0) {
+        // Switch to the first session in this workspace
+        await this.switchSession(workspaceSessions[0].id);
+        await this.loadSessionTasks();
+        this.openMainTaskPanel();
+      } else {
+        // No sessions in workspace - create one
+        this.showToast('Creating session in workspace...', 'info');
+        const folder = this.folders.find(f => f.id === workspaceId) ||
+                       this.findFolderById(workspaceId, this.folders);
+        const agentName = this.currentAgent || 'assistant';
+
+        try {
+          const response = await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent_name: agentName,
+              folder_id: workspaceId
+            })
+          });
+
+          if (!response.ok) throw new Error('Failed to create session');
+
+          const newSession = await response.json();
+          await this.loadSessions();
+          await this.switchSession(newSession.id);
+          await this.loadSessionTasks();
+          this.openMainTaskPanel();
+        } catch (error) {
+          console.error('Failed to create session:', error);
+          this.showToast('Failed to open workspace tasks', 'error');
+        }
+      }
+    }
+  },
+
+  // Helper to find folder by ID recursively
+  findFolderById(folderId, folders) {
+    for (const folder of folders) {
+      if (folder.id === folderId) return folder;
+      if (folder.children && folder.children.length > 0) {
+        const found = this.findFolderById(folderId, folder.children);
+        if (found) return found;
+      }
+    }
+    return null;
   },
 
   // Submit task from main panel

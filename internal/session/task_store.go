@@ -51,6 +51,21 @@ func NewSQLiteTaskStore(db *database.DB) *SQLiteTaskStore {
 	return &SQLiteTaskStore{db: db}
 }
 
+// GetSessionWorkspace returns the workspace (folder) ID for a given session.
+func (s *SQLiteTaskStore) GetSessionWorkspace(ctx context.Context, sessionID string) (string, error) {
+	var workspaceID sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT folder_id FROM sessions WHERE id = ?
+	`, sessionID).Scan(&workspaceID)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("session not found: %s", sessionID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get session workspace: %w", err)
+	}
+	return workspaceID.String, nil
+}
+
 // CreateTask creates a new task in the database.
 func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task *SessionTask) error {
 	if task.ID == "" {
@@ -71,10 +86,14 @@ func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task *SessionTask) err
 		task.Priority = 3 // Default medium priority
 	}
 
+	if task.WorkspaceID == "" {
+		return fmt.Errorf("workspace_id is required for tasks")
+	}
+
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_tasks (id, session_id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at)
-		VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.SessionID, task.WorkspaceID, task.Description, task.Details, task.Status,
+		INSERT INTO session_tasks (id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.WorkspaceID, task.Description, task.Details, task.Status,
 		task.Priority, task.CreatedAt, task.UpdatedAt, task.CompletedAt)
 
 	if err != nil {
@@ -88,13 +107,12 @@ func (s *SQLiteTaskStore) CreateTask(ctx context.Context, task *SessionTask) err
 func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionTask, error) {
 	task := &SessionTask{}
 
-	var sessionID, workspaceID sql.NullString
 	var completedAt sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at
+		SELECT id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at
 		FROM session_tasks WHERE id = ?
-	`, taskID).Scan(&task.ID, &sessionID, &workspaceID, &task.Description, &task.Details, &task.Status,
+	`, taskID).Scan(&task.ID, &task.WorkspaceID, &task.Description, &task.Details, &task.Status,
 		&task.Priority, &task.CreatedAt, &task.UpdatedAt, &completedAt)
 
 	if err == sql.ErrNoRows {
@@ -104,8 +122,6 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionT
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
-	task.SessionID = sessionID.String
-	task.WorkspaceID = workspaceID.String
 	if completedAt.Valid {
 		task.CompletedAt = &completedAt.Time
 	}
@@ -113,9 +129,10 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionT
 	return task, nil
 }
 
-// ListTasksBySession returns all tasks for a session, including workspace-level tasks.
+// ListTasksBySession returns all tasks for the workspace that contains the given session.
+// This looks up the session's folder_id and returns all tasks in that workspace.
 func (s *SQLiteTaskStore) ListTasksBySession(ctx context.Context, sessionID string) ([]SessionTask, error) {
-	// First, get the workspace (folder) ID for this session
+	// Get the workspace (folder) ID for this session
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 		SELECT folder_id FROM sessions WHERE id = ?
@@ -124,36 +141,20 @@ func (s *SQLiteTaskStore) ListTasksBySession(ctx context.Context, sessionID stri
 		return nil, fmt.Errorf("failed to get session folder: %w", err)
 	}
 
-	// Query tasks for this session OR workspace-level tasks in the same workspace
-	query := `
-		SELECT id, session_id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at
-		FROM session_tasks
-		WHERE session_id = ? OR (session_id IS NULL AND workspace_id = ?)
-		ORDER BY
-			CASE status
-				WHEN 'pending' THEN 1
-				WHEN 'in_progress' THEN 2
-				WHEN 'completed' THEN 3
-				WHEN 'cancelled' THEN 4
-			END,
-			created_at DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, sessionID, workspaceID.String)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list tasks: %w", err)
+	// If no workspace, return empty (tasks require a workspace)
+	if !workspaceID.Valid || workspaceID.String == "" {
+		return []SessionTask{}, nil
 	}
-	defer rows.Close()
 
-	return s.scanTasks(rows)
+	return s.ListTasksByWorkspace(ctx, workspaceID.String)
 }
 
-// ListTasksByWorkspace returns all workspace-level tasks (not attached to a specific session).
+// ListTasksByWorkspace returns all tasks for a workspace.
 func (s *SQLiteTaskStore) ListTasksByWorkspace(ctx context.Context, workspaceID string) ([]SessionTask, error) {
 	query := `
-		SELECT id, session_id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at
+		SELECT id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at
 		FROM session_tasks
-		WHERE workspace_id = ? AND session_id IS NULL
+		WHERE workspace_id = ?
 		ORDER BY
 			CASE status
 				WHEN 'pending' THEN 1
@@ -179,16 +180,13 @@ func (s *SQLiteTaskStore) scanTasks(rows *sql.Rows) ([]SessionTask, error) {
 
 	for rows.Next() {
 		var task SessionTask
-		var sessionID, workspaceID sql.NullString
 		var completedAt sql.NullTime
 
-		if err := rows.Scan(&task.ID, &sessionID, &workspaceID, &task.Description, &task.Details, &task.Status,
+		if err := rows.Scan(&task.ID, &task.WorkspaceID, &task.Description, &task.Details, &task.Status,
 			&task.Priority, &task.CreatedAt, &task.UpdatedAt, &completedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 
-		task.SessionID = sessionID.String
-		task.WorkspaceID = workspaceID.String
 		if completedAt.Valid {
 			task.CompletedAt = &completedAt.Time
 		}
@@ -259,9 +257,9 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string) error
 	return nil
 }
 
-// GetTaskCounts returns task statistics for a session.
+// GetTaskCounts returns task statistics for the workspace containing the given session.
 func (s *SQLiteTaskStore) GetTaskCounts(ctx context.Context, sessionID string) (*TaskCounts, error) {
-	// First, get the workspace (folder) ID for this session
+	// Get the workspace (folder) ID for this session
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
 		SELECT folder_id FROM sessions WHERE id = ?
@@ -270,22 +268,12 @@ func (s *SQLiteTaskStore) GetTaskCounts(ctx context.Context, sessionID string) (
 		return nil, fmt.Errorf("failed to get session folder: %w", err)
 	}
 
-	counts := &TaskCounts{}
-
-	err = s.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) as total,
-			COALESCE(SUM(CASE WHEN status IN ('pending', 'in_progress') THEN 1 ELSE 0 END), 0) as pending,
-			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed
-		FROM session_tasks
-		WHERE session_id = ? OR (session_id IS NULL AND workspace_id = ?)
-	`, sessionID, workspaceID.String).Scan(&counts.Total, &counts.Pending, &counts.Completed)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get task counts: %w", err)
+	// If no workspace, return zero counts
+	if !workspaceID.Valid || workspaceID.String == "" {
+		return &TaskCounts{}, nil
 	}
 
-	return counts, nil
+	return s.GetWorkspaceTaskCounts(ctx, workspaceID.String)
 }
 
 // GetWorkspaceTaskCounts returns task statistics for a workspace.
@@ -298,7 +286,7 @@ func (s *SQLiteTaskStore) GetWorkspaceTaskCounts(ctx context.Context, workspaceI
 			COALESCE(SUM(CASE WHEN status IN ('pending', 'in_progress') THEN 1 ELSE 0 END), 0) as pending,
 			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed
 		FROM session_tasks
-		WHERE workspace_id = ? AND session_id IS NULL
+		WHERE workspace_id = ?
 	`, workspaceID).Scan(&counts.Total, &counts.Pending, &counts.Completed)
 
 	if err != nil {
@@ -346,11 +334,15 @@ func (s *SQLiteTaskStore) CreateReminder(ctx context.Context, reminder *Schedule
 	// Calculate next run time based on schedule type
 	reminder.NextRun = s.calculateNextRun(reminder)
 
+	if reminder.WorkspaceID == "" {
+		return fmt.Errorf("workspace_id is required for reminders")
+	}
+
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO scheduled_task_reminders
-		(id, session_id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at)
-		VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, reminder.ID, reminder.SessionID, reminder.WorkspaceID, reminder.Name, reminder.Description,
+		(id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, reminder.ID, reminder.WorkspaceID, reminder.Name, reminder.Description,
 		reminder.ScheduleType, reminder.ExecuteAt, reminder.TimeOfDay, reminder.DayOfWeek,
 		reminder.NextRun, reminder.LastRun, reminder.Enabled, reminder.CreatedAt, reminder.UpdatedAt)
 
@@ -365,13 +357,12 @@ func (s *SQLiteTaskStore) CreateReminder(ctx context.Context, reminder *Schedule
 func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*ScheduledTaskReminder, error) {
 	reminder := &ScheduledTaskReminder{}
 
-	var sessionID, workspaceID sql.NullString
 	var executeAt, nextRun, lastRun sql.NullTime
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, session_id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
+		SELECT id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
 		FROM scheduled_task_reminders WHERE id = ?
-	`, reminderID).Scan(&reminder.ID, &sessionID, &workspaceID, &reminder.Name, &reminder.Description,
+	`, reminderID).Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Name, &reminder.Description,
 		&reminder.ScheduleType, &executeAt, &reminder.TimeOfDay, &reminder.DayOfWeek,
 		&nextRun, &lastRun, &reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt)
 
@@ -382,8 +373,6 @@ func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*
 		return nil, fmt.Errorf("failed to get reminder: %w", err)
 	}
 
-	reminder.SessionID = sessionID.String
-	reminder.WorkspaceID = workspaceID.String
 	if executeAt.Valid {
 		reminder.ExecuteAt = &executeAt.Time
 	}
@@ -397,7 +386,7 @@ func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*
 	return reminder, nil
 }
 
-// ListRemindersBySession returns all reminders for a session.
+// ListRemindersBySession returns all reminders for the workspace containing the given session.
 func (s *SQLiteTaskStore) ListRemindersBySession(ctx context.Context, sessionID string) ([]ScheduledTaskReminder, error) {
 	// Get workspace ID for this session
 	var workspaceID sql.NullString
@@ -406,14 +395,24 @@ func (s *SQLiteTaskStore) ListRemindersBySession(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("failed to get session folder: %w", err)
 	}
 
+	// If no workspace, return empty
+	if !workspaceID.Valid || workspaceID.String == "" {
+		return []ScheduledTaskReminder{}, nil
+	}
+
+	return s.ListRemindersByWorkspace(ctx, workspaceID.String)
+}
+
+// ListRemindersByWorkspace returns all reminders for a workspace.
+func (s *SQLiteTaskStore) ListRemindersByWorkspace(ctx context.Context, workspaceID string) ([]ScheduledTaskReminder, error) {
 	query := `
-		SELECT id, session_id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
+		SELECT id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
 		FROM scheduled_task_reminders
-		WHERE session_id = ? OR (session_id IS NULL AND workspace_id = ?)
+		WHERE workspace_id = ?
 		ORDER BY next_run ASC NULLS LAST, created_at DESC
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, sessionID, workspaceID.String)
+	rows, err := s.db.QueryContext(ctx, query, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reminders: %w", err)
 	}
@@ -464,7 +463,7 @@ func (s *SQLiteTaskStore) DeleteReminder(ctx context.Context, reminderID string)
 // ListDueReminders returns all enabled reminders whose next_run is in the past.
 func (s *SQLiteTaskStore) ListDueReminders(ctx context.Context) ([]ScheduledTaskReminder, error) {
 	query := `
-		SELECT id, session_id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
+		SELECT id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at
 		FROM scheduled_task_reminders
 		WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?
 		ORDER BY next_run ASC
@@ -485,17 +484,14 @@ func (s *SQLiteTaskStore) scanReminders(rows *sql.Rows) ([]ScheduledTaskReminder
 
 	for rows.Next() {
 		var reminder ScheduledTaskReminder
-		var sessionID, workspaceID sql.NullString
 		var executeAt, nextRun, lastRun sql.NullTime
 
-		if err := rows.Scan(&reminder.ID, &sessionID, &workspaceID, &reminder.Name, &reminder.Description,
+		if err := rows.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Name, &reminder.Description,
 			&reminder.ScheduleType, &executeAt, &reminder.TimeOfDay, &reminder.DayOfWeek,
 			&nextRun, &lastRun, &reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan reminder: %w", err)
 		}
 
-		reminder.SessionID = sessionID.String
-		reminder.WorkspaceID = workspaceID.String
 		if executeAt.Valid {
 			reminder.ExecuteAt = &executeAt.Time
 		}

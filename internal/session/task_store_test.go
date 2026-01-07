@@ -18,12 +18,21 @@ func setupTaskTestDB(t *testing.T) (*database.DB, *SQLiteStore, func()) {
 	return db, sessionStore, func() { _ = db.Close() }
 }
 
-// createTestSession creates a session for testing (needed for foreign key constraints)
-func createTestSession(ctx context.Context, sessionStore *SQLiteStore, sessionID string) {
+// createTestFolder creates a folder (workspace) for testing
+func createTestFolder(ctx context.Context, db *database.DB, folderID, name string) {
+	_, _ = db.ExecContext(ctx, `
+		INSERT INTO folders (id, name, created_at, updated_at)
+		VALUES (?, ?, datetime('now'), datetime('now'))
+	`, folderID, name)
+}
+
+// createTestSessionInFolder creates a session in a folder for testing
+func createTestSessionInFolder(ctx context.Context, sessionStore *SQLiteStore, sessionID, folderID string) {
 	session := &Session{
 		ID:        sessionID,
 		Title:     "Test Session",
 		AgentName: "assistant",
+		FolderID:  folderID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -31,18 +40,18 @@ func createTestSession(ctx context.Context, sessionStore *SQLiteStore, sessionID
 }
 
 func TestTaskStore_CreateAndGetTask(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	// Create parent session first
-	createTestSession(ctx, sessionStore, "session-1")
+	// Create workspace (folder) first
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "task-1",
-		SessionID:   "session-1",
+		WorkspaceID: "workspace-1",
 		Description: "Test task",
 		Status:      TaskStatusPending,
 		Priority:    3,
@@ -69,6 +78,9 @@ func TestTaskStore_CreateAndGetTask(t *testing.T) {
 	if got.Status != task.Status {
 		t.Errorf("Expected status %s, got %s", task.Status, got.Status)
 	}
+	if got.WorkspaceID != task.WorkspaceID {
+		t.Errorf("Expected workspace_id %s, got %s", task.WorkspaceID, got.WorkspaceID)
+	}
 }
 
 func TestTaskStore_TaskNotFound(t *testing.T) {
@@ -84,18 +96,36 @@ func TestTaskStore_TaskNotFound(t *testing.T) {
 	}
 }
 
-func TestTaskStore_UpdateTask(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+func TestTaskStore_CreateTaskRequiresWorkspace(t *testing.T) {
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	task := &SessionTask{
+		ID:          "task-no-workspace",
+		Description: "Task without workspace",
+	}
+
+	err := store.CreateTask(ctx, task)
+	if err == nil {
+		t.Error("Expected error when creating task without workspace_id")
+	}
+}
+
+func TestTaskStore_UpdateTask(t *testing.T) {
+	db, _, cleanup := setupTaskTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteTaskStore(db)
+	ctx := context.Background()
+
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "update-task",
-		SessionID:   "session-1",
+		WorkspaceID: "workspace-1",
 		Description: "Original description",
 		Status:      TaskStatusPending,
 	}
@@ -122,17 +152,17 @@ func TestTaskStore_UpdateTask(t *testing.T) {
 }
 
 func TestTaskStore_CompleteTask(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "complete-task",
-		SessionID:   "session-1",
+		WorkspaceID: "workspace-1",
 		Description: "Task to complete",
 		Status:      TaskStatusPending,
 	}
@@ -156,17 +186,17 @@ func TestTaskStore_CompleteTask(t *testing.T) {
 }
 
 func TestTaskStore_DeleteTask(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "delete-task",
-		SessionID:   "session-1",
+		WorkspaceID: "workspace-1",
 		Description: "Task to delete",
 	}
 
@@ -185,6 +215,38 @@ func TestTaskStore_DeleteTask(t *testing.T) {
 	}
 }
 
+func TestTaskStore_ListTasksByWorkspace(t *testing.T) {
+	db, _, cleanup := setupTaskTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteTaskStore(db)
+	ctx := context.Background()
+
+	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
+	createTestFolder(ctx, db, "workspace-2", "Workspace 2")
+
+	// Create tasks for different workspaces
+	tasks := []*SessionTask{
+		{ID: "t1", WorkspaceID: "workspace-1", Description: "Task 1", Status: TaskStatusPending},
+		{ID: "t2", WorkspaceID: "workspace-1", Description: "Task 2", Status: TaskStatusCompleted},
+		{ID: "t3", WorkspaceID: "workspace-2", Description: "Task 3", Status: TaskStatusPending}, // Different workspace
+	}
+
+	for _, task := range tasks {
+		_ = store.CreateTask(ctx, task)
+	}
+
+	// List for workspace-1
+	got, err := store.ListTasksByWorkspace(ctx, "workspace-1")
+	if err != nil {
+		t.Fatalf("Failed to list tasks: %v", err)
+	}
+
+	if len(got) != 2 {
+		t.Errorf("Expected 2 tasks for workspace-1, got %d", len(got))
+	}
+}
+
 func TestTaskStore_ListTasksBySession(t *testing.T) {
 	db, sessionStore, cleanup := setupTaskTestDB(t)
 	defer cleanup()
@@ -192,28 +254,56 @@ func TestTaskStore_ListTasksBySession(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
-	createTestSession(ctx, sessionStore, "session-2")
+	// Create workspace and session in that workspace
+	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
+	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
 
-	// Create tasks for session-1
+	// Create tasks for the workspace
 	tasks := []*SessionTask{
-		{ID: "t1", SessionID: "session-1", Description: "Task 1", Status: TaskStatusPending},
-		{ID: "t2", SessionID: "session-1", Description: "Task 2", Status: TaskStatusCompleted},
-		{ID: "t3", SessionID: "session-2", Description: "Task 3", Status: TaskStatusPending}, // Different session
+		{ID: "t1", WorkspaceID: "workspace-1", Description: "Task 1", Status: TaskStatusPending},
+		{ID: "t2", WorkspaceID: "workspace-1", Description: "Task 2", Status: TaskStatusCompleted},
 	}
 
 	for _, task := range tasks {
 		_ = store.CreateTask(ctx, task)
 	}
 
-	// List for session-1
+	// List via session (should return workspace tasks)
 	got, err := store.ListTasksBySession(ctx, "session-1")
 	if err != nil {
-		t.Fatalf("Failed to list tasks: %v", err)
+		t.Fatalf("Failed to list tasks by session: %v", err)
 	}
 
 	if len(got) != 2 {
-		t.Errorf("Expected 2 tasks for session-1, got %d", len(got))
+		t.Errorf("Expected 2 tasks for session's workspace, got %d", len(got))
+	}
+}
+
+func TestTaskStore_ListTasksBySession_NoWorkspace(t *testing.T) {
+	db, sessionStore, cleanup := setupTaskTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteTaskStore(db)
+	ctx := context.Background()
+
+	// Create session without a folder
+	session := &Session{
+		ID:        "session-no-folder",
+		Title:     "No Folder Session",
+		AgentName: "assistant",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	_ = sessionStore.CreateSession(ctx, session)
+
+	// List tasks (should return empty since session has no workspace)
+	got, err := store.ListTasksBySession(ctx, "session-no-folder")
+	if err != nil {
+		t.Fatalf("Failed to list tasks by session: %v", err)
+	}
+
+	if len(got) != 0 {
+		t.Errorf("Expected 0 tasks for session without workspace, got %d", len(got))
 	}
 }
 
@@ -224,20 +314,21 @@ func TestTaskStore_GetTaskCounts(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
+	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
 
 	// Create tasks
 	tasks := []*SessionTask{
-		{ID: "c1", SessionID: "session-1", Description: "Task 1", Status: TaskStatusPending},
-		{ID: "c2", SessionID: "session-1", Description: "Task 2", Status: TaskStatusInProgress},
-		{ID: "c3", SessionID: "session-1", Description: "Task 3", Status: TaskStatusCompleted},
+		{ID: "c1", WorkspaceID: "workspace-1", Description: "Task 1", Status: TaskStatusPending},
+		{ID: "c2", WorkspaceID: "workspace-1", Description: "Task 2", Status: TaskStatusInProgress},
+		{ID: "c3", WorkspaceID: "workspace-1", Description: "Task 3", Status: TaskStatusCompleted},
 	}
 
 	for _, task := range tasks {
 		_ = store.CreateTask(ctx, task)
 	}
 
-	// Get counts
+	// Get counts via session
 	counts, err := store.GetTaskCounts(ctx, "session-1")
 	if err != nil {
 		t.Fatalf("Failed to get task counts: %v", err)
@@ -255,16 +346,16 @@ func TestTaskStore_GetTaskCounts(t *testing.T) {
 }
 
 func TestTaskStore_CreateTaskAutoFields(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
-		SessionID:   "session-1",
+		WorkspaceID: "workspace-1",
 		Description: "Task without ID",
 	}
 
@@ -289,18 +380,18 @@ func TestTaskStore_CreateTaskAutoFields(t *testing.T) {
 }
 
 func TestReminderStore_CreateAndGetReminder(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	executeAt := time.Now().Add(24 * time.Hour)
 	reminder := &ScheduledTaskReminder{
 		ID:           "reminder-1",
-		SessionID:    "session-1",
+		WorkspaceID:  "workspace-1",
 		Name:         "Test Reminder",
 		Description:  "Test description",
 		ScheduleType: ReminderOnce,
@@ -332,17 +423,17 @@ func TestReminderStore_CreateAndGetReminder(t *testing.T) {
 }
 
 func TestReminderStore_DeleteReminder(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	reminder := &ScheduledTaskReminder{
 		ID:           "delete-reminder",
-		SessionID:    "session-1",
+		WorkspaceID:  "workspace-1",
 		Name:         "To Delete",
 		ScheduleType: ReminderOnce,
 		Enabled:      true,
@@ -364,17 +455,17 @@ func TestReminderStore_DeleteReminder(t *testing.T) {
 }
 
 func TestReminderStore_CalculateNextRun_Once(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	futureTime := time.Now().Add(24 * time.Hour)
 	reminder := &ScheduledTaskReminder{
-		SessionID:    "session-1",
+		WorkspaceID:  "workspace-1",
 		Name:         "Once Reminder",
 		ScheduleType: ReminderOnce,
 		ExecuteAt:    &futureTime,
@@ -393,16 +484,16 @@ func TestReminderStore_CalculateNextRun_Once(t *testing.T) {
 }
 
 func TestReminderStore_CalculateNextRun_Daily(t *testing.T) {
-	db, sessionStore, cleanup := setupTaskTestDB(t)
+	db, _, cleanup := setupTaskTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestSession(ctx, sessionStore, "session-1")
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
 
 	reminder := &ScheduledTaskReminder{
-		SessionID:    "session-1",
+		WorkspaceID:  "workspace-1",
 		Name:         "Daily Reminder",
 		ScheduleType: ReminderDaily,
 		TimeOfDay:    "09:00",
@@ -416,5 +507,26 @@ func TestReminderStore_CalculateNextRun_Daily(t *testing.T) {
 	}
 	if reminder.NextRun.Hour() != 9 || reminder.NextRun.Minute() != 0 {
 		t.Errorf("Expected NextRun at 09:00, got %02d:%02d", reminder.NextRun.Hour(), reminder.NextRun.Minute())
+	}
+}
+
+func TestTaskStore_GetSessionWorkspace(t *testing.T) {
+	db, sessionStore, cleanup := setupTaskTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteTaskStore(db)
+	ctx := context.Background()
+
+	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
+
+	// Get workspace for session
+	wsID, err := store.GetSessionWorkspace(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("Failed to get session workspace: %v", err)
+	}
+
+	if wsID != "workspace-1" {
+		t.Errorf("Expected workspace-1, got %s", wsID)
 	}
 }

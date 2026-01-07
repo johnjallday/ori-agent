@@ -30,14 +30,27 @@ func createTestTaskHandler(t *testing.T) (*TaskHandler, session.HybridStore, fun
 	}
 }
 
-// createTestSessionForTasks creates a session for task testing (needed for foreign key constraints).
-func createTestSessionForTasks(t *testing.T, store session.HybridStore, sessionID string) {
+// createTestWorkspaceAndSession creates a workspace and session for task testing.
+// Tasks require a workspace, and sessions must belong to a workspace to create tasks.
+func createTestWorkspaceAndSession(t *testing.T, store session.HybridStore, sessionID, workspaceID string) {
 	t.Helper()
 	ctx := context.Background()
+
+	// Create workspace (folder) first
+	folder := &session.Folder{
+		ID:   workspaceID,
+		Name: "Test Workspace",
+	}
+	if err := store.CreateFolder(ctx, folder); err != nil {
+		t.Fatalf("Failed to create test folder: %v", err)
+	}
+
+	// Create session in that workspace
 	sess := &session.Session{
 		ID:        sessionID,
 		Title:     "Test Session",
 		AgentName: "test-agent",
+		FolderID:  workspaceID,
 	}
 	if err := store.CreateSession(ctx, sess); err != nil {
 		t.Fatalf("Failed to create test session: %v", err)
@@ -49,7 +62,7 @@ func TestTaskHandler_CreateTask(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	body := `{"description": "Test task"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/tasks", bytes.NewBufferString(body))
@@ -83,7 +96,7 @@ func TestTaskHandler_CreateTaskMissingDescription(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	body := `{}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/tasks", bytes.NewBufferString(body))
@@ -102,7 +115,7 @@ func TestTaskHandler_ListTasks(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create multiple tasks
 	for i := 0; i < 3; i++ {
@@ -143,7 +156,7 @@ func TestTaskHandler_GetTask(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create a task
 	body := `{"description": "Get me"}`
@@ -177,7 +190,7 @@ func TestTaskHandler_GetTaskNotFound(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/tasks/non-existent", nil)
 	w := httptest.NewRecorder()
@@ -193,7 +206,7 @@ func TestTaskHandler_UpdateTask(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create a task
 	body := `{"description": "Original"}`
@@ -232,7 +245,7 @@ func TestTaskHandler_DeleteTask(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create a task
 	body := `{"description": "To delete"}`
@@ -269,7 +282,7 @@ func TestTaskHandler_CompleteTask(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create a task
 	body := `{"description": "Complete me"}`
@@ -369,7 +382,7 @@ func TestTaskHandler_MethodNotAllowed(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// PATCH on collection should be method not allowed
 	req := httptest.NewRequest(http.MethodPatch, "/api/sessions/session-1/tasks", nil)
@@ -386,7 +399,7 @@ func TestTaskHandler_TaskWithPriority(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	body := `{"description": "High priority", "priority": 1}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/tasks", bytes.NewBufferString(body))
@@ -413,7 +426,7 @@ func TestTaskHandler_TaskCounts(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	createTestSessionForTasks(t, store, "session-1")
+	createTestWorkspaceAndSession(t, store, "session-1", "workspace-1")
 
 	// Create tasks with different statuses
 	tasks := []struct {

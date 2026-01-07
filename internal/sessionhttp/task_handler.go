@@ -159,6 +159,8 @@ func (h *TaskHandler) listWorkspaceTasks(w http.ResponseWriter, r *http.Request,
 }
 
 // createTask handles POST /api/sessions/{id}/tasks or POST /api/workspaces/{id}/tasks.
+// If sessionID is provided, looks up the session's workspace.
+// If workspaceID is provided directly, uses that.
 func (h *TaskHandler) createTask(w http.ResponseWriter, r *http.Request, sessionID, workspaceID string) {
 	var req struct {
 		Description string `json:"description"`
@@ -175,8 +177,29 @@ func (h *TaskHandler) createTask(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
+	ctx := r.Context()
+
+	// If creating via session endpoint, look up the session's workspace
+	if workspaceID == "" && sessionID != "" {
+		wsID, err := h.taskStore.GetSessionWorkspace(ctx, sessionID)
+		if err != nil {
+			logger.Error("Failed to get session workspace", logger.Fields{"session_id": sessionID, "error": err})
+			_ = orihttp.RespondBadRequest(w, "session must belong to a workspace to create tasks")
+			return
+		}
+		if wsID == "" {
+			_ = orihttp.RespondBadRequest(w, "session must belong to a workspace to create tasks")
+			return
+		}
+		workspaceID = wsID
+	}
+
+	if workspaceID == "" {
+		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
+		return
+	}
+
 	task := &session.SessionTask{
-		SessionID:   sessionID,
 		WorkspaceID: workspaceID,
 		Description: req.Description,
 		Details:     req.Details,
@@ -184,14 +207,13 @@ func (h *TaskHandler) createTask(w http.ResponseWriter, r *http.Request, session
 		Status:      session.TaskStatusPending,
 	}
 
-	ctx := r.Context()
 	if err := h.taskStore.CreateTask(ctx, task); err != nil {
 		logger.Error("Failed to create task", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "failed to create task")
 		return
 	}
 
-	logger.Info("Task created", logger.Fields{"task_id": task.ID, "session_id": sessionID, "workspace_id": workspaceID})
+	logger.Info("Task created", logger.Fields{"task_id": task.ID, "workspace_id": workspaceID})
 	_ = orihttp.RespondJSON(w, http.StatusCreated, task)
 }
 
