@@ -27,7 +27,7 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, session *Session) error
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, title, agent_name, folder_id, message_count, created_at, updated_at)
+		INSERT INTO sessions (id, title, agent_name, workspace_id, message_count, created_at, updated_at)
 		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?)
 	`, session.ID, session.Title, session.AgentName, session.FolderID,
 		session.MessageCount, session.CreatedAt, session.UpdatedAt)
@@ -53,11 +53,11 @@ func (s *SQLiteStore) CreateSession(ctx context.Context, session *Session) error
 func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*Session, error) {
 	session := &Session{}
 
-	var folderID sql.NullString
+	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, agent_name, folder_id, message_count, created_at, updated_at
+		SELECT id, title, agent_name, workspace_id, message_count, created_at, updated_at
 		FROM sessions WHERE id = ?
-	`, id).Scan(&session.ID, &session.Title, &session.AgentName, &folderID,
+	`, id).Scan(&session.ID, &session.Title, &session.AgentName, &workspaceID,
 		&session.MessageCount, &session.CreatedAt, &session.UpdatedAt)
 
 	if err == sql.ErrNoRows {
@@ -67,7 +67,7 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*Session, erro
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	session.FolderID = folderID.String
+	session.FolderID = workspaceID.String
 
 	// Get tags
 	tags, err := s.getSessionTags(ctx, id)
@@ -90,7 +90,7 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*Session, erro
 func (s *SQLiteStore) UpdateSession(ctx context.Context, session *Session) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions
-		SET title = ?, agent_name = ?, folder_id = NULLIF(?, ''),
+		SET title = ?, agent_name = ?, workspace_id = NULLIF(?, ''),
 		    message_count = ?, updated_at = ?
 		WHERE id = ?
 	`, session.Title, session.AgentName, session.FolderID,
@@ -151,7 +151,7 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, filter *SessionFilter, o
 	// Get paginated results
 	orderBy := s.getOrderBy(opts.Sort)
 	query := fmt.Sprintf(`
-		SELECT s.id, s.title, s.agent_name, s.folder_id, s.message_count, s.created_at, s.updated_at
+		SELECT s.id, s.title, s.agent_name, s.workspace_id, s.message_count, s.created_at, s.updated_at
 		FROM sessions s
 		%s
 		ORDER BY %s
@@ -168,15 +168,15 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, filter *SessionFilter, o
 	sessions := make([]SessionListItem, 0)
 	for rows.Next() {
 		var item SessionListItem
-		var folderID sql.NullString
+		var workspaceID sql.NullString
 
-		if err := rows.Scan(&item.ID, &item.Title, &item.AgentName, &folderID,
+		if err := rows.Scan(&item.ID, &item.Title, &item.AgentName, &workspaceID,
 			&item.MessageCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
-		item.FolderID = folderID.String
+		item.FolderID = workspaceID.String
 		sessions = append(sessions, item)
 	}
 	_ = rows.Close() // Close rows before making additional queries
@@ -308,7 +308,7 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 
 	// Get search results with snippets
 	searchQuery := fmt.Sprintf(`
-		SELECT s.id, s.title, s.agent_name, s.folder_id, s.message_count,
+		SELECT s.id, s.title, s.agent_name, s.workspace_id, s.message_count,
 		       s.created_at, s.updated_at,
 		       snippet(sessions_fts, 2, '<mark>', '</mark>', '...', 32) as snippet
 		FROM sessions s
@@ -329,16 +329,16 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, filter *SessionF
 	results := make([]SearchResult, 0)
 	for rows.Next() {
 		var result SearchResult
-		var folderID sql.NullString
+		var workspaceID sql.NullString
 		var snippet string
 
-		if err := rows.Scan(&result.ID, &result.Title, &result.AgentName, &folderID,
+		if err := rows.Scan(&result.ID, &result.Title, &result.AgentName, &workspaceID,
 			&result.MessageCount, &result.CreatedAt, &result.UpdatedAt, &snippet); err != nil {
 			_ = rows.Close()
 			return nil, 0, fmt.Errorf("failed to scan search result: %w", err)
 		}
 
-		result.FolderID = folderID.String
+		result.FolderID = workspaceID.String
 		if snippet != "" {
 			result.Snippets = []string{snippet}
 		}
@@ -466,9 +466,9 @@ func (s *SQLiteStore) buildWhereClause(filter *SessionFilter) (string, []interfa
 
 	if filter.FolderID != nil {
 		if *filter.FolderID == "" {
-			conditions = append(conditions, "s.folder_id IS NULL")
+			conditions = append(conditions, "s.workspace_id IS NULL")
 		} else {
-			conditions = append(conditions, "s.folder_id = ?")
+			conditions = append(conditions, "s.workspace_id = ?")
 			args = append(args, *filter.FolderID)
 		}
 	}

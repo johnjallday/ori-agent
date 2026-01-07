@@ -297,118 +297,118 @@ func TestSQLiteStore_Tags(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_Folders(t *testing.T) {
+func TestSQLiteStore_Workspaces(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteStore(db)
 	ctx := context.Background()
 
-	// Create folders
-	root := &Folder{
-		ID:        "root-folder",
+	// Create workspaces
+	root := &Workspace{
+		ID:        "root-workspace",
 		Name:      "Root",
 		Color:     "#ff0000",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	child := &Folder{
-		ID:        "child-folder",
+	child := &Workspace{
+		ID:        "child-workspace",
 		Name:      "Child",
-		ParentID:  "root-folder",
+		ParentID:  "root-workspace",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	err := store.CreateFolder(ctx, root)
+	err := store.CreateWorkspace(ctx, root)
 	if err != nil {
-		t.Fatalf("Failed to create root folder: %v", err)
+		t.Fatalf("Failed to create root workspace: %v", err)
 	}
 
-	err = store.CreateFolder(ctx, child)
+	err = store.CreateWorkspace(ctx, child)
 	if err != nil {
-		t.Fatalf("Failed to create child folder: %v", err)
+		t.Fatalf("Failed to create child workspace: %v", err)
 	}
 
-	// Get folder
-	got, err := store.GetFolder(ctx, "root-folder")
+	// Get workspace
+	got, err := store.GetWorkspace(ctx, "root-workspace")
 	if err != nil {
-		t.Fatalf("Failed to get folder: %v", err)
+		t.Fatalf("Failed to get workspace: %v", err)
 	}
 	if got.Name != "Root" {
 		t.Errorf("Expected name 'Root', got %s", got.Name)
 	}
 
-	// List folders
-	folders, err := store.ListFolders(ctx)
+	// List workspaces
+	workspaces, err := store.ListWorkspaces(ctx)
 	if err != nil {
-		t.Fatalf("Failed to list folders: %v", err)
+		t.Fatalf("Failed to list workspaces: %v", err)
 	}
-	if len(folders) != 2 {
-		t.Errorf("Expected 2 folders, got %d", len(folders))
+	if len(workspaces) != 2 {
+		t.Errorf("Expected 2 workspaces, got %d", len(workspaces))
 	}
 
-	// Get folder tree
-	tree, err := store.GetFolderTree(ctx)
+	// Get workspace tree
+	tree, err := store.GetWorkspaceTree(ctx)
 	if err != nil {
-		t.Fatalf("Failed to get folder tree: %v", err)
+		t.Fatalf("Failed to get workspace tree: %v", err)
 	}
 	if len(tree) != 1 { // Only root
-		t.Errorf("Expected 1 root folder, got %d", len(tree))
+		t.Errorf("Expected 1 root workspace, got %d", len(tree))
 	}
 	if len(tree[0].Children) != 1 {
-		t.Errorf("Expected 1 child folder, got %d", len(tree[0].Children))
+		t.Errorf("Expected 1 child workspace, got %d", len(tree[0].Children))
 	}
 
-	// Get subfolder IDs
-	subfolderIDs, err := store.GetSubfolderIDs(ctx, "root-folder")
+	// Get subworkspace IDs
+	subworkspaceIDs, err := store.GetSubworkspaceIDs(ctx, "root-workspace")
 	if err != nil {
-		t.Fatalf("Failed to get subfolder IDs: %v", err)
+		t.Fatalf("Failed to get subworkspace IDs: %v", err)
 	}
-	if len(subfolderIDs) != 1 {
-		t.Errorf("Expected 1 subfolder ID, got %d", len(subfolderIDs))
+	if len(subworkspaceIDs) != 1 {
+		t.Errorf("Expected 1 subworkspace ID, got %d", len(subworkspaceIDs))
 	}
 }
 
-func TestSQLiteStore_DeleteFolderCascade(t *testing.T) {
+func TestSQLiteStore_DeleteWorkspaceCascade(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	store := NewSQLiteStore(db)
 	ctx := context.Background()
 
-	// Create folder and session in it
-	folder := &Folder{
-		ID:        "delete-folder",
+	// Create workspace and session in it
+	workspace := &Workspace{
+		ID:        "delete-workspace",
 		Name:      "To Delete",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, workspace)
 
 	session := &Session{
-		ID:        "session-in-folder",
+		ID:        "session-in-workspace",
 		Title:     "Session",
 		AgentName: "assistant",
-		FolderID:  "delete-folder",
+		FolderID:  "delete-workspace",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 	_ = store.CreateSession(ctx, session)
 
-	// Delete folder
-	err := store.DeleteFolder(ctx, "delete-folder")
+	// Delete workspace
+	err := store.DeleteWorkspace(ctx, "delete-workspace")
 	if err != nil {
-		t.Fatalf("Failed to delete folder: %v", err)
+		t.Fatalf("Failed to delete workspace: %v", err)
 	}
 
-	// Session should still exist but have no folder
-	got, err := store.GetSession(ctx, "session-in-folder")
+	// Session should still exist but have no workspace
+	got, err := store.GetSession(ctx, "session-in-workspace")
 	if err != nil {
 		t.Fatalf("Session should still exist: %v", err)
 	}
 	if got.FolderID != "" {
-		t.Errorf("Expected empty folder ID, got %s", got.FolderID)
+		t.Errorf("Expected empty workspace ID, got %s", got.FolderID)
 	}
 }
 
@@ -468,21 +468,21 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a folder first
-	folder := &Folder{
+	folder := &Workspace{
 		ID:        "test-folder",
 		Name:      "Test Folder",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, folder)
 
-	note := &FolderNote{
-		ID:        "test-note-1",
-		FolderID:  "test-folder",
-		Name:      "Test Note",
-		Content:   "This is test content for the note.",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "test-note-1",
+		WorkspaceID: "test-folder",
+		Name:        "Test Note",
+		Content:     "This is test content for the note.",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	// Create
@@ -500,8 +500,8 @@ func TestSQLiteStore_CreateAndGetNote(t *testing.T) {
 	if got.ID != note.ID {
 		t.Errorf("Expected ID %s, got %s", note.ID, got.ID)
 	}
-	if got.FolderID != note.FolderID {
-		t.Errorf("Expected FolderID %s, got %s", note.FolderID, got.FolderID)
+	if got.WorkspaceID != note.WorkspaceID {
+		t.Errorf("Expected FolderID %s, got %s", note.WorkspaceID, got.WorkspaceID)
 	}
 	if got.Name != note.Name {
 		t.Errorf("Expected Name %s, got %s", note.Name, got.Name)
@@ -532,21 +532,21 @@ func TestSQLiteStore_UpdateNote(t *testing.T) {
 	ctx := context.Background()
 
 	// Create folder and note
-	folder := &Folder{
+	folder := &Workspace{
 		ID:        "update-folder",
 		Name:      "Update Folder",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, folder)
 
-	note := &FolderNote{
-		ID:        "update-note",
-		FolderID:  "update-folder",
-		Name:      "Original Name",
-		Content:   "Original content",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "update-note",
+		WorkspaceID: "update-folder",
+		Name:        "Original Name",
+		Content:     "Original content",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	_ = store.CreateNote(ctx, note)
 
@@ -577,40 +577,40 @@ func TestSQLiteStore_MoveNoteBetweenFolders(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two folders
-	folder1 := &Folder{
+	folder1 := &Workspace{
 		ID:        "folder-1",
 		Name:      "Folder One",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	folder2 := &Folder{
+	folder2 := &Workspace{
 		ID:        "folder-2",
 		Name:      "Folder Two",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder1)
-	_ = store.CreateFolder(ctx, folder2)
+	_ = store.CreateWorkspace(ctx, folder1)
+	_ = store.CreateWorkspace(ctx, folder2)
 
 	// Create note in folder 1
-	note := &FolderNote{
-		ID:        "movable-note",
-		FolderID:  "folder-1",
-		Name:      "Movable Note",
-		Content:   "This note will be moved",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "movable-note",
+		WorkspaceID: "folder-1",
+		Name:        "Movable Note",
+		Content:     "This note will be moved",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	_ = store.CreateNote(ctx, note)
 
 	// Verify note is in folder 1
-	notes1, _ := store.ListNotesByFolder(ctx, "folder-1")
+	notes1, _ := store.ListNotesByWorkspace(ctx, "folder-1")
 	if len(notes1) != 1 {
 		t.Fatalf("Expected 1 note in folder-1, got %d", len(notes1))
 	}
 
 	// Move note to folder 2
-	note.FolderID = "folder-2"
+	note.WorkspaceID = "folder-2"
 	note.UpdatedAt = time.Now()
 	err := store.UpdateNote(ctx, note)
 	if err != nil {
@@ -618,21 +618,21 @@ func TestSQLiteStore_MoveNoteBetweenFolders(t *testing.T) {
 	}
 
 	// Verify note moved - folder 1 should be empty
-	notes1After, _ := store.ListNotesByFolder(ctx, "folder-1")
+	notes1After, _ := store.ListNotesByWorkspace(ctx, "folder-1")
 	if len(notes1After) != 0 {
 		t.Errorf("Expected 0 notes in folder-1 after move, got %d", len(notes1After))
 	}
 
 	// Verify note is now in folder 2
-	notes2, _ := store.ListNotesByFolder(ctx, "folder-2")
+	notes2, _ := store.ListNotesByWorkspace(ctx, "folder-2")
 	if len(notes2) != 1 {
 		t.Errorf("Expected 1 note in folder-2, got %d", len(notes2))
 	}
 
 	// Verify note data integrity after move
 	got, _ := store.GetNote(ctx, "movable-note")
-	if got.FolderID != "folder-2" {
-		t.Errorf("Expected folder_id 'folder-2', got '%s'", got.FolderID)
+	if got.WorkspaceID != "folder-2" {
+		t.Errorf("Expected workspace_id 'folder-2', got '%s'", got.WorkspaceID)
 	}
 	if got.Name != "Movable Note" {
 		t.Errorf("Expected name preserved, got '%s'", got.Name)
@@ -647,21 +647,21 @@ func TestSQLiteStore_DeleteNote(t *testing.T) {
 	ctx := context.Background()
 
 	// Create folder and note
-	folder := &Folder{
+	folder := &Workspace{
 		ID:        "delete-note-folder",
 		Name:      "Delete Folder",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, folder)
 
-	note := &FolderNote{
-		ID:        "delete-note",
-		FolderID:  "delete-note-folder",
-		Name:      "To Be Deleted",
-		Content:   "This will be deleted",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "delete-note",
+		WorkspaceID: "delete-note-folder",
+		Name:        "To Be Deleted",
+		Content:     "This will be deleted",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	_ = store.CreateNote(ctx, note)
 
@@ -676,7 +676,7 @@ func TestSQLiteStore_DeleteNote(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_ListNotesByFolder(t *testing.T) {
+func TestSQLiteStore_ListNotesByWorkspace(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -684,37 +684,37 @@ func TestSQLiteStore_ListNotesByFolder(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two folders
-	folder1 := &Folder{ID: "folder-1", Name: "Folder 1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	folder2 := &Folder{ID: "folder-2", Name: "Folder 2", CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	_ = store.CreateFolder(ctx, folder1)
-	_ = store.CreateFolder(ctx, folder2)
+	folder1 := &Workspace{ID: "folder-1", Name: "Folder 1", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	folder2 := &Workspace{ID: "folder-2", Name: "Folder 2", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	_ = store.CreateWorkspace(ctx, folder1)
+	_ = store.CreateWorkspace(ctx, folder2)
 
 	// Create notes in folder 1
 	for i := 0; i < 3; i++ {
-		note := &FolderNote{
-			ID:        "note-f1-" + string(rune('a'+i)),
-			FolderID:  "folder-1",
-			Name:      "Note " + string(rune('A'+i)),
-			Content:   "Content for note " + string(rune('A'+i)),
-			CreatedAt: time.Now().Add(time.Duration(i) * time.Hour),
-			UpdatedAt: time.Now().Add(time.Duration(i) * time.Hour),
+		note := &WorkspaceNote{
+			ID:          "note-f1-" + string(rune('a'+i)),
+			WorkspaceID: "folder-1",
+			Name:        "Note " + string(rune('A'+i)),
+			Content:     "Content for note " + string(rune('A'+i)),
+			CreatedAt:   time.Now().Add(time.Duration(i) * time.Hour),
+			UpdatedAt:   time.Now().Add(time.Duration(i) * time.Hour),
 		}
 		_ = store.CreateNote(ctx, note)
 	}
 
 	// Create one note in folder 2
-	note := &FolderNote{
-		ID:        "note-f2-a",
-		FolderID:  "folder-2",
-		Name:      "Note in Folder 2",
-		Content:   "Different folder",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "note-f2-a",
+		WorkspaceID: "folder-2",
+		Name:        "Note in Folder 2",
+		Content:     "Different folder",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	_ = store.CreateNote(ctx, note)
 
 	// List notes by folder
-	notes, err := store.ListNotesByFolder(ctx, "folder-1")
+	notes, err := store.ListNotesByWorkspace(ctx, "folder-1")
 	if err != nil {
 		t.Fatalf("Failed to list notes: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestSQLiteStore_ListNotesByFolder(t *testing.T) {
 	}
 
 	// Check folder 2
-	notes2, _ := store.ListNotesByFolder(ctx, "folder-2")
+	notes2, _ := store.ListNotesByWorkspace(ctx, "folder-2")
 	if len(notes2) != 1 {
 		t.Errorf("Expected 1 note in folder-2, got %d", len(notes2))
 	}
@@ -743,19 +743,19 @@ func TestSQLiteStore_SearchNotes(t *testing.T) {
 	ctx := context.Background()
 
 	// Create folder
-	folder := &Folder{
+	folder := &Workspace{
 		ID:        "search-folder",
 		Name:      "Search Folder",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, folder)
 
 	// Create notes with different content
-	notes := []FolderNote{
-		{ID: "search-1", FolderID: "search-folder", Name: "Meeting Notes", Content: "Discussed project timeline and deliverables", CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		{ID: "search-2", FolderID: "search-folder", Name: "Ideas", Content: "New feature ideas for the app", CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		{ID: "search-3", FolderID: "search-folder", Name: "Project Plan", Content: "The project deadline is next month", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	notes := []WorkspaceNote{
+		{ID: "search-1", WorkspaceID: "search-folder", Name: "Meeting Notes", Content: "Discussed project timeline and deliverables", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{ID: "search-2", WorkspaceID: "search-folder", Name: "Ideas", Content: "New feature ideas for the app", CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{ID: "search-3", WorkspaceID: "search-folder", Name: "Project Plan", Content: "The project deadline is next month", CreatedAt: time.Now(), UpdatedAt: time.Now()},
 	}
 
 	for _, n := range notes {
@@ -806,28 +806,28 @@ func TestSQLiteStore_DeleteFolderCascadesNotes(t *testing.T) {
 	ctx := context.Background()
 
 	// Create folder with notes
-	folder := &Folder{
+	folder := &Workspace{
 		ID:        "cascade-folder",
 		Name:      "Cascade Test",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	_ = store.CreateFolder(ctx, folder)
+	_ = store.CreateWorkspace(ctx, folder)
 
-	note := &FolderNote{
-		ID:        "cascade-note",
-		FolderID:  "cascade-folder",
-		Name:      "Note to Cascade",
-		Content:   "This should be deleted with folder",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	note := &WorkspaceNote{
+		ID:          "cascade-note",
+		WorkspaceID: "cascade-folder",
+		Name:        "Note to Cascade",
+		Content:     "This should be deleted with folder",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	_ = store.CreateNote(ctx, note)
 
-	// Delete folder
-	err := store.DeleteFolder(ctx, "cascade-folder")
+	// Delete workspace
+	err := store.DeleteWorkspace(ctx, "cascade-folder")
 	if err != nil {
-		t.Fatalf("Failed to delete folder: %v", err)
+		t.Fatalf("Failed to delete workspace: %v", err)
 	}
 
 	// Note should also be deleted (foreign key cascade)

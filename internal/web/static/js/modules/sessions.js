@@ -361,11 +361,11 @@ const sessionManager = {
     }
   },
 
-  // Load folders from API
+  // Load workspaces (folders) from API
   async loadFolders() {
     try {
-      const response = await fetch('/api/folders?tree=true');
-      if (!response.ok) throw new Error('Failed to load folders');
+      const response = await fetch('/api/workspaces?tree=true');
+      if (!response.ok) throw new Error('Failed to load workspaces');
 
       const data = await response.json();
       this.folders = data.folders || [];
@@ -1829,13 +1829,13 @@ const sessionManager = {
     const color = colorBtn?.dataset.color || '';
 
     try {
-      const response = await fetch('/api/folders', {
+      const response = await fetch('/api/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, description, color })
       });
 
-      if (!response.ok) throw new Error('Failed to create folder');
+      if (!response.ok) throw new Error('Failed to create workspace');
 
       // Close modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('addFolderModal'));
@@ -1857,11 +1857,11 @@ const sessionManager = {
     if (!confirm('Are you sure you want to delete this workspace? Sessions will be moved to root.')) return;
 
     try {
-      const response = await fetch(`/api/folders/${folderId}`, {
+      const response = await fetch(`/api/workspaces/${folderId}`, {
         method: 'DELETE'
       });
 
-      if (!response.ok) throw new Error('Failed to delete folder');
+      if (!response.ok) throw new Error('Failed to delete workspace');
 
       // Clear active folder if deleted
       if (this.activeFolder === folderId) {
@@ -2217,13 +2217,13 @@ const sessionManager = {
   // Rename folder via API
   async renameFolder(folderId, newName) {
     try {
-      const response = await fetch(`/api/folders/${folderId}`, {
+      const response = await fetch(`/api/workspaces/${folderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName })
       });
 
-      if (!response.ok) throw new Error('Failed to rename folder');
+      if (!response.ok) throw new Error('Failed to rename workspace');
 
       // Update local data
       const folder = this.findFolderById(folderId, this.folders);
@@ -2299,13 +2299,13 @@ const sessionManager = {
   // Set folder color via API
   async setFolderColor(folderId, color) {
     try {
-      const response = await fetch(`/api/folders/${folderId}`, {
+      const response = await fetch(`/api/workspaces/${folderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ color: color })
       });
 
-      if (!response.ok) throw new Error('Failed to update folder color');
+      if (!response.ok) throw new Error('Failed to update workspace color');
 
       // Update local data
       const folder = this.findFolderById(folderId, this.folders);
@@ -3057,7 +3057,7 @@ const sessionManager = {
   // Load notes for a folder
   async loadFolderNotes(folderId) {
     try {
-      const response = await fetch(`/api/folders/${folderId}/notes`);
+      const response = await fetch(`/api/workspaces/${folderId}/notes`);
       if (!response.ok) throw new Error('Failed to load notes');
       const data = await response.json();
       this.notesByFolder.set(folderId, data.notes || []);
@@ -3138,7 +3138,7 @@ const sessionManager = {
   // Create a new note in a folder
   async createNote(folderId, name = 'Untitled Note', content = '') {
     try {
-      const response = await fetch(`/api/folders/${folderId}/notes`, {
+      const response = await fetch(`/api/workspaces/${folderId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, content })

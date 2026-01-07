@@ -341,38 +341,38 @@ func TestHybridStore_Folders(t *testing.T) {
 
 	ctx := context.Background()
 
-	folder := &Folder{
+	workspace := &Workspace{
 		Name:  "Work",
 		Color: "#0000ff",
 	}
 
-	err := store.CreateFolder(ctx, folder)
+	err := store.CreateWorkspace(ctx, workspace)
 	if err != nil {
-		t.Fatalf("Failed to create folder: %v", err)
+		t.Fatalf("Failed to create workspace: %v", err)
 	}
 
-	if folder.ID == "" {
-		t.Error("Expected folder ID to be generated")
+	if workspace.ID == "" {
+		t.Error("Expected workspace ID to be generated")
 	}
 
-	// Get folder
-	got, err := store.GetFolder(ctx, folder.ID)
+	// Get workspace
+	got, err := store.GetWorkspace(ctx, workspace.ID)
 	if err != nil {
-		t.Fatalf("Failed to get folder: %v", err)
+		t.Fatalf("Failed to get workspace: %v", err)
 	}
 
 	if got.Name != "Work" {
 		t.Errorf("Expected name 'Work', got %s", got.Name)
 	}
 
-	// List folders
-	folders, err := store.ListFolders(ctx)
+	// List workspaces
+	workspaces, err := store.ListWorkspaces(ctx)
 	if err != nil {
-		t.Fatalf("Failed to list folders: %v", err)
+		t.Fatalf("Failed to list workspaces: %v", err)
 	}
 
-	if len(folders) != 1 {
-		t.Errorf("Expected 1 folder, got %d", len(folders))
+	if len(workspaces) != 1 {
+		t.Errorf("Expected 1 workspace, got %d", len(workspaces))
 	}
 }
 

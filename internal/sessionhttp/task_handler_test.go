@@ -36,13 +36,13 @@ func createTestWorkspaceAndSession(t *testing.T, store session.HybridStore, sess
 	t.Helper()
 	ctx := context.Background()
 
-	// Create workspace (folder) first
-	folder := &session.Folder{
+	// Create workspace first
+	workspace := &session.Workspace{
 		ID:   workspaceID,
 		Name: "Test Workspace",
 	}
-	if err := store.CreateFolder(ctx, folder); err != nil {
-		t.Fatalf("Failed to create test folder: %v", err)
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("Failed to create test workspace: %v", err)
 	}
 
 	// Create session in that workspace
@@ -319,14 +319,14 @@ func TestTaskHandler_WorkspaceTasks(t *testing.T) {
 	handler, store, cleanup := createTestTaskHandler(t)
 	defer cleanup()
 
-	// Create a folder (workspace) first
+	// Create a workspace first
 	ctx := context.Background()
-	folder := &session.Folder{
+	workspace := &session.Workspace{
 		ID:   "workspace-1",
 		Name: "Test Workspace",
 	}
-	if err := store.CreateFolder(ctx, folder); err != nil {
-		t.Fatalf("Failed to create folder: %v", err)
+	if err := store.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("Failed to create workspace: %v", err)
 	}
 
 	// Create a workspace task

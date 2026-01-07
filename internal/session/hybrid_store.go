@@ -239,50 +239,50 @@ func (h *hybridStore) GetAllTags(ctx context.Context) ([]Tag, error) {
 	return h.sqlite.GetAllTags(ctx)
 }
 
-// CreateFolder creates a new folder.
-func (h *hybridStore) CreateFolder(ctx context.Context, folder *Folder) error {
-	if folder.ID == "" {
-		folder.ID = uuid.New().String()
+// CreateWorkspace creates a new workspace.
+func (h *hybridStore) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
+	if workspace.ID == "" {
+		workspace.ID = uuid.New().String()
 	}
 
 	now := time.Now()
-	if folder.CreatedAt.IsZero() {
-		folder.CreatedAt = now
+	if workspace.CreatedAt.IsZero() {
+		workspace.CreatedAt = now
 	}
-	folder.UpdatedAt = now
+	workspace.UpdatedAt = now
 
-	return h.sqlite.CreateFolder(ctx, folder)
+	return h.sqlite.CreateWorkspace(ctx, workspace)
 }
 
-// GetFolder retrieves a folder by ID.
-func (h *hybridStore) GetFolder(ctx context.Context, id string) (*Folder, error) {
-	return h.sqlite.GetFolder(ctx, id)
+// GetWorkspace retrieves a workspace by ID.
+func (h *hybridStore) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
+	return h.sqlite.GetWorkspace(ctx, id)
 }
 
-// UpdateFolder updates folder metadata.
-func (h *hybridStore) UpdateFolder(ctx context.Context, folder *Folder) error {
-	folder.UpdatedAt = time.Now()
-	return h.sqlite.UpdateFolder(ctx, folder)
+// UpdateWorkspace updates workspace metadata.
+func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
+	workspace.UpdatedAt = time.Now()
+	return h.sqlite.UpdateWorkspace(ctx, workspace)
 }
 
-// DeleteFolder removes a folder.
-func (h *hybridStore) DeleteFolder(ctx context.Context, id string) error {
-	return h.sqlite.DeleteFolder(ctx, id)
+// DeleteWorkspace removes a workspace.
+func (h *hybridStore) DeleteWorkspace(ctx context.Context, id string) error {
+	return h.sqlite.DeleteWorkspace(ctx, id)
 }
 
-// ListFolders returns all folders.
-func (h *hybridStore) ListFolders(ctx context.Context) ([]Folder, error) {
-	return h.sqlite.ListFolders(ctx)
+// ListWorkspaces returns all workspaces.
+func (h *hybridStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
+	return h.sqlite.ListWorkspaces(ctx)
 }
 
-// GetFolderTree returns folders as a tree.
-func (h *hybridStore) GetFolderTree(ctx context.Context) ([]Folder, error) {
-	return h.sqlite.GetFolderTree(ctx)
+// GetWorkspaceTree returns workspaces as a tree.
+func (h *hybridStore) GetWorkspaceTree(ctx context.Context) ([]Workspace, error) {
+	return h.sqlite.GetWorkspaceTree(ctx)
 }
 
-// GetSubfolderIDs returns all descendant folder IDs.
-func (h *hybridStore) GetSubfolderIDs(ctx context.Context, folderID string) ([]string, error) {
-	return h.sqlite.GetSubfolderIDs(ctx, folderID)
+// GetSubworkspaceIDs returns all descendant workspace IDs.
+func (h *hybridStore) GetSubworkspaceIDs(ctx context.Context, workspaceID string) ([]string, error) {
+	return h.sqlite.GetSubworkspaceIDs(ctx, workspaceID)
 }
 
 // TouchSession marks a session as recently accessed.
@@ -391,7 +391,7 @@ func (h *hybridStore) GetInactiveSessions(ctx context.Context, inactiveDays int)
 	cutoff := time.Now().AddDate(0, 0, -inactiveDays)
 
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT id, title, agent_name, folder_id, message_count, created_at, updated_at
+		SELECT id, title, agent_name, workspace_id, message_count, created_at, updated_at
 		FROM sessions
 		WHERE updated_at < ?
 		ORDER BY updated_at ASC
@@ -629,21 +629,21 @@ func generateTitle(content string) string {
 }
 
 // ============================================================================
-// Folder Note Operations (Passthrough to SQLite)
+// Workspace Note Operations (Passthrough to SQLite)
 // ============================================================================
 
-// CreateNote creates a new folder note.
-func (h *hybridStore) CreateNote(ctx context.Context, note *FolderNote) error {
+// CreateNote creates a new workspace note.
+func (h *hybridStore) CreateNote(ctx context.Context, note *WorkspaceNote) error {
 	return h.sqlite.CreateNote(ctx, note)
 }
 
 // GetNote retrieves a note by ID.
-func (h *hybridStore) GetNote(ctx context.Context, id string) (*FolderNote, error) {
+func (h *hybridStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, error) {
 	return h.sqlite.GetNote(ctx, id)
 }
 
 // UpdateNote updates note metadata and content.
-func (h *hybridStore) UpdateNote(ctx context.Context, note *FolderNote) error {
+func (h *hybridStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error {
 	return h.sqlite.UpdateNote(ctx, note)
 }
 
@@ -652,9 +652,9 @@ func (h *hybridStore) DeleteNote(ctx context.Context, id string) error {
 	return h.sqlite.DeleteNote(ctx, id)
 }
 
-// ListNotesByFolder returns all notes in a folder.
-func (h *hybridStore) ListNotesByFolder(ctx context.Context, folderID string) ([]FolderNoteListItem, error) {
-	return h.sqlite.ListNotesByFolder(ctx, folderID)
+// ListNotesByWorkspace returns all notes in a workspace.
+func (h *hybridStore) ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteListItem, error) {
+	return h.sqlite.ListNotesByWorkspace(ctx, workspaceID)
 }
 
 // SearchNotes performs full-text search across note names and content.

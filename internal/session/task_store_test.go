@@ -18,21 +18,21 @@ func setupTaskTestDB(t *testing.T) (*database.DB, *SQLiteStore, func()) {
 	return db, sessionStore, func() { _ = db.Close() }
 }
 
-// createTestFolder creates a folder (workspace) for testing
-func createTestFolder(ctx context.Context, db *database.DB, folderID, name string) {
+// createTestWorkspace creates a workspace for testing
+func createTestWorkspace(ctx context.Context, db *database.DB, workspaceID, name string) {
 	_, _ = db.ExecContext(ctx, `
-		INSERT INTO folders (id, name, created_at, updated_at)
+		INSERT INTO workspaces (id, name, created_at, updated_at)
 		VALUES (?, ?, datetime('now'), datetime('now'))
-	`, folderID, name)
+	`, workspaceID, name)
 }
 
-// createTestSessionInFolder creates a session in a folder for testing
-func createTestSessionInFolder(ctx context.Context, sessionStore *SQLiteStore, sessionID, folderID string) {
+// createTestSessionInWorkspace creates a session in a workspace for testing
+func createTestSessionInWorkspace(ctx context.Context, sessionStore *SQLiteStore, sessionID, workspaceID string) {
 	session := &Session{
 		ID:        sessionID,
 		Title:     "Test Session",
 		AgentName: "assistant",
-		FolderID:  folderID,
+		FolderID:  workspaceID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -47,7 +47,7 @@ func TestTaskStore_CreateAndGetTask(t *testing.T) {
 	ctx := context.Background()
 
 	// Create workspace (folder) first
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "task-1",
@@ -121,7 +121,7 @@ func TestTaskStore_UpdateTask(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "update-task",
@@ -158,7 +158,7 @@ func TestTaskStore_CompleteTask(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "complete-task",
@@ -192,7 +192,7 @@ func TestTaskStore_DeleteTask(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		ID:          "delete-task",
@@ -222,8 +222,8 @@ func TestTaskStore_ListTasksByWorkspace(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
-	createTestFolder(ctx, db, "workspace-2", "Workspace 2")
+	createTestWorkspace(ctx, db, "workspace-1", "Workspace 1")
+	createTestWorkspace(ctx, db, "workspace-2", "Workspace 2")
 
 	// Create tasks for different workspaces
 	tasks := []*SessionTask{
@@ -255,8 +255,8 @@ func TestTaskStore_ListTasksBySession(t *testing.T) {
 	ctx := context.Background()
 
 	// Create workspace and session in that workspace
-	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
-	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
+	createTestWorkspace(ctx, db, "workspace-1", "Workspace 1")
+	createTestSessionInWorkspace(ctx, sessionStore, "session-1", "workspace-1")
 
 	// Create tasks for the workspace
 	tasks := []*SessionTask{
@@ -314,8 +314,8 @@ func TestTaskStore_GetTaskCounts(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Workspace 1")
-	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
+	createTestWorkspace(ctx, db, "workspace-1", "Workspace 1")
+	createTestSessionInWorkspace(ctx, sessionStore, "session-1", "workspace-1")
 
 	// Create tasks
 	tasks := []*SessionTask{
@@ -352,7 +352,7 @@ func TestTaskStore_CreateTaskAutoFields(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	task := &SessionTask{
 		WorkspaceID: "workspace-1",
@@ -386,7 +386,7 @@ func TestReminderStore_CreateAndGetReminder(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	executeAt := time.Now().Add(24 * time.Hour)
 	reminder := &ScheduledTaskReminder{
@@ -429,7 +429,7 @@ func TestReminderStore_DeleteReminder(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	reminder := &ScheduledTaskReminder{
 		ID:           "delete-reminder",
@@ -461,7 +461,7 @@ func TestReminderStore_CalculateNextRun_Once(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	futureTime := time.Now().Add(24 * time.Hour)
 	reminder := &ScheduledTaskReminder{
@@ -490,7 +490,7 @@ func TestReminderStore_CalculateNextRun_Daily(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
 
 	reminder := &ScheduledTaskReminder{
 		WorkspaceID:  "workspace-1",
@@ -517,8 +517,8 @@ func TestTaskStore_GetSessionWorkspace(t *testing.T) {
 	store := NewSQLiteTaskStore(db)
 	ctx := context.Background()
 
-	createTestFolder(ctx, db, "workspace-1", "Test Workspace")
-	createTestSessionInFolder(ctx, sessionStore, "session-1", "workspace-1")
+	createTestWorkspace(ctx, db, "workspace-1", "Test Workspace")
+	createTestSessionInWorkspace(ctx, sessionStore, "session-1", "workspace-1")
 
 	// Get workspace for session
 	wsID, err := store.GetSessionWorkspace(ctx, "session-1")

@@ -229,14 +229,15 @@ window.manualRetryConnection = async function() {
 };
 
 /**
- * Load workspaces from server
+ * Load workspaces from server (unified workspace API)
  */
 async function loadWorkspaces() {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
     try {
-        const response = await fetch('/api/orchestration/workspace', {
+        // Use unified workspace API (same as sessions sidebar)
+        const response = await fetch('/api/workspaces?tree=true', {
             signal: controller.signal
         });
 
@@ -256,7 +257,8 @@ async function loadWorkspaces() {
 
         // Connection successful
         handleConnectionSuccess();
-        renderWorkspaces(data.workspaces || []);
+        // API returns { folders: [...] } - map to workspaces for rendering
+        renderWorkspaces(data.folders || []);
 
     } catch (error) {
         clearTimeout(timeoutId);
@@ -427,7 +429,8 @@ async function deleteWorkspace(workspaceId) {
     }
 
     try {
-        const response = await fetch(`/api/orchestration/workspace/${workspaceId}`, {
+        // Use unified workspace API
+        const response = await fetch(`/api/workspaces/${workspaceId}`, {
             method: 'DELETE'
         });
 
@@ -480,10 +483,12 @@ function populateCanvasStudioSelect() {
     const select = document.getElementById('canvas-studio-select');
     if (!select) return;
 
-    fetch('/api/orchestration/workspace')
+    // Use unified workspace API
+    fetch('/api/workspaces')
         .then(res => res.json())
         .then(data => {
-            const workspaces = data.workspaces || [];
+            // API returns { folders: [...] } - map to workspaces
+            const workspaces = data.folders || [];
             select.innerHTML = '<option value="">Choose a studio...</option>' +
                 workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
         })

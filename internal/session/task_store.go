@@ -51,11 +51,11 @@ func NewSQLiteTaskStore(db *database.DB) *SQLiteTaskStore {
 	return &SQLiteTaskStore{db: db}
 }
 
-// GetSessionWorkspace returns the workspace (folder) ID for a given session.
+// GetSessionWorkspace returns the workspace ID for a given session.
 func (s *SQLiteTaskStore) GetSessionWorkspace(ctx context.Context, sessionID string) (string, error) {
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT folder_id FROM sessions WHERE id = ?
+		SELECT workspace_id FROM sessions WHERE id = ?
 	`, sessionID).Scan(&workspaceID)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("session not found: %s", sessionID)
@@ -130,15 +130,15 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionT
 }
 
 // ListTasksBySession returns all tasks for the workspace that contains the given session.
-// This looks up the session's folder_id and returns all tasks in that workspace.
+// This looks up the session's workspace_id and returns all tasks in that workspace.
 func (s *SQLiteTaskStore) ListTasksBySession(ctx context.Context, sessionID string) ([]SessionTask, error) {
-	// Get the workspace (folder) ID for this session
+	// Get the workspace ID for this session
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT folder_id FROM sessions WHERE id = ?
+		SELECT workspace_id FROM sessions WHERE id = ?
 	`, sessionID).Scan(&workspaceID)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get session folder: %w", err)
+		return nil, fmt.Errorf("failed to get session workspace: %w", err)
 	}
 
 	// If no workspace, return empty (tasks require a workspace)
@@ -259,13 +259,13 @@ func (s *SQLiteTaskStore) CompleteTask(ctx context.Context, taskID string) error
 
 // GetTaskCounts returns task statistics for the workspace containing the given session.
 func (s *SQLiteTaskStore) GetTaskCounts(ctx context.Context, sessionID string) (*TaskCounts, error) {
-	// Get the workspace (folder) ID for this session
+	// Get the workspace ID for this session
 	var workspaceID sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT folder_id FROM sessions WHERE id = ?
+		SELECT workspace_id FROM sessions WHERE id = ?
 	`, sessionID).Scan(&workspaceID)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get session folder: %w", err)
+		return nil, fmt.Errorf("failed to get session workspace: %w", err)
 	}
 
 	// If no workspace, return zero counts
@@ -390,9 +390,9 @@ func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*
 func (s *SQLiteTaskStore) ListRemindersBySession(ctx context.Context, sessionID string) ([]ScheduledTaskReminder, error) {
 	// Get workspace ID for this session
 	var workspaceID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT folder_id FROM sessions WHERE id = ?`, sessionID).Scan(&workspaceID)
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM sessions WHERE id = ?`, sessionID).Scan(&workspaceID)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get session folder: %w", err)
+		return nil, fmt.Errorf("failed to get session workspace: %w", err)
 	}
 
 	// If no workspace, return empty

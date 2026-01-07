@@ -110,90 +110,90 @@ func TestIntegration_SessionLifecycle(t *testing.T) {
 	}
 }
 
-// TestIntegration_FolderOrganization tests folder creation, nesting, and session organization
-func TestIntegration_FolderOrganization(t *testing.T) {
+// TestIntegration_WorkspaceOrganization tests workspace creation, nesting, and session organization
+func TestIntegration_WorkspaceOrganization(t *testing.T) {
 	ctx := context.Background()
 	store, cleanup := createTestStore(t)
 	defer cleanup()
 
-	// 1. Create root folder
-	rootFolder := &Folder{
+	// 1. Create root workspace
+	rootWorkspace := &Workspace{
 		ID:        uuid.New().String(),
 		Name:      "Projects",
 		Color:     "#FF5733",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	err := store.CreateFolder(ctx, rootFolder)
+	err := store.CreateWorkspace(ctx, rootWorkspace)
 	if err != nil {
-		t.Fatalf("Failed to create root folder: %v", err)
+		t.Fatalf("Failed to create root workspace: %v", err)
 	}
 
-	// 2. Create nested folder
-	childFolder := &Folder{
+	// 2. Create nested workspace
+	childWorkspace := &Workspace{
 		ID:        uuid.New().String(),
 		Name:      "Work Projects",
-		ParentID:  rootFolder.ID,
+		ParentID:  rootWorkspace.ID,
 		Color:     "#33FF57",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	err = store.CreateFolder(ctx, childFolder)
+	err = store.CreateWorkspace(ctx, childWorkspace)
 	if err != nil {
-		t.Fatalf("Failed to create child folder: %v", err)
+		t.Fatalf("Failed to create child workspace: %v", err)
 	}
 
-	// 3. Create session in child folder
+	// 3. Create session in child workspace
 	session := &Session{
 		ID:        uuid.New().String(),
 		Title:     "Project Discussion",
 		AgentName: "assistant",
-		FolderID:  childFolder.ID,
+		FolderID:  childWorkspace.ID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 	err = store.CreateSession(ctx, session)
 	if err != nil {
-		t.Fatalf("Failed to create session in folder: %v", err)
+		t.Fatalf("Failed to create session in workspace: %v", err)
 	}
 
-	// 4. Verify folders exist
-	folders, err := store.ListFolders(ctx)
+	// 4. Verify workspaces exist
+	workspaces, err := store.ListWorkspaces(ctx)
 	if err != nil {
-		t.Fatalf("Failed to list folders: %v", err)
+		t.Fatalf("Failed to list workspaces: %v", err)
 	}
-	if len(folders) != 2 {
-		t.Errorf("Expected 2 folders, got %d", len(folders))
+	if len(workspaces) != 2 {
+		t.Errorf("Expected 2 workspaces, got %d", len(workspaces))
 	}
 
-	// 5. Filter sessions by folder
-	filter := &SessionFilter{FolderID: &childFolder.ID}
+	// 5. Filter sessions by workspace
+	filter := &SessionFilter{FolderID: &childWorkspace.ID}
 	result, err := store.ListSessions(ctx, filter, nil)
 	if err != nil {
-		t.Fatalf("Failed to list sessions by folder: %v", err)
+		t.Fatalf("Failed to list sessions by workspace: %v", err)
 	}
 	if result.Total != 1 {
-		t.Errorf("Expected 1 session in folder, got %d", result.Total)
+		t.Errorf("Expected 1 session in workspace, got %d", result.Total)
 	}
 
-	// 6. Delete folder
-	err = store.DeleteFolder(ctx, childFolder.ID)
+	// 6. Delete workspace
+	err = store.DeleteWorkspace(ctx, childWorkspace.ID)
 	if err != nil {
-		t.Fatalf("Failed to delete folder: %v", err)
+		t.Fatalf("Failed to delete workspace: %v", err)
 	}
 
-	// Verify folder was deleted
-	_, err = store.GetFolder(ctx, childFolder.ID)
-	if err != ErrFolderNotFound {
-		t.Errorf("Expected folder to be deleted, got error: %v", err)
+	// Verify workspace was deleted
+	_, err = store.GetWorkspace(ctx, childWorkspace.ID)
+	if err != ErrWorkspaceNotFound {
+		t.Errorf("Expected workspace to be deleted, got error: %v", err)
 	}
 
 	// Session should still exist (moved to root or orphaned)
 	retrieved, err := store.GetSession(ctx, session.ID)
 	if err != nil {
-		t.Fatalf("Session should still exist after folder deletion: %v", err)
+		t.Fatalf("Session should still exist after workspace deletion: %v", err)
 	}
-	_ = retrieved // Session exists, folder handling is implementation-specific
+	_ = retrieved // Session exists, workspace handling is implementation-specific
 }
 
 // TestIntegration_SearchAndFilter tests search and filter combinations
