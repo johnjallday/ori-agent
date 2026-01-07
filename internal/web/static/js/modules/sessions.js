@@ -111,9 +111,12 @@ const sessionManager = {
 
   // Bind all event listeners
   bindEvents() {
-    // New chat button
-    document.getElementById('newChatBtn')?.addEventListener('click', () => this.createNewSession());
-    document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.createNewSession());
+    // New chat button - show modal
+    document.getElementById('newChatBtn')?.addEventListener('click', () => this.showCreateChatModal());
+    document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.showCreateChatModal());
+
+    // Create chat modal - create button
+    document.getElementById('createChatBtn')?.addEventListener('click', () => this.handleCreateChatFromModal());
 
     // Toggle sidebar (from inside session sidebar)
     document.getElementById('toggleSessionSidebarBtn')?.addEventListener('click', () => this.toggleSidebar());
@@ -844,27 +847,80 @@ const sessionManager = {
     });
   },
 
-  // Create new session - shows agent picker dialog first
-  async createNewSession() {
+  // Show create chat modal with workspace and agent selection
+  async showCreateChatModal() {
     try {
-      // Fetch available agents
-      const agents = await this.fetchAgents();
+      // Fetch workspaces and agents in parallel
+      const [agents] = await Promise.all([
+        this.fetchAgents()
+      ]);
+
       if (!agents || agents.length === 0) {
         console.error('No agents available');
         return;
       }
 
-      // If only one agent, skip the picker
-      if (agents.length === 1) {
-        await this.createSessionWithAgent(agents[0].name);
-        return;
+      // Populate workspace dropdown
+      const workspaceSelect = document.getElementById('chatWorkspaceSelect');
+      if (workspaceSelect) {
+        workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
+        this.folders.forEach(folder => {
+          workspaceSelect.innerHTML += `<option value="${folder.id}">${this.escapeHtml(folder.name)}</option>`;
+        });
       }
 
-      // Show agent picker dialog
-      this.showAgentPickerDialog(agents);
+      // Populate agent dropdown
+      const agentSelect = document.getElementById('chatAgentSelect');
+      if (agentSelect) {
+        agentSelect.innerHTML = '';
+        agents.forEach(agent => {
+          agentSelect.innerHTML += `<option value="${agent.name}">${this.escapeHtml(agent.name)}</option>`;
+        });
+      }
+
+      // Show the modal
+      const modal = document.getElementById('createChatModal');
+      if (modal) {
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+      }
     } catch (error) {
-      console.error('Failed to create session:', error);
+      console.error('Failed to show create chat modal:', error);
     }
+  },
+
+  // Handle create chat from modal
+  async handleCreateChatFromModal() {
+    const workspaceSelect = document.getElementById('chatWorkspaceSelect');
+    const agentSelect = document.getElementById('chatAgentSelect');
+
+    const workspaceId = workspaceSelect?.value || '';
+    const agentName = agentSelect?.value;
+
+    if (!agentName) {
+      console.error('No agent selected');
+      return;
+    }
+
+    // Close the modal
+    const modal = document.getElementById('createChatModal');
+    if (modal) {
+      const bsModal = bootstrap.Modal.getInstance(modal);
+      bsModal?.hide();
+    }
+
+    // Create the session
+    if (workspaceId) {
+      await this.createSessionWithAgentInFolder(agentName, workspaceId);
+    } else {
+      await this.createSessionWithAgent(agentName);
+    }
+  },
+
+  // Create new session - shows agent picker dialog first (legacy)
+  async createNewSession() {
+    // Now redirects to the modal
+    this.showCreateChatModal();
   },
 
   // Fetch available agents
