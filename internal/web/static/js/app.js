@@ -659,6 +659,97 @@ function escapeHtml(text) {
 // Chat state machine reference (initialized in initializeApp)
 let chatStateMachine = null;
 
+// Handle /task chat command
+async function handleTaskCommand(message) {
+  const input = document.getElementById('input');
+  if (input) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
+
+  const sessionId = window.sessionManager?.getActiveSessionId?.();
+  if (!sessionId) {
+    addMessageToChat('/task', true, false, false, true);
+    addMessageToChat('No active session. Please select or create a session first.', false, true);
+    return;
+  }
+
+  // Parse command: /task or /task <description>
+  const args = message.substring(5).trim(); // Remove "/task"
+
+  if (!args) {
+    // No args: display inline task list
+    addMessageToChat('/task', true, false, false, true);
+    await displayTaskList(sessionId);
+    return;
+  }
+
+  // Create a new task
+  addMessageToChat(`/task ${args}`, true, false, false, true);
+
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: args })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create task');
+    }
+
+    const task = await response.json();
+    addMessageToChat(`✓ Task created: "${task.description}"`, false, false);
+
+    // Refresh session tasks
+    if (window.sessionManager?.loadSessionTasks) {
+      await window.sessionManager.loadSessionTasks();
+    }
+  } catch (error) {
+    console.error('Failed to create task:', error);
+    addMessageToChat(`✗ Failed to create task: ${error.message}`, false, true);
+  }
+}
+
+// Display task list inline in chat
+async function displayTaskList(sessionId) {
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/tasks`);
+    if (!response.ok) throw new Error('Failed to load tasks');
+
+    const data = await response.json();
+    const tasks = data.tasks || [];
+
+    if (tasks.length === 0) {
+      addMessageToChat('No tasks for this session. Use `/task <description>` to create one.', false, false);
+      return;
+    }
+
+    // Build task list message
+    let message = `**Session Tasks** (${data.counts?.pending || 0} pending, ${data.counts?.completed || 0} completed)\n\n`;
+
+    // Sort: pending first
+    const sortedTasks = [...tasks].sort((a, b) => {
+      const aCompleted = a.status === 'completed' ? 1 : 0;
+      const bCompleted = b.status === 'completed' ? 1 : 0;
+      return aCompleted - bCompleted;
+    });
+
+    sortedTasks.forEach(task => {
+      const checkbox = task.status === 'completed' ? '☑' : '☐';
+      const strikethrough = task.status === 'completed' ? '~~' : '';
+      message += `${checkbox} ${strikethrough}${task.description}${strikethrough}\n`;
+    });
+
+    message += '\n_Use `/task <description>` to add a task_';
+
+    addMessageToChat(message, false, false);
+  } catch (error) {
+    console.error('Failed to load tasks:', error);
+    addMessageToChat(`✗ Failed to load tasks: ${error.message}`, false, true);
+  }
+}
+
 // Send message to chat API
 async function sendMessage(message) {
   // Check if state machine is active (replaces isWaitingForResponse)
@@ -670,6 +761,12 @@ async function sendMessage(message) {
   // Expand @notename references if sessionManager is available
   if (window.sessionManager?.expandNoteReferences) {
     trimmedMessage = await window.sessionManager.expandNoteReferences(trimmedMessage);
+  }
+
+  // Handle /task command
+  if (trimmedMessage.startsWith('/task')) {
+    await handleTaskCommand(trimmedMessage);
+    return;
   }
 
   // Add to history
@@ -833,6 +930,16 @@ async function sendMessage(message) {
     updateSendButton();
   }
 }
+
+// Send a message to chat programmatically (used by task execution, etc.)
+// Exposed globally so other modules can trigger chat messages
+window.sendMessageToChat = function(message) {
+  const input = document.getElementById('input');
+  if (input) {
+    input.value = message;
+  }
+  sendMessage(message);
+};
 
 // Update send button state based on chat state machine
 function updateSendButton() {

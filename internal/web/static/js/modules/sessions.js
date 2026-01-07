@@ -20,6 +20,7 @@ const sessionManager = {
   sessionsByFolder: new Map(),
   collapsedFolderIds: new Set(),
   agentModelCache: new Map(),
+  sessionTaskCounts: new Map(), // Cache of task counts per session: sessionId -> {total, pending, completed}
   editAgentOriginalName: '',
   editAgentSelectedTags: [],
   editAgentModalInitialized: false,
@@ -80,12 +81,14 @@ const sessionManager = {
     this.bindNoteEvents();
     this.setupKeyboardShortcuts();
     this.initChatAgentBar();
+    this.initTaskPanel();
+    this.initMainTaskPanel();
     await this.loadSessions();
     await this.loadFolders();
     await this.loadTags();
 
     // Try to restore active session, or auto-create one
-    const restored = this.restoreActiveSession();
+    const restored = await this.restoreActiveSession();
     if (!restored && this.sessions.length === 0) {
       // Auto-create initial session for this tab
       await this.createNewSession();
@@ -272,6 +275,9 @@ const sessionManager = {
       }
 
       this.renderSessions();
+
+      // Load task counts for all sessions (async, updates badges when ready)
+      this.loadSessionTaskCounts();
     } catch (error) {
       console.error('Failed to load sessions:', error);
       this.sessions = [];
@@ -281,6 +287,66 @@ const sessionManager = {
     } finally {
       this.isLoading = false;
     }
+  },
+
+  // Load task counts for all visible sessions
+  async loadSessionTaskCounts() {
+    if (this.sessions.length === 0) return;
+
+    // Fetch counts for each session
+    const fetchPromises = this.sessions.map(async (session) => {
+      try {
+        const response = await fetch(`/api/sessions/${session.id}/tasks`);
+        if (response.ok) {
+          const data = await response.json();
+          this.sessionTaskCounts.set(session.id, data.counts || { total: 0, pending: 0, completed: 0 });
+        }
+      } catch (error) {
+        console.error(`Failed to load task counts for session ${session.id}:`, error);
+      }
+    });
+
+    await Promise.all(fetchPromises);
+    this.updateSessionTaskBadges();
+  },
+
+  // Update task count badges on session items
+  updateSessionTaskBadges() {
+    document.querySelectorAll('.session-item').forEach(item => {
+      const sessionId = item.dataset.sessionId;
+      const counts = this.sessionTaskCounts.get(sessionId);
+
+      let badge = item.querySelector('.session-task-count-badge');
+
+      if (!counts || counts.total === 0) {
+        // Remove badge if no tasks
+        if (badge) badge.remove();
+        return;
+      }
+
+      // Create badge if it doesn't exist
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'session-task-count-badge';
+        const header = item.querySelector('.session-item-header');
+        if (header) {
+          // Insert before time
+          const timeSpan = header.querySelector('.session-time');
+          header.insertBefore(badge, timeSpan);
+        }
+      }
+
+      // Update badge content and style
+      if (counts.pending > 0) {
+        badge.textContent = counts.pending;
+        badge.classList.remove('complete');
+        badge.title = `${counts.pending} pending task${counts.pending > 1 ? 's' : ''}`;
+      } else {
+        badge.textContent = '✓';
+        badge.classList.add('complete');
+        badge.title = `All ${counts.completed} tasks complete`;
+      }
+    });
   },
 
   // Search notes
@@ -460,7 +526,7 @@ const sessionManager = {
     if (!container) return;
 
     if (this.folders.length === 0) {
-      container.innerHTML = '<div class="text-center text-muted small py-2">No folders</div>';
+      container.innerHTML = '<div class="text-center text-muted small py-2">No workspaces</div>';
       return;
     }
 
@@ -650,7 +716,7 @@ const sessionManager = {
         <svg class="session-folder-icon" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19,20H5A2,2 0 0,1 3,18V6A2,2 0 0,1 5,4H9L11,6H19A2,2 0 0,1 21,8V18A2,2 0 0,1 19,20M5,18H19V10H5V18M5,8H9L7,6H5V8Z"/>
         </svg>
-        <span class="session-folder-name">No Folder</span>
+        <span class="session-folder-name">No Workspace</span>
       </div>
     `;
   },
@@ -899,6 +965,9 @@ const sessionManager = {
 
       // Initialize/update session file manager
       this.initializeSessionFiles(sessionId);
+
+      // Load tasks for this session
+      await this.loadSessionTasks();
     } catch (error) {
       console.error('Failed to switch session:', error);
     }
@@ -1741,7 +1810,7 @@ const sessionManager = {
 
   // Delete folder
   async deleteFolder(folderId) {
-    if (!confirm('Are you sure you want to delete this folder? Sessions will be moved to root.')) return;
+    if (!confirm('Are you sure you want to delete this workspace? Sessions will be moved to root.')) return;
 
     try {
       const response = await fetch(`/api/folders/${folderId}`, {
@@ -2074,7 +2143,7 @@ const sessionManager = {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
           <path d="M19,20H5A2,2 0 0,1 3,18V6A2,2 0 0,1 5,4H9L11,6H19A2,2 0 0,1 21,8V18A2,2 0 0,1 19,20M5,18H19V10H5V18M5,8H9L7,6H5V8Z"/>
         </svg>
-        No Folder
+        No Workspace
       </div>
       ${this.folders.map(folder => `
         <div class="move-folder-item ${folder.id === currentFolderId ? 'selected' : ''}" data-folder-id="${folder.id}">
@@ -2219,7 +2288,7 @@ const sessionManager = {
         </div>
       </div>
       <div class="session-info-row">
-        <span class="session-info-label">Folder</span>
+        <span class="session-info-label">Workspace</span>
         <span class="session-info-value">${this.escapeHtml(folderName)}</span>
       </div>
       <div class="session-info-row">
@@ -2606,7 +2675,7 @@ const sessionManager = {
 
   // Restore active session from localStorage
   // Returns true if session was restored, false otherwise
-  restoreActiveSession() {
+  async restoreActiveSession() {
     // Use tab-specific key for multi-tab support
     const tabKey = `activeSessionId_${this.tabId}`;
     let savedId = sessionStorage.getItem(tabKey);
@@ -2631,6 +2700,9 @@ const sessionManager = {
 
       // Initialize session files panel
       this.initializeSessionFiles(savedId);
+
+      // Load tasks for the restored session
+      await this.loadSessionTasks();
 
       return true;
     }
@@ -2751,7 +2823,7 @@ const sessionManager = {
 
   // Find folder name by id
   getFolderName(folderId) {
-    if (!folderId) return 'No Folder';
+    if (!folderId) return 'No Workspace';
     const folder = this.findFolderById(folderId, this.folders);
     return folder?.name || 'Unknown';
   },
@@ -3468,6 +3540,646 @@ const sessionManager = {
   async confirmDeleteNote(noteId) {
     if (confirm('Are you sure you want to delete this note?')) {
       await this.deleteNote(noteId);
+    }
+  },
+
+  // =============================================================================
+  // Session Tasks
+  // =============================================================================
+
+  // Task state
+  sessionTasks: [],
+  taskCounts: { total: 0, pending: 0, completed: 0 },
+
+  // Initialize task panel
+  initTaskPanel() {
+    // Task panel toggle
+    document.getElementById('sessionTasksToggle')?.addEventListener('click', () => this.toggleTaskPanel());
+
+    // Add task button
+    document.getElementById('addTaskBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showTaskInput();
+    });
+
+    // Task input submit
+    document.getElementById('taskInputSubmit')?.addEventListener('click', () => this.submitTask());
+    document.getElementById('taskInput')?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.submitTask();
+    });
+
+    // Hide input on blur (with delay to allow button click)
+    document.getElementById('taskInput')?.addEventListener('blur', () => {
+      setTimeout(() => {
+        const input = document.getElementById('taskInput');
+        if (input && !input.value.trim()) {
+          this.hideTaskInput();
+        }
+      }, 200);
+    });
+  },
+
+  // Load tasks for current session
+  async loadSessionTasks() {
+    if (!this.activeSessionId) {
+      this.sessionTasks = [];
+      this.taskCounts = { total: 0, pending: 0, completed: 0 };
+      this.renderTaskPanel();
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`);
+      if (!response.ok) throw new Error('Failed to load tasks');
+
+      const data = await response.json();
+      this.sessionTasks = data.tasks || [];
+      this.taskCounts = data.counts || { total: 0, pending: 0, completed: 0 };
+
+      // Update the counts cache and badges
+      this.sessionTaskCounts.set(this.activeSessionId, this.taskCounts);
+      this.updateSessionTaskBadges();
+      this.updateChatTaskBadge();
+
+      this.renderTaskPanel();
+
+      // Update main panel if open
+      if (this.mainTaskPanelOpen) {
+        this.renderMainTaskPanel();
+      }
+    } catch (error) {
+      console.error('Failed to load session tasks:', error);
+      this.sessionTasks = [];
+      this.taskCounts = { total: 0, pending: 0, completed: 0 };
+      this.renderTaskPanel();
+      this.updateChatTaskBadge();
+    }
+  },
+
+  // Toggle task panel expand/collapse
+  toggleTaskPanel() {
+    const content = document.getElementById('sessionTasksContent');
+    const icon = document.querySelector('#sessionTasksToggle .folder-expand-icon');
+    if (content && icon) {
+      content.classList.toggle('collapsed');
+      icon.classList.toggle('expanded');
+    }
+  },
+
+  // Show task input
+  showTaskInput() {
+    const container = document.getElementById('taskInputContainer');
+    const input = document.getElementById('taskInput');
+    if (container && input) {
+      container.style.display = 'flex';
+      input.focus();
+    }
+  },
+
+  // Hide task input
+  hideTaskInput() {
+    const container = document.getElementById('taskInputContainer');
+    const input = document.getElementById('taskInput');
+    if (container && input) {
+      container.style.display = 'none';
+      input.value = '';
+    }
+  },
+
+  // Submit new task
+  async submitTask() {
+    const input = document.getElementById('taskInput');
+    const description = input?.value?.trim();
+    if (!description || !this.activeSessionId) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description })
+      });
+
+      if (!response.ok) throw new Error('Failed to create task');
+
+      this.hideTaskInput();
+      await this.loadSessionTasks();
+      this.showToast('Task created', 'success');
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      this.showToast('Failed to create task', 'error');
+    }
+  },
+
+  // Toggle task completion
+  async toggleTaskComplete(taskId) {
+    const task = this.sessionTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    try {
+      if (task.status === 'completed') {
+        // Uncomplete - update status back to pending
+        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'pending' })
+        });
+        if (!response.ok) throw new Error('Failed to update task');
+      } else {
+        // Complete
+        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}/complete`, {
+          method: 'POST'
+        });
+        if (!response.ok) throw new Error('Failed to complete task');
+      }
+
+      await this.loadSessionTasks();
+    } catch (error) {
+      console.error('Failed to toggle task:', error);
+      this.showToast('Failed to update task', 'error');
+    }
+  },
+
+  // Delete task
+  async deleteTask(taskId) {
+    if (!confirm('Delete this task?')) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete task');
+
+      await this.loadSessionTasks();
+      this.showToast('Task deleted', 'success');
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      this.showToast('Failed to delete task', 'error');
+    }
+  },
+
+  // Render task panel
+  renderTaskPanel() {
+    const panel = document.getElementById('sessionTasksPanel');
+    const countBadge = document.getElementById('sessionTaskCount');
+    const listContainer = document.getElementById('sessionTaskList');
+    const emptyState = document.getElementById('sessionTaskListEmpty');
+
+    if (!panel) return;
+
+    // Show/hide panel based on active session
+    if (this.activeSessionId) {
+      panel.style.display = 'block';
+    } else {
+      panel.style.display = 'none';
+      return;
+    }
+
+    // Update count badge
+    if (countBadge) {
+      countBadge.textContent = this.taskCounts.pending || 0;
+      countBadge.classList.remove('all-complete', 'empty');
+      if (this.taskCounts.total === 0) {
+        countBadge.classList.add('empty');
+      } else if (this.taskCounts.pending === 0) {
+        countBadge.classList.add('all-complete');
+        countBadge.textContent = this.taskCounts.completed;
+      }
+    }
+
+    // Render task list
+    if (listContainer) {
+      if (this.sessionTasks.length === 0) {
+        if (emptyState) emptyState.style.display = 'flex';
+        // Remove any task items
+        listContainer.querySelectorAll('.session-task-item').forEach(el => el.remove());
+      } else {
+        if (emptyState) emptyState.style.display = 'none';
+
+        // Clear and render tasks
+        listContainer.querySelectorAll('.session-task-item').forEach(el => el.remove());
+
+        this.sessionTasks.forEach(task => {
+          const isCompleted = task.status === 'completed';
+          const isWorkspaceTask = !task.session_id && task.workspace_id;
+
+          const taskEl = document.createElement('div');
+          taskEl.className = `session-task-item ${isCompleted ? 'completed' : ''}`;
+          taskEl.dataset.taskId = task.id;
+          taskEl.innerHTML = `
+            <div class="session-task-checkbox ${isCompleted ? 'checked' : ''}" data-task-id="${task.id}">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+              </svg>
+            </div>
+            <span class="session-task-description">${this.escapeHtml(task.description)}</span>
+            ${isWorkspaceTask ? '<span class="session-task-workspace-badge">Workspace</span>' : ''}
+            <button class="session-task-delete" data-task-id="${task.id}" title="Delete">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+            </button>
+          `;
+
+          // Checkbox click
+          taskEl.querySelector('.session-task-checkbox')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleTaskComplete(task.id);
+          });
+
+          // Delete click
+          taskEl.querySelector('.session-task-delete')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.deleteTask(task.id);
+          });
+
+          listContainer.appendChild(taskEl);
+        });
+      }
+    }
+  },
+
+  // ===== Main Task Panel (Chat Area) =====
+
+  mainTaskPanelOpen: false,
+
+  // Initialize main task panel events
+  initMainTaskPanel() {
+    // Tasks button in chat header
+    document.getElementById('chatTasksBtn')?.addEventListener('click', () => this.toggleMainTaskPanel());
+
+    // Close button
+    document.getElementById('mainTaskPanelClose')?.addEventListener('click', () => this.closeMainTaskPanel());
+
+    // Add task button - opens modal
+    document.getElementById('mainTaskAddBtn')?.addEventListener('click', () => this.openTaskModal());
+
+    // Input enter key - opens modal with prefilled title
+    document.getElementById('mainTaskInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const input = document.getElementById('mainTaskInput');
+        const title = input?.value?.trim() || '';
+        this.openTaskModal(null, title);
+        if (input) input.value = '';
+      }
+    });
+
+    // Task modal event handlers
+    document.getElementById('taskModalClose')?.addEventListener('click', () => this.closeTaskModal());
+    document.getElementById('taskModalCancel')?.addEventListener('click', () => this.closeTaskModal());
+    document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
+    document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
+
+    // Modal escape key
+    document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.closeTaskModal();
+      }
+    });
+  },
+
+  // Toggle main task panel
+  toggleMainTaskPanel() {
+    if (this.mainTaskPanelOpen) {
+      this.closeMainTaskPanel();
+    } else {
+      this.openMainTaskPanel();
+    }
+  },
+
+  // Open main task panel
+  openMainTaskPanel() {
+    const panel = document.getElementById('mainTaskPanel');
+    if (!panel || !this.activeSessionId) return;
+
+    panel.style.display = 'flex';
+    this.mainTaskPanelOpen = true;
+
+    // Update button state
+    document.getElementById('chatTasksBtn')?.classList.add('active');
+
+    // Render tasks
+    this.renderMainTaskPanel();
+
+    // Focus input
+    setTimeout(() => {
+      document.getElementById('mainTaskInput')?.focus();
+    }, 100);
+  },
+
+  // Close main task panel
+  closeMainTaskPanel() {
+    const panel = document.getElementById('mainTaskPanel');
+    if (!panel) return;
+
+    panel.style.display = 'none';
+    this.mainTaskPanelOpen = false;
+
+    // Update button state
+    document.getElementById('chatTasksBtn')?.classList.remove('active');
+  },
+
+  // Submit task from main panel
+  async submitMainTask() {
+    const input = document.getElementById('mainTaskInput');
+    const description = input?.value?.trim();
+    if (!description || !this.activeSessionId) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description })
+      });
+
+      if (!response.ok) throw new Error('Failed to create task');
+
+      input.value = '';
+      await this.loadSessionTasks();
+      this.renderMainTaskPanel();
+      this.showToast('Task created', 'success');
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      this.showToast('Failed to create task', 'error');
+    }
+  },
+
+  // Render main task panel
+  renderMainTaskPanel() {
+    const listContainer = document.getElementById('mainTaskList');
+    const emptyState = document.getElementById('mainTaskEmpty');
+    const chatBadge = document.getElementById('chatTasksBadge');
+
+    if (!listContainer) return;
+
+    // Update chat button badge
+    if (chatBadge) {
+      if (this.taskCounts.total === 0) {
+        chatBadge.classList.add('d-none');
+      } else {
+        chatBadge.classList.remove('d-none');
+        if (this.taskCounts.pending > 0) {
+          chatBadge.textContent = this.taskCounts.pending;
+          chatBadge.classList.remove('complete');
+        } else {
+          chatBadge.textContent = '✓';
+          chatBadge.classList.add('complete');
+        }
+      }
+    }
+
+    // Clear existing items
+    listContainer.innerHTML = '';
+
+    if (this.sessionTasks.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+
+    // Sort: pending first, then by creation date
+    const sortedTasks = [...this.sessionTasks].sort((a, b) => {
+      const aCompleted = a.status === 'completed' ? 1 : 0;
+      const bCompleted = b.status === 'completed' ? 1 : 0;
+      if (aCompleted !== bCompleted) return aCompleted - bCompleted;
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
+
+    sortedTasks.forEach(task => {
+      const isCompleted = task.status === 'completed';
+      const isWorkspaceTask = !task.session_id && task.workspace_id;
+      const createdAt = this.formatTimeAgo(task.created_at);
+
+      const taskEl = document.createElement('div');
+      taskEl.className = `main-task-item ${isCompleted ? 'completed' : ''}`;
+      taskEl.dataset.taskId = task.id;
+      const hasDetails = task.details && task.details.trim().length > 0;
+      taskEl.innerHTML = `
+        <input type="checkbox" class="main-task-checkbox" ${isCompleted ? 'checked' : ''}>
+        <div class="main-task-content">
+          <div class="main-task-description">${this.escapeHtml(task.description)}</div>
+          ${hasDetails ? `<div class="main-task-details">${this.escapeHtml(task.details)}</div>` : ''}
+          <div class="main-task-meta">
+            ${isWorkspaceTask ? '<span class="main-task-workspace-badge">Workspace</span>' : ''}
+            <span>${createdAt}</span>
+          </div>
+        </div>
+        <button class="main-task-edit" title="Edit task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+          </svg>
+        </button>
+        <button class="main-task-execute" title="Execute task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+          </svg>
+        </button>
+        <button class="main-task-delete" title="Delete task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+          </svg>
+        </button>
+      `;
+
+      // Checkbox change
+      taskEl.querySelector('.main-task-checkbox')?.addEventListener('change', () => {
+        this.toggleTaskComplete(task.id);
+      });
+
+      // Edit click
+      taskEl.querySelector('.main-task-edit')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openTaskModal(task.id);
+      });
+
+      // Execute click
+      taskEl.querySelector('.main-task-execute')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.executeTask(task.id);
+      });
+
+      // Delete click
+      taskEl.querySelector('.main-task-delete')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteMainTask(task.id);
+      });
+
+      listContainer.appendChild(taskEl);
+    });
+  },
+
+  // Delete task from main panel (with confirmation)
+  async deleteMainTask(taskId) {
+    if (!confirm('Delete this task?')) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Failed to delete task');
+
+      await this.loadSessionTasks();
+      this.renderMainTaskPanel();
+      this.showToast('Task deleted', 'success');
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      this.showToast('Failed to delete task', 'error');
+    }
+  },
+
+  // Execute task - send to chat as a prompt
+  async executeTask(taskId) {
+    const task = this.sessionTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    try {
+      // Mark task as in_progress
+      await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'in_progress' })
+      });
+
+      // Close task panel
+      this.closeMainTaskPanel();
+
+      // Build prompt from description and details
+      let prompt = task.description;
+      if (task.details && task.details.trim()) {
+        prompt += '\n\n' + task.details.trim();
+      }
+
+      // Send task to chat
+      if (window.sendMessageToChat) {
+        window.sendMessageToChat(prompt);
+      }
+
+      // Reload tasks to reflect status change
+      await this.loadSessionTasks();
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      this.showToast('Failed to execute task', 'error');
+    }
+  },
+
+  // Track which task is being edited (null for new task)
+  editingTaskId: null,
+
+  // Open task modal for creating or editing
+  openTaskModal(taskId = null, prefillTitle = '') {
+    const modal = document.getElementById('taskModal');
+    if (!modal) return;
+
+    this.editingTaskId = taskId;
+
+    // Set modal title
+    const modalTitle = document.getElementById('taskModalTitle');
+    if (modalTitle) {
+      modalTitle.textContent = taskId ? 'Edit Task' : 'Add Task';
+    }
+
+    // Get form elements
+    const descriptionInput = document.getElementById('taskModalDescription');
+    const detailsInput = document.getElementById('taskModalDetails');
+
+    if (taskId) {
+      // Editing existing task - populate fields
+      const task = this.sessionTasks.find(t => t.id === taskId);
+      if (task) {
+        if (descriptionInput) descriptionInput.value = task.description || '';
+        if (detailsInput) detailsInput.value = task.details || '';
+      }
+    } else {
+      // New task - clear or prefill
+      if (descriptionInput) descriptionInput.value = prefillTitle;
+      if (detailsInput) detailsInput.value = '';
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Focus title input
+    setTimeout(() => {
+      descriptionInput?.focus();
+    }, 100);
+  },
+
+  // Close task modal
+  closeTaskModal() {
+    const modal = document.getElementById('taskModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+    this.editingTaskId = null;
+  },
+
+  // Save task from modal (create or update)
+  async saveTaskFromModal() {
+    const descriptionInput = document.getElementById('taskModalDescription');
+    const detailsInput = document.getElementById('taskModalDetails');
+
+    const description = descriptionInput?.value?.trim();
+    const details = detailsInput?.value?.trim() || '';
+
+    if (!description) {
+      this.showToast('Task title is required', 'error');
+      descriptionInput?.focus();
+      return;
+    }
+
+    if (!this.activeSessionId) return;
+
+    try {
+      if (this.editingTaskId) {
+        // Update existing task
+        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${this.editingTaskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description, details })
+        });
+
+        if (!response.ok) throw new Error('Failed to update task');
+        this.showToast('Task updated', 'success');
+      } else {
+        // Create new task
+        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description, details })
+        });
+
+        if (!response.ok) throw new Error('Failed to create task');
+        this.showToast('Task created', 'success');
+      }
+
+      this.closeTaskModal();
+      await this.loadSessionTasks();
+      this.renderMainTaskPanel();
+    } catch (error) {
+      console.error('Failed to save task:', error);
+      this.showToast('Failed to save task', 'error');
+    }
+  },
+
+  // Update chat badge when tasks change (called from loadSessionTasks)
+  updateChatTaskBadge() {
+    const chatBadge = document.getElementById('chatTasksBadge');
+    if (!chatBadge) return;
+
+    if (this.taskCounts.total === 0) {
+      chatBadge.classList.add('d-none');
+    } else {
+      chatBadge.classList.remove('d-none');
+      if (this.taskCounts.pending > 0) {
+        chatBadge.textContent = this.taskCounts.pending;
+        chatBadge.classList.remove('complete');
+      } else {
+        chatBadge.textContent = '✓';
+        chatBadge.classList.add('complete');
+      }
     }
   }
 };

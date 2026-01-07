@@ -333,3 +333,134 @@ type StorageStats struct {
 	// CachedSessions is the number of sessions currently in memory cache.
 	CachedSessions int `json:"cached_sessions"`
 }
+
+// =============================================================================
+// Session Tasks
+// =============================================================================
+
+// TaskStatus represents the current state of a task.
+type TaskStatus string
+
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusCompleted  TaskStatus = "completed"
+	TaskStatusCancelled  TaskStatus = "cancelled"
+)
+
+// SessionTask represents a todo item or task attached to a session or workspace.
+// Tasks can be session-specific or workspace-wide (visible across all sessions in a workspace).
+type SessionTask struct {
+	// ID is a unique identifier for the task (UUID format).
+	ID string `json:"id"`
+
+	// SessionID is the session this task belongs to.
+	// Empty if this is a workspace-level task.
+	SessionID string `json:"session_id,omitempty"`
+
+	// WorkspaceID is the workspace (folder) this task belongs to.
+	// For session tasks, this is derived from the session's folder.
+	// For workspace-level tasks, the session_id is empty.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+
+	// Description is the task title/summary.
+	Description string `json:"description"`
+
+	// Details contains additional information about the task.
+	Details string `json:"details,omitempty"`
+
+	// Status is the current state of the task.
+	Status TaskStatus `json:"status"`
+
+	// Priority is the task priority (1-5, higher = more important).
+	Priority int `json:"priority"`
+
+	// CreatedAt is when the task was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the task was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// CompletedAt is when the task was marked complete.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// SessionTaskListItem is a lightweight representation of a task for list views.
+type SessionTaskListItem struct {
+	ID          string     `json:"id"`
+	SessionID   string     `json:"session_id,omitempty"`
+	WorkspaceID string     `json:"workspace_id,omitempty"`
+	Description string     `json:"description"`
+	Details     string     `json:"details,omitempty"`
+	Status      TaskStatus `json:"status"`
+	Priority    int        `json:"priority"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// TaskCounts contains aggregated task statistics for a session or workspace.
+type TaskCounts struct {
+	Total     int `json:"total"`
+	Pending   int `json:"pending"`
+	Completed int `json:"completed"`
+}
+
+// =============================================================================
+// Scheduled Task Reminders
+// =============================================================================
+
+// ReminderScheduleType represents the type of schedule for a reminder.
+type ReminderScheduleType string
+
+const (
+	ReminderOnce   ReminderScheduleType = "once"   // Execute once at specific time
+	ReminderDaily  ReminderScheduleType = "daily"  // Every day at specific time
+	ReminderWeekly ReminderScheduleType = "weekly" // Every week on specific day/time
+)
+
+// ScheduledTaskReminder represents a recurring or one-time reminder.
+// Unlike agentstudio scheduled tasks, these are reminders only (no agent execution).
+type ScheduledTaskReminder struct {
+	// ID is a unique identifier for the reminder (UUID format).
+	ID string `json:"id"`
+
+	// SessionID is the session this reminder belongs to (optional).
+	SessionID string `json:"session_id,omitempty"`
+
+	// WorkspaceID is the workspace this reminder belongs to (optional).
+	WorkspaceID string `json:"workspace_id,omitempty"`
+
+	// Name is a short title for the reminder.
+	Name string `json:"name"`
+
+	// Description is additional details about the reminder.
+	Description string `json:"description,omitempty"`
+
+	// ScheduleType defines how the reminder repeats.
+	ScheduleType ReminderScheduleType `json:"schedule_type"`
+
+	// ExecuteAt is for "once" type - when to trigger the reminder.
+	ExecuteAt *time.Time `json:"execute_at,omitempty"`
+
+	// TimeOfDay is for "daily" type - time to trigger (e.g., "09:00").
+	TimeOfDay string `json:"time_of_day,omitempty"`
+
+	// DayOfWeek is for "weekly" type - 0=Sunday, 1=Monday, ..., 6=Saturday.
+	DayOfWeek int `json:"day_of_week,omitempty"`
+
+	// NextRun is the calculated next trigger time.
+	NextRun *time.Time `json:"next_run,omitempty"`
+
+	// LastRun is when the reminder last triggered.
+	LastRun *time.Time `json:"last_run,omitempty"`
+
+	// Enabled indicates if the reminder is active.
+	Enabled bool `json:"enabled"`
+
+	// CreatedAt is when the reminder was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the reminder was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+}

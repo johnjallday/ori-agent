@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 3
+const schemaVersion = 5
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -66,6 +66,10 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration002ReviewSchema(ctx)
 	case 3:
 		return db.migration003FixToolCallsForeignKey(ctx)
+	case 4:
+		return db.migration004SessionTasks(ctx)
+	case 5:
+		return db.migration005TaskDetails(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -424,6 +428,84 @@ func (db *DB) migration003FixToolCallsForeignKey(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// migration004SessionTasks adds tables for session tasks and scheduled reminders.
+func (db *DB) migration004SessionTasks(ctx context.Context) error {
+	// Create session_tasks table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS session_tasks (
+			id TEXT PRIMARY KEY,
+			session_id TEXT,
+			workspace_id TEXT,
+			description TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			priority INTEGER DEFAULT 3,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create session_tasks table: %w", err)
+	}
+
+	// Create scheduled_task_reminders table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS scheduled_task_reminders (
+			id TEXT PRIMARY KEY,
+			session_id TEXT,
+			workspace_id TEXT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			schedule_type TEXT NOT NULL,
+			execute_at DATETIME,
+			time_of_day TEXT,
+			day_of_week INTEGER,
+			next_run DATETIME,
+			last_run DATETIME,
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create scheduled_task_reminders table: %w", err)
+	}
+
+	// Create indexes for performance
+	taskIndexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_session_id ON session_tasks(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_workspace_id ON session_tasks(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_status ON session_tasks(status)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_created_at ON session_tasks(created_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_session_id ON scheduled_task_reminders(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_workspace_id ON scheduled_task_reminders(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_next_run ON scheduled_task_reminders(next_run)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_enabled ON scheduled_task_reminders(enabled)",
+	}
+
+	for _, idx := range taskIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migration005TaskDetails adds a details column to session_tasks for additional task information.
+func (db *DB) migration005TaskDetails(ctx context.Context) error {
+	// Add details column to session_tasks
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE session_tasks ADD COLUMN details TEXT DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("failed to add details column to session_tasks: %w", err)
 	}
 
 	return nil

@@ -622,6 +622,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				}
 			}
 
+			// Task routes (check if task handler is available)
+			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
+				s.taskHandler.HandleSessionTasks(w, r)
+				return
+			}
+
 			// Fall through to session handler
 			s.sessionHandler.HandleSessions(w, r)
 		})
@@ -644,6 +650,25 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.sessionHandler.HandleFolders(w, r)
 		})
 		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
+
+		// Workspace routes (aliases for folders - backward compatible)
+		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			// Check if this is a workspace notes request
+			if strings.Contains(path, "/notes") {
+				s.sessionHandler.HandleFolderNotes(w, r)
+				return
+			}
+			// Check if this is a workspace tasks request
+			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
+				s.taskHandler.HandleWorkspaceTasks(w, r)
+				return
+			}
+			// Otherwise, handle as regular workspace/folder request
+			s.sessionHandler.HandleFolders(w, r)
+		})
+		mux.HandleFunc("/api/workspaces", s.sessionHandler.HandleFolders)
+
 		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
 	}

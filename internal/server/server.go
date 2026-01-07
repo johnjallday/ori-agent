@@ -130,6 +130,7 @@ type Server struct {
 	// Session management
 	sessionStore   session.HybridStore
 	sessionHandler *sessionhttp.Handler
+	taskHandler    *sessionhttp.TaskHandler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
