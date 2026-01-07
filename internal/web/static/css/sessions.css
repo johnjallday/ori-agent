@@ -1353,6 +1353,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .folder-notes-section .folder-note-item {
   padding: 5px 8px 5px 10px;
+  margin-left: 0;
 }
 
 .folder-note-icon {
