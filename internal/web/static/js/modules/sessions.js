@@ -111,8 +111,8 @@ const sessionManager = {
 
   // Bind all event listeners
   bindEvents() {
-    // New session button
-    document.getElementById('newSessionBtn')?.addEventListener('click', () => this.createNewSession());
+    // New chat button
+    document.getElementById('newChatBtn')?.addEventListener('click', () => this.createNewSession());
     document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.createNewSession());
 
     // Toggle sidebar (from inside session sidebar)
