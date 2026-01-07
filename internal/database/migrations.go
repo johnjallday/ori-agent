@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 8
+const schemaVersion = 9
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -76,6 +76,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration007WorkspaceOrchestration(ctx)
 	case 8:
 		return db.migration008RenameFoldersToWorkspaces(ctx)
+	case 9:
+		return db.migration009OrchestrationData(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -890,6 +892,55 @@ func (db *DB) migration008RenameFoldersToWorkspaces(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create workspaces index: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// migration009OrchestrationData adds JSON columns for storing orchestration data
+// (messages, tasks, attachments, scheduled tasks, store nodes, workflows) in workspaces.
+// These columns store serialized JSON that the adapter converts to/from agentstudio types.
+func (db *DB) migration009OrchestrationData(ctx context.Context) error {
+	// Add messages_json column - JSON array of inter-agent messages
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN messages_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add messages_json column: %w", err)
+	}
+
+	// Add tasks_json column - JSON array of orchestration tasks
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN tasks_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add tasks_json column: %w", err)
+	}
+
+	// Add attachments_json column - JSON array of attachments
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN attachments_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add attachments_json column: %w", err)
+	}
+
+	// Add scheduled_tasks_json column - JSON array of scheduled task templates
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN scheduled_tasks_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add scheduled_tasks_json column: %w", err)
+	}
+
+	// Add store_nodes_json column - JSON array of file storage nodes
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN store_nodes_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add store_nodes_json column: %w", err)
+	}
+
+	// Add workflows_json column - JSON map of workflow definitions
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN workflows_json TEXT DEFAULT '{}'
+	`); err != nil {
+		return fmt.Errorf("failed to add workflows_json column: %w", err)
 	}
 
 	return nil

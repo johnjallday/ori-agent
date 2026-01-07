@@ -58,13 +58,41 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		status = WorkspaceStatusActive
 	}
 
+	// Serialize orchestration data JSON fields
+	messagesJSON := workspace.MessagesJSON
+	if messagesJSON == nil {
+		messagesJSON = []byte("[]")
+	}
+	tasksJSON := workspace.TasksJSON
+	if tasksJSON == nil {
+		tasksJSON = []byte("[]")
+	}
+	attachmentsJSON := workspace.AttachmentsJSON
+	if attachmentsJSON == nil {
+		attachmentsJSON = []byte("[]")
+	}
+	scheduledTasksJSON := workspace.ScheduledTasksJSON
+	if scheduledTasksJSON == nil {
+		scheduledTasksJSON = []byte("[]")
+	}
+	storeNodesJSON := workspace.StoreNodesJSON
+	if storeNodesJSON == nil {
+		storeNodesJSON = []byte("[]")
+	}
+	workflowsJSON := workspace.WorkflowsJSON
+	if workflowsJSON == nil {
+		workflowsJSON = []byte("{}")
+	}
+
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, description, parent_id, color, session_count, created_at, updated_at,
-			agents, agent_instances, shared_data, status, layout)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			agents, agent_instances, shared_data, status, layout,
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
-		string(agentsJSON), string(agentInstancesJSON), string(sharedDataJSON), string(status), layoutJSON)
+		string(agentsJSON), string(agentInstancesJSON), string(sharedDataJSON), string(status), layoutJSON,
+		string(messagesJSON), string(tasksJSON), string(attachmentsJSON), string(scheduledTasksJSON), string(storeNodesJSON), string(workflowsJSON))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -88,14 +116,22 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var sharedDataJSON sql.NullString
 	var status sql.NullString
 	var layoutJSON sql.NullString
+	var messagesJSON sql.NullString
+	var tasksJSON sql.NullString
+	var attachmentsJSON sql.NullString
+	var scheduledTasksJSON sql.NullString
+	var storeNodesJSON sql.NullString
+	var workflowsJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at,
-			agents, agent_instances, shared_data, status, layout
+			agents, agent_instances, shared_data, status, layout,
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &description, &parentID, &color,
 		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
-		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON)
+		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
+		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrWorkspaceNotFound
@@ -126,6 +162,26 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 		if err := json.Unmarshal([]byte(layoutJSON.String), &layout); err == nil {
 			workspace.Layout = &layout
 		}
+	}
+
+	// Store raw JSON for orchestration data fields
+	if messagesJSON.Valid && messagesJSON.String != "" {
+		workspace.MessagesJSON = json.RawMessage(messagesJSON.String)
+	}
+	if tasksJSON.Valid && tasksJSON.String != "" {
+		workspace.TasksJSON = json.RawMessage(tasksJSON.String)
+	}
+	if attachmentsJSON.Valid && attachmentsJSON.String != "" {
+		workspace.AttachmentsJSON = json.RawMessage(attachmentsJSON.String)
+	}
+	if scheduledTasksJSON.Valid && scheduledTasksJSON.String != "" {
+		workspace.ScheduledTasksJSON = json.RawMessage(scheduledTasksJSON.String)
+	}
+	if storeNodesJSON.Valid && storeNodesJSON.String != "" {
+		workspace.StoreNodesJSON = json.RawMessage(storeNodesJSON.String)
+	}
+	if workflowsJSON.Valid && workflowsJSON.String != "" {
+		workspace.WorkflowsJSON = json.RawMessage(workflowsJSON.String)
 	}
 
 	return workspace, nil
@@ -171,13 +227,41 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 		status = WorkspaceStatusActive
 	}
 
+	// Serialize orchestration data JSON fields
+	messagesJSON := workspace.MessagesJSON
+	if messagesJSON == nil {
+		messagesJSON = []byte("[]")
+	}
+	tasksJSON := workspace.TasksJSON
+	if tasksJSON == nil {
+		tasksJSON = []byte("[]")
+	}
+	attachmentsJSON := workspace.AttachmentsJSON
+	if attachmentsJSON == nil {
+		attachmentsJSON = []byte("[]")
+	}
+	scheduledTasksJSON := workspace.ScheduledTasksJSON
+	if scheduledTasksJSON == nil {
+		scheduledTasksJSON = []byte("[]")
+	}
+	storeNodesJSON := workspace.StoreNodesJSON
+	if storeNodesJSON == nil {
+		storeNodesJSON = []byte("[]")
+	}
+	workflowsJSON := workspace.WorkflowsJSON
+	if workflowsJSON == nil {
+		workflowsJSON = []byte("{}")
+	}
+
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
 		SET name = ?, description = ?, parent_id = NULLIF(?, ''), color = ?, updated_at = ?,
-			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?
+			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
+			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?
 		WHERE id = ?
 	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color, workspace.UpdatedAt,
 		string(agentsJSON), string(agentInstancesJSON), string(sharedDataJSON), string(status), layoutJSON,
+		string(messagesJSON), string(tasksJSON), string(attachmentsJSON), string(scheduledTasksJSON), string(storeNodesJSON), string(workflowsJSON),
 		workspace.ID)
 
 	if err != nil {

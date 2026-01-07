@@ -17,6 +17,7 @@ type hybridStore struct {
 	cache         *MemoryCache
 	sqlite        *SQLiteStore
 	toolCallStore *SQLiteToolCallStore
+	taskStore     *SQLiteTaskStore
 	db            *database.DB
 
 	mu     sync.RWMutex
@@ -45,6 +46,7 @@ func NewHybridStore(ctx context.Context, cfg *HybridStoreConfig) (HybridStore, e
 		cache:         NewMemoryCache(cfg.CacheSize),
 		sqlite:        NewSQLiteStore(db),
 		toolCallStore: NewSQLiteToolCallStore(db),
+		taskStore:     NewSQLiteTaskStore(db),
 		db:            db,
 		stopCh:        make(chan struct{}),
 		config:        cfg,
@@ -79,6 +81,7 @@ func NewHybridStoreWithDB(db *database.DB, cacheSize int) HybridStore {
 		cache:         NewMemoryCache(cacheSize),
 		sqlite:        NewSQLiteStore(db),
 		toolCallStore: NewSQLiteToolCallStore(db),
+		taskStore:     NewSQLiteTaskStore(db),
 		db:            db,
 		stopCh:        make(chan struct{}),
 		config:        &HybridStoreConfig{CacheSize: cacheSize},
@@ -456,6 +459,11 @@ func (h *hybridStore) GetStorageStats(ctx context.Context) (*StorageStats, error
 // ToolCallStore returns the tool call store for persisting tool execution data.
 func (h *hybridStore) ToolCallStore() ToolCallStore {
 	return h.toolCallStore
+}
+
+// TaskStore returns the task store for session/workspace tasks.
+func (h *hybridStore) TaskStore() TaskStore {
+	return h.taskStore
 }
 
 // DB returns the underlying database connection.

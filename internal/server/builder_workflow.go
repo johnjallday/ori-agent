@@ -13,16 +13,37 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 )
 
 // initializeWorkspaceStore creates the workspace storage system.
+// Uses the session HybridStore as the underlying storage via an adapter,
+// which unifies workspace data between the Sessions sidebar and Studios page.
 func (b *ServerBuilder) initializeWorkspaceStore() error {
-	workspaceDir := resolveWorkspaceDir()
-	ws, err := createWorkspaceStore(workspaceDir)
-	if err != nil {
-		return err
+	var ws agentstudio.Store
+	verbose := os.Getenv("ORI_VERBOSE") == "true"
+
+	// Use the session store adapter if available (preferred for unified workspace data)
+	if b.server.sessionStore != nil {
+		adapter := session.NewWorkspaceStoreAdapter(b.server.sessionStore)
+		ws = adapter
+		if verbose {
+			logger.Info("Workspace store initialized using session store adapter (SQLite)", logger.Fields{})
+		}
+	} else {
+		// Fall back to file-based store if session store is not available
+		workspaceDir := resolveWorkspaceDir()
+		fileStore, err := createWorkspaceStore(workspaceDir)
+		if err != nil {
+			return err
+		}
+		ws = fileStore
+		if verbose {
+			logger.Info("Workspace store initialized using file store (fallback)", logger.Fields{"dir": workspaceDir})
+		}
 	}
+
 	b.server.workspaceStore = ws
 
 	// Now update chat handler with workspace store
@@ -81,6 +102,12 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
 	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 
+	// Create session store adapter for orchestration handler
+	var sessionStoreAdapter orchestrationhttp.SessionStore
+	if s.sessionStore != nil {
+		sessionStoreAdapter = session.NewOrchestrationSessionStore(s.sessionStore)
+	}
+
 	// Create orchestration handler with all available dependencies
 	// Note: TemplateManager is added later via SetTemplateManager in initializeTemplateManager
 	handler, err := orchestrationhttp.NewHandler(orchestrationhttp.HandlerConfig{
@@ -90,6 +117,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		Orchestrator:        orch,
 		NotificationService: s.notificationService,
 		TaskHandler:         taskHandler,
+		SessionStore:        sessionStoreAdapter,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
 	})
 	if err != nil {

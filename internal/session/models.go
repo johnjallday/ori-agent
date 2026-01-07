@@ -25,6 +25,7 @@
 package session
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -240,6 +241,30 @@ type Workspace struct {
 
 	// Layout stores the visual arrangement of workspace elements on the canvas.
 	Layout *CanvasLayout `json:"layout,omitempty"`
+
+	// ==========================================================================
+	// Orchestration Data (stored as JSON in SQLite)
+	// These fields store raw JSON that is deserialized by the adapter to
+	// agentstudio types. This avoids circular imports and type duplication.
+	// ==========================================================================
+
+	// MessagesJSON contains serialized inter-agent messages.
+	MessagesJSON json.RawMessage `json:"messages,omitempty"`
+
+	// TasksJSON contains serialized orchestration tasks.
+	TasksJSON json.RawMessage `json:"tasks,omitempty"`
+
+	// AttachmentsJSON contains serialized attachments.
+	AttachmentsJSON json.RawMessage `json:"attachments,omitempty"`
+
+	// ScheduledTasksJSON contains serialized scheduled task templates.
+	ScheduledTasksJSON json.RawMessage `json:"scheduled_tasks,omitempty"`
+
+	// StoreNodesJSON contains serialized file storage nodes.
+	StoreNodesJSON json.RawMessage `json:"store_nodes,omitempty"`
+
+	// WorkflowsJSON contains serialized workflow definitions.
+	WorkflowsJSON json.RawMessage `json:"workflows,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

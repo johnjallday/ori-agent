@@ -182,6 +182,32 @@
                 <span id="workspace-description" class="detail-value">--</span>
               </div>
             </div>
+
+            <!-- Sessions Card -->
+            <div class="modern-card p-4 mb-4">
+              <h4 class="mb-3" style="color: var(--text-primary);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M12,3C17.5,3 22,6.58 22,11C22,15.42 17.5,19 12,19C10.76,19 9.57,18.82 8.47,18.5C5.55,21 2,21 2,21C4.33,18.67 4.7,17.1 4.75,16.5C3.05,15.07 2,13.13 2,11C2,6.58 6.5,3 12,3Z"/>
+                </svg>
+                Sessions
+              </h4>
+              <div id="sessions-list" style="max-height: 300px; overflow-y: auto;">
+                <p style="color: var(--text-muted); font-size: 0.875rem;">Loading sessions...</p>
+              </div>
+            </div>
+
+            <!-- Session Tasks Card -->
+            <div class="modern-card p-4 mb-4">
+              <h4 class="mb-3" style="color: var(--text-primary);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                  <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+                </svg>
+                Session Tasks
+              </h4>
+              <div id="session-tasks-list" style="max-height: 300px; overflow-y: auto;">
+                <p style="color: var(--text-muted); font-size: 0.875rem;">Loading tasks...</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -655,10 +681,86 @@
         // Load tasks
         await loadTasks();
 
+        // Render sessions list (from session store)
+        renderSessions(workspace.sessions || []);
+
+        // Render session tasks list (from session store)
+        renderSessionTasks(workspace.session_tasks || []);
+
       } catch (error) {
         console.error('Error loading workspace:', error);
         alert('Failed to load workspace data');
       }
+    }
+
+    // Render sessions list
+    function renderSessions(sessions) {
+      const sessionsList = document.getElementById('sessions-list');
+      if (!sessions || sessions.length === 0) {
+        sessionsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No sessions in this workspace</p>';
+        return;
+      }
+
+      sessionsList.innerHTML = sessions.map(session => `
+        <a href="/chat?session=${encodeURIComponent(session.id)}" class="d-block text-decoration-none mb-2">
+          <div class="session-item p-2" style="border: 1px solid var(--border-color); border-radius: 6px; transition: all 0.2s ease; cursor: pointer;">
+            <div class="d-flex justify-content-between align-items-start">
+              <div style="flex: 1; min-width: 0;">
+                <div class="session-title" style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${escapeHtml(session.title || 'Untitled Session')}
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">
+                  ${session.agent_name ? `<span class="me-2">${escapeHtml(session.agent_name)}</span>` : ''}
+                  <span>${session.message_count || 0} messages</span>
+                </div>
+              </div>
+              <div style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">
+                ${session.updated_at ? new Date(session.updated_at).toLocaleDateString() : ''}
+              </div>
+            </div>
+          </div>
+        </a>
+      `).join('');
+    }
+
+    // Render session tasks list
+    function renderSessionTasks(tasks) {
+      const tasksList = document.getElementById('session-tasks-list');
+      if (!tasks || tasks.length === 0) {
+        tasksList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No tasks in this workspace</p>';
+        return;
+      }
+
+      const statusColors = {
+        'pending': 'var(--text-muted)',
+        'in_progress': 'var(--primary-color)',
+        'completed': 'var(--success-color)',
+        'failed': 'var(--danger-color)'
+      };
+
+      tasksList.innerHTML = tasks.map(task => {
+        const statusColor = statusColors[task.status] || 'var(--text-muted)';
+        const priorityBadge = task.priority > 1 ? `<span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">P${task.priority}</span>` : '';
+
+        return `
+          <div class="session-task-item p-2 mb-2" style="border: 1px solid var(--border-color); border-radius: 6px; border-left: 3px solid ${statusColor};">
+            <div class="d-flex justify-content-between align-items-start">
+              <div style="flex: 1; min-width: 0;">
+                <div class="d-flex align-items-center">
+                  <span style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    ${escapeHtml(task.description || 'Untitled Task')}
+                  </span>
+                  ${priorityBadge}
+                </div>
+                ${task.details ? `<div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(task.details)}</div>` : ''}
+              </div>
+              <span class="badge" style="background: ${statusColor}; font-size: 0.65rem;">
+                ${escapeHtml(task.status || 'pending')}
+              </span>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     // Load tasks
