@@ -635,7 +635,7 @@
 }
 
 .folder-sessions .session-icon {
-  margin-right: 6px;
+  margin-right: 0;
 }
 
 .session-item:hover .session-icon {
