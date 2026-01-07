@@ -14,85 +14,113 @@ import (
 // Workspace Operations
 // ============================================================================
 
+// workspaceJSONFields holds all serialized JSON fields for workspace storage.
+type workspaceJSONFields struct {
+	agents         []byte
+	agentInstances []byte
+	sharedData     []byte
+	layout         []byte
+	messages       []byte
+	tasks          []byte
+	attachments    []byte
+	scheduledTasks []byte
+	storeNodes     []byte
+	workflows      []byte
+	status         WorkspaceStatus
+}
+
+// serializeWorkspaceFields converts workspace fields to JSON for database storage.
+// This centralizes the serialization logic used by both Create and Update operations.
+func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
+	fields := workspaceJSONFields{}
+
+	// Serialize agents array
+	if workspace.Agents == nil {
+		fields.agents = []byte("[]")
+	} else if data, err := json.Marshal(workspace.Agents); err != nil {
+		fields.agents = []byte("[]")
+	} else {
+		fields.agents = data
+	}
+
+	// Serialize agent instances array
+	if workspace.AgentInstances == nil {
+		fields.agentInstances = []byte("[]")
+	} else if data, err := json.Marshal(workspace.AgentInstances); err != nil {
+		fields.agentInstances = []byte("[]")
+	} else {
+		fields.agentInstances = data
+	}
+
+	// Serialize shared data map
+	if workspace.SharedData == nil {
+		fields.sharedData = []byte("{}")
+	} else if data, err := json.Marshal(workspace.SharedData); err != nil {
+		fields.sharedData = []byte("{}")
+	} else {
+		fields.sharedData = data
+	}
+
+	// Serialize layout (optional)
+	if workspace.Layout != nil {
+		if data, err := json.Marshal(workspace.Layout); err == nil {
+			fields.layout = data
+		}
+	}
+
+	// Use existing JSON fields or defaults
+	fields.messages = workspace.MessagesJSON
+	if fields.messages == nil {
+		fields.messages = []byte("[]")
+	}
+	fields.tasks = workspace.TasksJSON
+	if fields.tasks == nil {
+		fields.tasks = []byte("[]")
+	}
+	fields.attachments = workspace.AttachmentsJSON
+	if fields.attachments == nil {
+		fields.attachments = []byte("[]")
+	}
+	fields.scheduledTasks = workspace.ScheduledTasksJSON
+	if fields.scheduledTasks == nil {
+		fields.scheduledTasks = []byte("[]")
+	}
+	fields.storeNodes = workspace.StoreNodesJSON
+	if fields.storeNodes == nil {
+		fields.storeNodes = []byte("[]")
+	}
+	fields.workflows = workspace.WorkflowsJSON
+	if fields.workflows == nil {
+		fields.workflows = []byte("{}")
+	}
+
+	// Default status
+	fields.status = workspace.Status
+	if fields.status == "" {
+		fields.status = WorkspaceStatusActive
+	}
+
+	return fields
+}
+
 // CreateWorkspace creates a new workspace.
 func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
 	if workspace.ID == "" {
 		return ErrInvalidID
 	}
 
-	// Serialize orchestration fields to JSON
-	agentsJSON, err := json.Marshal(workspace.Agents)
-	if err != nil {
-		agentsJSON = []byte("[]")
-	}
-	if workspace.Agents == nil {
-		agentsJSON = []byte("[]")
-	}
+	// Serialize all JSON fields using helper
+	f := serializeWorkspaceFields(workspace)
 
-	agentInstancesJSON, err := json.Marshal(workspace.AgentInstances)
-	if err != nil {
-		agentInstancesJSON = []byte("[]")
-	}
-	if workspace.AgentInstances == nil {
-		agentInstancesJSON = []byte("[]")
-	}
-
-	sharedDataJSON, err := json.Marshal(workspace.SharedData)
-	if err != nil {
-		sharedDataJSON = []byte("{}")
-	}
-	if workspace.SharedData == nil {
-		sharedDataJSON = []byte("{}")
-	}
-
-	var layoutJSON []byte
-	if workspace.Layout != nil {
-		layoutJSON, err = json.Marshal(workspace.Layout)
-		if err != nil {
-			layoutJSON = nil
-		}
-	}
-
-	status := workspace.Status
-	if status == "" {
-		status = WorkspaceStatusActive
-	}
-
-	// Serialize orchestration data JSON fields
-	messagesJSON := workspace.MessagesJSON
-	if messagesJSON == nil {
-		messagesJSON = []byte("[]")
-	}
-	tasksJSON := workspace.TasksJSON
-	if tasksJSON == nil {
-		tasksJSON = []byte("[]")
-	}
-	attachmentsJSON := workspace.AttachmentsJSON
-	if attachmentsJSON == nil {
-		attachmentsJSON = []byte("[]")
-	}
-	scheduledTasksJSON := workspace.ScheduledTasksJSON
-	if scheduledTasksJSON == nil {
-		scheduledTasksJSON = []byte("[]")
-	}
-	storeNodesJSON := workspace.StoreNodesJSON
-	if storeNodesJSON == nil {
-		storeNodesJSON = []byte("[]")
-	}
-	workflowsJSON := workspace.WorkflowsJSON
-	if workflowsJSON == nil {
-		workflowsJSON = []byte("{}")
-	}
-
-	_, err = s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, description, parent_id, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json)
 		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
-		string(agentsJSON), string(agentInstancesJSON), string(sharedDataJSON), string(status), layoutJSON,
-		string(messagesJSON), string(tasksJSON), string(attachmentsJSON), string(scheduledTasksJSON), string(storeNodesJSON), string(workflowsJSON))
+		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -189,69 +217,8 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 
 // UpdateWorkspace updates workspace metadata.
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
-	// Serialize orchestration fields to JSON
-	agentsJSON, err := json.Marshal(workspace.Agents)
-	if err != nil {
-		agentsJSON = []byte("[]")
-	}
-	if workspace.Agents == nil {
-		agentsJSON = []byte("[]")
-	}
-
-	agentInstancesJSON, err := json.Marshal(workspace.AgentInstances)
-	if err != nil {
-		agentInstancesJSON = []byte("[]")
-	}
-	if workspace.AgentInstances == nil {
-		agentInstancesJSON = []byte("[]")
-	}
-
-	sharedDataJSON, err := json.Marshal(workspace.SharedData)
-	if err != nil {
-		sharedDataJSON = []byte("{}")
-	}
-	if workspace.SharedData == nil {
-		sharedDataJSON = []byte("{}")
-	}
-
-	var layoutJSON []byte
-	if workspace.Layout != nil {
-		layoutJSON, err = json.Marshal(workspace.Layout)
-		if err != nil {
-			layoutJSON = nil
-		}
-	}
-
-	status := workspace.Status
-	if status == "" {
-		status = WorkspaceStatusActive
-	}
-
-	// Serialize orchestration data JSON fields
-	messagesJSON := workspace.MessagesJSON
-	if messagesJSON == nil {
-		messagesJSON = []byte("[]")
-	}
-	tasksJSON := workspace.TasksJSON
-	if tasksJSON == nil {
-		tasksJSON = []byte("[]")
-	}
-	attachmentsJSON := workspace.AttachmentsJSON
-	if attachmentsJSON == nil {
-		attachmentsJSON = []byte("[]")
-	}
-	scheduledTasksJSON := workspace.ScheduledTasksJSON
-	if scheduledTasksJSON == nil {
-		scheduledTasksJSON = []byte("[]")
-	}
-	storeNodesJSON := workspace.StoreNodesJSON
-	if storeNodesJSON == nil {
-		storeNodesJSON = []byte("[]")
-	}
-	workflowsJSON := workspace.WorkflowsJSON
-	if workflowsJSON == nil {
-		workflowsJSON = []byte("{}")
-	}
+	// Serialize all JSON fields using helper
+	f := serializeWorkspaceFields(workspace)
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
@@ -260,8 +227,8 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?
 		WHERE id = ?
 	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color, workspace.UpdatedAt,
-		string(agentsJSON), string(agentInstancesJSON), string(sharedDataJSON), string(status), layoutJSON,
-		string(messagesJSON), string(tasksJSON), string(attachmentsJSON), string(scheduledTasksJSON), string(storeNodesJSON), string(workflowsJSON),
+		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows),
 		workspace.ID)
 
 	if err != nil {

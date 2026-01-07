@@ -116,7 +116,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionT
 		&task.Priority, &task.CreatedAt, &task.UpdatedAt, &completedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", taskID)
+		return nil, ErrTaskNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
@@ -367,7 +367,7 @@ func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*
 		&nextRun, &lastRun, &reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("reminder not found: %s", reminderID)
+		return nil, ErrReminderNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get reminder: %w", err)

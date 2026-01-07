@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -287,7 +288,7 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	instanceNumber := instanceCount + 1
 	nodeID := req.AgentName + "-node-" + uuid.New().String()[:8]
 	if instanceNumber > 1 {
-		nodeID = req.AgentName + "-" + string(rune('0'+instanceNumber)) + "-node-" + uuid.New().String()[:8]
+		nodeID = fmt.Sprintf("%s-%d-node-%s", req.AgentName, instanceNumber, uuid.New().String()[:8])
 	}
 
 	newInstance := session.AgentInstance{
