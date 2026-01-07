@@ -984,6 +984,117 @@ const sessionManager = {
     }
   },
 
+  // Create a new session in a specific folder/workspace
+  async createNewSessionInFolder(folderId) {
+    try {
+      // Fetch available agents
+      const agents = await this.fetchAgents();
+      if (!agents || agents.length === 0) {
+        console.error('No agents available');
+        return;
+      }
+
+      // If only one agent, create directly
+      if (agents.length === 1) {
+        await this.createSessionWithAgentInFolder(agents[0].name, folderId);
+        return;
+      }
+
+      // Show agent picker dialog with folder context
+      this.showAgentPickerDialogForFolder(agents, folderId);
+    } catch (error) {
+      console.error('Failed to create session in folder:', error);
+    }
+  },
+
+  // Show agent picker dialog for folder context
+  showAgentPickerDialogForFolder(agents, folderId) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('agentPickerModal');
+    if (existingModal) existingModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'agentPickerModal';
+    modal.className = 'modal fade show';
+    modal.style.display = 'block';
+    modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    modal.innerHTML = `
+      <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+          <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+            <h6 class="modal-title" style="color: var(--text-primary);">Select Agent</h6>
+            <button type="button" class="btn-close" data-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="agent-picker-list">
+              ${agents.map(agent => `
+                <button class="agent-picker-item modern-btn modern-btn-secondary w-100 mb-2 text-start" data-agent="${agent.name}">
+                  <span class="agent-name">${this.escapeHtml(agent.name)}</span>
+                  ${agent.description ? `<small class="text-muted d-block">${this.escapeHtml(agent.description)}</small>` : ''}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Handle agent selection
+    modal.querySelectorAll('.agent-picker-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const agentName = btn.dataset.agent;
+        modal.remove();
+        this.createSessionWithAgentInFolder(agentName, folderId);
+      });
+    });
+
+    // Handle close
+    modal.querySelector('.btn-close').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+  },
+
+  // Create session with agent in a specific folder
+  async createSessionWithAgentInFolder(agentName, folderId) {
+    try {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'New Session',
+          agent_name: agentName,
+          folder_id: folderId
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to create session');
+
+      const data = await response.json();
+      if (data.session) {
+        this.sessions.unshift(data.session);
+        this.activeSessionId = data.session.id;
+        this.saveActiveSession();
+        this.renderSessions();
+
+        // Update the combined chat info bar with session title and agent
+        this.updateChatInfoBar(data.session.title || 'New Session', agentName);
+
+        // Update the current agent globally
+        this.updateCurrentAgent(agentName);
+
+        // Clear chat area for new session
+        if (typeof clearChatHistory === 'function') {
+          clearChatHistory();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to create session in folder:', error);
+    }
+  },
+
   // Switch to a session
   async switchToSession(sessionId) {
     if (sessionId === this.activeSessionId) return;
@@ -2115,6 +2226,9 @@ const sessionManager = {
     this.hideContextMenus();
 
     switch (action) {
+      case 'new-session':
+        this.createNewSessionInFolder(folderId);
+        break;
       case 'new-note':
         this.createNewNoteForFolder(folderId);
         break;
