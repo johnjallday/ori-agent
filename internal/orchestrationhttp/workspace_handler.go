@@ -101,6 +101,14 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			} else {
 				response["session_tasks"] = sessionTasks
 			}
+
+			// Add workspace notes
+			notes, err := wh.sessionStore.ListNotesByWorkspace(ctx, wsID)
+			if err != nil {
+				logger.Debug("Failed to load notes for workspace", logger.Fields{"workspace_id": wsID, "error": err})
+			} else {
+				response["notes"] = notes
+			}
 		}
 
 		orihttp.WriteJSON(w, response)

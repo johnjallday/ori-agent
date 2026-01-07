@@ -75,3 +75,25 @@ func (a *OrchestrationSessionStore) ListTasksByWorkspace(ctx context.Context, wo
 
 	return items, nil
 }
+
+// ListNotesByWorkspace returns workspace notes for a workspace.
+func (a *OrchestrationSessionStore) ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]orchestrationhttp.WorkspaceNoteItem, error) {
+	notes, err := a.store.ListNotesByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to orchestrationhttp.WorkspaceNoteItem
+	items := make([]orchestrationhttp.WorkspaceNoteItem, len(notes))
+	for i, n := range notes {
+		items[i] = orchestrationhttp.WorkspaceNoteItem{
+			ID:        n.ID,
+			Name:      n.Name,
+			Preview:   n.Preview,
+			CreatedAt: n.CreatedAt,
+			UpdatedAt: n.UpdatedAt,
+		}
+	}
+
+	return items, nil
+}

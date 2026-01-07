@@ -44,6 +44,7 @@ type HandlerConfig struct {
 type SessionStore interface {
 	ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]SessionListItem, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string) ([]SessionTaskItem, error)
+	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteItem, error)
 }
 
 // SessionListItem represents a session for API responses
@@ -66,6 +67,15 @@ type SessionTaskItem struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// WorkspaceNoteItem represents a workspace note for API responses
+type WorkspaceNoteItem struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Preview   string    `json:"preview,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Validate checks that all required dependencies are present
