@@ -112,7 +112,11 @@ const sessionManager = {
   // Bind all event listeners
   bindEvents() {
     // New chat button - show modal
-    document.getElementById('newChatBtn')?.addEventListener('click', () => this.showCreateChatModal());
+    document.getElementById('newChatBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showCreateChatModal();
+    });
     document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.showCreateChatModal());
 
     // Create chat modal - create button
@@ -643,7 +647,7 @@ const sessionManager = {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const workspaceId = btn.dataset.workspaceId;
-        this.addWorkspaceTask(workspaceId);
+        this.openTaskModalForWorkspace(workspaceId);
       });
     });
   },
@@ -850,10 +854,8 @@ const sessionManager = {
   // Show create chat modal with workspace and agent selection
   async showCreateChatModal() {
     try {
-      // Fetch workspaces and agents in parallel
-      const [agents] = await Promise.all([
-        this.fetchAgents()
-      ]);
+      // Fetch agents
+      const agents = await this.fetchAgents();
 
       if (!agents || agents.length === 0) {
         console.error('No agents available');
@@ -881,8 +883,63 @@ const sessionManager = {
       // Show the modal
       const modal = document.getElementById('createChatModal');
       if (modal) {
-        const bsModal = new bootstrap.Modal(modal);
-        bsModal.show();
+        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+          const bsModal = new bootstrap.Modal(modal);
+          bsModal.show();
+        } else {
+          // Fallback: show modal manually
+          modal.classList.add('show');
+          modal.style.display = 'block';
+          document.body.classList.add('modal-open');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to show create chat modal:', error);
+    }
+  },
+
+  // Show create chat modal with workspace pre-selected
+  async showCreateChatModalForWorkspace(workspaceId) {
+    try {
+      // Fetch agents
+      const agents = await this.fetchAgents();
+
+      if (!agents || agents.length === 0) {
+        console.error('No agents available');
+        return;
+      }
+
+      // Populate workspace dropdown
+      const workspaceSelect = document.getElementById('chatWorkspaceSelect');
+      if (workspaceSelect) {
+        workspaceSelect.innerHTML = '<option value="">No workspace (root)</option>';
+        this.folders.forEach(folder => {
+          const selected = folder.id === workspaceId ? ' selected' : '';
+          workspaceSelect.innerHTML += `<option value="${folder.id}"${selected}>${this.escapeHtml(folder.name)}</option>`;
+        });
+      }
+
+      // Populate agent dropdown
+      const agentSelect = document.getElementById('chatAgentSelect');
+      if (agentSelect) {
+        agentSelect.innerHTML = '';
+        agents.forEach(agent => {
+          agentSelect.innerHTML += `<option value="${agent.name}">${this.escapeHtml(agent.name)}</option>`;
+        });
+      }
+
+      // Show the modal
+      const modal = document.getElementById('createChatModal');
+      if (modal) {
+        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+          const bsModal = new bootstrap.Modal(modal);
+          bsModal.show();
+        } else {
+          // Fallback: show modal manually
+          modal.classList.add('show');
+          modal.style.display = 'block';
+          document.body.classList.add('modal-open');
+        }
       }
     } catch (error) {
       console.error('Failed to show create chat modal:', error);
@@ -2283,10 +2340,13 @@ const sessionManager = {
 
     switch (action) {
       case 'new-session':
-        this.createNewSessionInFolder(folderId);
+        this.showCreateChatModalForWorkspace(folderId);
         break;
       case 'new-note':
         this.createNewNoteForFolder(folderId);
+        break;
+      case 'new-task':
+        this.openTaskModalForWorkspace(folderId);
         break;
       case 'paste-note':
         this.pasteNoteToFolder(folderId);
@@ -3911,18 +3971,18 @@ const sessionManager = {
   },
 
   // =============================================================================
-  // Session Tasks
+  // Workspace Tasks
   // =============================================================================
 
   // Task state
-  sessionTasks: [],
+  workspaceTasks: [],
   taskCounts: { total: 0, pending: 0, completed: 0 },
   tasksByWorkspace: new Map(), // Tasks keyed by workspace (folder) ID
 
   // Load tasks for current session
   async loadSessionTasks() {
     if (!this.activeSessionId) {
-      this.sessionTasks = [];
+      this.workspaceTasks = [];
       this.taskCounts = { total: 0, pending: 0, completed: 0 };
       return;
     }
@@ -3932,7 +3992,7 @@ const sessionManager = {
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
-      this.sessionTasks = data.tasks || [];
+      this.workspaceTasks = data.tasks || [];
       this.taskCounts = data.counts || { total: 0, pending: 0, completed: 0 };
 
       // Update the counts cache and badges
@@ -3948,12 +4008,12 @@ const sessionManager = {
       // Update workspace tasks in sidebar
       const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
       if (activeSession && activeSession.folder_id) {
-        this.tasksByWorkspace.set(activeSession.folder_id, this.sessionTasks);
+        this.tasksByWorkspace.set(activeSession.folder_id, this.workspaceTasks);
         this.renderFolderTree();
       }
     } catch (error) {
       console.error('Failed to load session tasks:', error);
-      this.sessionTasks = [];
+      this.workspaceTasks = [];
       this.taskCounts = { total: 0, pending: 0, completed: 0 };
       this.updateChatTaskBadge();
     }
@@ -4016,7 +4076,7 @@ const sessionManager = {
 
   // Toggle task completion
   async toggleTaskComplete(taskId) {
-    const task = this.sessionTasks.find(t => t.id === taskId);
+    const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
 
     try {
@@ -4074,6 +4134,9 @@ const sessionManager = {
     // Close button
     document.getElementById('mainTaskPanelClose')?.addEventListener('click', () => this.closeMainTaskPanel());
 
+    // Backdrop click to close
+    document.getElementById('mainTaskModalBackdrop')?.addEventListener('click', () => this.closeMainTaskPanel());
+
     // Add task button - opens modal
     document.getElementById('mainTaskAddBtn')?.addEventListener('click', () => this.openTaskModal());
 
@@ -4094,10 +4157,17 @@ const sessionManager = {
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
     document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
 
-    // Modal escape key
+    // Modal escape key for task modal
     document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeTaskModal();
+      }
+    });
+
+    // Escape key for main task modal
+    document.getElementById('mainTaskModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.closeMainTaskPanel();
       }
     });
   },
@@ -4111,12 +4181,12 @@ const sessionManager = {
     }
   },
 
-  // Open main task panel
+  // Open main task modal
   openMainTaskPanel() {
-    const panel = document.getElementById('mainTaskPanel');
-    if (!panel || !this.activeSessionId) return;
+    const modal = document.getElementById('mainTaskModal');
+    if (!modal || !this.activeSessionId) return;
 
-    panel.style.display = 'flex';
+    modal.style.display = 'flex';
     this.mainTaskPanelOpen = true;
 
     // Update button state
@@ -4129,18 +4199,24 @@ const sessionManager = {
     setTimeout(() => {
       document.getElementById('mainTaskInput')?.focus();
     }, 100);
+
+    // Prevent body scrolling when modal is open
+    document.body.style.overflow = 'hidden';
   },
 
-  // Close main task panel
+  // Close main task modal
   closeMainTaskPanel() {
-    const panel = document.getElementById('mainTaskPanel');
-    if (!panel) return;
+    const modal = document.getElementById('mainTaskModal');
+    if (!modal) return;
 
-    panel.style.display = 'none';
+    modal.style.display = 'none';
     this.mainTaskPanelOpen = false;
 
     // Update button state
     document.getElementById('chatTasksBtn')?.classList.remove('active');
+
+    // Restore body scrolling
+    document.body.style.overflow = '';
   },
 
   // Open workspace task panel from sidebar
@@ -4257,7 +4333,7 @@ const sessionManager = {
     // Clear existing items
     listContainer.innerHTML = '';
 
-    if (this.sessionTasks.length === 0) {
+    if (this.workspaceTasks.length === 0) {
       if (emptyState) emptyState.style.display = 'flex';
       return;
     }
@@ -4265,7 +4341,7 @@ const sessionManager = {
     if (emptyState) emptyState.style.display = 'none';
 
     // Sort: pending first, then by creation date
-    const sortedTasks = [...this.sessionTasks].sort((a, b) => {
+    const sortedTasks = [...this.workspaceTasks].sort((a, b) => {
       const aCompleted = a.status === 'completed' ? 1 : 0;
       const bCompleted = b.status === 'completed' ? 1 : 0;
       if (aCompleted !== bCompleted) return aCompleted - bCompleted;
@@ -4357,7 +4433,7 @@ const sessionManager = {
 
   // Execute task - send to chat as a prompt
   async executeTask(taskId) {
-    const task = this.sessionTasks.find(t => t.id === taskId);
+    const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
 
     try {
@@ -4392,9 +4468,12 @@ const sessionManager = {
 
   // Track which task is being edited (null for new task)
   editingTaskId: null,
+  taskModalWorkspaceId: null, // For workspace-level tasks
 
   // Open task modal for creating or editing
   openTaskModal(taskId = null, prefillTitle = '') {
+    // Clear workspace context when opening for session task
+    this.taskModalWorkspaceId = null;
     const modal = document.getElementById('taskModal');
     if (!modal) return;
 
@@ -4412,7 +4491,7 @@ const sessionManager = {
 
     if (taskId) {
       // Editing existing task - populate fields
-      const task = this.sessionTasks.find(t => t.id === taskId);
+      const task = this.workspaceTasks.find(t => t.id === taskId);
       if (task) {
         if (descriptionInput) descriptionInput.value = task.description || '';
         if (detailsInput) detailsInput.value = task.details || '';
@@ -4439,6 +4518,38 @@ const sessionManager = {
       modal.style.display = 'none';
     }
     this.editingTaskId = null;
+    this.taskModalWorkspaceId = null;
+  },
+
+  // Open task modal for workspace-level task
+  openTaskModalForWorkspace(workspaceId) {
+    const modal = document.getElementById('taskModal');
+    if (!modal) return;
+
+    this.editingTaskId = null;
+    this.taskModalWorkspaceId = workspaceId;
+
+    // Set modal title
+    const modalTitle = document.getElementById('taskModalTitle');
+    if (modalTitle) {
+      const folder = this.folders.find(f => f.id === workspaceId);
+      const workspaceName = folder ? folder.name : 'Workspace';
+      modalTitle.textContent = `Add Task to ${workspaceName}`;
+    }
+
+    // Clear form
+    const descriptionInput = document.getElementById('taskModalDescription');
+    const detailsInput = document.getElementById('taskModalDetails');
+    if (descriptionInput) descriptionInput.value = '';
+    if (detailsInput) detailsInput.value = '';
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Focus title input
+    setTimeout(() => {
+      descriptionInput?.focus();
+    }, 100);
   },
 
   // Save task from modal (create or update)
@@ -4455,22 +4566,10 @@ const sessionManager = {
       return;
     }
 
-    if (!this.activeSessionId) return;
-
     try {
-      if (this.editingTaskId) {
-        // Update existing task
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${this.editingTaskId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description, details })
-        });
-
-        if (!response.ok) throw new Error('Failed to update task');
-        this.showToast('Task updated', 'success');
-      } else {
-        // Create new task
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+      if (this.taskModalWorkspaceId) {
+        // Creating workspace-level task
+        const response = await fetch(`/api/workspaces/${this.taskModalWorkspaceId}/tasks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ description, details })
@@ -4478,11 +4577,42 @@ const sessionManager = {
 
         if (!response.ok) throw new Error('Failed to create task');
         this.showToast('Task created', 'success');
-      }
+        this.closeTaskModal();
 
-      this.closeTaskModal();
-      await this.loadSessionTasks();
-      this.renderMainTaskPanel();
+        // Refresh folder data to update task counts
+        await this.loadFolders();
+        this.renderFolders();
+      } else if (this.activeSessionId) {
+        // Session-level task
+        if (this.editingTaskId) {
+          // Update existing task
+          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${this.editingTaskId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description, details })
+          });
+
+          if (!response.ok) throw new Error('Failed to update task');
+          this.showToast('Task updated', 'success');
+        } else {
+          // Create new task
+          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description, details })
+          });
+
+          if (!response.ok) throw new Error('Failed to create task');
+          this.showToast('Task created', 'success');
+        }
+
+        this.closeTaskModal();
+        await this.loadSessionTasks();
+        this.renderMainTaskPanel();
+      } else {
+        this.showToast('No session or workspace selected', 'error');
+        return;
+      }
     } catch (error) {
       console.error('Failed to save task:', error);
       this.showToast('Failed to save task', 'error');
