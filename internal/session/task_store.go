@@ -116,7 +116,7 @@ func (s *SQLiteTaskStore) GetTask(ctx context.Context, taskID string) (*SessionT
 		&task.Priority, &task.CreatedAt, &task.UpdatedAt, &completedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", taskID)
+		return nil, ErrTaskNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task: %w", err)
@@ -169,9 +169,15 @@ func (s *SQLiteTaskStore) ListTasksByWorkspace(ctx context.Context, workspaceID 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspace tasks: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanTasks(rows)
+	tasks, err := s.scanTasks(rows)
+	closeErr := rows.Close()
+	if closeErr != nil && err == nil {
+		return nil, fmt.Errorf("failed to close task rows: %w", closeErr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
 
 // scanTasks scans task rows into SessionTask structs.
@@ -367,7 +373,7 @@ func (s *SQLiteTaskStore) GetReminder(ctx context.Context, reminderID string) (*
 		&nextRun, &lastRun, &reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("reminder not found: %s", reminderID)
+		return nil, ErrReminderNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get reminder: %w", err)
@@ -416,9 +422,15 @@ func (s *SQLiteTaskStore) ListRemindersByWorkspace(ctx context.Context, workspac
 	if err != nil {
 		return nil, fmt.Errorf("failed to list reminders: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanReminders(rows)
+	reminders, err := s.scanReminders(rows)
+	closeErr := rows.Close()
+	if closeErr != nil && err == nil {
+		return nil, fmt.Errorf("failed to close reminder rows: %w", closeErr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return reminders, nil
 }
 
 // UpdateReminder updates an existing reminder.
@@ -473,9 +485,15 @@ func (s *SQLiteTaskStore) ListDueReminders(ctx context.Context) ([]ScheduledTask
 	if err != nil {
 		return nil, fmt.Errorf("failed to list due reminders: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanReminders(rows)
+	reminders, err := s.scanReminders(rows)
+	closeErr := rows.Close()
+	if closeErr != nil && err == nil {
+		return nil, fmt.Errorf("failed to close due reminder rows: %w", closeErr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return reminders, nil
 }
 
 // scanReminders scans reminder rows into ScheduledTaskReminder structs.

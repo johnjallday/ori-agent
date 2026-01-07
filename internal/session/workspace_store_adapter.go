@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // WorkspaceStoreAdapter implements agentstudio.Store using session.HybridStore.
@@ -135,24 +137,48 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *agentstudio.Workspace) *W
 		sessionWS.Layout = convertToSessionLayout(ws.Layout)
 	}
 
-	// Serialize orchestration data as JSON
+	// Serialize orchestration data as JSON with error logging
 	if len(ws.Messages) > 0 {
-		sessionWS.MessagesJSON, _ = json.Marshal(ws.Messages)
+		if data, err := json.Marshal(ws.Messages); err != nil {
+			logger.Warn("Failed to marshal workspace messages", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.MessagesJSON = data
+		}
 	}
 	if len(ws.Tasks) > 0 {
-		sessionWS.TasksJSON, _ = json.Marshal(ws.Tasks)
+		if data, err := json.Marshal(ws.Tasks); err != nil {
+			logger.Warn("Failed to marshal workspace tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.TasksJSON = data
+		}
 	}
 	if len(ws.Attachments) > 0 {
-		sessionWS.AttachmentsJSON, _ = json.Marshal(ws.Attachments)
+		if data, err := json.Marshal(ws.Attachments); err != nil {
+			logger.Warn("Failed to marshal workspace attachments", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.AttachmentsJSON = data
+		}
 	}
 	if len(ws.ScheduledTasks) > 0 {
-		sessionWS.ScheduledTasksJSON, _ = json.Marshal(ws.ScheduledTasks)
+		if data, err := json.Marshal(ws.ScheduledTasks); err != nil {
+			logger.Warn("Failed to marshal workspace scheduled tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.ScheduledTasksJSON = data
+		}
 	}
 	if len(ws.StoreNodes) > 0 {
-		sessionWS.StoreNodesJSON, _ = json.Marshal(ws.StoreNodes)
+		if data, err := json.Marshal(ws.StoreNodes); err != nil {
+			logger.Warn("Failed to marshal workspace store nodes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.StoreNodesJSON = data
+		}
 	}
 	if len(ws.Workflows) > 0 {
-		sessionWS.WorkflowsJSON, _ = json.Marshal(ws.Workflows)
+		if data, err := json.Marshal(ws.Workflows); err != nil {
+			logger.Warn("Failed to marshal workspace workflows", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.WorkflowsJSON = data
+		}
 	}
 
 	return sessionWS
@@ -195,35 +221,47 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 		agentWS.Layout = convertToAgentStudioLayout(ws.Layout)
 	}
 
-	// Deserialize orchestration data from JSON
+	// Deserialize orchestration data from JSON with error logging
 	if len(ws.MessagesJSON) > 0 {
-		_ = json.Unmarshal(ws.MessagesJSON, &agentWS.Messages)
+		if err := json.Unmarshal(ws.MessagesJSON, &agentWS.Messages); err != nil {
+			logger.Warn("Failed to unmarshal workspace messages", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 	if agentWS.Messages == nil {
 		agentWS.Messages = []agentstudio.AgentMessage{}
 	}
 
 	if len(ws.TasksJSON) > 0 {
-		_ = json.Unmarshal(ws.TasksJSON, &agentWS.Tasks)
+		if err := json.Unmarshal(ws.TasksJSON, &agentWS.Tasks); err != nil {
+			logger.Warn("Failed to unmarshal workspace tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 	if agentWS.Tasks == nil {
 		agentWS.Tasks = []agentstudio.Task{}
 	}
 
 	if len(ws.AttachmentsJSON) > 0 {
-		_ = json.Unmarshal(ws.AttachmentsJSON, &agentWS.Attachments)
+		if err := json.Unmarshal(ws.AttachmentsJSON, &agentWS.Attachments); err != nil {
+			logger.Warn("Failed to unmarshal workspace attachments", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 
 	if len(ws.ScheduledTasksJSON) > 0 {
-		_ = json.Unmarshal(ws.ScheduledTasksJSON, &agentWS.ScheduledTasks)
+		if err := json.Unmarshal(ws.ScheduledTasksJSON, &agentWS.ScheduledTasks); err != nil {
+			logger.Warn("Failed to unmarshal workspace scheduled tasks", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 
 	if len(ws.StoreNodesJSON) > 0 {
-		_ = json.Unmarshal(ws.StoreNodesJSON, &agentWS.StoreNodes)
+		if err := json.Unmarshal(ws.StoreNodesJSON, &agentWS.StoreNodes); err != nil {
+			logger.Warn("Failed to unmarshal workspace store nodes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 
 	if len(ws.WorkflowsJSON) > 0 {
-		_ = json.Unmarshal(ws.WorkflowsJSON, &agentWS.Workflows)
+		if err := json.Unmarshal(ws.WorkflowsJSON, &agentWS.Workflows); err != nil {
+			logger.Warn("Failed to unmarshal workspace workflows", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 	if agentWS.Workflows == nil {
 		agentWS.Workflows = make(map[string]agentstudio.Workflow)
@@ -395,6 +433,5 @@ func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description stri
 
 // generateID creates a new UUID for workspaces.
 func generateID() string {
-	// Use the same ID generation as elsewhere in the codebase
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return uuid.New().String()
 }

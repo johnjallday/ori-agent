@@ -13,6 +13,8 @@ var (
 	ErrWorkspaceNotFound = errors.New("workspace not found")
 	ErrMessageNotFound   = errors.New("message not found")
 	ErrNoteNotFound      = errors.New("note not found")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrReminderNotFound  = errors.New("reminder not found")
 	ErrInvalidID         = errors.New("invalid ID format")
 	ErrDuplicateID       = errors.New("duplicate ID")
 )

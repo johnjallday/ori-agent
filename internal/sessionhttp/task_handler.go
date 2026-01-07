@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -224,7 +225,7 @@ func (h *TaskHandler) getTask(w http.ResponseWriter, r *http.Request, taskID str
 	task, err := h.taskStore.GetTask(ctx, taskID)
 	if err != nil {
 		logger.Error("Failed to get task", logger.Fields{"task_id": taskID, "error": err})
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, session.ErrTaskNotFound) {
 			_ = orihttp.RespondNotFound(w, "task not found")
 		} else {
 			_ = orihttp.RespondInternalError(w, "failed to get task")
@@ -254,7 +255,7 @@ func (h *TaskHandler) updateTask(w http.ResponseWriter, r *http.Request, taskID 
 	task, err := h.taskStore.GetTask(ctx, taskID)
 	if err != nil {
 		logger.Error("Failed to get task for update", logger.Fields{"task_id": taskID, "error": err})
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, session.ErrTaskNotFound) {
 			_ = orihttp.RespondNotFound(w, "task not found")
 		} else {
 			_ = orihttp.RespondInternalError(w, "failed to get task")
@@ -292,7 +293,7 @@ func (h *TaskHandler) deleteTask(w http.ResponseWriter, r *http.Request, taskID 
 
 	if err := h.taskStore.DeleteTask(ctx, taskID); err != nil {
 		logger.Error("Failed to delete task", logger.Fields{"task_id": taskID, "error": err})
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, session.ErrTaskNotFound) {
 			_ = orihttp.RespondNotFound(w, "task not found")
 		} else {
 			_ = orihttp.RespondInternalError(w, "failed to delete task")
@@ -315,7 +316,7 @@ func (h *TaskHandler) completeTask(w http.ResponseWriter, r *http.Request, taskI
 
 	if err := h.taskStore.CompleteTask(ctx, taskID); err != nil {
 		logger.Error("Failed to complete task", logger.Fields{"task_id": taskID, "error": err})
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, session.ErrTaskNotFound) {
 			_ = orihttp.RespondNotFound(w, "task not found")
 		} else {
 			_ = orihttp.RespondInternalError(w, "failed to complete task")

@@ -103,7 +103,7 @@ echo -e "${BLUE}Step 3: AI-Powered Fix${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Create prompt for Claude
+# Create prompt for Codex
 PROMPT_FILE=$(mktemp)
 trap "rm -f $TEMP_ERRORS $PROMPT_FILE" EXIT
 
@@ -131,6 +131,7 @@ Please:
 IMPORTANT: Only fix the specific issues mentioned. Don't refactor or add features.
 EOF
 
+: <<'CLAUDE_AUTOFIX_DISABLED'
 echo -e "${BLUE}Launching Claude Code to fix issues...${NC}"
 echo ""
 
@@ -179,6 +180,57 @@ if claude -p "$(cat "$PROMPT_FILE")" --permission-mode acceptEdits; then
 else
   echo ""
   echo -e "${RED}❌ Claude Code execution failed${NC}"
+  exit 1
+fi
+CLAUDE_AUTOFIX_DISABLED
+
+echo -e "${BLUE}Launching Codex to fix issues...${NC}"
+echo ""
+
+# Check if codex CLI is available
+if ! command -v codex &> /dev/null; then
+  echo -e "${RED}❌ Codex CLI not found${NC}"
+  echo -e "${YELLOW}Please install Codex from: https://github.com/openai/codex${NC}"
+  exit 1
+fi
+
+# Launch Codex with the prompt
+if codex exec --full-auto -C "$(pwd)" - < "$PROMPT_FILE"; then
+  echo ""
+  echo -e "${GREEN}✓ Codex finished${NC}"
+  echo ""
+
+  # Step 5: Verify fixes
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${BLUE}Step 4: Verifying fixes${NC}"
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+
+  echo "Running lint check..."
+  if $GOLANGCI_LINT run ./... --max-same-issues 0 --max-issues-per-linter 0; then
+    echo ""
+    echo -e "${GREEN}✅ All lint issues resolved!${NC}"
+    echo ""
+  else
+    echo ""
+    echo -e "${YELLOW}⚠️  Some issues may remain. Review above.${NC}"
+    echo ""
+  fi
+
+  echo "Running tests to verify nothing broke..."
+  if go test ./... -short; then
+    echo ""
+    echo -e "${GREEN}✅ Tests passed!${NC}"
+    echo ""
+  else
+    echo ""
+    echo -e "${RED}❌ Tests failed after fixes${NC}"
+    echo -e "${YELLOW}You may need to review the changes${NC}"
+    echo ""
+  fi
+else
+  echo ""
+  echo -e "${RED}❌ Codex execution failed${NC}"
   exit 1
 fi
 

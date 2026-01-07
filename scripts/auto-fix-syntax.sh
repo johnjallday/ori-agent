@@ -1,12 +1,13 @@
 #!/bin/bash
 
-# Auto-fix Go syntax and code quality issues using Claude
+# Auto-fix Go syntax and code quality issues using Codex
 # This script detects syntax errors, unused imports, and other go vet issues
-# and uses the claude CLI to fix them automatically
+# and uses the codex CLI to fix them automatically
 
 set -e
 
-echo "🔧 Auto-fixing Go code issues with Claude..."
+# echo "🔧 Auto-fixing Go code issues with Claude..."
+echo "🔧 Auto-fixing Go code issues with Codex..."
 echo ""
 
 MAX_ITERATIONS=5
@@ -67,14 +68,15 @@ while [ $iteration -lt $MAX_ITERATIONS ]; do
     echo "$files"
     echo ""
 
-    # Fix each file using Claude
+    # Fix each file using Codex
     for file in $files; do
-        echo "🤖 Fixing $file with Claude..."
+        # echo "🤖 Fixing $file with Claude..."
+        echo "🤖 Fixing $file with Codex..."
 
         # Get errors for this specific file (handle both go fmt and go vet format)
         file_errors=$(echo "$error_output" | grep "$file" || true)
 
-        # Create prompt for Claude
+        # Create prompt for Codex
         prompt="Fix the issues in $file. The Go tools report these errors:
 
 $file_errors
@@ -87,12 +89,22 @@ Common issues to fix:
 
 Please read the file, identify and fix the issues. Preserve the intended functionality - only fix errors, don't refactor or change logic."
 
+        : <<'CLAUDE_AUTOFIX_DISABLED'
         # Use claude to fix the file (claude will read the file itself)
         if claude -p "$prompt" --output-format json --permission-mode acceptEdits > /tmp/claude-fix-$iteration.log 2>&1; then
             echo "✅ Claude processed $file"
         else
             echo "⚠️  Claude encountered an issue with $file"
             echo "Check /tmp/claude-fix-$iteration.log for details"
+        fi
+CLAUDE_AUTOFIX_DISABLED
+
+        # Use codex to fix the file (codex will read the file itself)
+        if printf '%s\n' "$prompt" | codex exec --full-auto -C "$(pwd)" - > /tmp/codex-fix-$iteration.log 2>&1; then
+            echo "✅ Codex processed $file"
+        else
+            echo "⚠️  Codex encountered an issue with $file"
+            echo "Check /tmp/codex-fix-$iteration.log for details"
         fi
         echo ""
     done

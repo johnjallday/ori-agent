@@ -508,7 +508,7 @@
 .folder-sessions {
   margin: 2px 0 6px 0;
   border-left: 2px solid var(--border-color);
-  margin-left: 12px;
+  margin-left: 22px;
 }
 
 /* Make folder sessions compact like notes */
@@ -1352,7 +1352,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .folder-notes-section {
   margin: 2px 0 6px 0;
   border-left: 2px solid var(--border-color);
-  margin-left: 12px;
+  margin-left: 22px;
 }
 
 .folder-notes-section.collapsed {
@@ -1378,7 +1378,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .folder-tasks-wrapper {
   margin: 2px 0 6px 0;
   border-left: 2px solid var(--primary-color);
-  margin-left: 12px;
+  margin-left: 22px;
 }
 
 .folder-tasks-wrapper.collapsed {

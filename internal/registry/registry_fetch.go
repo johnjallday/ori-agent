@@ -15,6 +15,40 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
+type rawPluginRegistry struct {
+	Plugins []map[string]any `json:"plugins"`
+}
+
+func looksLikeRegistryEntries(data []byte) bool {
+	var raw rawPluginRegistry
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.Plugins) == 0 {
+		return false
+	}
+
+	for _, plugin := range raw.Plugins {
+		if plugin == nil {
+			continue
+		}
+		if _, ok := plugin["path"]; ok {
+			return true
+		}
+		if _, ok := plugin["url"]; ok {
+			return true
+		}
+		if _, ok := plugin["download_url"]; ok {
+			return true
+		}
+		if _, ok := plugin["github_repo"]; ok {
+			return true
+		}
+		if _, ok := plugin["metadata"]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
 // shouldFetchFromGitHub checks if enough time has passed since the last fetch
 // Uses in-memory tracking only - no file-based caching
 func (m *Manager) shouldFetchFromGitHub() bool {
@@ -54,6 +88,17 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return reg, fmt.Errorf("failed to read GitHub response: %w", err)
+	}
+
+	if looksLikeRegistryEntries(data) {
+		if err := json.Unmarshal(data, &reg); err != nil {
+			return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
+		}
+		for i := range reg.Plugins {
+			reg.Plugins[i].Tags = normalizeTagsWithWarnings(reg.Plugins[i].Name, reg.Plugins[i].Tags)
+		}
+		m.lastFetchTime = time.Now()
+		return reg, nil
 	}
 
 	// Try to parse as the new metadata format first
@@ -127,6 +172,9 @@ func (m *Manager) fetchGitHubPluginRegistry() (types.PluginRegistry, error) {
 		if err := json.Unmarshal(data, &reg); err != nil {
 			return reg, fmt.Errorf("failed to parse GitHub plugin registry JSON: %w", err)
 		}
+		for i := range reg.Plugins {
+			reg.Plugins[i].Tags = normalizeTagsWithWarnings(reg.Plugins[i].Name, reg.Plugins[i].Tags)
+		}
 	}
 
 	// Update last fetch time on successful fetch
@@ -165,6 +213,19 @@ func (m *Manager) FetchFromMarketplace(mp types.Marketplace) (types.PluginRegist
 		if err != nil {
 			return reg, fmt.Errorf("failed to read response from %s: %w", mp.Name, err)
 		}
+	}
+
+	if looksLikeRegistryEntries(data) {
+		if err := json.Unmarshal(data, &reg); err != nil {
+			return reg, fmt.Errorf("failed to parse plugin registry JSON from %s: %w", mp.Name, err)
+		}
+		for i := range reg.Plugins {
+			reg.Plugins[i].Tags = normalizeTagsWithWarnings(reg.Plugins[i].Name, reg.Plugins[i].Tags)
+			if reg.Plugins[i].SourceMarketplace == "" {
+				reg.Plugins[i].SourceMarketplace = mp.ID
+			}
+		}
+		return reg, nil
 	}
 
 	// Try to parse as the new metadata format first
