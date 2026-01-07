@@ -670,7 +670,7 @@ const sessionManager = {
         ? `
           <div class="folder-tasks-wrapper ${isCollapsed ? 'collapsed' : ''}">
             <div class="folder-tasks-header" data-workspace-id="${folder.id}">
-              <svg class="folder-tasks-header-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <svg class="folder-tasks-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V5H19V19M17,17H7V7H17V17M9,9V15H15V9H9Z"/>
               </svg>
               <span class="folder-tasks-header-text">Tasks</span>

@@ -634,6 +634,10 @@
   height: 12px;
 }
 
+.folder-sessions .session-icon {
+  margin-right: 6px;
+}
+
 .session-item:hover .session-icon {
   color: var(--text-secondary);
 }
@@ -1348,7 +1352,13 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .folder-notes-section .folder-note-item {
-  padding-left: 10px;
+  padding: 5px 8px 5px 10px;
+}
+
+.folder-note-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
 }
 
 /* ============================================================================
@@ -1385,7 +1395,9 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .folder-tasks-header-icon {
   flex-shrink: 0;
-  margin-right: 8px;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
   color: var(--text-tertiary);
 }
 
