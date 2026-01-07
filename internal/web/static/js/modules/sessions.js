@@ -503,6 +503,9 @@ const sessionManager = {
     return `
       <div class="session-item ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}" data-session-id="${session.id}">
         <div class="session-item-header">
+          <svg class="session-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+          </svg>
           <span class="session-title">${this.escapeHtml(session.title || 'New Session')}</span>
           <span class="session-agent-badge" title="Agent: ${this.escapeHtml(agentName)}">${this.escapeHtml(agentName)}</span>
           <span class="session-time">${timeAgo}</span>

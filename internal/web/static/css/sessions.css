@@ -533,6 +533,16 @@
   display: none;
 }
 
+.folder-sessions .session-item-footer {
+  display: none;
+}
+
+.folder-sessions .session-item-header {
+  flex: 1;
+  margin-bottom: 0;
+  gap: 6px;
+}
+
 .folder-sessions .session-header {
   flex: 1;
   min-width: 0;
@@ -615,6 +625,21 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+.session-icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  width: 12px;
+  height: 12px;
+}
+
+.session-item:hover .session-icon {
+  color: var(--text-secondary);
+}
+
+.session-item.active .session-icon {
+  color: var(--primary-color);
 }
 
 .session-title {
