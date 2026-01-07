@@ -1,8 +1,10 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
@@ -35,6 +37,45 @@ type HandlerConfig struct {
 	TemplateManager     *templates.TemplateManager
 	NotificationService *agentstudio.NotificationService
 	TaskHandler         agentstudio.TaskHandler
+	SessionStore        SessionStore // For fetching sessions and session tasks
+}
+
+// SessionStore interface for fetching session data
+type SessionStore interface {
+	ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]SessionListItem, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID string) ([]SessionTaskItem, error)
+	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteItem, error)
+}
+
+// SessionListItem represents a session for API responses
+type SessionListItem struct {
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	AgentName    string    `json:"agent_name"`
+	MessageCount int       `json:"message_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// SessionTaskItem represents a session task for API responses
+type SessionTaskItem struct {
+	ID          string     `json:"id"`
+	Description string     `json:"description"`
+	Details     string     `json:"details,omitempty"`
+	Status      string     `json:"status"`
+	Priority    int        `json:"priority"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// WorkspaceNoteItem represents a workspace note for API responses
+type WorkspaceNoteItem struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Preview   string    `json:"preview,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Validate checks that all required dependencies are present
@@ -55,6 +96,7 @@ func (c *HandlerConfig) Validate() error {
 type Handler struct {
 	agentStore          store.Store
 	workspaceStore      agentstudio.Store
+	sessionStore        SessionStore
 	communicator        *agentcomm.Communicator
 	orchestrator        *orchestration.Orchestrator
 	templateManager     *templates.TemplateManager
@@ -92,6 +134,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	h := &Handler{
 		agentStore:          cfg.AgentStore,
 		workspaceStore:      cfg.WorkspaceStore,
+		sessionStore:        cfg.SessionStore,
 		eventBus:            cfg.EventBus,
 		communicator:        agentcomm.NewCommunicator(cfg.WorkspaceStore),
 		orchestrator:        cfg.Orchestrator,
@@ -109,7 +152,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 // initializeSubHandlers creates all sub-handlers based on available dependencies
 func (h *Handler) initializeSubHandlers() {
 	// Core sub-handlers (always created - depend only on required fields)
-	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, h.eventBus)
+	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, h.eventBus, h.sessionStore)
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)
 
@@ -161,7 +204,7 @@ func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 	h.eventBus = eb
 
 	// Initialize sub-handlers that require eventBus
-	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb)
+	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb, h.sessionStore)
 	h.messageHandler = NewMessageHandler(h.workspaceStore, eb)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, eb)
 	h.initializeTemplateHandlerLegacy()

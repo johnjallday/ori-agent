@@ -45,8 +45,18 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
-	mux.HandleFunc("/studios/", s.handleStudiosRoutes) // Dynamic route handler
-	mux.HandleFunc("/studios", s.serveWorkspaces)
+	// Workspaces page routes (primary)
+	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
+	mux.HandleFunc("/workspaces", s.serveWorkspaces)
+	// Legacy /studios routes (redirect to /workspaces)
+	mux.HandleFunc("/studios/", func(w http.ResponseWriter, r *http.Request) {
+		// Redirect /studios/{path} to /workspaces/{path}
+		newPath := strings.Replace(r.URL.Path, "/studios/", "/workspaces/", 1)
+		http.Redirect(w, r, newPath, http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/studios", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/workspaces", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/usage", s.serveUsage)
 	mux.HandleFunc("/review", s.serveReview)
 
@@ -622,6 +632,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				}
 			}
 
+			// Task routes (check if task handler is available)
+			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
+				s.taskHandler.HandleSessionTasks(w, r)
+				return
+			}
+
 			// Fall through to session handler
 			s.sessionHandler.HandleSessions(w, r)
 		})
@@ -632,18 +648,47 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/notes/", s.sessionHandler.HandleNotes)
 		mux.HandleFunc("/api/notes", s.sessionHandler.HandleNotes)
 
-		// Folder routes - note that /api/folders/{id}/notes needs to be handled
+		// Legacy folder routes (redirect to workspace routes)
 		mux.HandleFunc("/api/folders/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			// Check if this is a folder notes request
+			// Check if this is a workspace notes request
 			if strings.Contains(path, "/notes") {
-				s.sessionHandler.HandleFolderNotes(w, r)
+				s.sessionHandler.HandleWorkspaceNotes(w, r)
 				return
 			}
-			// Otherwise, handle as regular folder request
-			s.sessionHandler.HandleFolders(w, r)
+			// Otherwise, handle as regular workspace request
+			s.sessionHandler.HandleWorkspaces(w, r)
 		})
-		mux.HandleFunc("/api/folders", s.sessionHandler.HandleFolders)
+		mux.HandleFunc("/api/folders", s.sessionHandler.HandleWorkspaces)
+
+		// Workspace routes (unified workspace API)
+		mux.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			// Check if this is a workspace notes request
+			if strings.Contains(path, "/notes") {
+				s.sessionHandler.HandleWorkspaceNotes(w, r)
+				return
+			}
+			// Check if this is a workspace tasks request
+			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
+				s.taskHandler.HandleWorkspaceTasks(w, r)
+				return
+			}
+			// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name})
+			if strings.Contains(path, "/agents") {
+				s.sessionHandler.HandleWorkspaces(w, r)
+				return
+			}
+			// Handle layout management (GET/PUT /api/workspaces/{id}/layout)
+			if strings.Contains(path, "/layout") {
+				s.sessionHandler.HandleWorkspaces(w, r)
+				return
+			}
+			// Otherwise, handle as regular workspace request
+			s.sessionHandler.HandleWorkspaces(w, r)
+		})
+		mux.HandleFunc("/api/workspaces", s.sessionHandler.HandleWorkspaces)
+
 		mux.HandleFunc("/api/tags", s.sessionHandler.HandleTags)
 		mux.HandleFunc("/api/session-cache/stats", s.sessionHandler.HandleCacheStats)
 	}

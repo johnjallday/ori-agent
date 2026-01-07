@@ -9,7 +9,7 @@
 // Key Components:
 //   - Session: Represents a chat conversation with an agent
 //   - Message: Individual messages within a session (user or assistant)
-//   - Folder: Hierarchical organization for sessions
+//   - Workspace: Hierarchical organization for sessions
 //   - Tag: Labels for categorizing and filtering sessions
 //
 // Storage Strategy:
@@ -25,6 +25,7 @@
 package session
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -129,37 +130,141 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Folder represents a hierarchical folder for organizing sessions.
-// Folders can be nested to create a tree structure.
-type Folder struct {
-	// ID is a unique identifier for the folder (UUID format).
+// WorkspaceStatus represents the current state of a workspace.
+type WorkspaceStatus string
+
+const (
+	WorkspaceStatusActive    WorkspaceStatus = "active"
+	WorkspaceStatusCompleted WorkspaceStatus = "completed"
+	WorkspaceStatusFailed    WorkspaceStatus = "failed"
+	WorkspaceStatusCancelled WorkspaceStatus = "cancelled"
+)
+
+// AgentInstance represents a specific instance of an agent in a workspace.
+// This allows multiple instances of the same agent type with stable IDs.
+type AgentInstance struct {
+	// ID is a stable UUID for this agent instance.
 	ID string `json:"id"`
 
-	// Name is the display name of the folder.
+	// Name is the agent type name (e.g., "default", "writer").
 	Name string `json:"name"`
 
-	// Description is an optional short description of the folder's purpose.
+	// InstanceNumber is the sequential number for display (e.g., 1, 2, 3).
+	InstanceNumber int `json:"instance_number"`
+
+	// NodeID is a stable node ID (e.g., "default-node-1").
+	NodeID string `json:"node_id"`
+
+	// CreatedAt is when this instance was added.
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Position represents a 2D position on the canvas.
+type Position struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// WorkflowConnectionLayout represents a connection between nodes on the canvas.
+type WorkflowConnectionLayout struct {
+	ID       string `json:"id"`
+	From     string `json:"from"`
+	FromPort string `json:"from_port,omitempty"`
+	To       string `json:"to"`
+	ToPort   string `json:"to_port,omitempty"`
+	Color    string `json:"color,omitempty"`
+	Animated bool   `json:"animated,omitempty"`
+}
+
+// CanvasLayout stores the visual arrangement of workspace elements.
+type CanvasLayout struct {
+	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`
+	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`
+	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"`
+	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`
+	StorePositions      map[string]Position        `json:"store_positions,omitempty"`
+	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"`
+	Scale               float64                    `json:"scale,omitempty"`
+	OffsetX             float64                    `json:"offset_x,omitempty"`
+	OffsetY             float64                    `json:"offset_y,omitempty"`
+}
+
+// Workspace represents a hierarchical workspace for organizing sessions.
+// Workspaces can be nested to create a tree structure.
+// Workspaces also serve as unified containers for multi-agent orchestration.
+type Workspace struct {
+	// ID is a unique identifier for the workspace (UUID format).
+	ID string `json:"id"`
+
+	// Name is the display name of the workspace.
+	Name string `json:"name"`
+
+	// Description is an optional short description of the workspace's purpose.
 	Description string `json:"description,omitempty"`
 
-	// ParentID is the ID of the parent folder, or empty for root-level folders.
+	// ParentID is the ID of the parent workspace, or empty for root-level workspaces.
 	ParentID string `json:"parent_id,omitempty"`
 
-	// Color is an optional hex color code for the folder icon.
+	// Color is an optional hex color code for the workspace icon.
 	Color string `json:"color,omitempty"`
 
-	// SessionCount is the number of sessions in this folder (not including subfolders).
+	// SessionCount is the number of sessions in this workspace (not including subworkspaces).
 	// This is denormalized for efficient display.
 	SessionCount int `json:"session_count"`
 
-	// CreatedAt is when the folder was created.
+	// CreatedAt is when the workspace was created.
 	CreatedAt time.Time `json:"created_at"`
 
-	// UpdatedAt is when the folder was last modified.
+	// UpdatedAt is when the workspace was last modified.
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Children contains nested subfolders.
+	// Children contains nested subworkspaces.
 	// Only populated when building a tree structure for display.
-	Children []Folder `json:"children,omitempty"`
+	Children []Workspace `json:"children,omitempty"`
+
+	// ==========================================================================
+	// Orchestration Fields (for unified workspace functionality)
+	// ==========================================================================
+
+	// Agents is a list of agent names participating in this workspace.
+	// Deprecated: Use AgentInstances for new code.
+	Agents []string `json:"agents,omitempty"`
+
+	// AgentInstances contains stable agent instances with persistent IDs.
+	AgentInstances []AgentInstance `json:"agent_instances,omitempty"`
+
+	// SharedData is a key-value store for inter-agent data sharing.
+	SharedData map[string]interface{} `json:"shared_data,omitempty"`
+
+	// Status is the current state of the workspace.
+	Status WorkspaceStatus `json:"status,omitempty"`
+
+	// Layout stores the visual arrangement of workspace elements on the canvas.
+	Layout *CanvasLayout `json:"layout,omitempty"`
+
+	// ==========================================================================
+	// Orchestration Data (stored as JSON in SQLite)
+	// These fields store raw JSON that is deserialized by the adapter to
+	// agentstudio types. This avoids circular imports and type duplication.
+	// ==========================================================================
+
+	// MessagesJSON contains serialized inter-agent messages.
+	MessagesJSON json.RawMessage `json:"messages,omitempty"`
+
+	// TasksJSON contains serialized orchestration tasks.
+	TasksJSON json.RawMessage `json:"tasks,omitempty"`
+
+	// AttachmentsJSON contains serialized attachments.
+	AttachmentsJSON json.RawMessage `json:"attachments,omitempty"`
+
+	// ScheduledTasksJSON contains serialized scheduled task templates.
+	ScheduledTasksJSON json.RawMessage `json:"scheduled_tasks,omitempty"`
+
+	// StoreNodesJSON contains serialized file storage nodes.
+	StoreNodesJSON json.RawMessage `json:"store_nodes,omitempty"`
+
+	// WorkflowsJSON contains serialized workflow definitions.
+	WorkflowsJSON json.RawMessage `json:"workflows,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.
@@ -173,15 +278,15 @@ type Tag struct {
 	UsageCount int `json:"usage_count"`
 }
 
-// FolderNote represents a markdown note attached to a folder.
+// WorkspaceNote represents a markdown note attached to a workspace.
 // Notes provide context and documentation that can be accessed
-// by all sessions within the folder.
-type FolderNote struct {
+// by all sessions within the workspace.
+type WorkspaceNote struct {
 	// ID is a unique identifier for the note (UUID format).
 	ID string `json:"id"`
 
-	// FolderID is the folder this note belongs to.
-	FolderID string `json:"folder_id"`
+	// WorkspaceID is the workspace this note belongs to.
+	WorkspaceID string `json:"workspace_id"`
 
 	// Name is the display name of the note.
 	Name string `json:"name"`
@@ -196,23 +301,23 @@ type FolderNote struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// FolderNoteListItem is a lightweight representation of a note for list views.
+// WorkspaceNoteListItem is a lightweight representation of a note for list views.
 // It omits the full content to reduce payload size.
-type FolderNoteListItem struct {
-	ID        string    `json:"id"`
-	FolderID  string    `json:"folder_id"`
-	Name      string    `json:"name"`
-	Preview   string    `json:"preview,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+type WorkspaceNoteListItem struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"`
+	Preview     string    `json:"preview,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // NoteSearchResult contains a note with search match context.
 type NoteSearchResult struct {
-	FolderNoteListItem
+	WorkspaceNoteListItem
 
-	// FolderName is the name of the folder containing this note.
-	FolderName string `json:"folder_name,omitempty"`
+	// WorkspaceName is the name of the workspace containing this note.
+	WorkspaceName string `json:"workspace_name,omitempty"`
 
 	// Snippets are text excerpts showing where the search matched.
 	Snippets []string `json:"snippets,omitempty"`
@@ -332,4 +437,126 @@ type StorageStats struct {
 
 	// CachedSessions is the number of sessions currently in memory cache.
 	CachedSessions int `json:"cached_sessions"`
+}
+
+// =============================================================================
+// Session Tasks
+// =============================================================================
+
+// TaskStatus represents the current state of a task.
+type TaskStatus string
+
+const (
+	TaskStatusPending    TaskStatus = "pending"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusCompleted  TaskStatus = "completed"
+	TaskStatusCancelled  TaskStatus = "cancelled"
+)
+
+// SessionTask represents a todo item or task attached to a workspace.
+// Tasks are workspace-scoped and visible from any session within that workspace.
+type SessionTask struct {
+	// ID is a unique identifier for the task (UUID format).
+	ID string `json:"id"`
+
+	// WorkspaceID is the workspace (folder) this task belongs to.
+	// Tasks are workspace-scoped and can be viewed/executed from any session in that workspace.
+	WorkspaceID string `json:"workspace_id"`
+
+	// Description is the task title/summary.
+	Description string `json:"description"`
+
+	// Details contains additional information about the task.
+	Details string `json:"details,omitempty"`
+
+	// Status is the current state of the task.
+	Status TaskStatus `json:"status"`
+
+	// Priority is the task priority (1-5, higher = more important).
+	Priority int `json:"priority"`
+
+	// CreatedAt is when the task was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the task was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// CompletedAt is when the task was marked complete.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// SessionTaskListItem is a lightweight representation of a task for list views.
+type SessionTaskListItem struct {
+	ID          string     `json:"id"`
+	WorkspaceID string     `json:"workspace_id"`
+	Description string     `json:"description"`
+	Details     string     `json:"details,omitempty"`
+	Status      TaskStatus `json:"status"`
+	Priority    int        `json:"priority"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// TaskCounts contains aggregated task statistics for a session or workspace.
+type TaskCounts struct {
+	Total     int `json:"total"`
+	Pending   int `json:"pending"`
+	Completed int `json:"completed"`
+}
+
+// =============================================================================
+// Scheduled Task Reminders
+// =============================================================================
+
+// ReminderScheduleType represents the type of schedule for a reminder.
+type ReminderScheduleType string
+
+const (
+	ReminderOnce   ReminderScheduleType = "once"   // Execute once at specific time
+	ReminderDaily  ReminderScheduleType = "daily"  // Every day at specific time
+	ReminderWeekly ReminderScheduleType = "weekly" // Every week on specific day/time
+)
+
+// ScheduledTaskReminder represents a recurring or one-time reminder.
+// Unlike agentstudio scheduled tasks, these are reminders only (no agent execution).
+type ScheduledTaskReminder struct {
+	// ID is a unique identifier for the reminder (UUID format).
+	ID string `json:"id"`
+
+	// WorkspaceID is the workspace this reminder belongs to.
+	WorkspaceID string `json:"workspace_id"`
+
+	// Name is a short title for the reminder.
+	Name string `json:"name"`
+
+	// Description is additional details about the reminder.
+	Description string `json:"description,omitempty"`
+
+	// ScheduleType defines how the reminder repeats.
+	ScheduleType ReminderScheduleType `json:"schedule_type"`
+
+	// ExecuteAt is for "once" type - when to trigger the reminder.
+	ExecuteAt *time.Time `json:"execute_at,omitempty"`
+
+	// TimeOfDay is for "daily" type - time to trigger (e.g., "09:00").
+	TimeOfDay string `json:"time_of_day,omitempty"`
+
+	// DayOfWeek is for "weekly" type - 0=Sunday, 1=Monday, ..., 6=Saturday.
+	DayOfWeek int `json:"day_of_week,omitempty"`
+
+	// NextRun is the calculated next trigger time.
+	NextRun *time.Time `json:"next_run,omitempty"`
+
+	// LastRun is when the reminder last triggered.
+	LastRun *time.Time `json:"last_run,omitempty"`
+
+	// Enabled indicates if the reminder is active.
+	Enabled bool `json:"enabled"`
+
+	// CreatedAt is when the reminder was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// UpdatedAt is when the reminder was last modified.
+	UpdatedAt time.Time `json:"updated_at"`
 }

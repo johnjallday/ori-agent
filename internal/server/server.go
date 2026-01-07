@@ -130,6 +130,7 @@ type Server struct {
 	// Session management
 	sessionStore   session.HybridStore
 	sessionHandler *sessionhttp.Handler
+	taskHandler    *sessionhttp.TaskHandler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
@@ -381,13 +382,13 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStudiosRoutes handles all /studios/* routes
-func (s *Server) handleStudiosRoutes(w http.ResponseWriter, r *http.Request) {
-	// Extract path after /studios/
-	path := strings.TrimPrefix(r.URL.Path, "/studios/")
+// handleWorkspacesRoutes handles all /workspaces/* routes
+func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) {
+	// Extract path after /workspaces/
+	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
 	if path == "" || path == r.URL.Path {
-		// No ID provided, redirect to studios list
-		http.Redirect(w, r, "/studios", http.StatusSeeOther)
+		// No ID provided, redirect to workspaces list
+		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
 		return
 	}
 
@@ -395,7 +396,7 @@ func (s *Server) handleStudiosRoutes(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 	workspaceID := parts[0]
 
-	// Check if this is a canvas route: /studios/{id}/canvas
+	// Check if this is a canvas route: /workspaces/{id}/canvas
 	if len(parts) == 2 && parts[1] == "canvas" {
 		s.serveWorkspaceCanvas(w, r, workspaceID)
 		return

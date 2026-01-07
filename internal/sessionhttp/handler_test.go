@@ -672,23 +672,27 @@ func TestHandler_CacheStats(t *testing.T) {
 
 // FolderNote Handler Tests
 
-// createTestFolder creates a folder and returns its ID.
-func createTestFolder(t *testing.T, handler *Handler, name string) string {
+// createTestWorkspace creates a workspace and returns its ID.
+func createTestWorkspace(t *testing.T, handler *Handler, name string) string {
 	t.Helper()
 	body := `{"name": "` + name + `"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/folders", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	handler.HandleFolders(w, req)
+	handler.HandleWorkspaces(w, req)
 
 	if w.Code != http.StatusCreated {
-		t.Fatalf("Failed to create folder: %d - %s", w.Code, w.Body.String())
+		t.Fatalf("Failed to create workspace: %d - %s", w.Code, w.Body.String())
 	}
 
 	var resp map[string]interface{}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	folder := resp["folder"].(map[string]interface{})
-	return folder["id"].(string)
+	// Check for both "workspace" and "folder" keys for backward compatibility
+	workspace, ok := resp["workspace"].(map[string]interface{})
+	if !ok {
+		workspace = resp["folder"].(map[string]interface{})
+	}
+	return workspace["id"].(string)
 }
 
 // TestHandler_CreateNote tests creating a note via POST /api/notes.
@@ -696,9 +700,9 @@ func TestHandler_CreateNote(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Test Folder")
+	folderID := createTestWorkspace(t, handler, "Test Folder")
 
-	body := `{"folder_id": "` + folderID + `", "name": "Test Note", "content": "Note content here"}`
+	body := `{"workspace_id": "` + folderID + `", "name": "Test Note", "content": "Note content here"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -730,7 +734,7 @@ func TestHandler_CreateNote(t *testing.T) {
 	}
 }
 
-// TestHandler_CreateNoteMissingFolderID tests that folder_id is required.
+// TestHandler_CreateNoteMissingFolderID tests that workspace_id is required.
 func TestHandler_CreateNoteMissingFolderID(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
@@ -752,14 +756,14 @@ func TestHandler_CreateNoteInFolder(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Notes Folder")
+	folderID := createTestWorkspace(t, handler, "Notes Folder")
 
 	body := `{"name": "Folder Note", "content": "Content in folder"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/folders/"+folderID+"/notes", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handler.HandleFolderNotes(w, req)
+	handler.HandleWorkspaceNotes(w, req)
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d: %s", w.Code, w.Body.String())
@@ -769,8 +773,8 @@ func TestHandler_CreateNoteInFolder(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
 	note := resp["note"].(map[string]interface{})
-	if note["folder_id"] != folderID {
-		t.Errorf("Expected folder_id '%s', got '%v'", folderID, note["folder_id"])
+	if note["workspace_id"] != folderID {
+		t.Errorf("Expected workspace_id '%s', got '%v'", folderID, note["workspace_id"])
 	}
 }
 
@@ -779,10 +783,10 @@ func TestHandler_GetNote(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Get Note Folder")
+	folderID := createTestWorkspace(t, handler, "Get Note Folder")
 
 	// Create a note
-	createBody := `{"folder_id": "` + folderID + `", "name": "Get Me", "content": "Find me"}`
+	createBody := `{"workspace_id": "` + folderID + `", "name": "Get Me", "content": "Find me"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createW := httptest.NewRecorder()
@@ -831,10 +835,10 @@ func TestHandler_UpdateNote(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Update Folder")
+	folderID := createTestWorkspace(t, handler, "Update Folder")
 
 	// Create a note
-	createBody := `{"folder_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
+	createBody := `{"workspace_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createW := httptest.NewRecorder()
@@ -872,10 +876,10 @@ func TestHandler_UpdateNotePartial(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Partial Update Folder")
+	folderID := createTestWorkspace(t, handler, "Partial Update Folder")
 
 	// Create a note
-	createBody := `{"folder_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
+	createBody := `{"workspace_id": "` + folderID + `", "name": "Original", "content": "Original content"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createW := httptest.NewRecorder()
@@ -913,10 +917,10 @@ func TestHandler_DeleteNote(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Delete Folder")
+	folderID := createTestWorkspace(t, handler, "Delete Folder")
 
 	// Create a note
-	createBody := `{"folder_id": "` + folderID + `", "name": "To Delete"}`
+	createBody := `{"workspace_id": "` + folderID + `", "name": "To Delete"}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createW := httptest.NewRecorder()
@@ -951,11 +955,11 @@ func TestHandler_ListNotesByFolder(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "List Folder")
+	folderID := createTestWorkspace(t, handler, "List Folder")
 
 	// Create multiple notes
 	for i := 0; i < 3; i++ {
-		body := `{"folder_id": "` + folderID + `", "name": "Note"}`
+		body := `{"workspace_id": "` + folderID + `", "name": "Note"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -965,7 +969,7 @@ func TestHandler_ListNotesByFolder(t *testing.T) {
 	// List notes
 	listReq := httptest.NewRequest(http.MethodGet, "/api/folders/"+folderID+"/notes", nil)
 	listW := httptest.NewRecorder()
-	handler.HandleFolderNotes(listW, listReq)
+	handler.HandleWorkspaceNotes(listW, listReq)
 
 	if listW.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", listW.Code)
@@ -985,7 +989,7 @@ func TestHandler_SearchNotes(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Search Folder")
+	folderID := createTestWorkspace(t, handler, "Search Folder")
 
 	// Create notes with specific content
 	notes := []struct {
@@ -998,7 +1002,7 @@ func TestHandler_SearchNotes(t *testing.T) {
 	}
 
 	for _, n := range notes {
-		body := `{"folder_id": "` + folderID + `", "name": "` + n.name + `", "content": "` + n.content + `"}`
+		body := `{"workspace_id": "` + folderID + `", "name": "` + n.name + `", "content": "` + n.content + `"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -1060,10 +1064,10 @@ func TestHandler_CreateNoteDefaultName(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	folderID := createTestFolder(t, handler, "Default Name Folder")
+	folderID := createTestWorkspace(t, handler, "Default Name Folder")
 
 	// Create note without name
-	body := `{"folder_id": "` + folderID + `"}`
+	body := `{"workspace_id": "` + folderID + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

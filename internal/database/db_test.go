@@ -93,7 +93,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// Verify tables exist
-	tables := []string{"sessions", "messages", "folders", "session_tags", "sessions_fts", "schema_migrations"}
+	tables := []string{"sessions", "messages", "workspaces", "session_tags", "sessions_fts", "schema_migrations"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
@@ -153,8 +153,8 @@ func TestInTransaction(t *testing.T) {
 	// Test successful transaction
 	err = db.InTransaction(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO folders (id, name, created_at, updated_at)
-			VALUES ('folder-1', 'Test Folder', datetime('now'), datetime('now'))
+			INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('workspace-1', 'Test Workspace', datetime('now'), datetime('now'))
 		`)
 		return err
 	})
@@ -164,19 +164,19 @@ func TestInTransaction(t *testing.T) {
 
 	// Verify the insert was committed
 	var name string
-	err = db.QueryRowContext(ctx, "SELECT name FROM folders WHERE id = 'folder-1'").Scan(&name)
+	err = db.QueryRowContext(ctx, "SELECT name FROM workspaces WHERE id = 'workspace-1'").Scan(&name)
 	if err != nil {
 		t.Fatalf("Failed to query inserted row: %v", err)
 	}
-	if name != "Test Folder" {
-		t.Errorf("Expected 'Test Folder', got %s", name)
+	if name != "Test Workspace" {
+		t.Errorf("Expected 'Test Workspace', got %s", name)
 	}
 
 	// Test rolled back transaction
 	err = db.InTransaction(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO folders (id, name, created_at, updated_at)
-			VALUES ('folder-2', 'Another Folder', datetime('now'), datetime('now'))
+			INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('workspace-2', 'Another Workspace', datetime('now'), datetime('now'))
 		`)
 		if err != nil {
 			return err
@@ -190,12 +190,12 @@ func TestInTransaction(t *testing.T) {
 
 	// Verify the insert was rolled back
 	var count int
-	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM folders WHERE id = 'folder-2'").Scan(&count)
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workspaces WHERE id = 'workspace-2'").Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to count rows: %v", err)
 	}
 	if count != 0 {
-		t.Errorf("Expected 0 rows for folder-2, got %d", count)
+		t.Errorf("Expected 0 rows for workspace-2, got %d", count)
 	}
 }
 
@@ -215,13 +215,13 @@ func TestIndexesExist(t *testing.T) {
 
 	expectedIndexes := []string{
 		"idx_sessions_agent_name",
-		"idx_sessions_folder_id",
+		"idx_sessions_workspace_id",
 		"idx_sessions_updated_at",
 		"idx_sessions_created_at",
 		"idx_messages_session_id",
 		"idx_messages_created_at",
 		"idx_session_tags_tag",
-		"idx_folders_parent_id",
+		"idx_workspaces_parent_id",
 	}
 
 	for _, idx := range expectedIndexes {

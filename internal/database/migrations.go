@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 3
+const schemaVersion = 9
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -66,6 +66,18 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration002ReviewSchema(ctx)
 	case 3:
 		return db.migration003FixToolCallsForeignKey(ctx)
+	case 4:
+		return db.migration004SessionTasks(ctx)
+	case 5:
+		return db.migration005TaskDetails(ctx)
+	case 6:
+		return db.migration006TasksWorkspaceOnly(ctx)
+	case 7:
+		return db.migration007WorkspaceOrchestration(ctx)
+	case 8:
+		return db.migration008RenameFoldersToWorkspaces(ctx)
+	case 9:
+		return db.migration009OrchestrationData(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -424,6 +436,511 @@ func (db *DB) migration003FixToolCallsForeignKey(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create index: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// migration004SessionTasks adds tables for session tasks and scheduled reminders.
+func (db *DB) migration004SessionTasks(ctx context.Context) error {
+	// Create session_tasks table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS session_tasks (
+			id TEXT PRIMARY KEY,
+			session_id TEXT,
+			workspace_id TEXT,
+			description TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			priority INTEGER DEFAULT 3,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create session_tasks table: %w", err)
+	}
+
+	// Create scheduled_task_reminders table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS scheduled_task_reminders (
+			id TEXT PRIMARY KEY,
+			session_id TEXT,
+			workspace_id TEXT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			schedule_type TEXT NOT NULL,
+			execute_at DATETIME,
+			time_of_day TEXT,
+			day_of_week INTEGER,
+			next_run DATETIME,
+			last_run DATETIME,
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create scheduled_task_reminders table: %w", err)
+	}
+
+	// Create indexes for performance
+	taskIndexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_session_id ON session_tasks(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_workspace_id ON session_tasks(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_status ON session_tasks(status)",
+		"CREATE INDEX IF NOT EXISTS idx_session_tasks_created_at ON session_tasks(created_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_session_id ON scheduled_task_reminders(session_id)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_workspace_id ON scheduled_task_reminders(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_next_run ON scheduled_task_reminders(next_run)",
+		"CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_enabled ON scheduled_task_reminders(enabled)",
+	}
+
+	for _, idx := range taskIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migration005TaskDetails adds a details column to session_tasks for additional task information.
+func (db *DB) migration005TaskDetails(ctx context.Context) error {
+	// Add details column to session_tasks
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE session_tasks ADD COLUMN details TEXT DEFAULT ''
+	`); err != nil {
+		return fmt.Errorf("failed to add details column to session_tasks: %w", err)
+	}
+
+	return nil
+}
+
+// migration006TasksWorkspaceOnly removes session_id from tasks, making them workspace-scoped only.
+// Tasks now belong to workspaces (folders) and can be viewed/executed from any session in that workspace.
+// SQLite doesn't support DROP COLUMN on columns with foreign keys, so we recreate the tables.
+func (db *DB) migration006TasksWorkspaceOnly(ctx context.Context) error {
+	// Recreate session_tasks without session_id
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE session_tasks_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			description TEXT NOT NULL,
+			details TEXT DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			priority INTEGER DEFAULT 3,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new session_tasks table: %w", err)
+	}
+
+	// Copy data (workspace_id from session's folder_id if session_id was set)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO session_tasks_new (id, workspace_id, description, details, status, priority, created_at, updated_at, completed_at)
+		SELECT
+			t.id,
+			COALESCE(t.workspace_id, s.folder_id) as workspace_id,
+			t.description,
+			t.details,
+			t.status,
+			t.priority,
+			t.created_at,
+			t.updated_at,
+			t.completed_at
+		FROM session_tasks t
+		LEFT JOIN sessions s ON t.session_id = s.id
+	`); err != nil {
+		return fmt.Errorf("failed to copy session_tasks data: %w", err)
+	}
+
+	// Drop old table and rename new one
+	if _, err := db.ExecContext(ctx, `DROP TABLE session_tasks`); err != nil {
+		return fmt.Errorf("failed to drop old session_tasks table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE session_tasks_new RENAME TO session_tasks`); err != nil {
+		return fmt.Errorf("failed to rename session_tasks table: %w", err)
+	}
+
+	// Recreate scheduled_task_reminders without session_id
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE scheduled_task_reminders_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			schedule_type TEXT NOT NULL,
+			execute_at DATETIME,
+			time_of_day TEXT,
+			day_of_week INTEGER,
+			next_run DATETIME,
+			last_run DATETIME,
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES folders(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new scheduled_task_reminders table: %w", err)
+	}
+
+	// Copy data
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scheduled_task_reminders_new (id, workspace_id, name, description, schedule_type, execute_at, time_of_day, day_of_week, next_run, last_run, enabled, created_at, updated_at)
+		SELECT
+			r.id,
+			COALESCE(r.workspace_id, s.folder_id) as workspace_id,
+			r.name,
+			r.description,
+			r.schedule_type,
+			r.execute_at,
+			r.time_of_day,
+			r.day_of_week,
+			r.next_run,
+			r.last_run,
+			r.enabled,
+			r.created_at,
+			r.updated_at
+		FROM scheduled_task_reminders r
+		LEFT JOIN sessions s ON r.session_id = s.id
+	`); err != nil {
+		return fmt.Errorf("failed to copy scheduled_task_reminders data: %w", err)
+	}
+
+	// Drop old table and rename new one
+	if _, err := db.ExecContext(ctx, `DROP TABLE scheduled_task_reminders`); err != nil {
+		return fmt.Errorf("failed to drop old scheduled_task_reminders table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_task_reminders_new RENAME TO scheduled_task_reminders`); err != nil {
+		return fmt.Errorf("failed to rename scheduled_task_reminders table: %w", err)
+	}
+
+	// Create indexes
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_session_tasks_workspace_id ON session_tasks(workspace_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace_id index on session_tasks: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_workspace_id ON scheduled_task_reminders(workspace_id)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace_id index on scheduled_task_reminders: %w", err)
+	}
+
+	return nil
+}
+
+// migration007WorkspaceOrchestration adds orchestration fields to folders table.
+// This enables unified workspace functionality where folders can serve as orchestration workspaces
+// with agents, shared data, and canvas layouts.
+func (db *DB) migration007WorkspaceOrchestration(ctx context.Context) error {
+	// Add agents column - JSON array of agent names
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE folders ADD COLUMN agents TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add agents column to folders: %w", err)
+	}
+
+	// Add agent_instances column - JSON array of AgentInstance objects
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE folders ADD COLUMN agent_instances TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add agent_instances column to folders: %w", err)
+	}
+
+	// Add shared_data column - JSON object for inter-agent data sharing
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE folders ADD COLUMN shared_data TEXT DEFAULT '{}'
+	`); err != nil {
+		return fmt.Errorf("failed to add shared_data column to folders: %w", err)
+	}
+
+	// Add status column - workspace status (active, completed, failed, cancelled)
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE folders ADD COLUMN status TEXT DEFAULT 'active'
+	`); err != nil {
+		return fmt.Errorf("failed to add status column to folders: %w", err)
+	}
+
+	// Add layout column - JSON object for canvas layout positions
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE folders ADD COLUMN layout TEXT
+	`); err != nil {
+		return fmt.Errorf("failed to add layout column to folders: %w", err)
+	}
+
+	// Create index on status for filtering workspaces by status
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_folders_status ON folders(status)
+	`); err != nil {
+		return fmt.Errorf("failed to create status index on folders: %w", err)
+	}
+
+	return nil
+}
+
+// migration008RenameFoldersToWorkspaces renames the folders table to workspaces
+// and updates all foreign key references for consistency with the UI and API naming.
+func (db *DB) migration008RenameFoldersToWorkspaces(ctx context.Context) error {
+	// Rename folders table to workspaces
+	if _, err := db.ExecContext(ctx, `ALTER TABLE folders RENAME TO workspaces`); err != nil {
+		return fmt.Errorf("failed to rename folders table to workspaces: %w", err)
+	}
+
+	// Rename folder_id column in sessions table to workspace_id
+	// SQLite doesn't support RENAME COLUMN in older versions, so we recreate the table
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE sessions_new (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			agent_name TEXT NOT NULL,
+			workspace_id TEXT,
+			message_count INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new sessions table: %w", err)
+	}
+
+	// Copy data from old sessions table
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO sessions_new (id, title, agent_name, workspace_id, message_count, created_at, updated_at)
+		SELECT id, title, agent_name, folder_id, message_count, created_at, updated_at
+		FROM sessions
+	`); err != nil {
+		return fmt.Errorf("failed to copy sessions data: %w", err)
+	}
+
+	// Drop old sessions table
+	if _, err := db.ExecContext(ctx, `DROP TABLE sessions`); err != nil {
+		return fmt.Errorf("failed to drop old sessions table: %w", err)
+	}
+
+	// Rename new sessions table
+	if _, err := db.ExecContext(ctx, `ALTER TABLE sessions_new RENAME TO sessions`); err != nil {
+		return fmt.Errorf("failed to rename sessions table: %w", err)
+	}
+
+	// Recreate sessions indexes
+	sessionsIndexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_sessions_agent_name ON sessions(agent_name)",
+		"CREATE INDEX IF NOT EXISTS idx_sessions_workspace_id ON sessions(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC)",
+	}
+	for _, idx := range sessionsIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create sessions index: %w", err)
+		}
+	}
+
+	// Recreate sessions FTS triggers with new column name
+	// First drop old triggers
+	triggers := []string{
+		"DROP TRIGGER IF EXISTS sessions_ai",
+		"DROP TRIGGER IF EXISTS sessions_au",
+		"DROP TRIGGER IF EXISTS sessions_ad",
+	}
+	for _, trigger := range triggers {
+		if _, err := db.ExecContext(ctx, trigger); err != nil {
+			logger.Debug("Failed to drop trigger (may not exist)", logger.Fields{"error": err})
+		}
+	}
+
+	// Recreate triggers
+	newTriggers := []string{
+		`CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
+			INSERT INTO sessions_fts(session_id, title, content) VALUES (new.id, new.title, '');
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE OF title ON sessions BEGIN
+			UPDATE sessions_fts SET title = new.title WHERE session_id = old.id;
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
+			DELETE FROM sessions_fts WHERE session_id = old.id;
+		END`,
+	}
+	for _, trigger := range newTriggers {
+		if _, err := db.ExecContext(ctx, trigger); err != nil {
+			return fmt.Errorf("failed to create sessions trigger: %w", err)
+		}
+	}
+
+	// Rename folder_notes table to workspace_notes
+	if _, err := db.ExecContext(ctx, `ALTER TABLE folder_notes RENAME TO workspace_notes`); err != nil {
+		return fmt.Errorf("failed to rename folder_notes table: %w", err)
+	}
+
+	// Rename folder_id column in workspace_notes to workspace_id
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE workspace_notes_new (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			content TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create new workspace_notes table: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_notes_new (id, workspace_id, name, content, created_at, updated_at)
+		SELECT id, folder_id, name, content, created_at, updated_at
+		FROM workspace_notes
+	`); err != nil {
+		return fmt.Errorf("failed to copy workspace_notes data: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE workspace_notes`); err != nil {
+		return fmt.Errorf("failed to drop old workspace_notes table: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `ALTER TABLE workspace_notes_new RENAME TO workspace_notes`); err != nil {
+		return fmt.Errorf("failed to rename workspace_notes table: %w", err)
+	}
+
+	// Recreate workspace_notes indexes
+	notesIndexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_workspace_notes_workspace_id ON workspace_notes(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_workspace_notes_updated_at ON workspace_notes(updated_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_workspace_notes_name ON workspace_notes(name)",
+	}
+	for _, idx := range notesIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create workspace_notes index: %w", err)
+		}
+	}
+
+	// Update folder_notes_fts to workspace_notes_fts
+	// Drop old FTS table and triggers, create new ones
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER IF EXISTS folder_notes_ai`); err != nil {
+		logger.Debug("Failed to drop folder_notes_ai trigger", nil)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER IF EXISTS folder_notes_au`); err != nil {
+		logger.Debug("Failed to drop folder_notes_au trigger", nil)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER IF EXISTS folder_notes_ad`); err != nil {
+		logger.Debug("Failed to drop folder_notes_ad trigger", nil)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS folder_notes_fts`); err != nil {
+		logger.Debug("Failed to drop folder_notes_fts table", nil)
+	}
+
+	// Create new FTS table for workspace notes
+	if _, err := db.ExecContext(ctx, `
+		CREATE VIRTUAL TABLE IF NOT EXISTS workspace_notes_fts USING fts5(
+			note_id,
+			name,
+			content,
+			tokenize='porter unicode61'
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create workspace_notes_fts table: %w", err)
+	}
+
+	// Populate FTS from existing notes
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_notes_fts(note_id, name, content)
+		SELECT id, name, content FROM workspace_notes
+	`); err != nil {
+		logger.Debug("Failed to populate workspace_notes_fts", logger.Fields{"error": err})
+	}
+
+	// Create new triggers for workspace_notes FTS
+	notesTriggers := []string{
+		`CREATE TRIGGER IF NOT EXISTS workspace_notes_ai AFTER INSERT ON workspace_notes BEGIN
+			INSERT INTO workspace_notes_fts(note_id, name, content) VALUES (new.id, new.name, new.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS workspace_notes_au AFTER UPDATE ON workspace_notes BEGIN
+			UPDATE workspace_notes_fts SET name = new.name, content = new.content WHERE note_id = old.id;
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS workspace_notes_ad AFTER DELETE ON workspace_notes BEGIN
+			DELETE FROM workspace_notes_fts WHERE note_id = old.id;
+		END`,
+	}
+	for _, trigger := range notesTriggers {
+		if _, err := db.ExecContext(ctx, trigger); err != nil {
+			return fmt.Errorf("failed to create workspace_notes trigger: %w", err)
+		}
+	}
+
+	// Rename indexes on workspaces table
+	// Drop old indexes and create new ones with correct names
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_folders_parent_id`); err != nil {
+		logger.Debug("Failed to drop idx_folders_parent_id", nil)
+	}
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_folders_status`); err != nil {
+		logger.Debug("Failed to drop idx_folders_status", nil)
+	}
+
+	workspaceIndexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_workspaces_parent_id ON workspaces(parent_id)",
+		"CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces(status)",
+	}
+	for _, idx := range workspaceIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create workspaces index: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// migration009OrchestrationData adds JSON columns for storing orchestration data
+// (messages, tasks, attachments, scheduled tasks, store nodes, workflows) in workspaces.
+// These columns store serialized JSON that the adapter converts to/from agentstudio types.
+func (db *DB) migration009OrchestrationData(ctx context.Context) error {
+	// Add messages_json column - JSON array of inter-agent messages
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN messages_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add messages_json column: %w", err)
+	}
+
+	// Add tasks_json column - JSON array of orchestration tasks
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN tasks_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add tasks_json column: %w", err)
+	}
+
+	// Add attachments_json column - JSON array of attachments
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN attachments_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add attachments_json column: %w", err)
+	}
+
+	// Add scheduled_tasks_json column - JSON array of scheduled task templates
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN scheduled_tasks_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add scheduled_tasks_json column: %w", err)
+	}
+
+	// Add store_nodes_json column - JSON array of file storage nodes
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN store_nodes_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add store_nodes_json column: %w", err)
+	}
+
+	// Add workflows_json column - JSON map of workflow definitions
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN workflows_json TEXT DEFAULT '{}'
+	`); err != nil {
+		return fmt.Errorf("failed to add workflows_json column: %w", err)
 	}
 
 	return nil

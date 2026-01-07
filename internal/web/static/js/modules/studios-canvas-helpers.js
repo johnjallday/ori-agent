@@ -2091,7 +2091,7 @@ window.executeCombinerTask = executeCombinerTask;
  * View workspace (redirect to workspace dashboard)
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/studios/${workspaceId}`;
+    window.location.href = `/workspaces/${workspaceId}`;
 }
 
 /**

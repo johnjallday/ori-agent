@@ -38,20 +38,21 @@ func (h *Handler) HandleNotes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleFolderNotes routes requests to /api/folders/{id}/notes.
-func (h *Handler) HandleFolderNotes(w http.ResponseWriter, r *http.Request) {
-	// Extract folder ID from path
+// HandleWorkspaceNotes routes requests to /api/workspaces/{id}/notes.
+func (h *Handler) HandleWorkspaceNotes(w http.ResponseWriter, r *http.Request) {
+	// Extract workspace ID from path
 	path := r.URL.Path
-	path = strings.TrimPrefix(path, "/api/folders/")
+	path = strings.TrimPrefix(path, "/api/workspaces/")
+	path = strings.TrimPrefix(path, "/api/folders/") // Legacy support
 
-	// Path should be "{folder_id}/notes" or "{folder_id}/notes/{note_id}"
+	// Path should be "{workspace_id}/notes" or "{workspace_id}/notes/{note_id}"
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 || parts[1] != "notes" {
 		_ = orihttp.RespondBadRequest(w, "Invalid path")
 		return
 	}
 
-	folderID := parts[0]
+	workspaceID := parts[0]
 
 	// If there's a note ID, route to specific note handler
 	if len(parts) > 2 && parts[2] != "" {
@@ -59,12 +60,12 @@ func (h *Handler) HandleFolderNotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle folder notes collection
+	// Handle workspace notes collection
 	switch r.Method {
 	case http.MethodGet:
-		h.listNotesByFolder(w, r, folderID)
+		h.listNotesByWorkspace(w, r, workspaceID)
 	case http.MethodPost:
-		h.createNoteInFolder(w, r, folderID)
+		h.createNoteInWorkspace(w, r, workspaceID)
 	default:
 		_ = orihttp.RespondMethodNotAllowed(w)
 	}
@@ -89,17 +90,17 @@ func (h *Handler) handleNote(w http.ResponseWriter, r *http.Request, id string) 
 // createNote handles POST /api/notes.
 func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		FolderID string `json:"folder_id"`
-		Name     string `json:"name"`
-		Content  string `json:"content"`
+		WorkspaceID string `json:"workspace_id"`
+		Name        string `json:"name"`
+		Content     string `json:"content"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 
-	if req.FolderID == "" {
-		_ = orihttp.RespondBadRequest(w, "folder_id is required")
+	if req.WorkspaceID == "" {
+		_ = orihttp.RespondBadRequest(w, "workspace_id is required")
 		return
 	}
 
@@ -108,18 +109,18 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	note := &session.FolderNote{
-		ID:        uuid.New().String(),
-		FolderID:  req.FolderID,
-		Name:      req.Name,
-		Content:   req.Content,
-		CreatedAt: now,
-		UpdatedAt: now,
+	note := &session.WorkspaceNote{
+		ID:          uuid.New().String(),
+		WorkspaceID: req.WorkspaceID,
+		Name:        req.Name,
+		Content:     req.Content,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := h.store.CreateNote(r.Context(), note); err != nil {
-		if err == session.ErrFolderNotFound {
-			_ = orihttp.RespondNotFound(w, "Folder not found")
+		if err == session.ErrWorkspaceNotFound {
+			_ = orihttp.RespondNotFound(w, "Workspace not found")
 			return
 		}
 		logger.Error("Failed to create note", logger.Fields{"error": err})
@@ -127,7 +128,7 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.Info("Note created", logger.Fields{"id": note.ID, "folder_id": req.FolderID, "name": req.Name})
+	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": req.WorkspaceID, "name": req.Name})
 
 	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
@@ -135,8 +136,8 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// createNoteInFolder handles POST /api/folders/{id}/notes.
-func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, folderID string) {
+// createNoteInWorkspace handles POST /api/workspaces/{id}/notes.
+func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	var req struct {
 		Name    string `json:"name"`
 		Content string `json:"content"`
@@ -151,18 +152,18 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 	}
 
 	now := time.Now()
-	note := &session.FolderNote{
-		ID:        uuid.New().String(),
-		FolderID:  folderID,
-		Name:      req.Name,
-		Content:   req.Content,
-		CreatedAt: now,
-		UpdatedAt: now,
+	note := &session.WorkspaceNote{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		Name:        req.Name,
+		Content:     req.Content,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := h.store.CreateNote(r.Context(), note); err != nil {
-		if err == session.ErrFolderNotFound {
-			_ = orihttp.RespondNotFound(w, "Folder not found")
+		if err == session.ErrWorkspaceNotFound {
+			_ = orihttp.RespondNotFound(w, "Workspace not found")
 			return
 		}
 		logger.Error("Failed to create note", logger.Fields{"error": err})
@@ -170,7 +171,7 @@ func (h *Handler) createNoteInFolder(w http.ResponseWriter, r *http.Request, fol
 		return
 	}
 
-	logger.Info("Note created", logger.Fields{"id": note.ID, "folder_id": folderID, "name": req.Name})
+	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": workspaceID, "name": req.Name})
 
 	_ = orihttp.RespondCreated(w, map[string]interface{}{
 		"success": true,
@@ -207,9 +208,9 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	var req struct {
-		Name     *string `json:"name,omitempty"`
-		Content  *string `json:"content,omitempty"`
-		FolderID *string `json:"folder_id,omitempty"`
+		Name        *string `json:"name,omitempty"`
+		Content     *string `json:"content,omitempty"`
+		WorkspaceID *string `json:"workspace_id,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -223,8 +224,8 @@ func (h *Handler) updateNote(w http.ResponseWriter, r *http.Request, id string) 
 	if req.Content != nil {
 		note.Content = *req.Content
 	}
-	if req.FolderID != nil {
-		note.FolderID = *req.FolderID
+	if req.WorkspaceID != nil {
+		note.WorkspaceID = *req.WorkspaceID
 	}
 	note.UpdatedAt = time.Now()
 
@@ -260,11 +261,11 @@ func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) 
 	orihttp.RespondNoContent(w)
 }
 
-// listNotesByFolder handles GET /api/folders/{id}/notes.
-func (h *Handler) listNotesByFolder(w http.ResponseWriter, r *http.Request, folderID string) {
-	notes, err := h.store.ListNotesByFolder(r.Context(), folderID)
+// listNotesByWorkspace handles GET /api/workspaces/{id}/notes.
+func (h *Handler) listNotesByWorkspace(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	notes, err := h.store.ListNotesByWorkspace(r.Context(), workspaceID)
 	if err != nil {
-		logger.Error("Failed to list notes", logger.Fields{"folder_id": folderID, "error": err})
+		logger.Error("Failed to list notes", logger.Fields{"workspace_id": workspaceID, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to list notes")
 		return
 	}

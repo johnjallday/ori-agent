@@ -10,26 +10,26 @@ import (
 )
 
 // ============================================================================
-// Folder Note Operations
+// Workspace Note Operations
 // ============================================================================
 
-// CreateNote creates a new folder note in the database.
-func (s *SQLiteStore) CreateNote(ctx context.Context, note *FolderNote) error {
+// CreateNote creates a new workspace note in the database.
+func (s *SQLiteStore) CreateNote(ctx context.Context, note *WorkspaceNote) error {
 	if note.ID == "" {
 		return ErrInvalidID
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO folder_notes (id, folder_id, name, content, created_at, updated_at)
+		INSERT INTO workspace_notes (id, workspace_id, name, content, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, note.ID, note.FolderID, note.Name, note.Content, note.CreatedAt, note.UpdatedAt)
+	`, note.ID, note.WorkspaceID, note.Name, note.Content, note.CreatedAt, note.UpdatedAt)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			return ErrDuplicateID
 		}
 		if strings.Contains(err.Error(), "FOREIGN KEY constraint") {
-			return ErrFolderNotFound
+			return ErrWorkspaceNotFound
 		}
 		return fmt.Errorf("failed to create note: %w", err)
 	}
@@ -38,13 +38,13 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note *FolderNote) error {
 }
 
 // GetNote retrieves a note by ID.
-func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*FolderNote, error) {
-	note := &FolderNote{}
+func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*WorkspaceNote, error) {
+	note := &WorkspaceNote{}
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, folder_id, name, content, created_at, updated_at
-		FROM folder_notes WHERE id = ?
-	`, id).Scan(&note.ID, &note.FolderID, &note.Name, &note.Content,
+		SELECT id, workspace_id, name, content, created_at, updated_at
+		FROM workspace_notes WHERE id = ?
+	`, id).Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Content,
 		&note.CreatedAt, &note.UpdatedAt)
 
 	if err == sql.ErrNoRows {
@@ -58,12 +58,12 @@ func (s *SQLiteStore) GetNote(ctx context.Context, id string) (*FolderNote, erro
 }
 
 // UpdateNote updates note metadata and content.
-func (s *SQLiteStore) UpdateNote(ctx context.Context, note *FolderNote) error {
+func (s *SQLiteStore) UpdateNote(ctx context.Context, note *WorkspaceNote) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE folder_notes
-		SET name = ?, content = ?, folder_id = ?, updated_at = ?
+		UPDATE workspace_notes
+		SET name = ?, content = ?, workspace_id = ?, updated_at = ?
 		WHERE id = ?
-	`, note.Name, note.Content, note.FolderID, note.UpdatedAt, note.ID)
+	`, note.Name, note.Content, note.WorkspaceID, note.UpdatedAt, note.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update note: %w", err)
@@ -78,7 +78,7 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note *FolderNote) error {
 
 // DeleteNote removes a note.
 func (s *SQLiteStore) DeleteNote(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM folder_notes WHERE id = ?", id)
+	result, err := s.db.ExecContext(ctx, "DELETE FROM workspace_notes WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete note: %w", err)
 	}
@@ -90,25 +90,25 @@ func (s *SQLiteStore) DeleteNote(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListNotesByFolder returns all notes in a folder.
-func (s *SQLiteStore) ListNotesByFolder(ctx context.Context, folderID string) ([]FolderNoteListItem, error) {
+// ListNotesByWorkspace returns all notes in a workspace.
+func (s *SQLiteStore) ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteListItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, folder_id, name,
+		SELECT id, workspace_id, name,
 		       CASE WHEN LENGTH(content) > 100 THEN SUBSTR(content, 1, 100) || '...' ELSE content END as preview,
 		       created_at, updated_at
-		FROM folder_notes
-		WHERE folder_id = ?
+		FROM workspace_notes
+		WHERE workspace_id = ?
 		ORDER BY updated_at DESC
-	`, folderID)
+	`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list notes: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	notes := make([]FolderNoteListItem, 0)
+	notes := make([]WorkspaceNoteListItem, 0)
 	for rows.Next() {
-		var note FolderNoteListItem
-		if err := rows.Scan(&note.ID, &note.FolderID, &note.Name, &note.Preview,
+		var note WorkspaceNoteListItem
+		if err := rows.Scan(&note.ID, &note.WorkspaceID, &note.Name, &note.Preview,
 			&note.CreatedAt, &note.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan note: %w", err)
 		}
@@ -125,15 +125,15 @@ func (s *SQLiteStore) SearchNotes(ctx context.Context, query string, limit int) 
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT n.id, n.folder_id, n.name,
+		SELECT n.id, n.workspace_id, n.name,
 		       CASE WHEN LENGTH(n.content) > 100 THEN SUBSTR(n.content, 1, 100) || '...' ELSE n.content END as preview,
 		       n.created_at, n.updated_at,
-		       f.name as folder_name,
-		       snippet(folder_notes_fts, 2, '<mark>', '</mark>', '...', 32) as snippet
-		FROM folder_notes n
-		INNER JOIN folder_notes_fts fts ON n.id = fts.note_id
-		LEFT JOIN folders f ON n.folder_id = f.id
-		WHERE folder_notes_fts MATCH ?
+		       w.name as workspace_name,
+		       snippet(workspace_notes_fts, 2, '<mark>', '</mark>', '...', 32) as snippet
+		FROM workspace_notes n
+		INNER JOIN workspace_notes_fts fts ON n.id = fts.note_id
+		LEFT JOIN workspaces w ON n.workspace_id = w.id
+		WHERE workspace_notes_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?
 	`, query, limit)
@@ -149,15 +149,15 @@ func (s *SQLiteStore) SearchNotes(ctx context.Context, query string, limit int) 
 	results := make([]NoteSearchResult, 0)
 	for rows.Next() {
 		var result NoteSearchResult
-		var folderName sql.NullString
+		var workspaceName sql.NullString
 		var snippet string
 
-		if err := rows.Scan(&result.ID, &result.FolderID, &result.Name, &result.Preview,
-			&result.CreatedAt, &result.UpdatedAt, &folderName, &snippet); err != nil {
+		if err := rows.Scan(&result.ID, &result.WorkspaceID, &result.Name, &result.Preview,
+			&result.CreatedAt, &result.UpdatedAt, &workspaceName, &snippet); err != nil {
 			return nil, fmt.Errorf("failed to scan search result: %w", err)
 		}
 
-		result.FolderName = folderName.String
+		result.WorkspaceName = workspaceName.String
 		if snippet != "" {
 			result.Snippets = []string{snippet}
 		}

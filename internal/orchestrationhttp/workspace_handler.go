@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,14 +18,16 @@ type WorkspaceHandler struct {
 	agentStore     store.Store
 	workspaceStore agentstudio.Store
 	eventBus       *agentstudio.EventBus
+	sessionStore   SessionStore
 }
 
 // NewWorkspaceHandler creates a new workspace handler
-func NewWorkspaceHandler(agentStore store.Store, workspaceStore agentstudio.Store, eventBus *agentstudio.EventBus) *WorkspaceHandler {
+func NewWorkspaceHandler(agentStore store.Store, workspaceStore agentstudio.Store, eventBus *agentstudio.EventBus, sessionStore SessionStore) *WorkspaceHandler {
 	return &WorkspaceHandler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
 		eventBus:       eventBus,
+		sessionStore:   sessionStore,
 	}
 }
 
@@ -61,7 +64,54 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		orihttp.WriteJSON(w, ws)
+		// Build response with workspace data
+		response := map[string]interface{}{
+			"id":              ws.ID,
+			"name":            ws.Name,
+			"description":     ws.Description,
+			"agents":          ws.Agents,
+			"agent_instances": ws.AgentInstances,
+			"shared_data":     ws.SharedData,
+			"messages":        ws.Messages,
+			"tasks":           ws.Tasks,
+			"attachments":     ws.Attachments,
+			"scheduled_tasks": ws.ScheduledTasks,
+			"store_nodes":     ws.StoreNodes,
+			"workflows":       ws.Workflows,
+			"layout":          ws.Layout,
+			"status":          ws.Status,
+			"created_at":      ws.CreatedAt,
+			"updated_at":      ws.UpdatedAt,
+		}
+
+		// Add sessions if session store is available
+		if wh.sessionStore != nil {
+			ctx := context.Background()
+			sessions, err := wh.sessionStore.ListSessionsByWorkspace(ctx, wsID)
+			if err != nil {
+				logger.Debug("Failed to load sessions for workspace", logger.Fields{"workspace_id": wsID, "error": err})
+			} else {
+				response["sessions"] = sessions
+			}
+
+			// Add session tasks
+			sessionTasks, err := wh.sessionStore.ListTasksByWorkspace(ctx, wsID)
+			if err != nil {
+				logger.Debug("Failed to load session tasks for workspace", logger.Fields{"workspace_id": wsID, "error": err})
+			} else {
+				response["session_tasks"] = sessionTasks
+			}
+
+			// Add workspace notes
+			notes, err := wh.sessionStore.ListNotesByWorkspace(ctx, wsID)
+			if err != nil {
+				logger.Debug("Failed to load notes for workspace", logger.Fields{"workspace_id": wsID, "error": err})
+			} else {
+				response["notes"] = notes
+			}
+		}
+
+		orihttp.WriteJSON(w, response)
 		return
 	}
 

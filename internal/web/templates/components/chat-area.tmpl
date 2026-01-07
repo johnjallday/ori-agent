@@ -28,6 +28,13 @@
         </div>
       </div>
       <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary chat-tasks-btn" id="chatTasksBtn" title="View session tasks" aria-label="View session tasks">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+          </svg>
+          <span>Tasks</span>
+          <span id="chatTasksBadge" class="chat-tasks-badge d-none">0</span>
+        </button>
         <button type="button" class="btn btn-sm btn-outline-primary chat-agent-edit-btn" id="chatEditAgentBtn" title="Edit agent settings" aria-label="Edit agent settings">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
@@ -45,6 +52,82 @@
   </div>
   <div id="chatArea" class="overflow-auto flex-grow-1" style="padding-right: 0.5rem;" role="log" aria-label="Chat messages" aria-live="polite">
     <!-- Chat messages will be populated here -->
+  </div>
+</div>
+
+<!-- Workspace Tasks Modal (Popup) - Outside chatContainer for proper z-index -->
+<div id="mainTaskModal" class="main-task-modal" style="display: none;">
+  <div class="main-task-modal-backdrop" id="mainTaskModalBackdrop"></div>
+  <div class="main-task-modal-dialog">
+    <div class="main-task-modal-content">
+      <div class="main-task-modal-header">
+        <h6 class="main-task-modal-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+          </svg>
+          Workspace Tasks
+        </h6>
+        <button type="button" class="main-task-modal-close" id="mainTaskPanelClose" aria-label="Close task panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="main-task-modal-body">
+        <!-- Add Task Input -->
+        <div class="main-task-add-section">
+          <div class="main-task-input-wrapper">
+            <input type="text" id="mainTaskInput" class="main-task-input" placeholder="Add a new task..." aria-label="New task description">
+            <button type="button" id="mainTaskAddBtn" class="main-task-add-btn" title="Add task" aria-label="Add task">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <!-- Task List -->
+        <div id="mainTaskList" class="main-task-list">
+          <!-- Tasks will be rendered here -->
+        </div>
+        <!-- Empty State -->
+        <div id="mainTaskEmpty" class="main-task-empty">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="main-task-empty-icon">
+            <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+          </svg>
+          <p>No tasks yet</p>
+          <span>Add your first task above</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Task Edit Modal (for creating/editing tasks) - Outside chatContainer for proper z-index -->
+<div id="taskModal" class="task-modal" style="display: none;">
+  <div class="task-modal-backdrop"></div>
+  <div class="task-modal-content">
+    <div class="task-modal-header">
+      <h6 class="task-modal-title" id="taskModalTitle">Add Task</h6>
+      <button type="button" class="task-modal-close" id="taskModalClose" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="task-modal-body">
+      <div class="task-modal-field">
+        <label for="taskModalDescription" class="task-modal-label">Title</label>
+        <input type="text" id="taskModalDescription" class="task-modal-input" placeholder="What needs to be done?" autocomplete="off">
+      </div>
+      <div class="task-modal-field">
+        <label for="taskModalDetails" class="task-modal-label">Details <span class="task-modal-optional">(optional)</span></label>
+        <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="4"></textarea>
+      </div>
+    </div>
+    <div class="task-modal-footer">
+      <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskModalCancel">Cancel</button>
+      <button type="button" class="task-modal-btn task-modal-btn-save" id="taskModalSave">Save Task</button>
+    </div>
   </div>
 </div>
 

@@ -75,17 +75,29 @@ async function createWorkspace() {
     // Allow creating workspace without agents - they can be added later
 
     try {
-        const response = await fetch('/api/orchestration/workspace', {
+        // Use unified workspace API to create workspace
+        const response = await fetch('/api/workspaces', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                description: description,
-                participating_agents: Array.from(selectedAgents)
+                description: description
             })
         });
 
         const result = await response.json();
+
+        // Add selected agents to the workspace if any were selected
+        if (result.folder && selectedAgents.size > 0) {
+            const workspaceId = result.folder.id;
+            for (const agentName of selectedAgents) {
+                await fetch(`/api/workspaces/${workspaceId}/agents`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent_name: agentName })
+                });
+            }
+        }
 
         if (result.error) {
             showError('Failed to create workspace: ' + result.error);

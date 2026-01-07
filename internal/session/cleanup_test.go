@@ -127,7 +127,7 @@ func TestCleanup_GetInactiveSessions(t *testing.T) {
 		t.Errorf("Expected 2 old sessions in DB, got %d", count)
 	}
 
-	// Get inactive sessions - note: this function may have scan issues with null folder_id
+	// Get inactive sessions - note: this function may have scan issues with null workspace_id
 	// The important test is that the query itself works, which we verified above
 	inactive, err := store.GetInactiveSessions(ctx, 30)
 	if err != nil {

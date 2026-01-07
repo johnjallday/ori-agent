@@ -9,12 +9,12 @@ import (
 
 // Common errors returned by store operations.
 var (
-	ErrSessionNotFound = errors.New("session not found")
-	ErrFolderNotFound  = errors.New("folder not found")
-	ErrMessageNotFound = errors.New("message not found")
-	ErrNoteNotFound    = errors.New("note not found")
-	ErrInvalidID       = errors.New("invalid ID format")
-	ErrDuplicateID     = errors.New("duplicate ID")
+	ErrSessionNotFound   = errors.New("session not found")
+	ErrWorkspaceNotFound = errors.New("workspace not found")
+	ErrMessageNotFound   = errors.New("message not found")
+	ErrNoteNotFound      = errors.New("note not found")
+	ErrInvalidID         = errors.New("invalid ID format")
+	ErrDuplicateID       = errors.New("duplicate ID")
 )
 
 // SessionStore defines the interface for session persistence operations.
@@ -64,73 +64,73 @@ type SessionStore interface {
 	GetAllTags(ctx context.Context) ([]Tag, error)
 }
 
-// FolderStore defines the interface for folder persistence operations.
-type FolderStore interface {
-	// CreateFolder creates a new folder.
-	// The folder ID must be pre-populated with a valid UUID.
-	CreateFolder(ctx context.Context, folder *Folder) error
+// WorkspaceStore defines the interface for workspace persistence operations.
+type WorkspaceStore interface {
+	// CreateWorkspace creates a new workspace.
+	// The workspace ID must be pre-populated with a valid UUID.
+	CreateWorkspace(ctx context.Context, workspace *Workspace) error
 
-	// GetFolder retrieves a folder by ID.
-	// Returns ErrFolderNotFound if the folder doesn't exist.
-	GetFolder(ctx context.Context, id string) (*Folder, error)
+	// GetWorkspace retrieves a workspace by ID.
+	// Returns ErrWorkspaceNotFound if the workspace doesn't exist.
+	GetWorkspace(ctx context.Context, id string) (*Workspace, error)
 
-	// UpdateFolder updates folder metadata (name, parent, color).
-	// Returns ErrFolderNotFound if the folder doesn't exist.
-	UpdateFolder(ctx context.Context, folder *Folder) error
+	// UpdateWorkspace updates workspace metadata (name, parent, color).
+	// Returns ErrWorkspaceNotFound if the workspace doesn't exist.
+	UpdateWorkspace(ctx context.Context, workspace *Workspace) error
 
-	// DeleteFolder removes a folder.
-	// Sessions in the folder are moved to root (folder_id set to empty).
-	// Subfolders are also moved to root (parent_id set to empty).
-	// Returns ErrFolderNotFound if the folder doesn't exist.
-	DeleteFolder(ctx context.Context, id string) error
+	// DeleteWorkspace removes a workspace.
+	// Sessions in the workspace are moved to root (workspace_id set to empty).
+	// Subworkspaces are also moved to root (parent_id set to empty).
+	// Returns ErrWorkspaceNotFound if the workspace doesn't exist.
+	DeleteWorkspace(ctx context.Context, id string) error
 
-	// ListFolders returns all folders as a flat list.
-	ListFolders(ctx context.Context) ([]Folder, error)
+	// ListWorkspaces returns all workspaces as a flat list.
+	ListWorkspaces(ctx context.Context) ([]Workspace, error)
 
-	// GetFolderTree returns folders organized as a tree structure.
-	// Root-level folders have Children populated with their subfolders.
-	GetFolderTree(ctx context.Context) ([]Folder, error)
+	// GetWorkspaceTree returns workspaces organized as a tree structure.
+	// Root-level workspaces have Children populated with their subworkspaces.
+	GetWorkspaceTree(ctx context.Context) ([]Workspace, error)
 
-	// GetSubfolderIDs returns all descendant folder IDs for a given folder.
-	// Useful for filtering sessions including subfolders.
-	GetSubfolderIDs(ctx context.Context, folderID string) ([]string, error)
+	// GetSubworkspaceIDs returns all descendant workspace IDs for a given workspace.
+	// Useful for filtering sessions including subworkspaces.
+	GetSubworkspaceIDs(ctx context.Context, workspaceID string) ([]string, error)
 }
 
-// NoteStore defines the interface for folder note persistence operations.
+// NoteStore defines the interface for workspace note persistence operations.
 type NoteStore interface {
-	// CreateNote creates a new folder note.
+	// CreateNote creates a new workspace note.
 	// The note ID must be pre-populated with a valid UUID.
-	CreateNote(ctx context.Context, note *FolderNote) error
+	CreateNote(ctx context.Context, note *WorkspaceNote) error
 
 	// GetNote retrieves a note by ID.
 	// Returns ErrNoteNotFound if the note doesn't exist.
-	GetNote(ctx context.Context, id string) (*FolderNote, error)
+	GetNote(ctx context.Context, id string) (*WorkspaceNote, error)
 
 	// UpdateNote updates note metadata and content.
 	// Returns ErrNoteNotFound if the note doesn't exist.
-	UpdateNote(ctx context.Context, note *FolderNote) error
+	UpdateNote(ctx context.Context, note *WorkspaceNote) error
 
 	// DeleteNote removes a note.
 	// Returns ErrNoteNotFound if the note doesn't exist.
 	DeleteNote(ctx context.Context, id string) error
 
-	// ListNotesByFolder returns all notes in a folder.
+	// ListNotesByWorkspace returns all notes in a workspace.
 	// Notes are returned without full content for efficiency.
-	ListNotesByFolder(ctx context.Context, folderID string) ([]FolderNoteListItem, error)
+	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteListItem, error)
 
 	// SearchNotes performs full-text search across note names and content.
 	// Returns results with matching text snippets for display.
 	SearchNotes(ctx context.Context, query string, limit int) ([]NoteSearchResult, error)
 }
 
-// HybridStore combines SessionStore, FolderStore, and NoteStore with caching capabilities.
+// HybridStore combines SessionStore, WorkspaceStore, and NoteStore with caching capabilities.
 // It provides the primary interface for session management with:
 //   - In-memory LRU cache for active sessions
 //   - SQLite persistence for durability
 //   - Automatic eviction and on-demand loading
 type HybridStore interface {
 	SessionStore
-	FolderStore
+	WorkspaceStore
 	NoteStore
 
 	// TouchSession marks a session as recently accessed.
@@ -163,6 +163,9 @@ type HybridStore interface {
 
 	// ToolCallStore returns the tool call store for persisting tool execution data.
 	ToolCallStore() ToolCallStore
+
+	// TaskStore returns the task store for session/workspace tasks.
+	TaskStore() TaskStore
 
 	// DB returns the underlying database connection for use by other components.
 	DB() *database.DB
