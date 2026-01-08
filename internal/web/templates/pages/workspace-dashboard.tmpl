@@ -855,6 +855,7 @@
   <script src="js/modules/sidebar.js"></script>
   <script src="js/modules/plugin-health.js"></script>
   <script src="js/modules/file-upload.js"></script>
+  <script src="js/modules/task-modal-controller.js"></script>
   <link rel="stylesheet" href="/css/workspace-dashboard.css">
 
   <script>
@@ -2736,6 +2737,8 @@
       themeManager.initialize();
     });
   </script>
+
+  {{template "task-modal" .}}
 </body>
 </html>
 {{end}}

@@ -151,18 +151,51 @@ export class DashboardTasks {
   }
 
   showCreateTaskForm() {
-    const form = document.getElementById('create-task-form');
-    if (form) {
-      form.style.display = 'block';
+    // Use shared task modal controller
+    if (window.taskModalController) {
+      window.taskModalController.openForCreate(this.workspaceId, '', async () => {
+        // Refresh tasks after save
+        await this.loadTasks();
+        this.renderTaskList();
+      });
+    } else {
+      // Fallback to inline form if controller not available
+      const form = document.getElementById('create-task-form');
+      if (form) {
+        form.style.display = 'block';
+      }
     }
   }
 
   hideCreateTaskForm() {
+    // Close shared modal if available
+    if (window.taskModalController) {
+      window.taskModalController.close();
+    }
+    // Also hide inline form for backward compatibility
     const form = document.getElementById('create-task-form');
     if (form) {
       form.style.display = 'none';
-      // Reset form
-      document.getElementById('task-form').reset();
+      document.getElementById('task-form')?.reset();
+    }
+  }
+
+  /**
+   * Open task modal for editing
+   */
+  openTaskForEdit(taskId) {
+    const task = this.data.tasks.find(t => t.id === taskId);
+    if (!task) {
+      console.error('Task not found:', taskId);
+      return;
+    }
+
+    if (window.taskModalController) {
+      window.taskModalController.openForEdit(task, async () => {
+        // Refresh tasks after save
+        await this.loadTasks();
+        this.renderTaskList();
+      });
     }
   }
 

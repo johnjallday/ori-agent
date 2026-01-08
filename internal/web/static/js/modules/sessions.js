@@ -4894,10 +4894,39 @@ const sessionManager = {
   openTaskModal(taskId = null, prefillTitle = '') {
     // Clear workspace context when opening for session task
     this.taskModalWorkspaceId = null;
+    this.editingTaskId = taskId;
+
+    // Get workspace ID from active session
+    let workspaceId = null;
+    if (this.activeSessionId) {
+      const session = this.sessions.find(s => s.id === this.activeSessionId);
+      workspaceId = session?.folder_id;
+    }
+
+    // Use shared task modal controller if available
+    if (window.taskModalController && workspaceId) {
+      if (taskId) {
+        // Editing existing task
+        const task = this.workspaceTasks.find(t => t.id === taskId);
+        if (task) {
+          window.taskModalController.openForEdit(task, async () => {
+            await this.loadSessionTasks();
+            this.renderMainTaskPanel();
+          });
+        }
+      } else {
+        // Creating new task
+        window.taskModalController.openForCreate(workspaceId, prefillTitle, async () => {
+          await this.loadSessionTasks();
+          this.renderMainTaskPanel();
+        });
+      }
+      return;
+    }
+
+    // Fallback to legacy implementation
     const modal = document.getElementById('taskModal');
     if (!modal) return;
-
-    this.editingTaskId = taskId;
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
@@ -5102,11 +5131,21 @@ const sessionManager = {
 
   // Open task modal for workspace-level task
   openTaskModalForWorkspace(workspaceId) {
-    const modal = document.getElementById('taskModal');
-    if (!modal) return;
-
     this.editingTaskId = null;
     this.taskModalWorkspaceId = workspaceId;
+
+    // Use shared task modal controller if available
+    if (window.taskModalController) {
+      window.taskModalController.openForCreate(workspaceId, '', async () => {
+        await this.loadFolders();
+        this.renderFolders();
+      });
+      return;
+    }
+
+    // Fallback to legacy implementation
+    const modal = document.getElementById('taskModal');
+    if (!modal) return;
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
