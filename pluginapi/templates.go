@@ -34,11 +34,11 @@ func NewTemplateRenderer() *TemplateRenderer {
 // Example usage in a plugin:
 //
 //	//go:embed templates/*.html
-//	var templatesFS embed.FS
+//	var assetsFS embed.FS
 //
 //	func (p *myPlugin) ServeWebPage(path string, query map[string]string) (string, string, error) {
 //	    renderer := pluginapi.NewTemplateRenderer()
-//	    html, err := renderer.RenderTemplate(templatesFS, "marketplace.html", map[string]interface{}{
+//	    html, err := renderer.RenderTemplate(assetsFS, "marketplace.html", map[string]interface{}{
 //	        "Title": "Plugin Marketplace",
 //	        "Items": items,
 //	    })

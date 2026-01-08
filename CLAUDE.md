@@ -272,11 +272,14 @@ retries, _ := sm.GetInt("max_retries")
 **3. Template Rendering API**
 Serve web pages with Go templates:
 
-```go
-//go:embed templates
-var templatesFS embed.FS
+```yaml
+# plugin.yaml
+assets:
+  - templates
+```
 
-html, err := pluginapi.RenderTemplate(templatesFS, "templates/page.html", data)
+```go
+html, err := pluginapi.RenderTemplate(assetsFS, "templates/page.html", data)
 ```
 
 **Benefits**:

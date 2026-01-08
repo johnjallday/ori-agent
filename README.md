@@ -279,11 +279,14 @@ Checkout Example Plugins
 #### 2. **Template Rendering API**
 Serve beautiful web pages with Go templates:
 
-```go
-//go:embed templates
-var templatesFS embed.FS
+```yaml
+# plugin.yaml
+assets:
+  - templates
+```
 
-html, err := pluginapi.RenderTemplate(templatesFS, "templates/page.html", data)
+```go
+html, err := pluginapi.RenderTemplate(assetsFS, "templates/page.html", data)
 ```
 
 ### Getting Started with Plugins

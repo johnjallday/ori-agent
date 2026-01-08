@@ -27,7 +27,7 @@ var (
 var configYAML string
 
 //go:embed templates
-var templatesFS embed.FS
+var assetsFS embed.FS
 
 // Params represents the parameters for this plugin
 type Params struct {

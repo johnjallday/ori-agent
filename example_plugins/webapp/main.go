@@ -184,7 +184,7 @@ func serveDashboardPage(t *WebappPluginTool, query map[string]string) (string, s
 	}
 
 	// Render template using the Template Rendering API
-	html, err := pluginapi.RenderTemplate(templatesFS, "templates/dashboard.html", data)
+	html, err := pluginapi.RenderTemplate(assetsFS, "templates/dashboard.html", data)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to render template: %w", err)
 	}

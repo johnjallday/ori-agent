@@ -33,7 +33,7 @@ config:
 
 web_pages:
   - dashboard
-templates:
+assets:
   - templates
 
 tool_definition:
