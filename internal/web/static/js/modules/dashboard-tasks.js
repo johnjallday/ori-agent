@@ -437,9 +437,90 @@ export class DashboardTasks {
       }
     }
 
+    // Build schedule section HTML
+    const hasSchedule = task.schedule != null;
+    const scheduleEnabled = task.schedule_enabled || false;
+    const scheduleType = task.schedule?.type || 'daily';
+    const scheduleTime = task.schedule?.time_of_day || '09:00';
+    const scheduleDay = task.schedule?.day_of_week || 0;
+    const scheduleInterval = task.schedule?.interval || 3600000000000; // 1 hour in nanoseconds
+    const intervalHours = Math.floor(scheduleInterval / 3600000000000);
+    const intervalMinutes = Math.floor((scheduleInterval % 3600000000000) / 60000000000);
+    const intervalValue = intervalHours > 0 ? intervalHours : intervalMinutes;
+    const intervalUnit = intervalHours > 0 ? 'h' : 'm';
+
+    const scheduleHTML = `
+      <div class="mb-4" style="background: rgba(245, 158, 11, 0.1); border-radius: 8px; padding: 16px;">
+        <h6 style="color: #f59e0b; margin-bottom: 12px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+          </svg>
+          Schedule
+        </h6>
+        <div class="mb-2">
+          <div class="form-check">
+            <input type="checkbox" class="form-check-input" id="edit-schedule-enabled" ${scheduleEnabled ? 'checked' : ''} onchange="workspaceDashboard.toggleEditScheduleFields()">
+            <label class="form-check-label" for="edit-schedule-enabled">Enable Schedule</label>
+          </div>
+        </div>
+        <div id="edit-schedule-fields" style="display: ${scheduleEnabled || hasSchedule ? 'block' : 'none'};">
+          <div class="mb-2">
+            <label class="form-label small">Schedule Name (optional)</label>
+            <input type="text" id="edit-schedule-name" class="form-control form-control-sm" value="${this.escapeHtml(task.schedule_name || '')}" placeholder="e.g., Daily Report">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Schedule Type</label>
+            <select id="edit-schedule-type" class="form-control form-control-sm" onchange="workspaceDashboard.updateEditScheduleTypeFields()">
+              <option value="daily" ${scheduleType === 'daily' ? 'selected' : ''}>Daily</option>
+              <option value="weekly" ${scheduleType === 'weekly' ? 'selected' : ''}>Weekly</option>
+              <option value="interval" ${scheduleType === 'interval' ? 'selected' : ''}>Interval</option>
+              <option value="once" ${scheduleType === 'once' ? 'selected' : ''}>Once</option>
+            </select>
+          </div>
+          <div id="edit-schedule-time-field" class="mb-2" style="display: ${scheduleType === 'daily' || scheduleType === 'weekly' ? 'block' : 'none'};">
+            <label class="form-label small">Time of Day</label>
+            <input type="time" id="edit-schedule-time" class="form-control form-control-sm" value="${scheduleTime}">
+          </div>
+          <div id="edit-schedule-day-field" class="mb-2" style="display: ${scheduleType === 'weekly' ? 'block' : 'none'};">
+            <label class="form-label small">Day of Week</label>
+            <select id="edit-schedule-day" class="form-control form-control-sm">
+              <option value="0" ${scheduleDay === 0 ? 'selected' : ''}>Sunday</option>
+              <option value="1" ${scheduleDay === 1 ? 'selected' : ''}>Monday</option>
+              <option value="2" ${scheduleDay === 2 ? 'selected' : ''}>Tuesday</option>
+              <option value="3" ${scheduleDay === 3 ? 'selected' : ''}>Wednesday</option>
+              <option value="4" ${scheduleDay === 4 ? 'selected' : ''}>Thursday</option>
+              <option value="5" ${scheduleDay === 5 ? 'selected' : ''}>Friday</option>
+              <option value="6" ${scheduleDay === 6 ? 'selected' : ''}>Saturday</option>
+            </select>
+          </div>
+          <div id="edit-schedule-interval-field" class="mb-2" style="display: ${scheduleType === 'interval' ? 'block' : 'none'};">
+            <label class="form-label small">Interval</label>
+            <div class="d-flex gap-2">
+              <input type="number" id="edit-schedule-interval-value" class="form-control form-control-sm" value="${intervalValue}" min="1" style="width: 80px;">
+              <select id="edit-schedule-interval-unit" class="form-control form-control-sm">
+                <option value="m" ${intervalUnit === 'm' ? 'selected' : ''}>Minutes</option>
+                <option value="h" ${intervalUnit === 'h' ? 'selected' : ''}>Hours</option>
+              </select>
+            </div>
+          </div>
+          <div id="edit-schedule-once-field" class="mb-2" style="display: ${scheduleType === 'once' ? 'block' : 'none'};">
+            <label class="form-label small">Execute At</label>
+            <input type="datetime-local" id="edit-schedule-datetime" class="form-control form-control-sm" value="${task.schedule?.execute_at ? new Date(task.schedule.execute_at).toISOString().slice(0, 16) : ''}">
+          </div>
+          ${hasSchedule ? `
+            <div class="mt-3 small text-muted">
+              <div><strong>Execution Count:</strong> ${task.execution_count || 0}</div>
+              ${task.next_run ? `<div><strong>Next Run:</strong> ${new Date(task.next_run).toLocaleString()}</div>` : ''}
+              ${task.last_run ? `<div><strong>Last Run:</strong> ${new Date(task.last_run).toLocaleString()}</div>` : ''}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
     // Create modal HTML
     const modalHTML = `
-      <div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true">
+      <div class="modal fade" id="taskDetailsModal" tabindex="-1" aria-labelledby="taskDetailsModalLabel" aria-hidden="true" data-task-id="${task.id}">
         <div class="modal-dialog modal-lg">
           <div class="modal-content" style="background-color: var(--surface-color); color: var(--text-primary);">
             <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
@@ -455,14 +536,16 @@ export class DashboardTasks {
 
               <h6>Details:</h6>
               <ul>
-                <li><strong>From:</strong> ${this.escapeHtml(task.from)}</li>
-                <li><strong>To:</strong> ${this.escapeHtml(task.to)}</li>
+                <li><strong>From:</strong> ${this.escapeHtml(task.from || 'N/A')}</li>
+                <li><strong>To:</strong> ${this.escapeHtml(task.to || 'N/A')}</li>
                 <li><strong>Priority:</strong> ${task.priority || 'N/A'}</li>
                 <li><strong>Created:</strong> ${new Date(task.created_at).toLocaleString()}</li>
                 ${task.completed_at ? `<li><strong>Completed:</strong> ${new Date(task.completed_at).toLocaleString()}</li>` : ''}
               </ul>
 
               ${inputTasksHTML}
+
+              ${scheduleHTML}
 
               ${task.result ? `
                 <h6>Result:</h6>
@@ -485,6 +568,12 @@ export class DashboardTasks {
               ` : ''}
             </div>
             <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+              <button type="button" class="btn btn-warning" onclick="workspaceDashboard.saveTaskSchedule('${task.id}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                </svg>
+                Save Schedule
+              </button>
               ${task.result && task.status === 'completed' ? `
                 <button type="button" class="btn btn-primary" onclick="workspaceDashboard.useTaskResultInNewTask('${task.id}')" data-bs-dismiss="modal">
                   ✨ Use Result in New Task
@@ -642,6 +731,123 @@ export class DashboardTasks {
       case 'once':
         if (onceField) onceField.style.display = 'block';
         break;
+    }
+  }
+
+  // Toggle edit schedule fields visibility in task detail modal
+  toggleEditScheduleFields() {
+    const checkbox = document.getElementById('edit-schedule-enabled');
+    const container = document.getElementById('edit-schedule-fields');
+    if (checkbox && container) {
+      container.style.display = checkbox.checked ? 'block' : 'none';
+    }
+  }
+
+  // Update edit schedule type fields visibility
+  updateEditScheduleTypeFields() {
+    const scheduleType = document.getElementById('edit-schedule-type')?.value || 'daily';
+
+    const timeField = document.getElementById('edit-schedule-time-field');
+    const dayField = document.getElementById('edit-schedule-day-field');
+    const intervalField = document.getElementById('edit-schedule-interval-field');
+    const onceField = document.getElementById('edit-schedule-once-field');
+
+    // Hide all first
+    if (timeField) timeField.style.display = 'none';
+    if (dayField) dayField.style.display = 'none';
+    if (intervalField) intervalField.style.display = 'none';
+    if (onceField) onceField.style.display = 'none';
+
+    // Show relevant fields based on type
+    switch (scheduleType) {
+      case 'daily':
+        if (timeField) timeField.style.display = 'block';
+        break;
+      case 'weekly':
+        if (timeField) timeField.style.display = 'block';
+        if (dayField) dayField.style.display = 'block';
+        break;
+      case 'interval':
+        if (intervalField) intervalField.style.display = 'block';
+        break;
+      case 'once':
+        if (onceField) onceField.style.display = 'block';
+        break;
+    }
+  }
+
+  // Save task schedule from the edit modal
+  async saveTaskSchedule(taskId) {
+    const scheduleEnabled = document.getElementById('edit-schedule-enabled')?.checked || false;
+    const scheduleName = document.getElementById('edit-schedule-name')?.value || '';
+    const scheduleType = document.getElementById('edit-schedule-type')?.value || 'daily';
+
+    // Build update request
+    const updateData = {
+      task_id: taskId,
+      schedule_enabled: scheduleEnabled,
+    };
+
+    if (scheduleName) {
+      updateData.schedule_name = scheduleName;
+    }
+
+    // Build schedule config if enabled
+    if (scheduleEnabled) {
+      const schedule = { type: scheduleType };
+
+      switch (scheduleType) {
+        case 'daily':
+          schedule.time_of_day = document.getElementById('edit-schedule-time')?.value || '09:00';
+          break;
+        case 'weekly':
+          schedule.time_of_day = document.getElementById('edit-schedule-time')?.value || '09:00';
+          schedule.day_of_week = parseInt(document.getElementById('edit-schedule-day')?.value) || 0;
+          break;
+        case 'interval':
+          const intervalValue = parseInt(document.getElementById('edit-schedule-interval-value')?.value) || 1;
+          const intervalUnit = document.getElementById('edit-schedule-interval-unit')?.value || 'h';
+          if (intervalUnit === 'm') {
+            schedule.interval = intervalValue * 60 * 1000000000;
+          } else {
+            schedule.interval = intervalValue * 60 * 60 * 1000000000;
+          }
+          break;
+        case 'once':
+          const datetime = document.getElementById('edit-schedule-datetime')?.value;
+          if (datetime) {
+            schedule.execute_at = new Date(datetime).toISOString();
+          }
+          break;
+      }
+
+      updateData.schedule = schedule;
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'Failed to update task schedule');
+      }
+
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('taskDetailsModal'));
+      if (modal) modal.hide();
+
+      // Reload tasks
+      await this.loadTasks();
+      this.renderTaskList();
+
+      this.showToast('Schedule saved', 'success');
+    } catch (error) {
+      console.error('Error saving task schedule:', error);
+      this.showToast('Failed to save schedule: ' + error.message, 'error');
     }
   }
 

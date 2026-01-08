@@ -124,6 +124,9 @@ class WorkspaceDashboard {
   toggleScheduleFields() { return this.tasks.toggleScheduleFields(); }
   updateScheduleTypeFields() { return this.tasks.updateScheduleTypeFields(); }
   toggleTaskComplete(taskId, completed) { return this.tasks.toggleTaskComplete(taskId, completed); }
+  toggleEditScheduleFields() { return this.tasks.toggleEditScheduleFields(); }
+  updateEditScheduleTypeFields() { return this.tasks.updateEditScheduleTypeFields(); }
+  saveTaskSchedule(taskId) { return this.tasks.saveTaskSchedule(taskId); }
 
   // Scheduled methods
   renderScheduledTasksTab() { return this.scheduled.renderScheduledTasksTab(); }
