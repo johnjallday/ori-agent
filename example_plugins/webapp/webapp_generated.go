@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,19 +12,22 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*webapp_pluginTool)(nil)
+var _ pluginapi.PluginTool = (*WebappPluginTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool          = (*webapp_pluginTool)(nil)
-	_ pluginapi.MetadataProvider       = (*webapp_pluginTool)(nil)
-	_ pluginapi.PluginCompatibility    = (*webapp_pluginTool)(nil)
-	_ pluginapi.InitializationProvider = (*webapp_pluginTool)(nil)
-	_ pluginapi.WebPageProvider        = (*webapp_pluginTool)(nil)
+	_ pluginapi.VersionedTool          = (*WebappPluginTool)(nil)
+	_ pluginapi.MetadataProvider       = (*WebappPluginTool)(nil)
+	_ pluginapi.PluginCompatibility    = (*WebappPluginTool)(nil)
+	_ pluginapi.InitializationProvider = (*WebappPluginTool)(nil)
+	_ pluginapi.WebPageProvider        = (*WebappPluginTool)(nil)
 )
 
-// WebappPluginParams represents the parameters for this plugin
-type WebappPluginParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	Operation       string `json:"operation"`        // Operation to perform
 	ItemName        string `json:"item_name"`        // Name of the item (for add_item and delete_item operations)
 	ItemDescription string `json:"item_description"` // Description of the item (for add_item operation)
@@ -31,7 +35,7 @@ type WebappPluginParams struct {
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *webapp_pluginTool) Call(ctx context.Context, args string) (string, error) {
+func (t *WebappPluginTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -43,7 +47,7 @@ func (t *webapp_pluginTool) Call(ctx context.Context, args string) (string, erro
 		return "", err
 	}
 
-	var params WebappPluginParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
@@ -54,20 +58,43 @@ func (t *webapp_pluginTool) Call(ctx context.Context, args string) (string, erro
 	return t.Execute(ctx, &params)
 }
 
-// NOTE: Config methods (GetRequiredConfig, ValidateConfig, InitializeWithConfig)
-// are implemented manually in main.go because this plugin has custom validation
-// logic for items_per_page (min/max constraints).
+// GetRequiredConfig returns the configuration variables needed by this plugin
+// This method is auto-generated from plugin.yaml config section
+func (t *WebappPluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+	return t.GetConfigFromYAML()
+}
+
+// ValidateConfig validates the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *WebappPluginTool) ValidateConfig(config map[string]interface{}) error {
+	return nil
+}
+
+// InitializeWithConfig initializes the plugin with the provided configuration
+// This method is auto-generated from plugin.yaml config section
+func (t *WebappPluginTool) InitializeWithConfig(config map[string]interface{}) error {
+	sm := t.Settings()
+	if sm == nil {
+		return fmt.Errorf("settings manager not available")
+	}
+	for key, value := range config {
+		if err := sm.Set(key, value); err != nil {
+			return fmt.Errorf("failed to store config %s: %w", key, err)
+		}
+	}
+	return nil
+}
 
 // GetWebPages returns the available web pages for this plugin
 // This method is auto-generated from plugin.yaml web_pages section
-func (t *webapp_pluginTool) GetWebPages() []string {
+func (t *WebappPluginTool) GetWebPages() []string {
 	return []string{
 		"dashboard",
 	}
 }
 
 // WebPageHandler is a function that serves a specific web page
-type WebPageHandler func(t *webapp_pluginTool, query map[string]string) (string, string, error)
+type WebPageHandler func(t *WebappPluginTool, query map[string]string) (string, string, error)
 
 // webPageRegistry maps page paths to their handler functions
 // Handler functions must be defined by you with the naming convention serve{PascalCase}Page
@@ -77,7 +104,7 @@ var webPageRegistry = map[string]WebPageHandler{
 
 // ServeWebPage dispatches to the appropriate page handler
 // This method is auto-generated from plugin.yaml web_pages section
-func (t *webapp_pluginTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
+func (t *WebappPluginTool) ServeWebPage(path string, query map[string]string) (string, string, error) {
 	handler, ok := webPageRegistry[path]
 	if !ok {
 		return "", "", fmt.Errorf("page not found: %s", path)

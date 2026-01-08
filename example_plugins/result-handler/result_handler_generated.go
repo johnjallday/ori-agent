@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,17 +12,20 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*result_handlerTool)(nil)
+var _ pluginapi.PluginTool = (*ResultHandlerTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool       = (*result_handlerTool)(nil)
-	_ pluginapi.MetadataProvider    = (*result_handlerTool)(nil)
-	_ pluginapi.PluginCompatibility = (*result_handlerTool)(nil)
+	_ pluginapi.VersionedTool       = (*ResultHandlerTool)(nil)
+	_ pluginapi.MetadataProvider    = (*ResultHandlerTool)(nil)
+	_ pluginapi.PluginCompatibility = (*ResultHandlerTool)(nil)
 )
 
-// ResultHandlerParams represents the parameters for this plugin
-type ResultHandlerParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	Action  string `json:"action"`  // Action to perform
 	Path    string `json:"path"`    // File path, directory path, or URL to open
 	Context string `json:"context"` // Optional context about what triggered this action (e.g., 'reaper_scripts', 'config_file')
@@ -29,7 +33,7 @@ type ResultHandlerParams struct {
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *result_handlerTool) Call(ctx context.Context, args string) (string, error) {
+func (t *ResultHandlerTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -41,13 +45,13 @@ func (t *result_handlerTool) Call(ctx context.Context, args string) (string, err
 		return "", err
 	}
 
-	var params ResultHandlerParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
 }

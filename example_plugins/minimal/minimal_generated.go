@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,25 +12,28 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*minimal_pluginTool)(nil)
+var _ pluginapi.PluginTool = (*MinimalPluginTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool          = (*minimal_pluginTool)(nil)
-	_ pluginapi.MetadataProvider       = (*minimal_pluginTool)(nil)
-	_ pluginapi.PluginCompatibility    = (*minimal_pluginTool)(nil)
-	_ pluginapi.InitializationProvider = (*minimal_pluginTool)(nil)
+	_ pluginapi.VersionedTool          = (*MinimalPluginTool)(nil)
+	_ pluginapi.MetadataProvider       = (*MinimalPluginTool)(nil)
+	_ pluginapi.PluginCompatibility    = (*MinimalPluginTool)(nil)
+	_ pluginapi.InitializationProvider = (*MinimalPluginTool)(nil)
 )
 
-// MinimalPluginParams represents the parameters for this plugin
-type MinimalPluginParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	Operation string `json:"operation"` // Operation to perform: echo (returns input) or status (returns plugin status)
 	Message   string `json:"message"`   // Message to echo
 	Count     int    `json:"count"`     // Number of times to repeat the message
 }
 
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(ctx context.Context, t *minimal_pluginTool, params *MinimalPluginParams) (string, error)
+type OperationHandler func(ctx context.Context, t *MinimalPluginTool, params *Params) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 // Handler functions must be defined by you with the naming convention handle{PascalCase}
@@ -40,7 +44,7 @@ var operationRegistry = map[string]OperationHandler{
 
 // Execute dispatches to the appropriate operation handler
 // This method is auto-generated from plugin.yaml operations
-func (t *minimal_pluginTool) Execute(ctx context.Context, params *MinimalPluginParams) (string, error) {
+func (t *MinimalPluginTool) Execute(ctx context.Context, params *Params) (string, error) {
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
 		return "", fmt.Errorf("unknown operation: %s. Valid operations: echo, status", params.Operation)
@@ -50,7 +54,7 @@ func (t *minimal_pluginTool) Execute(ctx context.Context, params *MinimalPluginP
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *minimal_pluginTool) Call(ctx context.Context, args string) (string, error) {
+func (t *MinimalPluginTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -62,7 +66,7 @@ func (t *minimal_pluginTool) Call(ctx context.Context, args string) (string, err
 		return "", err
 	}
 
-	var params MinimalPluginParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
@@ -75,13 +79,13 @@ func (t *minimal_pluginTool) Call(ctx context.Context, args string) (string, err
 
 // GetRequiredConfig returns the configuration variables needed by this plugin
 // This method is auto-generated from plugin.yaml config section
-func (t *minimal_pluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
+func (t *MinimalPluginTool) GetRequiredConfig() []pluginapi.ConfigVariable {
 	return t.GetConfigFromYAML()
 }
 
 // ValidateConfig validates the provided configuration
 // This method is auto-generated from plugin.yaml config section
-func (t *minimal_pluginTool) ValidateConfig(config map[string]interface{}) error {
+func (t *MinimalPluginTool) ValidateConfig(config map[string]interface{}) error {
 	// Validate api_endpoint (required)
 	if val, ok := config["api_endpoint"]; !ok || val == nil || val == "" {
 		return fmt.Errorf("api_endpoint is required")
@@ -91,7 +95,7 @@ func (t *minimal_pluginTool) ValidateConfig(config map[string]interface{}) error
 
 // InitializeWithConfig initializes the plugin with the provided configuration
 // This method is auto-generated from plugin.yaml config section
-func (t *minimal_pluginTool) InitializeWithConfig(config map[string]interface{}) error {
+func (t *MinimalPluginTool) InitializeWithConfig(config map[string]interface{}) error {
 	sm := t.Settings()
 	if sm == nil {
 		return fmt.Errorf("settings manager not available")

@@ -4,41 +4,37 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-//go:embed plugin.yaml
-var configYAML string
-
-// mathTool implements pluginapi.Tool for basic arithmetic operations.
+// MathTool implements pluginapi.Tool for basic arithmetic operations.
 // Most boilerplate is auto-generated in math_generated.go
-type mathTool struct {
+type MathTool struct {
 	pluginapi.BasePlugin
 }
 
 // --- Handler functions (the only code you need to write) ---
 // The naming convention handle{PascalCase} is auto-wired by the generator
 
-func handleAdd(ctx context.Context, m *mathTool, params *MathParams) (string, error) {
+func handleAdd(ctx context.Context, m *MathTool, params *Params) (string, error) {
 	result := params.A + params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleSubtract(ctx context.Context, m *mathTool, params *MathParams) (string, error) {
+func handleSubtract(ctx context.Context, m *MathTool, params *Params) (string, error) {
 	result := params.A - params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleMultiply(ctx context.Context, m *mathTool, params *MathParams) (string, error) {
+func handleMultiply(ctx context.Context, m *MathTool, params *Params) (string, error) {
 	result := params.A * params.B
 	return fmt.Sprintf("%g", result), nil
 }
 
-func handleDivide(ctx context.Context, m *mathTool, params *MathParams) (string, error) {
+func handleDivide(ctx context.Context, m *MathTool, params *Params) (string, error) {
 	if params.B == 0 {
 		return "", errors.New("division by zero")
 	}
@@ -47,5 +43,5 @@ func handleDivide(ctx context.Context, m *mathTool, params *MathParams) (string,
 }
 
 func main() {
-	pluginapi.ServePlugin(&mathTool{}, configYAML)
+	pluginapi.ServePlugin(&MathTool{}, configYAML)
 }

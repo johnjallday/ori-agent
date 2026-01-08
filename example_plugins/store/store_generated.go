@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,17 +12,20 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*storeTool)(nil)
+var _ pluginapi.PluginTool = (*StoreTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool       = (*storeTool)(nil)
-	_ pluginapi.MetadataProvider    = (*storeTool)(nil)
-	_ pluginapi.PluginCompatibility = (*storeTool)(nil)
+	_ pluginapi.VersionedTool       = (*StoreTool)(nil)
+	_ pluginapi.MetadataProvider    = (*StoreTool)(nil)
+	_ pluginapi.PluginCompatibility = (*StoreTool)(nil)
 )
 
-// StoreParams represents the parameters for this plugin
-type StoreParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	StoreNodeId string                 `json:"store_node_id"` // The canvas node ID of the Store node (e.g., 'store-node-1')
 	FilePath    string                 `json:"file_path"`     // Relative path within the Store node's base directory (e.g., 'daily-2025-01-15.json', '2025/jan/report.txt'). Must be relative - no absolute paths or '../' allowed.
 	Data        string                 `json:"data"`          // The data to write. Format depends on the Store node's configuration (JSON string, plain text, markdown, or base64-encoded binary)
@@ -30,7 +34,7 @@ type StoreParams struct {
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *storeTool) Call(ctx context.Context, args string) (string, error) {
+func (t *StoreTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -42,7 +46,7 @@ func (t *storeTool) Call(ctx context.Context, args string) (string, error) {
 		return "", err
 	}
 
-	var params StoreParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {

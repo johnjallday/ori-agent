@@ -185,6 +185,7 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 ### Issue: "Port 8765 already in use"
 **Solution:**
+Note: Starting Ori Agent will prompt before stopping a non-Ori process that is using the port.
 ```bash
 # Kill existing server
 lsof -ti :8765 | xargs kill

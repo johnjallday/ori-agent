@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,23 +12,26 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*get_weatherTool)(nil)
+var _ pluginapi.PluginTool = (*GetWeatherTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool       = (*get_weatherTool)(nil)
-	_ pluginapi.MetadataProvider    = (*get_weatherTool)(nil)
-	_ pluginapi.PluginCompatibility = (*get_weatherTool)(nil)
+	_ pluginapi.VersionedTool       = (*GetWeatherTool)(nil)
+	_ pluginapi.MetadataProvider    = (*GetWeatherTool)(nil)
+	_ pluginapi.PluginCompatibility = (*GetWeatherTool)(nil)
 )
 
-// GetWeatherParams represents the parameters for this plugin
-type GetWeatherParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	Location string `json:"location"` // Location to get weather for
 }
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *get_weatherTool) Call(ctx context.Context, args string) (string, error) {
+func (t *GetWeatherTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -39,13 +43,13 @@ func (t *get_weatherTool) Call(ctx context.Context, args string) (string, error)
 		return "", err
 	}
 
-	var params GetWeatherParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
 
-	// Call the Execute method (implemented by you)
+	// Call the Execute method
 	return t.Execute(ctx, &params)
 }

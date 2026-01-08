@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -15,12 +14,9 @@ import (
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-//go:embed plugin.yaml
-var configYAML string
-
-// storeTool implements pluginapi.Tool for file storage operations.
+// StoreTool implements pluginapi.Tool for file storage operations.
 // Note: Compile-time interface check is in store_generated.go
-type storeTool struct {
+type StoreTool struct {
 	pluginapi.BasePlugin
 	store     agentstudio.Store
 	agentName string
@@ -29,10 +25,10 @@ type storeTool struct {
 
 // Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
 // Note: Call() is auto-generated in store_generated.go from plugin.yaml
-// Note: StoreParams is auto-generated in store_generated.go from plugin.yaml
+// Note: Params is auto-generated in store_generated.go from plugin.yaml
 
 // SetAgentContext implements AgentAwareTool interface
-func (s *storeTool) SetAgentContext(ctx pluginapi.AgentContext) {
+func (s *StoreTool) SetAgentContext(ctx pluginapi.AgentContext) {
 	s.agentName = ctx.Name
 	s.agentDir = ctx.AgentDir
 
@@ -47,7 +43,7 @@ func (s *storeTool) SetAgentContext(ctx pluginapi.AgentContext) {
 
 // extractWorkspaceID extracts the workspace ID from the agent directory path
 // Expected path format: .../workspaces/{workspace-id}/agents/{agent-name}
-func (s *storeTool) extractWorkspaceID(agentDir string) string {
+func (s *StoreTool) extractWorkspaceID(agentDir string) string {
 	cleanPath := filepath.Clean(agentDir)
 	parts := strings.Split(cleanPath, string(filepath.Separator))
 	// Look for "workspaces/{id}/agents" pattern
@@ -60,7 +56,7 @@ func (s *storeTool) extractWorkspaceID(agentDir string) string {
 }
 
 // Execute contains the business logic for the store_write operation
-func (s *storeTool) Execute(ctx context.Context, params *StoreParams) (string, error) {
+func (s *StoreTool) Execute(ctx context.Context, params *Params) (string, error) {
 	// Note: Validation is already done in the generated Call() method
 
 	// Extract workspace ID from agent directory path
@@ -131,6 +127,6 @@ func (s *storeTool) Execute(ctx context.Context, params *StoreParams) (string, e
 }
 
 func main() {
-	tool := &storeTool{}
+	tool := &StoreTool{}
 	pluginapi.ServePlugin(tool, configYAML)
 }

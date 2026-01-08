@@ -14,11 +14,13 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	portutil "github.com/johnjallday/ori-agent/internal/port"
 )
 
 func main() {
@@ -150,6 +152,14 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 			select {
 			case <-startItem.ClickedCh:
 				log.Println("Start Server clicked")
+				if controller.GetStatus() != menubar.StatusStopped {
+					logger.Info("Server already running", nil)
+					continue
+				}
+				port := controller.GetPort()
+				if !ensurePortAvailableForStart(port) {
+					continue
+				}
 				ctx := context.Background()
 				if err := controller.StartServer(ctx); err != nil {
 					logger.Error("Failed to start server", logger.Fields{"server": err})
@@ -395,4 +405,77 @@ func showNotification(title, message string) {
 			logger.Error("Failed to show notification", logger.Fields{"err": err})
 		}
 	}
+}
+
+func ensurePortAvailableForStart(port int) bool {
+	processes, err := portutil.FindPortProcesses(port)
+	if err != nil {
+		logger.Error("Failed to inspect port owners", logger.Fields{"port": port, "error": err.Error()})
+	}
+
+	if len(processes) == 0 {
+		if portutil.IsPortAvailable(port) {
+			return true
+		}
+		processes = []portutil.ProcessInfo{{PID: 0, Name: ""}}
+	}
+
+	allOri := true
+	for _, process := range processes {
+		if !portutil.IsOriProcessName(process.Name) {
+			allOri = false
+			break
+		}
+	}
+
+	summary := portutil.FormatProcessSummary(processes)
+	if allOri {
+		logger.Info("Found existing ori process(es) on port, stopping...", logger.Fields{"port": port, "processes": summary})
+	} else {
+		confirmed, dialogErr := confirmStopProcessDialog(port, summary)
+		if dialogErr != nil {
+			logger.Error("Failed to show confirmation dialog", logger.Fields{"error": dialogErr.Error()})
+			showNotification("Port In Use", fmt.Sprintf("Port %d is used by %s.", port, summary))
+			return false
+		}
+		if !confirmed {
+			logger.Info("User declined to stop process on port", logger.Fields{"port": port, "processes": summary})
+			return false
+		}
+	}
+
+	if err := portutil.TerminateProcesses(processes); err != nil {
+		logger.Error("Failed to stop process on port", logger.Fields{"port": port, "error": err.Error()})
+		showNotification("Port In Use", fmt.Sprintf("Failed to stop process on port %d.", port))
+		return false
+	}
+
+	for i := 0; i < 5; i++ {
+		if portutil.IsPortAvailable(port) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	showNotification("Port In Use", fmt.Sprintf("Port %d is still in use.", port))
+	return false
+}
+
+func confirmStopProcessDialog(port int, summary string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, fmt.Errorf("confirmation dialog not supported on this platform")
+	}
+	prompt := fmt.Sprintf("Port %d is used by %s. Stop it to continue?", port, summary)
+	script := fmt.Sprintf(`display dialog "%s" with title "Port In Use" buttons {"Cancel", "Stop"} default button "Cancel"`, escapeAppleScriptString(prompt))
+	cmd := exec.Command("osascript", "-e", script)
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	outputStr := strings.TrimSpace(string(output))
+	return strings.Contains(outputStr, "button returned:Stop"), nil
+}
+
+func escapeAppleScriptString(value string) string {
+	return strings.ReplaceAll(value, "\"", "\\\"")
 }

@@ -40,6 +40,7 @@ build_plugin() {
   mkdir -p uploaded_plugins
 
   local output_path="uploaded_plugins/$output_name"
+  local cache_dir
 
   # Add .exe extension for Windows
   if [ "$TARGET_OS" = "windows" ]; then
@@ -49,7 +50,11 @@ build_plugin() {
   # Build entire package to include generated files (*.go and *_generated.go)
   # Change to plugin directory and build with "." to include all .go files
   # Use GOWORK=off to disable workspace mode (plugins have their own go.mod)
-  if (cd "example_plugins/$plugin_dir" && GOWORK=off GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -o "../../$output_path" .); then
+  if (cd "example_plugins/$plugin_dir" && \
+      cache_dir="$(pwd)/.gocache-build" && \
+      rm -rf "$cache_dir" && mkdir -p "$cache_dir" && \
+      GOWORK=off GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" GOCACHE="$cache_dir" go build -o "../../$output_path" .); then
+    rm -rf "example_plugins/$plugin_dir/.gocache-build"
     echo -e "${GREEN}✓ Successfully built $output_name -> $output_path${NC}"
   else
     echo -e "${RED}✗ Failed to build $plugin_dir${NC}"

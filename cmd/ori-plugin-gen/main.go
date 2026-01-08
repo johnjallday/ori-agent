@@ -252,7 +252,7 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 	// Build template data
 	toolName := strings.ReplaceAll(config.Name, "-", "_")
 	toolNamePascal := toPascalCase(toolName)
-	paramsStruct := toolNamePascal + "Params"
+	paramsStruct := "Params"
 
 	var fields []FieldInfo
 	params, err := collectParameters(config.Tool)
@@ -437,6 +437,7 @@ var codeTemplate = template.Must(template.New("plugin").Parse(`// Code generated
 package {{.PackageName}}
 
 import (
+	_ "embed"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -448,16 +449,19 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*{{.ToolName}}Tool)(nil)
+var _ pluginapi.PluginTool = (*{{.ToolNamePascal}}Tool)(nil)
 {{- if .OptionalInterfaces}}
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
 {{- range .OptionalInterfaces}}
-	_ {{.}} = (*{{$.ToolName}}Tool)(nil)
+	_ {{.}} = (*{{$.ToolNamePascal}}Tool)(nil)
 {{- end}}
 )
 {{- end}}
+
+//go:embed plugin.yaml
+var configYAML string
 
 // {{.ParamsStruct}} represents the parameters for this plugin
 type {{.ParamsStruct}} struct {
@@ -468,7 +472,7 @@ type {{.ParamsStruct}} struct {
 {{- if .HasOperations}}
 
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(ctx context.Context, t *{{.ToolName}}Tool, params *{{.ParamsStruct}}) (string, error)
+type OperationHandler func(ctx context.Context, t *{{.ToolNamePascal}}Tool, params *{{.ParamsStruct}}) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 // Handler functions must be defined by you with the naming convention handle{PascalCase}
@@ -480,7 +484,7 @@ var operationRegistry = map[string]OperationHandler{
 
 // Execute dispatches to the appropriate operation handler
 // This method is auto-generated from plugin.yaml operations
-func (t *{{.ToolName}}Tool) Execute(ctx context.Context, params *{{.ParamsStruct}}) (string, error) {
+func (t *{{.ToolNamePascal}}Tool) Execute(ctx context.Context, params *{{.ParamsStruct}}) (string, error) {
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
 		return "", fmt.Errorf("unknown operation: %s. Valid operations: {{range $i, $op := .Operations}}{{if $i}}, {{end}}{{$op.Name}}{{end}}", params.Operation)
@@ -491,7 +495,7 @@ func (t *{{.ToolName}}Tool) Execute(ctx context.Context, params *{{.ParamsStruct
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *{{.ToolName}}Tool) Call(ctx context.Context, args string) (string, error) {
+func (t *{{.ToolNamePascal}}Tool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -517,13 +521,13 @@ func (t *{{.ToolName}}Tool) Call(ctx context.Context, args string) (string, erro
 
 // GetRequiredConfig returns the configuration variables needed by this plugin
 // This method is auto-generated from plugin.yaml config section
-func (t *{{.ToolName}}Tool) GetRequiredConfig() []pluginapi.ConfigVariable {
+func (t *{{.ToolNamePascal}}Tool) GetRequiredConfig() []pluginapi.ConfigVariable {
 	return t.GetConfigFromYAML()
 }
 
 // ValidateConfig validates the provided configuration
 // This method is auto-generated from plugin.yaml config section
-func (t *{{.ToolName}}Tool) ValidateConfig(config map[string]interface{}) error {
+func (t *{{.ToolNamePascal}}Tool) ValidateConfig(config map[string]interface{}) error {
 {{- range .ConfigVars}}
 {{- if .Required}}
 	// Validate {{.Key}} (required)
@@ -545,7 +549,7 @@ func (t *{{.ToolName}}Tool) ValidateConfig(config map[string]interface{}) error 
 
 // InitializeWithConfig initializes the plugin with the provided configuration
 // This method is auto-generated from plugin.yaml config section
-func (t *{{.ToolName}}Tool) InitializeWithConfig(config map[string]interface{}) error {
+func (t *{{.ToolNamePascal}}Tool) InitializeWithConfig(config map[string]interface{}) error {
 	sm := t.Settings()
 	if sm == nil {
 		return fmt.Errorf("settings manager not available")
@@ -562,7 +566,7 @@ func (t *{{.ToolName}}Tool) InitializeWithConfig(config map[string]interface{}) 
 
 // AcceptsFiles returns the list of file types this plugin accepts
 // This method is auto-generated from plugin.yaml accepts_files section
-func (t *{{.ToolName}}Tool) AcceptsFiles() []string {
+func (t *{{.ToolNamePascal}}Tool) AcceptsFiles() []string {
 	return []string{
 {{- range .AcceptsFiles}}
 		"{{.}}",
@@ -572,7 +576,7 @@ func (t *{{.ToolName}}Tool) AcceptsFiles() []string {
 {{- if .HasFileOperations}}
 
 // FileOperationHandler is a function that handles a specific operation with file attachments
-type FileOperationHandler func(ctx context.Context, t *{{.ToolName}}Tool, params *{{.ParamsStruct}}, files []pluginapi.FileAttachment) (string, error)
+type FileOperationHandler func(ctx context.Context, t *{{.ToolNamePascal}}Tool, params *{{.ParamsStruct}}, files []pluginapi.FileAttachment) (string, error)
 
 // fileOperationRegistry maps operation names to their file handler functions
 // Handler functions must be defined by you with the naming convention handle{PascalCase}WithFiles
@@ -584,7 +588,7 @@ var fileOperationRegistry = map[string]FileOperationHandler{
 
 // CallWithFiles handles file attachments by dispatching to file operation handlers
 // This method is auto-generated from plugin.yaml accepts_files.file_operations section
-func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+func (t *{{.ToolNamePascal}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
 	var params {{.ParamsStruct}}
 	if err := json.Unmarshal([]byte(args), &params); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -603,7 +607,7 @@ func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, file
 // NOTE: CallWithFiles must be implemented manually in main.go
 // Default implementation (copy if you don't need custom file handling):
 //
-// func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
+// func (t *{{.ToolNamePascal}}Tool) CallWithFiles(ctx context.Context, args string, files []pluginapi.FileAttachment) (string, error) {
 //     var params {{.ParamsStruct}}
 //     if err := json.Unmarshal([]byte(args), &params); err != nil {
 //         return "", fmt.Errorf("invalid arguments: %w", err)
@@ -616,7 +620,7 @@ func (t *{{.ToolName}}Tool) CallWithFiles(ctx context.Context, args string, file
 
 // GetWebPages returns the available web pages for this plugin
 // This method is auto-generated from plugin.yaml web_pages section
-func (t *{{.ToolName}}Tool) GetWebPages() []string {
+func (t *{{.ToolNamePascal}}Tool) GetWebPages() []string {
 	return []string{
 {{- range .WebPages}}
 		"{{.}}",
@@ -625,7 +629,7 @@ func (t *{{.ToolName}}Tool) GetWebPages() []string {
 }
 
 // WebPageHandler is a function that serves a specific web page
-type WebPageHandler func(t *{{.ToolName}}Tool, query map[string]string) (string, string, error)
+type WebPageHandler func(t *{{.ToolNamePascal}}Tool, query map[string]string) (string, string, error)
 
 // webPageRegistry maps page paths to their handler functions
 // Handler functions must be defined by you with the naming convention serve{PascalCase}Page
@@ -637,7 +641,7 @@ var webPageRegistry = map[string]WebPageHandler{
 
 // ServeWebPage dispatches to the appropriate page handler
 // This method is auto-generated from plugin.yaml web_pages section
-func (t *{{.ToolName}}Tool) ServeWebPage(path string, query map[string]string) (string, string, error) {
+func (t *{{.ToolNamePascal}}Tool) ServeWebPage(path string, query map[string]string) (string, string, error) {
 	handler, ok := webPageRegistry[path]
 	if !ok {
 		return "", "", fmt.Errorf("page not found: %s", path)

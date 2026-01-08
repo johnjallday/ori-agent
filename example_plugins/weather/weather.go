@@ -4,18 +4,14 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-//go:embed plugin.yaml
-var configYAML string
-
-// get_weatherTool implements pluginapi.Tool for fetching weather.
+// GetWeatherTool implements pluginapi.Tool for fetching weather.
 // Note: Compile-time interface check is in weather_generated.go
-type get_weatherTool struct {
+type GetWeatherTool struct {
 	pluginapi.BasePlugin // Embed BasePlugin to get version/metadata methods for free
 }
 
@@ -23,12 +19,12 @@ type get_weatherTool struct {
 // Note: Call() is auto-generated in weather_generated.go from plugin.yaml
 
 // Execute contains the business logic - called by the generated Call() method
-func (w *get_weatherTool) Execute(ctx context.Context, params *GetWeatherParams) (string, error) {
+func (w *GetWeatherTool) Execute(ctx context.Context, params *Params) (string, error) {
 	// TODO: replace with real API call.
 	result := fmt.Sprintf("Sunny, 25°C in %s", params.Location)
 	return result, nil
 }
 
 func main() {
-	pluginapi.ServePlugin(&get_weatherTool{}, configYAML)
+	pluginapi.ServePlugin(&GetWeatherTool{}, configYAML)
 }

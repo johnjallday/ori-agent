@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -11,24 +12,27 @@ import (
 )
 
 // Compile-time interface checks
-var _ pluginapi.PluginTool = (*mathTool)(nil)
+var _ pluginapi.PluginTool = (*MathTool)(nil)
 
 // Optional interface checks (auto-detected from plugin.yaml)
 var (
-	_ pluginapi.VersionedTool       = (*mathTool)(nil)
-	_ pluginapi.MetadataProvider    = (*mathTool)(nil)
-	_ pluginapi.PluginCompatibility = (*mathTool)(nil)
+	_ pluginapi.VersionedTool       = (*MathTool)(nil)
+	_ pluginapi.MetadataProvider    = (*MathTool)(nil)
+	_ pluginapi.PluginCompatibility = (*MathTool)(nil)
 )
 
-// MathParams represents the parameters for this plugin
-type MathParams struct {
+//go:embed plugin.yaml
+var configYAML string
+
+// Params represents the parameters for this plugin
+type Params struct {
 	Operation string  `json:"operation"` // Operation to perform: add, subtract, multiply, divide
 	A         float64 `json:"a"`         // First operand
 	B         float64 `json:"b"`         // Second operand
 }
 
 // OperationHandler is a function that handles a specific operation
-type OperationHandler func(ctx context.Context, t *mathTool, params *MathParams) (string, error)
+type OperationHandler func(ctx context.Context, t *MathTool, params *Params) (string, error)
 
 // operationRegistry maps operation names to their handler functions
 // Handler functions must be defined by you with the naming convention handle{PascalCase}
@@ -41,7 +45,7 @@ var operationRegistry = map[string]OperationHandler{
 
 // Execute dispatches to the appropriate operation handler
 // This method is auto-generated from plugin.yaml operations
-func (t *mathTool) Execute(ctx context.Context, params *MathParams) (string, error) {
+func (t *MathTool) Execute(ctx context.Context, params *Params) (string, error) {
 	handler, ok := operationRegistry[params.Operation]
 	if !ok {
 		return "", fmt.Errorf("unknown operation: %s. Valid operations: add, divide, multiply, subtract", params.Operation)
@@ -51,7 +55,7 @@ func (t *mathTool) Execute(ctx context.Context, params *MathParams) (string, err
 
 // Call implements the PluginTool interface
 // This method is auto-generated from plugin.yaml
-func (t *mathTool) Call(ctx context.Context, args string) (string, error) {
+func (t *MathTool) Call(ctx context.Context, args string) (string, error) {
 	var paramsMap map[string]interface{}
 
 	// Unmarshal JSON arguments for validation
@@ -63,7 +67,7 @@ func (t *mathTool) Call(ctx context.Context, args string) (string, error) {
 		return "", err
 	}
 
-	var params MathParams
+	var params Params
 
 	// Unmarshal JSON arguments into typed params
 	if err := json.Unmarshal([]byte(args), &params); err != nil {

@@ -4,26 +4,22 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
-//go:embed plugin.yaml
-var configYAML string
-
-// minimal_pluginTool demonstrates the optimized plugin development experience
+// MinimalPluginTool demonstrates the optimized plugin development experience
 // Most boilerplate is now auto-generated in minimal_generated.go
-type minimal_pluginTool struct {
+type MinimalPluginTool struct {
 	pluginapi.BasePlugin
 }
 
 // --- Handler functions (the only code you need to write) ---
 // The naming convention handle{PascalCase} is auto-wired by the generator
 
-func handleEcho(ctx context.Context, t *minimal_pluginTool, params *MinimalPluginParams) (string, error) {
+func handleEcho(ctx context.Context, t *MinimalPluginTool, params *Params) (string, error) {
 	if params.Message == "" {
 		return "", fmt.Errorf("message is required for echo operation")
 	}
@@ -49,7 +45,7 @@ func handleEcho(ctx context.Context, t *minimal_pluginTool, params *MinimalPlugi
 	return strings.TrimSpace(repeated), nil
 }
 
-func handleStatus(ctx context.Context, t *minimal_pluginTool, params *MinimalPluginParams) (string, error) {
+func handleStatus(ctx context.Context, t *MinimalPluginTool, params *Params) (string, error) {
 	sm := t.Settings()
 	if sm == nil {
 		return "Settings API not available (no agent context)", nil
@@ -81,5 +77,5 @@ Recent Activity:`, apiEndpoint, timeoutSeconds, debugMode, len(allSettings))
 }
 
 func main() {
-	pluginapi.ServePlugin(&minimal_pluginTool{}, configYAML)
+	pluginapi.ServePlugin(&MinimalPluginTool{}, configYAML)
 }
