@@ -8,21 +8,21 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Orchestrator coordinates multi-agent workflows
 type Orchestrator struct {
 	agentStore     store.Store
-	workspaceStore agentstudio.Store
+	workspaceStore workspace.Store
 	communicator   *agentcomm.Communicator
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(agentStore store.Store, workspaceStore agentstudio.Store, communicator *agentcomm.Communicator) *Orchestrator {
+func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator) *Orchestrator {
 	return &Orchestrator{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -56,7 +56,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 
 	// 1. Create workspace
 	workspaceName := fmt.Sprintf("collab-%s-%d", mainAgent, time.Now().Unix())
-	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        workspaceName,
 		Agents:      []string{mainAgent}, // Add main agent as first member
 		InitialData: task.Context,
@@ -89,7 +89,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	// 3. Execute workflow based on required roles
 	result, err := o.executeWorkflow(ctx, ws, task, agents)
 	if err != nil {
-		ws.SetStatus(agentstudio.StatusFailed)
+		ws.SetStatus(workspace.StatusFailed)
 		_ = o.workspaceStore.Save(ws) // Best effort save
 		return &CollaborativeResult{
 			WorkspaceID: ws.ID,
@@ -102,7 +102,7 @@ func (o *Orchestrator) ExecuteCollaborativeTask(ctx context.Context, mainAgent s
 	}
 
 	// 4. Mark workspace as completed
-	ws.SetStatus(agentstudio.StatusCompleted)
+	ws.SetStatus(workspace.StatusCompleted)
 	_ = o.workspaceStore.Save(ws) // Best effort save
 
 	result.WorkspaceID = ws.ID
@@ -165,7 +165,7 @@ func (o *Orchestrator) findAgentsByRoles(requiredRoles []types.AgentRole) ([]str
 }
 
 // executeWorkflow executes the appropriate workflow based on required roles
-func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	// Determine workflow type based on roles
 	hasResearcher := o.hasRole(task.RequiredRoles, types.RoleResearcher)
 	hasAnalyzer := o.hasRole(task.RequiredRoles, types.RoleAnalyzer)
@@ -194,7 +194,7 @@ func (o *Orchestrator) hasRole(roles []types.AgentRole, target types.AgentRole) 
 }
 
 // executeResearchWorkflow executes a simple research workflow
-func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("📚 Executing research workflow", logger.Fields{})
 
 	subResults := make(map[string]interface{})
@@ -245,7 +245,7 @@ func (o *Orchestrator) executeResearchWorkflow(ctx context.Context, ws *agentstu
 }
 
 // executeParallelWorkflow executes tasks in parallel across agents
-func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *agentstudio.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
+func (o *Orchestrator) executeParallelWorkflow(ctx context.Context, ws *workspace.Workspace, task CollaborativeTask, agents []string) (*CollaborativeResult, error) {
 	logger.Debug("⚡ Executing parallel workflow with agents", logger.Fields{"agent": len(agents)})
 
 	subResults := make(map[string]interface{})

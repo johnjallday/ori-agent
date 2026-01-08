@@ -1,4 +1,4 @@
-package agentstudio
+package workspace
 
 import (
 	"sync"

@@ -7,22 +7,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // WorkspaceHandler manages workspace-related operations
 type WorkspaceHandler struct {
 	agentStore     store.Store
-	workspaceStore agentstudio.Store
-	eventBus       *agentstudio.EventBus
+	workspaceStore workspace.Store
+	eventBus       *workspace.EventBus
 	sessionStore   SessionStore
 }
 
 // NewWorkspaceHandler creates a new workspace handler
-func NewWorkspaceHandler(agentStore store.Store, workspaceStore agentstudio.Store, eventBus *agentstudio.EventBus, sessionStore SessionStore) *WorkspaceHandler {
+func NewWorkspaceHandler(agentStore store.Store, workspaceStore workspace.Store, eventBus *workspace.EventBus, sessionStore SessionStore) *WorkspaceHandler {
 	return &WorkspaceHandler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -204,7 +204,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	// Create workspace
 
-	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        req.Name,
 		Description: req.Description,
 		Agents:      req.Agents,
@@ -222,8 +222,8 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	// Publish workspace created event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceCreated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceCreated,
 			ws.ID,
 			"api",
 			map[string]interface{}{
@@ -290,8 +290,8 @@ func (wh *WorkspaceHandler) handleUpdateWorkspace(w http.ResponseWriter, r *http
 
 	// Publish workspace updated event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceUpdated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
 			ws.ID,
 			"api",
 			map[string]interface{}{
@@ -400,8 +400,8 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 
 	// Publish event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceUpdated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
 			req.WorkspaceID,
 			"api",
 			map[string]interface{}{
@@ -461,8 +461,8 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 
 	// Publish event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceUpdated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
 			workspaceID,
 			"api",
 			map[string]interface{}{
@@ -491,16 +491,16 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	var req struct {
-		WorkspaceID         string                                 `json:"workspace_id"`
-		TaskPositions       map[string]agentstudio.Position        `json:"task_positions"`
-		AgentPositions      map[string]agentstudio.Position        `json:"agent_positions"`
-		AttachmentPositions map[string]agentstudio.Position        `json:"attachment_positions"`
-		SchedulerPositions  map[string]agentstudio.Position        `json:"scheduler_positions"`
-		StorePositions      map[string]agentstudio.Position        `json:"store_positions"`
-		WorkflowConnections []agentstudio.WorkflowConnectionLayout `json:"workflow_connections"`
-		Scale               float64                                `json:"scale"`
-		OffsetX             float64                                `json:"offset_x"`
-		OffsetY             float64                                `json:"offset_y"`
+		WorkspaceID         string                               `json:"workspace_id"`
+		TaskPositions       map[string]workspace.Position        `json:"task_positions"`
+		AgentPositions      map[string]workspace.Position        `json:"agent_positions"`
+		AttachmentPositions map[string]workspace.Position        `json:"attachment_positions"`
+		SchedulerPositions  map[string]workspace.Position        `json:"scheduler_positions"`
+		StorePositions      map[string]workspace.Position        `json:"store_positions"`
+		WorkflowConnections []workspace.WorkflowConnectionLayout `json:"workflow_connections"`
+		Scale               float64                              `json:"scale"`
+		OffsetX             float64                              `json:"offset_x"`
+		OffsetY             float64                              `json:"offset_y"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -522,7 +522,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	// Update layout
 
 	if ws.Layout == nil {
-		ws.Layout = &agentstudio.CanvasLayout{}
+		ws.Layout = &workspace.CanvasLayout{}
 	}
 
 	ws.Layout.TaskPositions = req.TaskPositions
@@ -542,9 +542,9 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Broadcast workspace update event to notify all connected clients
-	wh.eventBus.Publish(agentstudio.Event{
+	wh.eventBus.Publish(workspace.Event{
 		WorkspaceID: req.WorkspaceID,
-		Type:        agentstudio.EventWorkspaceUpdated,
+		Type:        workspace.EventWorkspaceUpdated,
 		Timestamp:   time.Now(),
 	})
 

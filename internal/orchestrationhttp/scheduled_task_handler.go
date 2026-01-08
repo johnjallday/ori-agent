@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/robfig/cron/v3"
 )
 
@@ -48,15 +48,15 @@ func (th *TaskHandler) handleListScheduledTasks(w http.ResponseWriter, r *http.R
 // handleCreateScheduledTask creates a new scheduled task
 func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID string                     `json:"studio_id"`
-		Name        string                     `json:"name"`
-		Description string                     `json:"description"`
-		From        string                     `json:"from"`
-		To          string                     `json:"to"`
-		Prompt      string                     `json:"prompt"`
-		Priority    int                        `json:"priority"`
-		Schedule    agentstudio.ScheduleConfig `json:"schedule"`
-		Enabled     bool                       `json:"enabled"`
+		WorkspaceID string                   `json:"studio_id"`
+		Name        string                   `json:"name"`
+		Description string                   `json:"description"`
+		From        string                   `json:"from"`
+		To          string                   `json:"to"`
+		Prompt      string                   `json:"prompt"`
+		Priority    int                      `json:"priority"`
+		Schedule    workspace.ScheduleConfig `json:"schedule"`
+		Enabled     bool                     `json:"enabled"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -94,7 +94,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 
 	// Create scheduled task
 	now := time.Now()
-	st := agentstudio.ScheduledTask{
+	st := workspace.ScheduledTask{
 		WorkspaceID: req.WorkspaceID,
 		Name:        req.Name,
 		Description: req.Description,
@@ -129,7 +129,7 @@ func (th *TaskHandler) handleCreateScheduledTask(w http.ResponseWriter, r *http.
 	}
 
 	// Get the created scheduled task (now has ID)
-	var createdTask *agentstudio.ScheduledTask
+	var createdTask *workspace.ScheduledTask
 	for i := len(ws.ScheduledTasks) - 1; i >= 0; i-- {
 		if ws.ScheduledTasks[i].Name == req.Name {
 			createdTask = &ws.ScheduledTasks[i]
@@ -220,12 +220,12 @@ func (th *TaskHandler) handleGetScheduledTask(w http.ResponseWriter, r *http.Req
 
 func (th *TaskHandler) handleUpdateScheduledTask(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
-		Name        *string                     `json:"name,omitempty"`
-		Description *string                     `json:"description,omitempty"`
-		Prompt      *string                     `json:"prompt,omitempty"`
-		Priority    *int                        `json:"priority,omitempty"`
-		Schedule    *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
-		Enabled     *bool                       `json:"enabled,omitempty"`
+		Name        *string                   `json:"name,omitempty"`
+		Description *string                   `json:"description,omitempty"`
+		Prompt      *string                   `json:"prompt,omitempty"`
+		Priority    *int                      `json:"priority,omitempty"`
+		Schedule    *workspace.ScheduleConfig `json:"schedule,omitempty"`
+		Enabled     *bool                     `json:"enabled,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -438,14 +438,14 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 		}
 
 		// Create a task from the scheduled task
-		task := agentstudio.Task{
+		task := workspace.Task{
 			WorkspaceID: ws.ID,
 			From:        st.From,
 			To:          st.To,
 			Description: st.Prompt,
 			Priority:    st.Priority,
 			Context:     st.Context,
-			Status:      agentstudio.TaskStatusPending,
+			Status:      workspace.TaskStatusPending,
 		}
 
 		if err := ws.AddTask(task); err != nil {
@@ -478,22 +478,22 @@ func (th *TaskHandler) handleTriggerScheduledTask(w http.ResponseWriter, r *http
 }
 
 // calculateInitialNextRun calculates the initial next run time for a schedule
-func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *time.Time {
+func calculateInitialNextRun(config workspace.ScheduleConfig, now time.Time) *time.Time {
 	switch config.Type {
-	case agentstudio.ScheduleOnce:
+	case workspace.ScheduleOnce:
 		if config.ExecuteAt != nil {
 			return config.ExecuteAt
 		}
 		return nil
 
-	case agentstudio.ScheduleInterval:
+	case workspace.ScheduleInterval:
 		if config.Interval == 0 {
 			return nil
 		}
 		next := now.Add(config.Interval)
 		return &next
 
-	case agentstudio.ScheduleDaily:
+	case workspace.ScheduleDaily:
 		hour, minute, err := parseScheduleTime(config.TimeOfDay)
 		if err != nil {
 			return nil
@@ -508,7 +508,7 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 
 		return &next
 
-	case agentstudio.ScheduleWeekly:
+	case workspace.ScheduleWeekly:
 		if config.DayOfWeek < 0 || config.DayOfWeek > 6 {
 			return nil
 		}
@@ -545,13 +545,13 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 
 		return &next
 
-	case agentstudio.ScheduleCron:
+	case workspace.ScheduleCron:
 		if config.CronExpr == "" {
 			return nil
 		}
 
 		// Validate and parse cron expression using agentstudio's validator
-		if err := agentstudio.ValidateCronExpression(config.CronExpr); err != nil {
+		if err := workspace.ValidateCronExpression(config.CronExpr); err != nil {
 			return nil
 		}
 
@@ -566,7 +566,7 @@ func calculateInitialNextRun(config agentstudio.ScheduleConfig, now time.Time) *
 		next := schedule.Next(now)
 		return &next
 
-	case agentstudio.ScheduleRelativeDelay:
+	case workspace.ScheduleRelativeDelay:
 		if config.DelayDuration == 0 {
 			return nil
 		}
@@ -637,7 +637,7 @@ func substituteInputPlaceholders(description string, inputs []string) string {
 
 // getTaskWithWorkspace retrieves a task and its associated workspace
 // Returns the task, workspace, and any error encountered
-func (th *TaskHandler) getTaskWithWorkspace(taskID string) (*agentstudio.Task, *agentstudio.Workspace, error) {
+func (th *TaskHandler) getTaskWithWorkspace(taskID string) (*workspace.Task, *workspace.Workspace, error) {
 	task, err := th.communicator.GetTask(taskID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("task not found: %w", err)
@@ -653,7 +653,7 @@ func (th *TaskHandler) getTaskWithWorkspace(taskID string) (*agentstudio.Task, *
 
 // updateTaskAssignment updates the assignment (To and AssignedNodeID) of a task within a workspace
 // Returns the index of the updated task, or -1 if not found
-func (th *TaskHandler) updateTaskAssignment(ws *agentstudio.Workspace, taskID string, newTo *string, assignedNodeID *string) (int, error) {
+func (th *TaskHandler) updateTaskAssignment(ws *workspace.Workspace, taskID string, newTo *string, assignedNodeID *string) (int, error) {
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			if newTo != nil {

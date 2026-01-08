@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Task represents a delegated task from one agent to another
@@ -58,12 +58,12 @@ type DelegationResponse struct {
 
 // MessageRequest is a convenient wrapper for sending messages
 type MessageRequest struct {
-	WorkspaceID string                  `json:"studio_id"`
-	From        string                  `json:"from"`
-	To          string                  `json:"to"` // Empty for broadcast
-	Type        agentstudio.MessageType `json:"type"`
-	Content     string                  `json:"content"`
-	Metadata    map[string]interface{}  `json:"metadata,omitempty"`
+	WorkspaceID string                 `json:"studio_id"`
+	From        string                 `json:"from"`
+	To          string                 `json:"to"` // Empty for broadcast
+	Type        workspace.MessageType  `json:"type"`
+	Content     string                 `json:"content"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NewTask creates a new task with generated ID and timestamps

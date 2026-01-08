@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // HandleWorkspace handles the /workspace command and subcommands
@@ -38,7 +38,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 	}
 
 	// Create agent context
-	agentCtx := agentstudio.NewAgentContext(current, ch.workspaceStore)
+	agentCtx := workspace.NewAgentContext(current, ch.workspaceStore)
 
 	// Parse subcommand
 	args = strings.TrimSpace(args)
@@ -64,7 +64,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (ch *CommandHandler) handleWorkspaceSummary(w http.ResponseWriter, agentCtx *agentstudio.AgentContext) {
+func (ch *CommandHandler) handleWorkspaceSummary(w http.ResponseWriter, agentCtx *workspace.AgentContext) {
 	summary, err := agentCtx.GetWorkspaceSummary()
 	if err != nil {
 		response := map[string]any{
@@ -84,7 +84,7 @@ func (ch *CommandHandler) handleWorkspaceSummary(w http.ResponseWriter, agentCtx
 	}
 }
 
-func (ch *CommandHandler) handleWorkspaceTasks(w http.ResponseWriter, agentCtx *agentstudio.AgentContext) {
+func (ch *CommandHandler) handleWorkspaceTasks(w http.ResponseWriter, agentCtx *workspace.AgentContext) {
 	tasksSummary, err := agentCtx.GetTasksSummary()
 	if err != nil {
 		response := map[string]any{
@@ -104,7 +104,7 @@ func (ch *CommandHandler) handleWorkspaceTasks(w http.ResponseWriter, agentCtx *
 	}
 }
 
-func (ch *CommandHandler) handleWorkspaceTaskDetail(w http.ResponseWriter, agentCtx *agentstudio.AgentContext, parts []string) {
+func (ch *CommandHandler) handleWorkspaceTaskDetail(w http.ResponseWriter, agentCtx *workspace.AgentContext, parts []string) {
 	if len(parts) < 2 {
 		response := map[string]any{
 			"response": "❌ Please provide a task ID. Usage: `/workspace task <task-id>`",
@@ -135,7 +135,7 @@ func (ch *CommandHandler) handleWorkspaceTaskDetail(w http.ResponseWriter, agent
 	}
 }
 
-func (ch *CommandHandler) handleWorkspaceAllTasks(w http.ResponseWriter, agentCtx *agentstudio.AgentContext) {
+func (ch *CommandHandler) handleWorkspaceAllTasks(w http.ResponseWriter, agentCtx *workspace.AgentContext) {
 	allTasks, err := agentCtx.GetAllTasks()
 	if err != nil {
 		response := map[string]any{
@@ -149,7 +149,7 @@ func (ch *CommandHandler) handleWorkspaceAllTasks(w http.ResponseWriter, agentCt
 
 	if len(allTasks) == 0 {
 		response := map[string]any{
-			"response": "You have no tasks in any agentstudio.",
+			"response": "You have no tasks in any workspace.",
 		}
 		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
@@ -161,19 +161,19 @@ func (ch *CommandHandler) handleWorkspaceAllTasks(w http.ResponseWriter, agentCt
 	sb.WriteString(fmt.Sprintf("## All Your Tasks (%d)\n\n", len(allTasks)))
 
 	// Group by status
-	byStatus := make(map[agentstudio.TaskStatus][]agentstudio.Task)
+	byStatus := make(map[workspace.TaskStatus][]workspace.Task)
 	for _, task := range allTasks {
 		byStatus[task.Status] = append(byStatus[task.Status], task)
 	}
 
-	statuses := []agentstudio.TaskStatus{
-		agentstudio.TaskStatusPending,
-		agentstudio.TaskStatusAssigned,
-		agentstudio.TaskStatusInProgress,
-		agentstudio.TaskStatusCompleted,
-		agentstudio.TaskStatusFailed,
-		agentstudio.TaskStatusCancelled,
-		agentstudio.TaskStatusTimeout,
+	statuses := []workspace.TaskStatus{
+		workspace.TaskStatusPending,
+		workspace.TaskStatusAssigned,
+		workspace.TaskStatusInProgress,
+		workspace.TaskStatusCompleted,
+		workspace.TaskStatusFailed,
+		workspace.TaskStatusCancelled,
+		workspace.TaskStatusTimeout,
 	}
 
 	for _, status := range statuses {

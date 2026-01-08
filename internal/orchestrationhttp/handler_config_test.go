@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestHandlerConfig_Validate(t *testing.T) {
@@ -43,7 +43,7 @@ func TestHandlerConfig_Validate(t *testing.T) {
 			config: HandlerConfig{
 				AgentStore:     &mockStore{},
 				WorkspaceStore: &mockWorkspaceStore{},
-				EventBus:       agentstudio.DefaultEventBus(),
+				EventBus:       workspace.DefaultEventBus(),
 			},
 			wantErr: false,
 		},
@@ -66,7 +66,7 @@ func TestHandlerConfig_Validate(t *testing.T) {
 }
 
 func TestNewHandler(t *testing.T) {
-	eventBus := agentstudio.DefaultEventBus()
+	eventBus := workspace.DefaultEventBus()
 
 	t.Run("valid config creates handler", func(t *testing.T) {
 		h, err := NewHandler(HandlerConfig{
@@ -104,7 +104,7 @@ func TestNewHandler(t *testing.T) {
 			AgentStore:          &mockStore{},
 			WorkspaceStore:      &mockWorkspaceStore{},
 			EventBus:            eventBus,
-			NotificationService: agentstudio.NewNotificationService(eventBus, 100),
+			NotificationService: workspace.NewNotificationService(eventBus, 100),
 		})
 		if err != nil {
 			t.Fatalf("NewHandler() error = %v", err)
@@ -128,11 +128,11 @@ func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                  
 func (m *mockStore) SetAgent(name string, ag *agent.Agent) error                 { return nil }
 func (m *mockStore) Save() error                                                 { return nil }
 
-// mockWorkspaceStore implements agentstudio.Store interface
+// mockWorkspaceStore implements workspace.Store interface
 type mockWorkspaceStore struct{}
 
-func (m *mockWorkspaceStore) Save(ws *agentstudio.Workspace) error          { return nil }
-func (m *mockWorkspaceStore) Get(id string) (*agentstudio.Workspace, error) { return nil, nil }
-func (m *mockWorkspaceStore) List() ([]string, error)                       { return nil, nil }
-func (m *mockWorkspaceStore) Delete(id string) error                        { return nil }
-func (m *mockWorkspaceStore) ListActive() ([]*agentstudio.Workspace, error) { return nil, nil }
+func (m *mockWorkspaceStore) Save(ws *workspace.Workspace) error          { return nil }
+func (m *mockWorkspaceStore) Get(id string) (*workspace.Workspace, error) { return nil, nil }
+func (m *mockWorkspaceStore) List() ([]string, error)                     { return nil, nil }
+func (m *mockWorkspaceStore) Delete(id string) error                      { return nil }
+func (m *mockWorkspaceStore) ListActive() ([]*workspace.Workspace, error) { return nil, nil }

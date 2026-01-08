@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // HandlerConfig holds all dependencies for the orchestration handler.
@@ -29,14 +29,14 @@ import (
 type HandlerConfig struct {
 	// Required dependencies
 	AgentStore     store.Store
-	WorkspaceStore agentstudio.Store
-	EventBus       *agentstudio.EventBus
+	WorkspaceStore workspace.Store
+	EventBus       *workspace.EventBus
 
 	// Optional dependencies (enable additional features)
 	Orchestrator        *orchestration.Orchestrator
 	TemplateManager     *templates.TemplateManager
-	NotificationService *agentstudio.NotificationService
-	TaskHandler         agentstudio.TaskHandler
+	NotificationService *workspace.NotificationService
+	TaskHandler         workspace.TaskHandler
 	SessionStore        SessionStore // For fetching sessions and session tasks
 }
 
@@ -82,14 +82,14 @@ func (c *HandlerConfig) Validate() error {
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
 	agentStore          store.Store
-	workspaceStore      agentstudio.Store
+	workspaceStore      workspace.Store
 	sessionStore        SessionStore
 	communicator        *agentcomm.Communicator
 	orchestrator        *orchestration.Orchestrator
 	templateManager     *templates.TemplateManager
-	eventBus            *agentstudio.EventBus
-	notificationService *agentstudio.NotificationService
-	taskHandler         agentstudio.TaskHandler
+	eventBus            *workspace.EventBus
+	notificationService *workspace.NotificationService
+	taskHandler         workspace.TaskHandler
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -163,7 +163,7 @@ func (h *Handler) initializeSubHandlers() {
 
 // NewHandlerLegacy creates a new orchestration handler using the legacy pattern.
 // Deprecated: Use NewHandler with HandlerConfig instead for better dependency validation.
-func NewHandlerLegacy(agentStore store.Store, workspaceStore agentstudio.Store) *Handler {
+func NewHandlerLegacy(agentStore store.Store, workspaceStore workspace.Store) *Handler {
 	return &Handler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -187,7 +187,7 @@ func (h *Handler) SetTemplateManager(tm *templates.TemplateManager) {
 
 // SetEventBus sets the event bus instance.
 // Deprecated: Use NewHandler with HandlerConfig instead.
-func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
+func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	h.eventBus = eb
 
 	// Initialize sub-handlers that require eventBus
@@ -206,7 +206,7 @@ func (h *Handler) SetEventBus(eb *agentstudio.EventBus) {
 
 // SetNotificationService sets the notification service instance.
 // Deprecated: Use NewHandler with HandlerConfig instead.
-func (h *Handler) SetNotificationService(ns *agentstudio.NotificationService) {
+func (h *Handler) SetNotificationService(ns *workspace.NotificationService) {
 	h.notificationService = ns
 	// Initialize notification handler if eventBus is available
 	if h.eventBus != nil {
@@ -216,7 +216,7 @@ func (h *Handler) SetNotificationService(ns *agentstudio.NotificationService) {
 
 // SetTaskHandler sets the task handler instance.
 // Deprecated: Use NewHandler with HandlerConfig instead.
-func (h *Handler) SetTaskHandler(th agentstudio.TaskHandler) {
+func (h *Handler) SetTaskHandler(th workspace.TaskHandler) {
 	h.taskHandler = th
 	h.initializeTaskHandlerLegacy()
 }

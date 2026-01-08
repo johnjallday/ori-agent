@@ -6,24 +6,24 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // TaskHandler manages task and scheduled task operations
 type TaskHandler struct {
-	workspaceStore agentstudio.Store
+	workspaceStore workspace.Store
 	communicator   *agentcomm.Communicator
-	taskHandler    agentstudio.TaskHandler
-	eventBus       *agentstudio.EventBus
+	taskHandler    workspace.TaskHandler
+	eventBus       *workspace.EventBus
 }
 
 // NewTaskHandler creates a new task handler
-func NewTaskHandler(workspaceStore agentstudio.Store,
+func NewTaskHandler(workspaceStore workspace.Store,
 	communicator *agentcomm.Communicator,
-	taskHandler agentstudio.TaskHandler,
-	eventBus *agentstudio.EventBus) *TaskHandler {
+	taskHandler workspace.TaskHandler,
+	eventBus *workspace.EventBus) *TaskHandler {
 	return &TaskHandler{
 		workspaceStore: workspaceStore,
 		communicator:   communicator,
@@ -131,7 +131,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create task
-	task := agentstudio.Task{
+	task := workspace.Task{
 		WorkspaceID:    req.WorkspaceID,
 		From:           req.From,
 		To:             req.To,
@@ -140,7 +140,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Details:        req.Details,
 		Priority:       req.Priority,
 		InputTaskIDs:   req.InputTaskIDs,
-		Status:         agentstudio.TaskStatusPending,
+		Status:         workspace.TaskStatusPending,
 	}
 
 	// Add task to workspace
@@ -159,7 +159,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Get the task we just added (it now has an ID)
 	// Find the most recently added task with matching properties
-	var createdTask *agentstudio.Task
+	var createdTask *workspace.Task
 	for i := len(ws.Tasks) - 1; i >= 0; i-- {
 		if ws.Tasks[i].Description == req.Description && ws.Tasks[i].From == req.From && ws.Tasks[i].To == req.To {
 			createdTask = &ws.Tasks[i]
@@ -293,8 +293,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 				eventData["assigned_node_id"] = *req.AssignedNodeID
 			}
 
-			th.eventBus.Publish(agentstudio.Event{
-				Type:        agentstudio.EventWorkspaceUpdated,
+			th.eventBus.Publish(workspace.Event{
+				Type:        workspace.EventWorkspaceUpdated,
 				WorkspaceID: task.WorkspaceID,
 				Data:        eventData,
 			})
@@ -342,8 +342,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		logger.Info("Reassigned task to", logger.Fields{"task_id": req.TaskID, "to": *req.To})
 
 		// Publish event
-		th.eventBus.Publish(agentstudio.Event{
-			Type:        agentstudio.EventTaskAssigned,
+		th.eventBus.Publish(workspace.Event{
+			Type:        workspace.EventTaskAssigned,
 			WorkspaceID: task.WorkspaceID,
 			Data: map[string]interface{}{
 				"task_id": req.TaskID,
@@ -370,7 +370,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	err := th.communicator.UpdateTaskStatus(
 		req.TaskID,
-		agentstudio.TaskStatus(req.Status),
+		workspace.TaskStatus(req.Status),
 		req.Result,
 		req.Error,
 	)
@@ -475,7 +475,7 @@ func (th *TaskHandler) CompleteTaskHandler(w http.ResponseWriter, r *http.Reques
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			now := time.Now()
-			ws.Tasks[i].Status = agentstudio.TaskStatusCompleted
+			ws.Tasks[i].Status = workspace.TaskStatusCompleted
 			ws.Tasks[i].CompletedAt = &now
 			break
 		}
@@ -492,8 +492,8 @@ func (th *TaskHandler) CompleteTaskHandler(w http.ResponseWriter, r *http.Reques
 
 	// Publish event
 	if th.eventBus != nil {
-		th.eventBus.Publish(agentstudio.Event{
-			Type:        agentstudio.EventTaskCompleted,
+		th.eventBus.Publish(workspace.Event{
+			Type:        workspace.EventTaskCompleted,
 			WorkspaceID: task.WorkspaceID,
 			Data: map[string]interface{}{
 				"task_id": taskID,

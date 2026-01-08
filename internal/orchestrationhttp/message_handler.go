@@ -4,19 +4,19 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // MessageHandler manages message-related operations for workspaces
 type MessageHandler struct {
-	workspaceStore agentstudio.Store
-	eventBus       *agentstudio.EventBus
+	workspaceStore workspace.Store
+	eventBus       *workspace.EventBus
 }
 
 // NewMessageHandler creates a new message handler
-func NewMessageHandler(workspaceStore agentstudio.Store, eventBus *agentstudio.EventBus) *MessageHandler {
+func NewMessageHandler(workspaceStore workspace.Store, eventBus *workspace.EventBus) *MessageHandler {
 	return &MessageHandler{
 		workspaceStore: workspaceStore,
 		eventBus:       eventBus,
@@ -54,11 +54,11 @@ func (mh *MessageHandler) MessagesHandler(w http.ResponseWriter, r *http.Request
 }
 
 // handleGetMessages retrieves messages from workspace
-func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
+func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace) {
 	agentName := r.URL.Query().Get("agent")
 	sinceStr := r.URL.Query().Get("since")
 
-	var messages []agentstudio.AgentMessage
+	var messages []workspace.AgentMessage
 
 	if sinceStr != "" {
 		// Get messages since timestamp
@@ -83,8 +83,8 @@ func (mh *MessageHandler) handleGetMessages(w http.ResponseWriter, r *http.Reque
 }
 
 // handleSendMessage sends a message to workspace
-func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Request, ws *agentstudio.Workspace) {
-	var msg agentstudio.AgentMessage
+func (mh *MessageHandler) handleSendMessage(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace) {
+	var msg workspace.AgentMessage
 
 	if !orihttp.ParseJSONBody(w, r, &msg) {
 		return

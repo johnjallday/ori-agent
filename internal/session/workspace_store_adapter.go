@@ -1,4 +1,4 @@
-// Package session provides the WorkspaceStoreAdapter that implements agentstudio.Store
+// Package session provides the WorkspaceStoreAdapter that implements workspace.Store
 // using the session.HybridStore as the underlying storage. This allows orchestration
 // handlers to use SQLite storage through a unified interface.
 package session
@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// WorkspaceStoreAdapter implements agentstudio.Store using session.HybridStore.
+// WorkspaceStoreAdapter implements workspace.Store using session.HybridStore.
 // This adapter bridges the session storage system with the orchestration system,
 // allowing both to share the same SQLite-backed workspace data.
 type WorkspaceStoreAdapter struct {
@@ -26,11 +26,11 @@ func NewWorkspaceStoreAdapter(store HybridStore) *WorkspaceStoreAdapter {
 	return &WorkspaceStoreAdapter{store: store}
 }
 
-// Save persists a workspace to storage by converting from agentstudio.Workspace to session.Workspace.
-func (a *WorkspaceStoreAdapter) Save(ws *agentstudio.Workspace) error {
+// Save persists a workspace to storage by converting from workspace.Workspace to session.Workspace.
+func (a *WorkspaceStoreAdapter) Save(ws *workspace.Workspace) error {
 	ctx := context.Background()
 
-	// Convert agentstudio.Workspace to session.Workspace
+	// Convert workspace.Workspace to session.Workspace
 	sessionWS := a.toSessionWorkspace(ws)
 
 	// Check if workspace exists
@@ -50,8 +50,8 @@ func (a *WorkspaceStoreAdapter) Save(ws *agentstudio.Workspace) error {
 	return a.store.UpdateWorkspace(ctx, sessionWS)
 }
 
-// Get retrieves a workspace by ID and converts to agentstudio.Workspace.
-func (a *WorkspaceStoreAdapter) Get(id string) (*agentstudio.Workspace, error) {
+// Get retrieves a workspace by ID and converts to workspace.Workspace.
+func (a *WorkspaceStoreAdapter) Get(id string) (*workspace.Workspace, error) {
 	ctx := context.Background()
 
 	sessionWS, err := a.store.GetWorkspace(ctx, id)
@@ -88,7 +88,7 @@ func (a *WorkspaceStoreAdapter) Delete(id string) error {
 }
 
 // ListActive returns all active workspaces.
-func (a *WorkspaceStoreAdapter) ListActive() ([]*agentstudio.Workspace, error) {
+func (a *WorkspaceStoreAdapter) ListActive() ([]*workspace.Workspace, error) {
 	ctx := context.Background()
 
 	workspaces, err := a.store.ListWorkspaces(ctx)
@@ -96,7 +96,7 @@ func (a *WorkspaceStoreAdapter) ListActive() ([]*agentstudio.Workspace, error) {
 		return nil, err
 	}
 
-	active := make([]*agentstudio.Workspace, 0)
+	active := make([]*workspace.Workspace, 0)
 	for _, ws := range workspaces {
 		if ws.Status == WorkspaceStatusActive || ws.Status == "" {
 			active = append(active, a.toAgentStudioWorkspace(&ws))
@@ -105,8 +105,8 @@ func (a *WorkspaceStoreAdapter) ListActive() ([]*agentstudio.Workspace, error) {
 	return active, nil
 }
 
-// toSessionWorkspace converts agentstudio.Workspace to session.Workspace.
-func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *agentstudio.Workspace) *Workspace {
+// toSessionWorkspace converts workspace.Workspace to session.Workspace.
+func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Workspace {
 	sessionWS := &Workspace{
 		ID:          ws.ID,
 		Name:        ws.Name,
@@ -184,9 +184,9 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *agentstudio.Workspace) *W
 	return sessionWS
 }
 
-// toAgentStudioWorkspace converts session.Workspace to agentstudio.Workspace.
-func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstudio.Workspace {
-	agentWS := &agentstudio.Workspace{
+// toAgentStudioWorkspace converts session.Workspace to workspace.Workspace.
+func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace.Workspace {
+	agentWS := &workspace.Workspace{
 		ID:          ws.ID,
 		Name:        ws.Name,
 		Description: ws.Description,
@@ -194,19 +194,19 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 		UpdatedAt:   ws.UpdatedAt,
 		Agents:      ws.Agents,
 		SharedData:  ws.SharedData,
-		Status:      agentstudio.WorkspaceStatus(ws.Status),
+		Status:      workspace.WorkspaceStatus(ws.Status),
 	}
 
 	// Default status to active if not set
 	if agentWS.Status == "" {
-		agentWS.Status = agentstudio.StatusActive
+		agentWS.Status = workspace.StatusActive
 	}
 
 	// Convert AgentInstances
 	if len(ws.AgentInstances) > 0 {
-		agentWS.AgentInstances = make([]agentstudio.AgentInstance, len(ws.AgentInstances))
+		agentWS.AgentInstances = make([]workspace.AgentInstance, len(ws.AgentInstances))
 		for i, ai := range ws.AgentInstances {
-			agentWS.AgentInstances[i] = agentstudio.AgentInstance{
+			agentWS.AgentInstances[i] = workspace.AgentInstance{
 				ID:             ai.ID,
 				Name:           ai.Name,
 				InstanceNumber: ai.InstanceNumber,
@@ -228,7 +228,7 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 		}
 	}
 	if agentWS.Messages == nil {
-		agentWS.Messages = []agentstudio.AgentMessage{}
+		agentWS.Messages = []workspace.AgentMessage{}
 	}
 
 	if len(ws.TasksJSON) > 0 {
@@ -237,7 +237,7 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 		}
 	}
 	if agentWS.Tasks == nil {
-		agentWS.Tasks = []agentstudio.Task{}
+		agentWS.Tasks = []workspace.Task{}
 	}
 
 	if len(ws.AttachmentsJSON) > 0 {
@@ -264,7 +264,7 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 		}
 	}
 	if agentWS.Workflows == nil {
-		agentWS.Workflows = make(map[string]agentstudio.Workflow)
+		agentWS.Workflows = make(map[string]workspace.Workflow)
 	}
 
 	if agentWS.SharedData == nil {
@@ -274,8 +274,8 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *agentstud
 	return agentWS
 }
 
-// convertToSessionLayout converts agentstudio.CanvasLayout to session.CanvasLayout.
-func convertToSessionLayout(layout *agentstudio.CanvasLayout) *CanvasLayout {
+// convertToSessionLayout converts workspace.CanvasLayout to session.CanvasLayout.
+func convertToSessionLayout(layout *workspace.CanvasLayout) *CanvasLayout {
 	if layout == nil {
 		return nil
 	}
@@ -339,57 +339,57 @@ func convertToSessionLayout(layout *agentstudio.CanvasLayout) *CanvasLayout {
 	return sessionLayout
 }
 
-// convertToAgentStudioLayout converts session.CanvasLayout to agentstudio.CanvasLayout.
-func convertToAgentStudioLayout(layout *CanvasLayout) *agentstudio.CanvasLayout {
+// convertToAgentStudioLayout converts session.CanvasLayout to workspace.CanvasLayout.
+func convertToAgentStudioLayout(layout *CanvasLayout) *workspace.CanvasLayout {
 	if layout == nil {
 		return nil
 	}
 
-	agentLayout := &agentstudio.CanvasLayout{
+	agentLayout := &workspace.CanvasLayout{
 		Scale:   layout.Scale,
 		OffsetX: layout.OffsetX,
 		OffsetY: layout.OffsetY,
 	}
 
 	if layout.TaskPositions != nil {
-		agentLayout.TaskPositions = make(map[string]agentstudio.Position)
+		agentLayout.TaskPositions = make(map[string]workspace.Position)
 		for k, v := range layout.TaskPositions {
-			agentLayout.TaskPositions[k] = agentstudio.Position{X: v.X, Y: v.Y}
+			agentLayout.TaskPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 
 	if layout.AgentPositions != nil {
-		agentLayout.AgentPositions = make(map[string]agentstudio.Position)
+		agentLayout.AgentPositions = make(map[string]workspace.Position)
 		for k, v := range layout.AgentPositions {
-			agentLayout.AgentPositions[k] = agentstudio.Position{X: v.X, Y: v.Y}
+			agentLayout.AgentPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 
 	if layout.AttachmentPositions != nil {
-		agentLayout.AttachmentPositions = make(map[string]agentstudio.Position)
+		agentLayout.AttachmentPositions = make(map[string]workspace.Position)
 		for k, v := range layout.AttachmentPositions {
-			agentLayout.AttachmentPositions[k] = agentstudio.Position{X: v.X, Y: v.Y}
+			agentLayout.AttachmentPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 
 	if layout.SchedulerPositions != nil {
-		agentLayout.SchedulerPositions = make(map[string]agentstudio.Position)
+		agentLayout.SchedulerPositions = make(map[string]workspace.Position)
 		for k, v := range layout.SchedulerPositions {
-			agentLayout.SchedulerPositions[k] = agentstudio.Position{X: v.X, Y: v.Y}
+			agentLayout.SchedulerPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 
 	if layout.StorePositions != nil {
-		agentLayout.StorePositions = make(map[string]agentstudio.Position)
+		agentLayout.StorePositions = make(map[string]workspace.Position)
 		for k, v := range layout.StorePositions {
-			agentLayout.StorePositions[k] = agentstudio.Position{X: v.X, Y: v.Y}
+			agentLayout.StorePositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 
 	if len(layout.WorkflowConnections) > 0 {
-		agentLayout.WorkflowConnections = make([]agentstudio.WorkflowConnectionLayout, len(layout.WorkflowConnections))
+		agentLayout.WorkflowConnections = make([]workspace.WorkflowConnectionLayout, len(layout.WorkflowConnections))
 		for i, conn := range layout.WorkflowConnections {
-			agentLayout.WorkflowConnections[i] = agentstudio.WorkflowConnectionLayout{
+			agentLayout.WorkflowConnections[i] = workspace.WorkflowConnectionLayout{
 				ID:       conn.ID,
 				From:     conn.From,
 				FromPort: conn.FromPort,
@@ -404,22 +404,22 @@ func convertToAgentStudioLayout(layout *CanvasLayout) *agentstudio.CanvasLayout 
 	return agentLayout
 }
 
-// Ensure WorkspaceStoreAdapter implements agentstudio.Store
-var _ agentstudio.Store = (*WorkspaceStoreAdapter)(nil)
+// Ensure WorkspaceStoreAdapter implements workspace.Store
+var _ workspace.Store = (*WorkspaceStoreAdapter)(nil)
 
 // CreateWorkspaceViaAdapter creates a new workspace through the adapter interface.
 // This is a helper for creating workspaces with proper defaults.
-func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description string, agents []string) (*agentstudio.Workspace, error) {
+func (a *WorkspaceStoreAdapter) CreateWorkspaceViaAdapter(name, description string, agents []string) (*workspace.Workspace, error) {
 	now := time.Now()
-	ws := &agentstudio.Workspace{
+	ws := &workspace.Workspace{
 		ID:          generateID(),
 		Name:        name,
 		Description: description,
 		Agents:      agents,
-		Status:      agentstudio.StatusActive,
+		Status:      workspace.StatusActive,
 		SharedData:  make(map[string]interface{}),
-		Messages:    []agentstudio.AgentMessage{},
-		Tasks:       []agentstudio.Task{},
+		Messages:    []workspace.AgentMessage{},
+		Tasks:       []workspace.Task{},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

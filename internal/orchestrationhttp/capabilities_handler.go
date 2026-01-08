@@ -5,24 +5,24 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // CapabilitiesHandler manages agent capabilities and delegation
 type CapabilitiesHandler struct {
 	agentStore     store.Store
-	workspaceStore agentstudio.Store
+	workspaceStore workspace.Store
 	communicator   *agentcomm.Communicator
-	eventBus       *agentstudio.EventBus
+	eventBus       *workspace.EventBus
 }
 
 // NewCapabilitiesHandler creates a new capabilities handler
-func NewCapabilitiesHandler(agentStore store.Store, workspaceStore agentstudio.Store,
-	communicator *agentcomm.Communicator, eventBus *agentstudio.EventBus) *CapabilitiesHandler {
+func NewCapabilitiesHandler(agentStore store.Store, workspaceStore workspace.Store,
+	communicator *agentcomm.Communicator, eventBus *workspace.EventBus) *CapabilitiesHandler {
 	return &CapabilitiesHandler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,

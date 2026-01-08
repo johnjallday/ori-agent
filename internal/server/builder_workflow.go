@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // initializeWorkspaceStore creates the workspace storage system.
 // Uses the session HybridStore as the underlying storage via an adapter,
 // which unifies workspace data between the Sessions sidebar and Studios page.
 func (b *ServerBuilder) initializeWorkspaceStore() error {
-	var ws agentstudio.Store
+	var ws workspace.Store
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	// Use the session store adapter if available (preferred for unified workspace data)
@@ -56,12 +56,12 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 func (b *ServerBuilder) initializeEventSystem() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	b.server.eventBus = agentstudio.DefaultEventBus()
+	b.server.eventBus = workspace.DefaultEventBus()
 	if verbose {
 		logger.Info("Event bus initialized", logger.Fields{})
 	}
 
-	b.server.notificationService = agentstudio.NewNotificationService(b.server.eventBus, 500)
+	b.server.notificationService = workspace.NewNotificationService(b.server.eventBus, 500)
 	if verbose {
 		logger.Info("Notification service initialized", logger.Fields{})
 	}
@@ -73,20 +73,20 @@ func (b *ServerBuilder) initializeEventSystem() error {
 func (b *ServerBuilder) initializeTaskExecution() error {
 	s := b.server
 
-	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
+	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 	taskHandler.SetEventBus(s.eventBus)
 
-	s.taskExecutor = agentstudio.NewTaskExecutor(s.workspaceStore, taskHandler, agentstudio.ExecutorConfig{
+	s.taskExecutor = workspace.NewTaskExecutor(s.workspaceStore, taskHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
 		MaxConcurrent: 5,
 	})
 	s.taskExecutor.SetEventBus(s.eventBus)
 
-	s.stepExecutor = agentstudio.NewStepExecutor(s.workspaceStore, taskHandler, agentstudio.StepExecutorConfig{
+	s.stepExecutor = workspace.NewStepExecutor(s.workspaceStore, taskHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,
 	})
 
-	s.taskScheduler = agentstudio.NewTaskScheduler(s.workspaceStore, agentstudio.SchedulerConfig{
+	s.taskScheduler = workspace.NewTaskScheduler(s.workspaceStore, workspace.SchedulerConfig{
 		PollInterval: 1 * time.Minute,
 	})
 	s.taskScheduler.SetEventBus(s.eventBus)
@@ -100,7 +100,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
 	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
-	taskHandler := agentstudio.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
+	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 
 	// Create session store adapter for orchestration handler
 	var sessionStoreAdapter orchestrationhttp.SessionStore
@@ -135,13 +135,13 @@ func (b *ServerBuilder) initializeOrchestration() error {
 func (b *ServerBuilder) initializeStudioOrchestrator() error {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
-	llmAdapter := agentstudio.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
-	b.server.studioOrchestrator = agentstudio.NewOrchestrator(b.server.workspaceStore, b.server.st, llmAdapter, b.server.eventBus)
+	llmAdapter := workspace.NewLLMFactoryAdapter(b.server.llmFactory, "openai")
+	b.server.studioOrchestrator = workspace.NewOrchestrator(b.server.workspaceStore, b.server.st, llmAdapter, b.server.eventBus)
 	if verbose {
 		logger.Info("Agent Studio orchestrator initialized", logger.Fields{})
 	}
 
-	b.server.studioHandler = agentstudio.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
+	b.server.studioHandler = workspace.NewHTTPHandler(b.server.workspaceStore, b.server.studioOrchestrator, b.server.eventBus)
 	if verbose {
 		logger.Info("Agent Studio HTTP handler initialized", logger.Fields{})
 	}

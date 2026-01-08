@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -16,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
 	web "github.com/johnjallday/ori-agent/internal/web"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // CoreSystemFacade manages core system dependencies (LLM, client factory, config)
@@ -42,19 +42,19 @@ type PluginSystemFacade struct {
 type StorageSystemFacade struct {
 	AgentStore      store.Store
 	AgentStorePath  string
-	WorkspaceStore  agentstudio.Store
+	WorkspaceStore  workspace.Store
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
 }
 
 // WorkflowSystemFacade manages agent studio and orchestration dependencies
 type WorkflowSystemFacade struct {
-	TaskExecutor        *agentstudio.TaskExecutor
-	StepExecutor        *agentstudio.StepExecutor
-	TaskScheduler       *agentstudio.TaskScheduler
-	EventBus            *agentstudio.EventBus
-	NotificationService *agentstudio.NotificationService
-	StudioOrchestrator  *agentstudio.Orchestrator
+	TaskExecutor        *workspace.TaskExecutor
+	StepExecutor        *workspace.StepExecutor
+	TaskScheduler       *workspace.TaskScheduler
+	EventBus            *workspace.EventBus
+	NotificationService *workspace.NotificationService
+	StudioOrchestrator  *workspace.Orchestrator
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -111,7 +111,7 @@ func NewPluginSystemFacade(
 func NewStorageSystemFacade(
 	agentStore store.Store,
 	agentStorePath string,
-	workspaceStore agentstudio.Store,
+	workspaceStore workspace.Store,
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
 ) *StorageSystemFacade {
@@ -126,12 +126,12 @@ func NewStorageSystemFacade(
 
 // NewWorkflowSystemFacade creates a new workflow system facade
 func NewWorkflowSystemFacade(
-	taskExecutor *agentstudio.TaskExecutor,
-	stepExecutor *agentstudio.StepExecutor,
-	taskScheduler *agentstudio.TaskScheduler,
-	eventBus *agentstudio.EventBus,
-	notificationService *agentstudio.NotificationService,
-	studioOrchestrator *agentstudio.Orchestrator,
+	taskExecutor *workspace.TaskExecutor,
+	stepExecutor *workspace.StepExecutor,
+	taskScheduler *workspace.TaskScheduler,
+	eventBus *workspace.EventBus,
+	notificationService *workspace.NotificationService,
+	studioOrchestrator *workspace.Orchestrator,
 ) *WorkflowSystemFacade {
 	return &WorkflowSystemFacade{
 		TaskExecutor:        taskExecutor,

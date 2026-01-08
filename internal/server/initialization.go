@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -19,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // loadDefaultSettings returns the default server settings configuration.
@@ -279,8 +279,8 @@ func resolveWorkspaceDir() string {
 }
 
 // createWorkspaceStore creates a new file-based workspace storage system.
-func createWorkspaceStore(workspaceDir string) (agentstudio.Store, error) {
-	ws, err := agentstudio.NewFileStore(workspaceDir)
+func createWorkspaceStore(workspaceDir string) (workspace.Store, error) {
+	ws, err := workspace.NewFileStore(workspaceDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create workspace store: %w", err)
 	}

@@ -9,23 +9,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // StreamingHandler manages SSE streaming endpoints
 type StreamingHandler struct {
-	workspaceStore agentstudio.Store
+	workspaceStore workspace.Store
 	orchestrator   *orchestration.Orchestrator
-	eventBus       *agentstudio.EventBus
+	eventBus       *workspace.EventBus
 }
 
 // NewStreamingHandler creates a new streaming handler
-func NewStreamingHandler(workspaceStore agentstudio.Store,
+func NewStreamingHandler(workspaceStore workspace.Store,
 	orchestrator *orchestration.Orchestrator,
-	eventBus *agentstudio.EventBus) *StreamingHandler {
+	eventBus *workspace.EventBus) *StreamingHandler {
 	return &StreamingHandler{
 		workspaceStore: workspaceStore,
 		orchestrator:   orchestrator,
@@ -107,10 +107,10 @@ func (sh *StreamingHandler) WorkflowStatusStreamHandler(w http.ResponseWriter, r
 // streamEventsFromBus streams events using the event bus (real-time)
 func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, workspaceID string) {
 	// Create event channel
-	eventChan := make(chan agentstudio.Event, 50)
+	eventChan := make(chan workspace.Event, 50)
 
 	// Subscribe to workspace events
-	subID := sh.eventBus.SubscribeToWorkspace(workspaceID, func(event agentstudio.Event) {
+	subID := sh.eventBus.SubscribeToWorkspace(workspaceID, func(event workspace.Event) {
 		select {
 		case eventChan <- event:
 		default:
@@ -159,7 +159,7 @@ func (sh *StreamingHandler) streamEventsFromBus(ctx context.Context, w http.Resp
 			flusher.Flush()
 
 			// Check for completion events
-			if event.Type == agentstudio.EventWorkspaceCompleted || event.Type == agentstudio.EventWorkflowCompleted {
+			if event.Type == workspace.EventWorkspaceCompleted || event.Type == workspace.EventWorkflowCompleted {
 				logger.Info("Workspace completed, closing SSE stream", logger.Fields{"workspace_id": workspaceID})
 				return
 			}
@@ -309,10 +309,10 @@ func (sh *StreamingHandler) ProgressStreamHandler(w http.ResponseWriter, r *http
 	}
 
 	// Create event channel
-	eventChan := make(chan agentstudio.Event, 100)
+	eventChan := make(chan workspace.Event, 100)
 
 	// Subscribe to workspace events
-	subID := sh.eventBus.SubscribeToWorkspace(workspaceID, func(event agentstudio.Event) {
+	subID := sh.eventBus.SubscribeToWorkspace(workspaceID, func(event workspace.Event) {
 		select {
 		case eventChan <- event:
 		default:
