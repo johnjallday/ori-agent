@@ -83,6 +83,7 @@ type PluginConfig struct {
 	Config       *PluginConfigSection `yaml:"config,omitempty"`
 	Tool         *YAMLToolDefinition  `yaml:"tool_definition,omitempty"`
 	AcceptsFiles *AcceptsFilesSection `yaml:"accepts_files,omitempty"`
+	Templates    []string             `yaml:"templates,omitempty"`
 	WebPages     []string             `yaml:"web_pages,omitempty"`
 }
 
@@ -114,6 +115,10 @@ type TemplateData struct {
 	WebPages        []string
 	WebPageHandlers []OperationInfo // Web page handlers (reusing OperationInfo)
 	HasWebPages     bool
+
+	// Template embedding
+	Templates    []string
+	HasTemplates bool
 }
 
 // OperationInfo holds info about an operation for code generation
@@ -341,6 +346,10 @@ func generateCode(pkgName string, config *PluginConfig) (string, error) {
 		WebPages:        config.WebPages,
 		WebPageHandlers: buildWebPageHandlers(config.WebPages),
 		HasWebPages:     len(config.WebPages) > 0,
+
+		// Template embedding
+		Templates:    config.Templates,
+		HasTemplates: len(config.Templates) > 0,
 	}
 
 	// Execute template
@@ -437,7 +446,11 @@ var codeTemplate = template.Must(template.New("plugin").Parse(`// Code generated
 package {{.PackageName}}
 
 import (
+{{- if .HasTemplates}}
+	"embed"
+{{- else}}
 	_ "embed"
+{{- end}}
 	"context"
 	"encoding/json"
 	"fmt"
@@ -463,6 +476,13 @@ var (
 //go:embed plugin.yaml
 var configYAML string
 
+{{- if .HasTemplates}}
+{{- range .Templates}}
+//go:embed {{.}}
+{{- end}}
+var templatesFS embed.FS
+
+{{- end}}
 // {{.ParamsStruct}} represents the parameters for this plugin
 type {{.ParamsStruct}} struct {
 {{- range .Fields}}

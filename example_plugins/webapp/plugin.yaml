@@ -33,6 +33,8 @@ config:
 
 web_pages:
   - dashboard
+templates:
+  - templates
 
 tool_definition:
   description: "Example tool with web interface. Manages a simple list of items."
@@ -56,3 +58,24 @@ tool_definition:
       type: string
       description: "Description of the item (for add_item operation)"
       required: false
+  operations:
+    add_item:
+      parameters:
+        - name: item_name
+          type: string
+          description: "Name of the item"
+          required: true
+        - name: item_description
+          type: string
+          description: "Description of the item"
+          required: false
+    list_items:
+      parameters: []
+    delete_item:
+      parameters:
+        - name: item_name
+          type: string
+          description: "Name of the item"
+          required: true
+    open_dashboard:
+      parameters: []

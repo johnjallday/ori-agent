@@ -97,6 +97,8 @@ type PluginConfig struct {
 	Requirements YAMLRequirements    `yaml:"requirements,omitempty"`
 	Config       YAMLConfig          `yaml:"config,omitempty"`
 	Tool         *YAMLToolDefinition `yaml:"tool_definition,omitempty"` // Optional tool definition
+	Templates    []string            `yaml:"templates,omitempty"`
+	WebPages     []string            `yaml:"web_pages,omitempty"`
 }
 
 // readPluginConfig parses and validates plugin configuration from embedded YAML.

@@ -4,15 +4,11 @@ package main
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
-
-//go:embed templates
-var templatesFS embed.FS
 
 // Item represents a simple item in our list
 type Item struct {
@@ -26,48 +22,21 @@ type WebappPluginTool struct {
 	pluginapi.BasePlugin
 }
 
-// OperationHandler is a function that handles a specific operation
-type OperationHandler func(t *WebappPluginTool, params *Params) (string, error)
-
-// operationRegistry maps operation names to their handler functions
-var operationRegistry = map[string]OperationHandler{
-	"add_item":       handleAddItem,
-	"list_items":     handleListItems,
-	"delete_item":    handleDeleteItem,
-	"open_dashboard": handleOpenDashboard,
-}
-
-// Note: Definition() is inherited from BasePlugin, which automatically reads from plugin.yaml
-// Note: Call() is auto-generated in webapp_generated.go from plugin.yaml
-// Note: Compile-time PluginTool check is in webapp_generated.go
-
-// Execute contains the business logic - called by the generated Call() method
-func (t *WebappPluginTool) Execute(ctx context.Context, params *Params) (string, error) {
-	// Look up handler in registry
-	handler, ok := operationRegistry[params.Operation]
-	if !ok {
-		return "", fmt.Errorf("unknown operation: %s. Valid operations: add_item, list_items, delete_item, open_dashboard", params.Operation)
-	}
-
-	// Execute the handler
-	return handler(t, params)
-}
-
 // Operation handlers
 
-func handleAddItem(t *WebappPluginTool, params *Params) (string, error) {
+func handleAddItem(ctx context.Context, t *WebappPluginTool, params *Params) (string, error) {
 	return t.addItem(params.ItemName, params.ItemDescription)
 }
 
-func handleListItems(t *WebappPluginTool, params *Params) (string, error) {
+func handleListItems(ctx context.Context, t *WebappPluginTool, params *Params) (string, error) {
 	return t.listItems()
 }
 
-func handleDeleteItem(t *WebappPluginTool, params *Params) (string, error) {
+func handleDeleteItem(ctx context.Context, t *WebappPluginTool, params *Params) (string, error) {
 	return t.deleteItem(params.ItemName)
 }
 
-func handleOpenDashboard(t *WebappPluginTool, params *Params) (string, error) {
+func handleOpenDashboard(ctx context.Context, t *WebappPluginTool, params *Params) (string, error) {
 	return t.openDashboard()
 }
 

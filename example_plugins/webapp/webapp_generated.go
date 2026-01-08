@@ -4,7 +4,7 @@ package main
 
 import (
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
 
@@ -26,11 +26,36 @@ var (
 //go:embed plugin.yaml
 var configYAML string
 
+//go:embed templates
+var templatesFS embed.FS
+
 // Params represents the parameters for this plugin
 type Params struct {
 	Operation       string `json:"operation"`        // Operation to perform
 	ItemName        string `json:"item_name"`        // Name of the item (for add_item and delete_item operations)
 	ItemDescription string `json:"item_description"` // Description of the item (for add_item operation)
+}
+
+// OperationHandler is a function that handles a specific operation
+type OperationHandler func(ctx context.Context, t *WebappPluginTool, params *Params) (string, error)
+
+// operationRegistry maps operation names to their handler functions
+// Handler functions must be defined by you with the naming convention handle{PascalCase}
+var operationRegistry = map[string]OperationHandler{
+	"add_item":       handleAddItem,
+	"delete_item":    handleDeleteItem,
+	"list_items":     handleListItems,
+	"open_dashboard": handleOpenDashboard,
+}
+
+// Execute dispatches to the appropriate operation handler
+// This method is auto-generated from plugin.yaml operations
+func (t *WebappPluginTool) Execute(ctx context.Context, params *Params) (string, error) {
+	handler, ok := operationRegistry[params.Operation]
+	if !ok {
+		return "", fmt.Errorf("unknown operation: %s. Valid operations: add_item, delete_item, list_items, open_dashboard", params.Operation)
+	}
+	return handler(ctx, t, params)
 }
 
 // Call implements the PluginTool interface
