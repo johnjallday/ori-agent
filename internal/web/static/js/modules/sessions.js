@@ -82,6 +82,7 @@ const sessionManager = {
     this.setupKeyboardShortcuts();
     this.initChatAgentBar();
     this.initMainTaskPanel();
+    this.initScheduledTasksModal();
     await this.loadSessions();
     await this.loadFolders();
     await this.loadTags();
@@ -398,6 +399,9 @@ const sessionManager = {
       // Load tasks for all workspaces
       await this.loadAllWorkspaceTasks(this.folders);
 
+      // Load scheduled tasks for all workspaces
+      await this.loadAllWorkspaceScheduledTasks(this.folders);
+
       this.renderFolderTree();
     } catch (error) {
       console.error('Failed to load folders:', error);
@@ -665,6 +669,15 @@ const sessionManager = {
         this.openTaskModalForWorkspace(workspaceId);
       });
     });
+
+    // Bind scheduled tasks section events
+    container.querySelectorAll('.folder-schedules-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const workspaceId = header.dataset.workspaceId;
+        this.openScheduledTasksPanel(workspaceId);
+      });
+    });
   },
 
   // Render folder items recursively
@@ -702,6 +715,26 @@ const sessionManager = {
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                 </svg>
               </button>
+            </div>
+          </div>
+        `
+        : '';
+
+      // Get scheduled tasks for this workspace
+      const workspaceScheduledTasks = this.scheduledTasksByWorkspace?.get(folder.id) || [];
+      const scheduledTaskCount = workspaceScheduledTasks.length;
+      const enabledScheduleCount = workspaceScheduledTasks.filter(st => st.enabled).length;
+
+      // Schedules section - clickable header that opens the scheduled tasks panel
+      const schedulesHtml = scheduledTaskCount > 0
+        ? `
+          <div class="folder-schedules-wrapper ${isCollapsed ? 'collapsed' : ''}">
+            <div class="folder-schedules-header" data-workspace-id="${folder.id}">
+              <svg class="folder-schedules-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+              </svg>
+              <span class="folder-schedules-header-text">Schedules</span>
+              <span class="folder-schedules-count">${enabledScheduleCount}/${scheduledTaskCount}</span>
             </div>
           </div>
         `
@@ -749,6 +782,7 @@ const sessionManager = {
         ${notesHtml}
         ${sessionsHtml}
         ${tasksHtml}
+        ${schedulesHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
     }).join('');
@@ -3993,6 +4027,8 @@ const sessionManager = {
   workspaceTasks: [],
   taskCounts: { total: 0, pending: 0, completed: 0 },
   tasksByWorkspace: new Map(), // Tasks keyed by workspace (folder) ID
+  scheduledTasksByWorkspace: new Map(), // Scheduled tasks keyed by workspace (folder) ID
+  currentScheduledTaskWorkspaceId: null, // Workspace context for scheduled task operations
 
   // Load tasks for current session (from workspace/orchestration)
   async loadSessionTasks() {
@@ -4060,6 +4096,51 @@ const sessionManager = {
       await this.loadWorkspaceTasks(folder.id);
       if (folder.children && folder.children.length > 0) {
         await this.loadAllWorkspaceTasks(folder.children);
+      }
+    }
+  },
+
+  // Load scheduled tasks for a workspace (folder) using orchestration API
+  // Now returns tasks that have schedules (not legacy ScheduledTask entities)
+  async loadWorkspaceScheduledTasks(workspaceId) {
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      const data = await response.json();
+      const allTasks = data.tasks || [];
+      // Filter tasks that have schedules - normalize to consistent format
+      const scheduledTasks = allTasks
+        .filter(task => task.schedule != null)
+        .map(task => ({
+          id: task.id,
+          name: task.schedule_name || task.description,
+          description: task.description,
+          enabled: task.schedule_enabled,
+          schedule: task.schedule,
+          next_run: task.next_run,
+          last_run: task.last_run,
+          execution_count: task.execution_count,
+          failure_count: task.failure_count,
+          execution_history: task.execution_history,
+          // Keep reference to original task
+          task_id: task.id,
+          from: task.from,
+          to: task.to
+        }));
+      this.scheduledTasksByWorkspace.set(workspaceId, scheduledTasks);
+      return scheduledTasks;
+    } catch (error) {
+      console.error('Failed to load workspace scheduled tasks:', error);
+      return [];
+    }
+  },
+
+  // Load scheduled tasks for all workspaces recursively
+  async loadAllWorkspaceScheduledTasks(folders) {
+    for (const folder of folders) {
+      await this.loadWorkspaceScheduledTasks(folder.id);
+      if (folder.children && folder.children.length > 0) {
+        await this.loadAllWorkspaceScheduledTasks(folder.children);
       }
     }
   },
@@ -4266,6 +4347,309 @@ const sessionManager = {
       console.error('Failed to open workspace tasks:', error);
       this.showToast('Failed to open workspace tasks', 'error');
     }
+  },
+
+  // =============================================================================
+  // Scheduled Tasks Panel Functions
+  // =============================================================================
+
+  // Open scheduled tasks panel for a workspace
+  async openScheduledTasksPanel(workspaceId) {
+    try {
+      // Load scheduled tasks from workspace
+      const response = await fetch(`/api/orchestration/scheduled-tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load scheduled tasks');
+
+      const data = await response.json();
+      const scheduledTasks = data.scheduled_tasks || [];
+
+      this.currentScheduledTaskWorkspaceId = workspaceId;
+      this.showScheduledTasksModal(scheduledTasks, workspaceId);
+    } catch (error) {
+      console.error('Failed to open scheduled tasks:', error);
+      this.showToast('Failed to load scheduled tasks', 'error');
+    }
+  },
+
+  // Show scheduled tasks modal
+  showScheduledTasksModal(scheduledTasks, workspaceId) {
+    const modal = document.getElementById('scheduledTasksModal');
+    if (!modal) return;
+
+    const folder = this.findFolderById(workspaceId, this.folders);
+    const workspaceName = folder ? folder.name : 'Workspace';
+
+    // Set title
+    const titleEl = document.getElementById('scheduledTasksModalTitle');
+    if (titleEl) {
+      titleEl.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+          <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+        </svg>
+        Schedules - ${this.escapeHtml(workspaceName)}
+      `;
+    }
+
+    // Render list
+    this.renderScheduledTasksList(scheduledTasks);
+
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  },
+
+  // Render scheduled tasks list
+  renderScheduledTasksList(scheduledTasks) {
+    const listContainer = document.getElementById('scheduledTasksList');
+    const emptyState = document.getElementById('scheduledTasksEmpty');
+
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '';
+
+    if (scheduledTasks.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+
+    scheduledTasks.forEach(st => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'scheduled-task-item';
+      itemEl.dataset.scheduleId = st.id;
+
+      const scheduleDesc = this.getScheduleDescription(st.schedule);
+      const nextRun = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
+      const statusClass = st.enabled ? 'enabled' : 'disabled';
+
+      itemEl.innerHTML = `
+        <div class="scheduled-task-status-indicator ${statusClass}"></div>
+        <div class="scheduled-task-content">
+          <div class="scheduled-task-name">${this.escapeHtml(st.name)}</div>
+          <div class="scheduled-task-desc">${this.escapeHtml(st.description || '')}</div>
+          <div class="scheduled-task-meta">
+            <span class="scheduled-task-schedule">${scheduleDesc}</span>
+            ${st.enabled ? `<span class="scheduled-task-next">Next: ${nextRun}</span>` : ''}
+          </div>
+        </div>
+        <div class="scheduled-task-actions">
+          <button class="scheduled-task-toggle" title="${st.enabled ? 'Disable' : 'Enable'}">
+            ${st.enabled ? '⏸' : '▶'}
+          </button>
+          <button class="scheduled-task-trigger" title="Trigger Now" ${!st.enabled ? 'disabled' : ''}>
+            ⚡
+          </button>
+        </div>
+      `;
+
+      // Bind click for details
+      itemEl.addEventListener('click', (e) => {
+        if (!e.target.closest('button')) {
+          this.showScheduledTaskDetails(st);
+        }
+      });
+
+      // Toggle button
+      itemEl.querySelector('.scheduled-task-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleScheduledTaskEnabled(st.id, !st.enabled);
+      });
+
+      // Trigger button
+      itemEl.querySelector('.scheduled-task-trigger')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.triggerScheduledTask(st.id);
+      });
+
+      listContainer.appendChild(itemEl);
+    });
+  },
+
+  // Get human-readable schedule description
+  getScheduleDescription(schedule) {
+    if (!schedule) return 'No schedule';
+
+    switch (schedule.type) {
+      case 'daily':
+        return `Daily at ${schedule.time_of_day || '00:00'}`;
+      case 'weekly':
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        return `Weekly on ${days[schedule.day_of_week || 0]} at ${schedule.time_of_day || '00:00'}`;
+      case 'interval':
+        // Interval is in nanoseconds
+        const totalSeconds = Math.floor((schedule.interval || 0) / 1000000000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        if (hours > 0) return `Every ${hours} hour${hours > 1 ? 's' : ''}`;
+        return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      case 'once':
+        return schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'Once';
+      case 'cron':
+        return `Cron: ${schedule.cron_expr || 'custom'}`;
+      default:
+        return 'Custom schedule';
+    }
+  },
+
+  // Show scheduled task details modal
+  showScheduledTaskDetails(st) {
+    const modal = document.getElementById('scheduledTaskDetailModal');
+    if (!modal) return;
+
+    // Populate details
+    document.getElementById('scheduleDetailName').textContent = st.name;
+    document.getElementById('scheduleDetailDesc').textContent = st.description || 'No description';
+
+    const statusEl = document.getElementById('scheduleDetailStatus');
+    statusEl.textContent = st.enabled ? 'Enabled' : 'Disabled';
+    statusEl.className = 'schedule-detail-badge ' + (st.enabled ? 'badge-enabled' : 'badge-disabled');
+
+    document.getElementById('scheduleDetailSchedule').textContent = this.getScheduleDescription(st.schedule);
+    document.getElementById('scheduleDetailNextRun').textContent = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
+    document.getElementById('scheduleDetailLastRun').textContent = st.last_run ? new Date(st.last_run).toLocaleString() : 'Never';
+    document.getElementById('scheduleDetailExecutions').textContent = `${st.execution_count || 0} total, ${st.failure_count || 0} failures`;
+
+    // Render execution history
+    this.renderExecutionHistory(st.execution_history || []);
+
+    // Store current schedule ID for actions
+    modal.dataset.scheduleId = st.id;
+    modal.dataset.enabled = st.enabled;
+
+    // Update toggle button text
+    const toggleBtn = document.getElementById('scheduleDetailToggleBtn');
+    if (toggleBtn) toggleBtn.textContent = st.enabled ? 'Disable' : 'Enable';
+
+    modal.style.display = 'flex';
+  },
+
+  // Render execution history
+  renderExecutionHistory(history) {
+    const container = document.getElementById('scheduleDetailHistory');
+    if (!container) return;
+
+    if (!history || history.length === 0) {
+      container.innerHTML = '<div class="history-empty">No execution history</div>';
+      return;
+    }
+
+    // Show last 10 executions (reversed to show most recent first)
+    const recentHistory = history.slice().reverse().slice(0, 10);
+
+    container.innerHTML = recentHistory.map(exec => `
+      <div class="history-item ${exec.status}">
+        <span class="history-time">${new Date(exec.executed_at).toLocaleString()}</span>
+        <span class="history-status">${exec.status === 'success' ? '✓' : '✗'}</span>
+        ${exec.error ? `<span class="history-error" title="${this.escapeHtml(exec.error)}">${this.escapeHtml(exec.error.substring(0, 30))}...</span>` : ''}
+      </div>
+    `).join('');
+  },
+
+  // Toggle scheduled task enabled/disabled
+  // Now updates the task's schedule_enabled field
+  async toggleScheduledTaskEnabled(taskId, enable) {
+    const action = enable ? 'enable' : 'disable';
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          schedule_enabled: enable
+        })
+      });
+
+      if (!response.ok) throw new Error(`Failed to ${action} task schedule`);
+
+      // Reload and refresh
+      if (this.currentScheduledTaskWorkspaceId) {
+        await this.loadWorkspaceScheduledTasks(this.currentScheduledTaskWorkspaceId);
+        const tasks = this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
+        this.renderScheduledTasksList(tasks);
+        this.renderFolderTree();
+      }
+
+      this.showToast(`Schedule ${enable ? 'enabled' : 'disabled'}`, 'success');
+    } catch (error) {
+      console.error(`Failed to ${action} task schedule:`, error);
+      this.showToast(`Failed to ${action} schedule`, 'error');
+    }
+  },
+
+  // Trigger scheduled task manually (execute the task now)
+  async triggerScheduledTask(taskId) {
+    if (!confirm('Execute this scheduled task now?')) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+
+      if (!response.ok) throw new Error('Failed to trigger scheduled task');
+
+      const data = await response.json();
+      this.showToast(`Task triggered! ID: ${data.task_id?.substring(0, 8)}...`, 'success');
+    } catch (error) {
+      console.error('Failed to trigger scheduled task:', error);
+      this.showToast('Failed to trigger schedule', 'error');
+    }
+  },
+
+  // Close scheduled tasks modal
+  closeScheduledTasksModal() {
+    const modal = document.getElementById('scheduledTasksModal');
+    if (modal) {
+      modal.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  },
+
+  // Close scheduled task detail modal
+  closeScheduledTaskDetailModal() {
+    const modal = document.getElementById('scheduledTaskDetailModal');
+    if (modal) modal.style.display = 'none';
+  },
+
+  // Initialize scheduled tasks modal events
+  initScheduledTasksModal() {
+    // Close buttons
+    document.getElementById('scheduledTasksModalClose')?.addEventListener('click', () => this.closeScheduledTasksModal());
+    document.getElementById('scheduledTasksModalBackdrop')?.addEventListener('click', () => this.closeScheduledTasksModal());
+
+    // Detail modal close
+    document.getElementById('scheduleDetailClose')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+    document.getElementById('scheduleDetailBackdrop')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+
+    // Detail modal actions
+    document.getElementById('scheduleDetailToggleBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('scheduledTaskDetailModal');
+      if (modal) {
+        const scheduleId = modal.dataset.scheduleId;
+        const currentlyEnabled = modal.dataset.enabled === 'true';
+        this.toggleScheduledTaskEnabled(scheduleId, !currentlyEnabled);
+        this.closeScheduledTaskDetailModal();
+      }
+    });
+
+    document.getElementById('scheduleDetailTriggerBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('scheduledTaskDetailModal');
+      if (modal) {
+        const scheduleId = modal.dataset.scheduleId;
+        this.triggerScheduledTask(scheduleId);
+      }
+    });
+
+    // Escape key handlers
+    document.getElementById('scheduledTasksModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeScheduledTasksModal();
+    });
+
+    document.getElementById('scheduledTaskDetailModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeScheduledTaskDetailModal();
+    });
   },
 
   // Helper to find folder by ID recursively

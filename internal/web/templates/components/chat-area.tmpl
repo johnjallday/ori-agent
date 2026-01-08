@@ -131,6 +131,91 @@
   </div>
 </div>
 
+<!-- Scheduled Tasks List Modal -->
+<div id="scheduledTasksModal" class="scheduled-tasks-modal" style="display: none;">
+  <div class="scheduled-tasks-modal-backdrop" id="scheduledTasksModalBackdrop"></div>
+  <div class="scheduled-tasks-modal-dialog">
+    <div class="scheduled-tasks-modal-content">
+      <div class="scheduled-tasks-modal-header">
+        <h6 class="scheduled-tasks-modal-title" id="scheduledTasksModalTitle">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+            <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+          </svg>
+          Workspace Schedules
+        </h6>
+        <button type="button" class="scheduled-tasks-modal-close" id="scheduledTasksModalClose" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="scheduled-tasks-modal-body">
+        <div id="scheduledTasksList" class="scheduled-tasks-list">
+          <!-- Scheduled tasks rendered here -->
+        </div>
+        <div id="scheduledTasksEmpty" class="scheduled-tasks-empty" style="display: none;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="scheduled-tasks-empty-icon">
+            <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+          </svg>
+          <p>No scheduled tasks</p>
+          <span>Create schedules from the Dashboard</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scheduled Task Detail Modal -->
+<div id="scheduledTaskDetailModal" class="schedule-detail-modal" style="display: none;">
+  <div class="schedule-detail-backdrop" id="scheduleDetailBackdrop"></div>
+  <div class="schedule-detail-content">
+    <div class="schedule-detail-header">
+      <h6 class="schedule-detail-title" id="scheduleDetailName">Schedule Name</h6>
+      <button type="button" class="schedule-detail-close" id="scheduleDetailClose" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="schedule-detail-body">
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Description</span>
+        <span class="schedule-detail-value" id="scheduleDetailDesc">-</span>
+      </div>
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Status</span>
+        <span class="schedule-detail-badge" id="scheduleDetailStatus">Enabled</span>
+      </div>
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Schedule</span>
+        <span class="schedule-detail-value" id="scheduleDetailSchedule">-</span>
+      </div>
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Next Run</span>
+        <span class="schedule-detail-value" id="scheduleDetailNextRun">-</span>
+      </div>
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Last Run</span>
+        <span class="schedule-detail-value" id="scheduleDetailLastRun">-</span>
+      </div>
+      <div class="schedule-detail-row">
+        <span class="schedule-detail-label">Executions</span>
+        <span class="schedule-detail-value" id="scheduleDetailExecutions">0 total, 0 failures</span>
+      </div>
+      <div class="schedule-detail-section">
+        <span class="schedule-detail-label">Execution History</span>
+        <div class="schedule-detail-history" id="scheduleDetailHistory">
+          <!-- History rendered here -->
+        </div>
+      </div>
+    </div>
+    <div class="schedule-detail-footer">
+      <button type="button" class="schedule-detail-btn schedule-detail-btn-toggle" id="scheduleDetailToggleBtn">Disable</button>
+      <button type="button" class="schedule-detail-btn schedule-detail-btn-trigger" id="scheduleDetailTriggerBtn">Trigger Now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modern-card p-3" id="inputContainer">
   <!-- File Upload Area -->
   <div id="uploadedFilesArea" class="mb-3" style="display: none;">

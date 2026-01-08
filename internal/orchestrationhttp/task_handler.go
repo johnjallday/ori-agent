@@ -96,16 +96,19 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID            string   `json:"studio_id"`
-		From                   string   `json:"from"`
-		To                     string   `json:"to"`
-		AssignedNodeID         string   `json:"assigned_node_id"`
-		Description            string   `json:"description"`
-		Details                string   `json:"details"`
-		Priority               int      `json:"priority"`
-		InputTaskIDs           []string `json:"input_task_ids"`
-		ResultCombinationMode  string   `json:"result_combination_mode"`
-		CombinationInstruction string   `json:"combination_instruction"`
+		WorkspaceID            string                    `json:"studio_id"`
+		From                   string                    `json:"from"`
+		To                     string                    `json:"to"`
+		AssignedNodeID         string                    `json:"assigned_node_id"`
+		Description            string                    `json:"description"`
+		Details                string                    `json:"details"`
+		Priority               int                       `json:"priority"`
+		InputTaskIDs           []string                  `json:"input_task_ids"`
+		ResultCombinationMode  string                    `json:"result_combination_mode"`
+		CombinationInstruction string                    `json:"combination_instruction"`
+		Schedule               *workspace.ScheduleConfig `json:"schedule"`
+		ScheduleEnabled        bool                      `json:"schedule_enabled"`
+		ScheduleName           string                    `json:"schedule_name"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -132,15 +135,24 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Create task
 	task := workspace.Task{
-		WorkspaceID:    req.WorkspaceID,
-		From:           req.From,
-		To:             req.To,
-		AssignedNodeID: req.AssignedNodeID,
-		Description:    req.Description,
-		Details:        req.Details,
-		Priority:       req.Priority,
-		InputTaskIDs:   req.InputTaskIDs,
-		Status:         workspace.TaskStatusPending,
+		WorkspaceID:     req.WorkspaceID,
+		From:            req.From,
+		To:              req.To,
+		AssignedNodeID:  req.AssignedNodeID,
+		Description:     req.Description,
+		Details:         req.Details,
+		Priority:        req.Priority,
+		InputTaskIDs:    req.InputTaskIDs,
+		Status:          workspace.TaskStatusPending,
+		Schedule:        req.Schedule,
+		ScheduleEnabled: req.ScheduleEnabled,
+		ScheduleName:    req.ScheduleName,
+	}
+
+	// Calculate NextRun if schedule is enabled
+	if task.Schedule != nil && task.ScheduleEnabled {
+		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Now())
+		task.NextRun = nextRun
 	}
 
 	// Add task to workspace
@@ -194,15 +206,18 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID                 string   `json:"task_id"`
-		Status                 string   `json:"status"`
-		Result                 string   `json:"result"`
-		Error                  string   `json:"error"`
-		To                     *string  `json:"to"`                      // Optional: reassign task to different agent
-		AssignedNodeID         *string  `json:"assigned_node_id"`        // Optional: target specific agent instance/node
-		InputTaskIDs           []string `json:"input_task_ids"`          // Optional: update input task connections
-		ResultCombinationMode  *string  `json:"result_combination_mode"` // Optional: update combination mode
-		CombinationInstruction *string  `json:"combination_instruction"` // Optional: update combination instruction
+		TaskID                 string                    `json:"task_id"`
+		Status                 string                    `json:"status"`
+		Result                 string                    `json:"result"`
+		Error                  string                    `json:"error"`
+		To                     *string                   `json:"to"`                      // Optional: reassign task to different agent
+		AssignedNodeID         *string                   `json:"assigned_node_id"`        // Optional: target specific agent instance/node
+		InputTaskIDs           []string                  `json:"input_task_ids"`          // Optional: update input task connections
+		ResultCombinationMode  *string                   `json:"result_combination_mode"` // Optional: update combination mode
+		CombinationInstruction *string                   `json:"combination_instruction"` // Optional: update combination instruction
+		Schedule               *workspace.ScheduleConfig `json:"schedule"`                // Optional: schedule configuration
+		ScheduleEnabled        *bool                     `json:"schedule_enabled"`        // Optional: enable/disable schedule
+		ScheduleName           *string                   `json:"schedule_name"`           // Optional: schedule name
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -220,8 +235,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Handle task updates (input connections, reassignment, or combination mode)
-	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil {
+	// Handle task updates (input connections, reassignment, combination mode, or schedule)
+	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || req.Schedule != nil || req.ScheduleEnabled != nil || req.ScheduleName != nil {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
 		// Get task and workspace using helper
@@ -258,6 +273,33 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 						return
 					}
 				}
+
+				// Update schedule configuration
+				if req.Schedule != nil {
+					ws.Tasks[i].Schedule = req.Schedule
+					// Calculate initial NextRun if schedule is being set
+					if ws.Tasks[i].ScheduleEnabled {
+						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*req.Schedule, time.Now())
+					}
+					logger.Debug("Updated task schedule", logger.Fields{"task_id": req.TaskID})
+				}
+
+				// Update schedule enabled state
+				if req.ScheduleEnabled != nil {
+					ws.Tasks[i].ScheduleEnabled = *req.ScheduleEnabled
+					// Calculate NextRun when enabling, clear when disabling
+					if *req.ScheduleEnabled && ws.Tasks[i].Schedule != nil {
+						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*ws.Tasks[i].Schedule, time.Now())
+					} else if !*req.ScheduleEnabled {
+						ws.Tasks[i].NextRun = nil
+					}
+					logger.Debug("Updated task schedule enabled", logger.Fields{"task_id": req.TaskID, "enabled": *req.ScheduleEnabled})
+				}
+
+				// Update schedule name
+				if req.ScheduleName != nil {
+					ws.Tasks[i].ScheduleName = *req.ScheduleName
+				}
 				break
 			}
 		}
@@ -291,6 +333,15 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			}
 			if req.AssignedNodeID != nil {
 				eventData["assigned_node_id"] = *req.AssignedNodeID
+			}
+			if req.Schedule != nil {
+				eventData["schedule"] = req.Schedule
+			}
+			if req.ScheduleEnabled != nil {
+				eventData["schedule_enabled"] = *req.ScheduleEnabled
+			}
+			if req.ScheduleName != nil {
+				eventData["schedule_name"] = *req.ScheduleName
 			}
 
 			th.eventBus.Publish(workspace.Event{

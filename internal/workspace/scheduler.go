@@ -78,19 +78,19 @@ func (ts *TaskScheduler) pollLoop() {
 	}
 }
 
-// checkScheduledTasks checks all workspaces for scheduled tasks that need to run.
+// checkScheduledTasks checks all workspaces for tasks with schedules that need to run.
 // This is the main polling function called on every tick (default: every minute).
 //
 // Execution flow:
 //  1. List all workspaces
 //  2. Filter to active workspaces only
-//  3. For each enabled scheduled task in each workspace:
+//  3. For each task with Schedule != nil && ScheduleEnabled:
 //     a. Check if NextRun time has arrived (now >= NextRun)
 //     b. Validate max_runs limit not exceeded
 //     c. Validate end_date not passed
-//     d. Execute task if all checks pass
+//     d. Reset and re-execute task if all checks pass
 //
-// Note: Uses pointer iteration (&ws.ScheduledTasks[i]) to allow in-place modifications
+// Note: Uses pointer iteration (&ws.Tasks[i]) to allow in-place modifications
 func (ts *TaskScheduler) checkScheduledTasks() {
 	workspaceIDs, err := ts.workspaceStore.List()
 	if err != nil {
@@ -111,29 +111,29 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			continue
 		}
 
-		// Check each enabled scheduled task
+		// Check each task with an enabled schedule
 		// Use pointer iteration to allow in-place modifications of task state
-		for i := range ws.ScheduledTasks {
-			st := &ws.ScheduledTasks[i]
+		for i := range ws.Tasks {
+			task := &ws.Tasks[i]
 
-			// Skip disabled tasks (already completed, failed, or manually disabled)
-			if !st.Enabled {
+			// Skip tasks without schedules or disabled schedules
+			if task.Schedule == nil || !task.ScheduleEnabled {
 				continue
 			}
 
 			// Check if it's time to run (NextRun must be set and in the past/present)
-			if st.NextRun == nil || st.NextRun.After(now) {
+			if task.NextRun == nil || task.NextRun.After(now) {
 				continue
 			}
 
 			// VALIDATION 1: Check if max runs reached
 			// max_runs=0 means unlimited executions
-			if st.Schedule.MaxRuns > 0 && st.ExecutionCount >= st.Schedule.MaxRuns {
-				logger.Debug("📅 Scheduled task reached max runs (), disabling", logger.Fields{"task_id": st.ID, "maxruns": st.Schedule.MaxRuns})
-				st.Enabled = false
-				st.NextRun = nil
-				if err := ws.UpdateScheduledTask(*st); err != nil {
-					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			if task.Schedule.MaxRuns > 0 && task.ExecutionCount >= task.Schedule.MaxRuns {
+				logger.Debug("📅 Task schedule reached max runs, disabling", logger.Fields{"task_id": task.ID, "maxruns": task.Schedule.MaxRuns})
+				task.ScheduleEnabled = false
+				task.NextRun = nil
+				if err := ws.UpdateTask(*task); err != nil {
+					logger.Error("Failed to update task", logger.Fields{"error": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
 					logger.Error("Failed to save workspace", logger.Fields{"error": err})
@@ -143,26 +143,12 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 
 			// VALIDATION 2: Check if end date passed
 			// end_date is optional; nil means no end date
-			if st.Schedule.EndDate != nil && now.After(*st.Schedule.EndDate) {
-				logger.Debug("📅 Scheduled task passed end date, disabling", logger.Fields{"task_id": st.ID})
-				st.Enabled = false
-				st.NextRun = nil
-				if err := ws.UpdateScheduledTask(*st); err != nil {
-					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
-				}
-				if err := ts.workspaceStore.Save(ws); err != nil {
-					logger.Error("Failed to save workspace", logger.Fields{"error": err})
-				}
-				continue
-			}
-
-			// Canvas scheduler nodes must be linked to a task node before execution
-			if st.CanvasNodeID != "" && st.TargetTaskID == "" {
-				logger.Debug("📅 Skipping scheduler execution - no target task linked", logger.Fields{"task_id": st.ID, "canvas_node_id": st.CanvasNodeID})
-				nextRun := ts.calculateNextRun(st.Schedule, now)
-				st.NextRun = nextRun
-				if err := ws.UpdateScheduledTask(*st); err != nil {
-					logger.Error("Failed to update scheduled task", logger.Fields{"task_id": err})
+			if task.Schedule.EndDate != nil && now.After(*task.Schedule.EndDate) {
+				logger.Debug("📅 Task schedule passed end date, disabling", logger.Fields{"task_id": task.ID})
+				task.ScheduleEnabled = false
+				task.NextRun = nil
+				if err := ws.UpdateTask(*task); err != nil {
+					logger.Error("Failed to update task", logger.Fields{"error": err})
 				}
 				if err := ts.workspaceStore.Save(ws); err != nil {
 					logger.Error("Failed to save workspace", logger.Fields{"error": err})
@@ -171,8 +157,175 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			}
 
 			// All checks passed - execute the scheduled task
-			ts.executeScheduledTask(ws, st)
+			ts.executeTaskSchedule(ws, task, now)
 		}
+
+		// Also check legacy ScheduledTasks for backward compatibility during migration
+		ts.checkLegacyScheduledTasks(ws, now)
+	}
+}
+
+// checkLegacyScheduledTasks handles old ScheduledTask entities for backward compatibility
+func (ts *TaskScheduler) checkLegacyScheduledTasks(ws *Workspace, now time.Time) {
+	for i := range ws.ScheduledTasks {
+		st := &ws.ScheduledTasks[i]
+
+		if !st.Enabled {
+			continue
+		}
+
+		if st.NextRun == nil || st.NextRun.After(now) {
+			continue
+		}
+
+		if st.Schedule.MaxRuns > 0 && st.ExecutionCount >= st.Schedule.MaxRuns {
+			st.Enabled = false
+			st.NextRun = nil
+			ws.UpdateScheduledTask(*st)
+			ts.workspaceStore.Save(ws)
+			continue
+		}
+
+		if st.Schedule.EndDate != nil && now.After(*st.Schedule.EndDate) {
+			st.Enabled = false
+			st.NextRun = nil
+			ws.UpdateScheduledTask(*st)
+			ts.workspaceStore.Save(ws)
+			continue
+		}
+
+		if st.CanvasNodeID != "" && st.TargetTaskID == "" {
+			nextRun := ts.calculateNextRun(st.Schedule, now)
+			st.NextRun = nextRun
+			ws.UpdateScheduledTask(*st)
+			ts.workspaceStore.Save(ws)
+			continue
+		}
+
+		ts.executeScheduledTask(ws, st)
+	}
+}
+
+// executeTaskSchedule resets a task and queues it for re-execution based on its schedule.
+// This is the new approach where schedule is directly on the task.
+func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time.Time) {
+	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": task.ID, "name": task.ScheduleName})
+
+	// Validate task is assigned to an agent
+	if task.To == "" || task.To == "unassigned" {
+		ts.recordTaskScheduleFailure(ws, task, fmt.Errorf("task is not assigned to an agent"))
+		return
+	}
+
+	// Don't interrupt in-progress tasks
+	if task.Status == TaskStatusInProgress {
+		ts.recordTaskScheduleFailure(ws, task, fmt.Errorf("task is already in progress"))
+		return
+	}
+
+	// Reset task state for re-execution
+	task.Status = TaskStatusAssigned
+	task.Result = ""
+	task.Error = ""
+	task.Progress = nil
+	task.StartedAt = nil
+	task.CompletedAt = nil
+
+	// Update schedule tracking
+	task.LastRun = &now
+	task.ExecutionCount++
+	task.FailureCount = 0 // Reset failure count on successful trigger
+
+	// Add to execution history
+	execution := TaskExecution{
+		TaskID:     task.ID,
+		ExecutedAt: now,
+		Status:     "success",
+	}
+	task.ExecutionHistory = append(task.ExecutionHistory, execution)
+	if len(task.ExecutionHistory) > 20 {
+		task.ExecutionHistory = task.ExecutionHistory[len(task.ExecutionHistory)-20:]
+	}
+
+	// Calculate next run
+	nextRun := CalculateNextRun(*task.Schedule, now)
+	task.NextRun = nextRun
+
+	// Auto-disable one-time schedules
+	if nextRun == nil {
+		task.ScheduleEnabled = false
+		logger.Info("📅 Task schedule completed (one-time execution), disabling", logger.Fields{"task_id": task.ID})
+	}
+
+	// Save changes
+	if err := ws.UpdateTask(*task); err != nil {
+		logger.Error("Failed to update task", logger.Fields{"error": err})
+		return
+	}
+
+	if err := ts.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		return
+	}
+
+	// Publish events
+	if ts.eventBus != nil {
+		event := NewScheduledTaskEvent(EventScheduledTaskTriggered, ws.ID, task.ID, task.ScheduleName, map[string]interface{}{
+			"task_id":         task.ID,
+			"task_created":    false,
+			"execution_count": task.ExecutionCount,
+			"next_run":        nextRun,
+			"timestamp":       now,
+		})
+		ts.eventBus.Publish(event)
+
+		workspaceEvent := NewWorkspaceEvent(EventWorkspaceUpdated, ws.ID, "scheduler", map[string]interface{}{
+			"task_id":         task.ID,
+			"execution_count": task.ExecutionCount,
+			"next_run":        nextRun,
+		})
+		ts.eventBus.Publish(workspaceEvent)
+	}
+}
+
+// recordTaskScheduleFailure updates task schedule bookkeeping and emits failure events.
+func (ts *TaskScheduler) recordTaskScheduleFailure(ws *Workspace, task *Task, err error) {
+	logger.Error("Failed to execute scheduled task", logger.Fields{"task_id": task.ID, "err": err})
+
+	task.FailureCount++
+
+	execution := TaskExecution{
+		TaskID:     task.ID,
+		ExecutedAt: time.Now(),
+		Status:     "failed",
+		Error:      err.Error(),
+	}
+	task.ExecutionHistory = append(task.ExecutionHistory, execution)
+	if len(task.ExecutionHistory) > 20 {
+		task.ExecutionHistory = task.ExecutionHistory[len(task.ExecutionHistory)-20:]
+	}
+
+	// Auto-disable after 5 consecutive failures
+	if task.FailureCount >= 5 {
+		logger.Warn("Task schedule disabled after consecutive failures", logger.Fields{"task_id": task.ID, "failurecount": task.FailureCount})
+		task.ScheduleEnabled = false
+	}
+
+	if err := ws.UpdateTask(*task); err != nil {
+		logger.Error("Failed to update task", logger.Fields{"error": err})
+	}
+	if err := ts.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+	}
+
+	if ts.eventBus != nil {
+		event := NewScheduledTaskEvent(EventScheduledTaskFailed, ws.ID, task.ID, task.ScheduleName, map[string]interface{}{
+			"error":         err.Error(),
+			"failure_count": task.FailureCount,
+			"timestamp":     time.Now(),
+			"disabled":      !task.ScheduleEnabled,
+		})
+		ts.eventBus.Publish(event)
 	}
 }
 

@@ -232,6 +232,62 @@ export class DashboardRenderer {
                       <option value="2">Urgent</option>
                     </select>
                   </div>
+                  <div class="mb-2">
+                    <div class="form-check">
+                      <input type="checkbox" class="form-check-input" id="task-schedule-enabled" onchange="workspaceDashboard.toggleScheduleFields()">
+                      <label class="form-check-label small" for="task-schedule-enabled" style="color: var(--text-primary);">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                          <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                        </svg>
+                        Enable Schedule (run on a recurring basis)
+                      </label>
+                    </div>
+                  </div>
+                  <div id="schedule-fields-container" style="display: none; background: rgba(245, 158, 11, 0.1); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px;">
+                    <div class="mb-2">
+                      <label class="form-label small" style="color: var(--text-primary);">Schedule Name (optional)</label>
+                      <input type="text" id="task-schedule-name" class="form-control form-control-sm" placeholder="e.g., Daily Report">
+                    </div>
+                    <div class="mb-2">
+                      <label class="form-label small" style="color: var(--text-primary);">Schedule Type</label>
+                      <select id="task-schedule-type" class="form-control form-control-sm" onchange="workspaceDashboard.updateScheduleTypeFields()">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="interval">Interval (every X minutes/hours)</option>
+                        <option value="once">Once (at specific time)</option>
+                      </select>
+                    </div>
+                    <div id="schedule-time-field" class="mb-2">
+                      <label class="form-label small" style="color: var(--text-primary);">Time of Day</label>
+                      <input type="time" id="task-schedule-time" class="form-control form-control-sm" value="09:00">
+                    </div>
+                    <div id="schedule-day-field" class="mb-2" style="display: none;">
+                      <label class="form-label small" style="color: var(--text-primary);">Day of Week</label>
+                      <select id="task-schedule-day" class="form-control form-control-sm">
+                        <option value="0">Sunday</option>
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                      </select>
+                    </div>
+                    <div id="schedule-interval-field" class="mb-2" style="display: none;">
+                      <label class="form-label small" style="color: var(--text-primary);">Interval</label>
+                      <div class="d-flex gap-2">
+                        <input type="number" id="task-schedule-interval-value" class="form-control form-control-sm" value="1" min="1" style="width: 80px;">
+                        <select id="task-schedule-interval-unit" class="form-control form-control-sm">
+                          <option value="m">Minutes</option>
+                          <option value="h">Hours</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div id="schedule-once-field" class="mb-2" style="display: none;">
+                      <label class="form-label small" style="color: var(--text-primary);">Execute At</label>
+                      <input type="datetime-local" id="task-schedule-datetime" class="form-control form-control-sm">
+                    </div>
+                  </div>
                   <div class="mb-3">
                     <label class="form-label small" style="color: var(--text-primary);">
                       Use Results From Previous Tasks (Optional)

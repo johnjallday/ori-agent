@@ -38,6 +38,7 @@ export class DashboardTasks {
     const hasResult = task.result && isCompleted;
     const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
     const hasCombinationMode = task.result_combination_mode && task.result_combination_mode !== 'default';
+    const hasSchedule = task.schedule && task.schedule_enabled;
 
     // For tasks without agents, show checkbox for manual completion
     const checkboxHTML = !hasAgent ? `
@@ -47,14 +48,25 @@ export class DashboardTasks {
              style="cursor: pointer; width: 20px; height: 20px;">
     ` : '';
 
+    // Schedule indicator
+    const scheduleIndicator = hasSchedule ? `
+      <span style="color: #f59e0b;" title="Scheduled: ${task.schedule_name || task.schedule.type}${task.next_run ? ' - Next: ' + new Date(task.next_run).toLocaleString() : ''}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+          <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+        </svg>
+        ${task.schedule_name || task.schedule.type}
+      </span>
+    ` : '';
+
     // Agent info (only if task has agents assigned)
     const agentInfoHTML = hasAgent ? `
-      <div class="d-flex gap-3 text-muted small">
+      <div class="d-flex gap-3 text-muted small flex-wrap">
         ${task.from ? `<span>From: ${this.escapeHtml(task.from)}</span>` : ''}
         <span>To: ${this.escapeHtml(task.to)}</span>
         ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
         ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
         ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
+        ${scheduleIndicator}
       </div>
     ` : `
       <div class="d-flex gap-3 text-muted small">
@@ -169,6 +181,11 @@ export class DashboardTasks {
     const combinationMode = document.getElementById('task-combination-mode')?.value || 'default';
     const combinationInstruction = document.getElementById('task-combination-instruction')?.value || '';
 
+    // Get schedule fields
+    const scheduleEnabled = document.getElementById('task-schedule-enabled')?.checked || false;
+    const scheduleName = document.getElementById('task-schedule-name')?.value || '';
+    const scheduleType = document.getElementById('task-schedule-type')?.value || 'daily';
+
     // Only description is required - from/to are optional for simple tasks
     if (!description) {
       alert('Please enter a task description');
@@ -181,6 +198,43 @@ export class DashboardTasks {
       description: description,
       priority: priority,
     };
+
+    // Add schedule if enabled
+    if (scheduleEnabled) {
+      requestBody.schedule_enabled = true;
+      if (scheduleName) requestBody.schedule_name = scheduleName;
+
+      // Build schedule config based on type
+      const schedule = { type: scheduleType };
+
+      switch (scheduleType) {
+        case 'daily':
+          schedule.time_of_day = document.getElementById('task-schedule-time')?.value || '09:00';
+          break;
+        case 'weekly':
+          schedule.time_of_day = document.getElementById('task-schedule-time')?.value || '09:00';
+          schedule.day_of_week = parseInt(document.getElementById('task-schedule-day')?.value) || 0;
+          break;
+        case 'interval':
+          const intervalValue = parseInt(document.getElementById('task-schedule-interval-value')?.value) || 1;
+          const intervalUnit = document.getElementById('task-schedule-interval-unit')?.value || 'h';
+          // Convert to nanoseconds (Go time.Duration)
+          if (intervalUnit === 'm') {
+            schedule.interval = intervalValue * 60 * 1000000000; // minutes to nanoseconds
+          } else {
+            schedule.interval = intervalValue * 60 * 60 * 1000000000; // hours to nanoseconds
+          }
+          break;
+        case 'once':
+          const datetime = document.getElementById('task-schedule-datetime')?.value;
+          if (datetime) {
+            schedule.execute_at = new Date(datetime).toISOString();
+          }
+          break;
+      }
+
+      requestBody.schedule = schedule;
+    }
 
     // Add optional fields
     if (from) requestBody.from = from;
@@ -548,6 +602,47 @@ export class DashboardTasks {
     }
 
     hintsContent.innerHTML = hintsHTML;
+  }
+
+  toggleScheduleFields() {
+    const checkbox = document.getElementById('task-schedule-enabled');
+    const container = document.getElementById('schedule-fields-container');
+    if (checkbox && container) {
+      container.style.display = checkbox.checked ? 'block' : 'none';
+    }
+  }
+
+  updateScheduleTypeFields() {
+    const scheduleType = document.getElementById('task-schedule-type')?.value || 'daily';
+
+    // Get field containers
+    const timeField = document.getElementById('schedule-time-field');
+    const dayField = document.getElementById('schedule-day-field');
+    const intervalField = document.getElementById('schedule-interval-field');
+    const onceField = document.getElementById('schedule-once-field');
+
+    // Hide all first
+    if (timeField) timeField.style.display = 'none';
+    if (dayField) dayField.style.display = 'none';
+    if (intervalField) intervalField.style.display = 'none';
+    if (onceField) onceField.style.display = 'none';
+
+    // Show relevant fields based on type
+    switch (scheduleType) {
+      case 'daily':
+        if (timeField) timeField.style.display = 'block';
+        break;
+      case 'weekly':
+        if (timeField) timeField.style.display = 'block';
+        if (dayField) dayField.style.display = 'block';
+        break;
+      case 'interval':
+        if (intervalField) intervalField.style.display = 'block';
+        break;
+      case 'once':
+        if (onceField) onceField.style.display = 'block';
+        break;
+    }
   }
 
 }

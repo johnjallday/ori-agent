@@ -151,6 +151,16 @@ type Task struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+
+	// Schedule fields - enables task to run on a schedule (re-runs same task)
+	Schedule         *ScheduleConfig `json:"schedule,omitempty"`
+	ScheduleEnabled  bool            `json:"schedule_enabled,omitempty"`
+	ScheduleName     string          `json:"schedule_name,omitempty"`
+	NextRun          *time.Time      `json:"next_run,omitempty"`
+	LastRun          *time.Time      `json:"last_run,omitempty"`
+	ExecutionCount   int             `json:"execution_count,omitempty"`
+	FailureCount     int             `json:"failure_count,omitempty"`
+	ExecutionHistory []TaskExecution `json:"execution_history,omitempty"`
 }
 
 // TaskStatus represents the current state of a task
