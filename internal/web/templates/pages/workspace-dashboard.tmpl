@@ -144,6 +144,12 @@
                   Tasks
                 </h4>
                 <div class="d-flex gap-2">
+                  <button class="modern-btn modern-btn-primary btn-sm" onclick="openCreateTaskModal()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                      <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                    </svg>
+                    New Task
+                  </button>
                   <button class="modern-btn modern-btn-secondary btn-sm" onclick="refreshTasks()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
@@ -179,7 +185,14 @@
               </div>
               <div class="detail-row">
                 <span class="detail-label">Description</span>
-                <span id="workspace-description" class="detail-value">--</span>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <span id="workspace-description" class="detail-value" style="flex: 1;">--</span>
+                  <button class="btn btn-sm p-1" onclick="openEditDescriptionModal()" title="Edit description" style="color: var(--text-muted); background: transparent; border: none;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -196,27 +209,22 @@
               </div>
             </div>
 
-            <!-- Session Tasks Card -->
-            <div class="modern-card p-4 mb-4">
-              <h4 class="mb-3" style="color: var(--text-primary);">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
-                </svg>
-                Session Tasks
-              </h4>
-              <div id="session-tasks-list" style="max-height: 300px; overflow-y: auto;">
-                <p style="color: var(--text-muted); font-size: 0.875rem;">Loading tasks...</p>
-              </div>
-            </div>
-
             <!-- Notes Card -->
             <div class="modern-card p-4 mb-4">
-              <h4 class="mb-3" style="color: var(--text-primary);">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M19,3H14.82C14.4,1.84 13.3,1 12,1C10.7,1 9.6,1.84 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M12,9H7V11H12V9M17,13H7V15H17V13M15,17H7V19H15V17Z"/>
-                </svg>
-                Notes
-              </h4>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 style="color: var(--text-primary); margin: 0;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                    <path d="M19,3H14.82C14.4,1.84 13.3,1 12,1C10.7,1 9.6,1.84 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M7,7H17V5H19V19H5V5H7V7M12,9H7V11H12V9M17,13H7V15H17V13M15,17H7V19H15V17Z"/>
+                  </svg>
+                  Notes
+                </h4>
+                <button class="modern-btn modern-btn-primary btn-sm" onclick="openCreateNoteModal()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  New Note
+                </button>
+              </div>
               <div id="notes-list" style="max-height: 300px; overflow-y: auto;">
                 <p style="color: var(--text-muted); font-size: 0.875rem;">Loading notes...</p>
               </div>
@@ -224,12 +232,20 @@
 
             <!-- Attachments Card -->
             <div class="modern-card p-4 mb-4">
-              <h4 class="mb-3" style="color: var(--text-primary);">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/>
-                </svg>
-                Attachments
-              </h4>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 style="color: var(--text-primary); margin: 0;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
+                    <path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/>
+                  </svg>
+                  Attachments
+                </h4>
+                <button class="modern-btn modern-btn-primary btn-sm" onclick="openCreateAttachmentModal()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                    <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+                  </svg>
+                  New
+                </button>
+              </div>
               <div id="attachments-list" style="max-height: 300px; overflow-y: auto;">
                 <p style="color: var(--text-muted); font-size: 0.875rem;">Loading attachments...</p>
               </div>
@@ -425,6 +441,201 @@
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="modern-btn modern-btn-primary" id="edit-task-save-btn" onclick="submitEditTask()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Task Modal -->
+  <div class="modal fade" id="createTaskModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Task
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Title <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="create-task-description" placeholder="What needs to be done?" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Details</label>
+            <textarea class="form-control" id="create-task-details" rows="3" placeholder="Additional details or notes..."></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Priority</label>
+            <select class="form-select" id="create-task-priority">
+              <option value="1">1 - Low</option>
+              <option value="2">2</option>
+              <option value="3" selected>3 - Normal</option>
+              <option value="4">4</option>
+              <option value="5">5 - High</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Assign to Agent (optional)</label>
+            <select class="form-select" id="create-task-assignment">
+              <option value="">-- No agent (manual task) --</option>
+            </select>
+            <div class="form-text">Leave unassigned for a manual task you'll complete yourself.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="create-task-save-btn" onclick="submitCreateTask()">Create Task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Note Modal -->
+  <div class="modal fade" id="createNoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Note
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Title</label>
+            <input type="text" class="form-control" id="create-note-name" placeholder="Note title (optional)" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Content</label>
+            <textarea class="form-control" id="create-note-content" rows="8" placeholder="Write your note here..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="create-note-save-btn" onclick="submitCreateNote()">Create Note</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Note Modal -->
+  <div class="modal fade" id="editNoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+            </svg>
+            Edit Note
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-note-id" />
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Title</label>
+            <input type="text" class="form-control" id="edit-note-name" placeholder="Note title" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Content</label>
+            <textarea class="form-control" id="edit-note-content" rows="10" placeholder="Write your note here..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-note-save-btn" onclick="submitEditNote()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Description Modal -->
+  <div class="modal fade" id="editDescriptionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+            </svg>
+            Edit Description
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Description</label>
+            <textarea class="form-control" id="edit-description-content" rows="4" placeholder="Enter workspace description..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="edit-description-save-btn" onclick="submitEditDescription()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Attachment Modal -->
+  <div class="modal fade" id="createAttachmentModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color: var(--text-primary);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Attachment
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Title <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="create-attachment-title" placeholder="Attachment title" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Type</label>
+            <select class="form-select" id="create-attachment-type">
+              <option value="doc">Document</option>
+              <option value="image">Image</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Content</label>
+            <textarea class="form-control" id="create-attachment-body" rows="5" placeholder="Attachment content or description..."></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Link URL (optional)</label>
+            <input type="url" class="form-control" id="create-attachment-link" placeholder="https://..." />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Color (optional)</label>
+            <input type="color" class="form-control form-control-color" id="create-attachment-color" value="#3498db" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="modern-btn modern-btn-primary" id="create-attachment-save-btn" onclick="submitCreateAttachment()">Create Attachment</button>
         </div>
       </div>
     </div>
@@ -710,9 +921,6 @@
         // Render sessions list (from session store)
         renderSessions(workspace.sessions || []);
 
-        // Render session tasks list (from session store)
-        renderSessionTasks(workspace.session_tasks || []);
-
         // Render notes list (from session store)
         renderNotes(workspace.notes || []);
 
@@ -755,46 +963,6 @@
       `).join('');
     }
 
-    // Render session tasks list
-    function renderSessionTasks(tasks) {
-      const tasksList = document.getElementById('session-tasks-list');
-      if (!tasks || tasks.length === 0) {
-        tasksList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No tasks in this workspace</p>';
-        return;
-      }
-
-      const statusColors = {
-        'pending': 'var(--text-muted)',
-        'in_progress': 'var(--primary-color)',
-        'completed': 'var(--success-color)',
-        'failed': 'var(--danger-color)'
-      };
-
-      tasksList.innerHTML = tasks.map(task => {
-        const statusColor = statusColors[task.status] || 'var(--text-muted)';
-        const priorityBadge = task.priority > 1 ? `<span class="badge bg-warning text-dark ms-1" style="font-size: 0.65rem;">P${task.priority}</span>` : '';
-
-        return `
-          <div class="session-task-item p-2 mb-2" style="border: 1px solid var(--border-color); border-radius: 6px; border-left: 3px solid ${statusColor};">
-            <div class="d-flex justify-content-between align-items-start">
-              <div style="flex: 1; min-width: 0;">
-                <div class="d-flex align-items-center">
-                  <span style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    ${escapeHtml(task.description || 'Untitled Task')}
-                  </span>
-                  ${priorityBadge}
-                </div>
-                ${task.details ? `<div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(task.details)}</div>` : ''}
-              </div>
-              <span class="badge" style="background: ${statusColor}; font-size: 0.65rem;">
-                ${escapeHtml(task.status || 'pending')}
-              </span>
-            </div>
-          </div>
-        `;
-      }).join('');
-    }
-
     // Render notes list
     function renderNotes(notes) {
       const notesList = document.getElementById('notes-list');
@@ -806,14 +974,26 @@
       notesList.innerHTML = notes.map(note => `
         <div class="note-item p-2 mb-2" style="border: 1px solid var(--border-color); border-radius: 6px; border-left: 3px solid var(--primary-color);">
           <div class="d-flex justify-content-between align-items-start">
-            <div style="flex: 1; min-width: 0;">
+            <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="openEditNoteModal('${escapeHtml(note.id)}')">
               <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                 ${escapeHtml(note.name || 'Untitled Note')}
               </div>
               ${note.preview ? `<div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(note.preview)}</div>` : ''}
             </div>
-            <div style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">
-              ${note.updated_at ? new Date(note.updated_at).toLocaleDateString() : ''}
+            <div class="d-flex align-items-center gap-1">
+              <span style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">
+                ${note.updated_at ? new Date(note.updated_at).toLocaleDateString() : ''}
+              </span>
+              <button class="btn btn-sm p-1" onclick="openEditNoteModal('${escapeHtml(note.id)}')" title="Edit note" style="color: var(--text-muted); background: transparent; border: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+                </svg>
+              </button>
+              <button class="btn btn-sm p-1" onclick="deleteNote('${escapeHtml(note.id)}')" title="Delete note" style="color: var(--danger-color); background: transparent; border: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -852,15 +1032,25 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="${typeColor}">
                 ${typeIcon}
               </svg>
-              <div style="flex: 1; min-width: 0;">
+              <div style="flex: 1; min-width: 0; cursor: pointer;" onclick="openEditAttachmentModal('${escapeHtml(attachment.id)}')">
                 <div style="font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   ${escapeHtml(attachment.title || 'Untitled')}
                 </div>
                 ${attachment.body ? `<div style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(attachment.body.substring(0, 100))}</div>` : ''}
               </div>
               <span class="badge" style="background: ${typeColor}; font-size: 0.65rem;">
-                ${escapeHtml(attachment.type || 'file')}
+                ${escapeHtml(attachment.type || 'doc')}
               </span>
+              <button class="btn btn-sm p-1" onclick="openEditAttachmentModal('${escapeHtml(attachment.id)}')" title="Edit attachment" style="color: var(--text-muted); background: transparent; border: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
+                </svg>
+              </button>
+              <button class="btn btn-sm p-1" onclick="deleteAttachment('${escapeHtml(attachment.id)}')" title="Delete attachment" style="color: var(--danger-color); background: transparent; border: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                </svg>
+              </button>
             </div>
           </div>
         `;
@@ -918,6 +1108,11 @@
                         <path d="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z"/>
                       </svg>
                       Edit
+                    </button>
+                    <button class="modern-btn modern-btn-danger btn-sm" onclick="deleteTask('${escapeHtml(task.id)}')" title="Delete task">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                      </svg>
                     </button>
                     <span class="task-status ${task.status || 'pending'}">${task.status || 'pending'}</span>
                   </div>
@@ -1254,6 +1449,300 @@
       }
     }
 
+    // ========== TASK CREATE MODAL ==========
+
+    function openCreateTaskModal() {
+      // Clear form
+      document.getElementById('create-task-description').value = '';
+      document.getElementById('create-task-details').value = '';
+      document.getElementById('create-task-priority').value = '3';
+
+      // Populate agent assignment dropdown
+      const selectEl = document.getElementById('create-task-assignment');
+      const options = [];
+      options.push({ label: '-- No agent (manual task) --', value: '' });
+
+      const instances = currentWorkspace?.agent_instances || [];
+      if (Array.isArray(instances) && instances.length > 0) {
+        instances.forEach(inst => {
+          options.push({
+            label: `${inst.name} #${inst.instance_number}`,
+            value: `node:${inst.node_id}`
+          });
+        });
+      } else {
+        const agents = currentWorkspace?.agents || [];
+        const counters = {};
+        agents.forEach(name => {
+          counters[name] = (counters[name] || 0) + 1;
+          const n = counters[name];
+          const nodeId = `${name}-node-${n}`;
+          options.push({ label: `${name} #${n}`, value: `node:${nodeId}` });
+        });
+      }
+
+      selectEl.innerHTML = options
+        .map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+        .join('');
+
+      const modal = new bootstrap.Modal(document.getElementById('createTaskModal'));
+      modal.show();
+    }
+
+    async function submitCreateTask() {
+      const description = document.getElementById('create-task-description').value.trim();
+      const details = document.getElementById('create-task-details').value.trim();
+      const priority = parseInt(document.getElementById('create-task-priority').value) || 3;
+      const assignment = document.getElementById('create-task-assignment').value;
+
+      if (!description) {
+        alert('Task title is required');
+        return;
+      }
+
+      let to = '';
+      let assignedNodeId = '';
+      if (assignment && assignment.startsWith('node:')) {
+        assignedNodeId = assignment.slice('node:'.length);
+        to = deriveToFromAssignedNodeID(assignedNodeId);
+      }
+
+      const saveBtn = document.getElementById('create-task-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Creating...';
+
+      try {
+        const resp = await fetch('/api/orchestration/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studio_id: workspaceId,
+            description: description,
+            details: details,
+            priority: priority,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to create task');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('createTaskModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to create task: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== NOTE CREATE MODAL ==========
+
+    function openCreateNoteModal() {
+      // Clear form
+      document.getElementById('create-note-name').value = '';
+      document.getElementById('create-note-content').value = '';
+
+      const modal = new bootstrap.Modal(document.getElementById('createNoteModal'));
+      modal.show();
+    }
+
+    async function submitCreateNote() {
+      const name = document.getElementById('create-note-name').value.trim();
+      const content = document.getElementById('create-note-content').value.trim();
+
+      const saveBtn = document.getElementById('create-note-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Creating...';
+
+      try {
+        const resp = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name || 'Untitled Note',
+            content: content
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to create note');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('createNoteModal'));
+        modal.hide();
+
+        // Reload workspace data to refresh notes list
+        await loadWorkspaceData();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to create note: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== DELETE FUNCTIONS ==========
+
+    async function deleteTask(taskId) {
+      if (!confirm('Are you sure you want to delete this task?')) return;
+
+      try {
+        const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
+          method: 'DELETE'
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to delete task');
+        }
+
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to delete task: ${err.message || err}`);
+      }
+    }
+
+    async function deleteNote(noteId) {
+      if (!confirm('Are you sure you want to delete this note?')) return;
+
+      try {
+        const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+          method: 'DELETE'
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to delete note');
+        }
+
+        await loadWorkspaceData();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to delete note: ${err.message || err}`);
+      }
+    }
+
+    // ========== NOTE EDIT MODAL ==========
+
+    async function openEditNoteModal(noteId) {
+      try {
+        // Fetch full note content
+        const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+        if (!resp.ok) throw new Error('Failed to load note');
+
+        const note = await resp.json();
+
+        document.getElementById('edit-note-id').value = note.id;
+        document.getElementById('edit-note-name').value = note.name || '';
+        document.getElementById('edit-note-content').value = note.content || '';
+
+        const modal = new bootstrap.Modal(document.getElementById('editNoteModal'));
+        modal.show();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to load note: ${err.message || err}`);
+      }
+    }
+
+    async function submitEditNote() {
+      const noteId = document.getElementById('edit-note-id').value;
+      const name = document.getElementById('edit-note-name').value.trim();
+      const content = document.getElementById('edit-note-content').value;
+
+      const saveBtn = document.getElementById('edit-note-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name || 'Untitled Note',
+            content: content
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update note');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editNoteModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update note: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== DESCRIPTION EDIT MODAL ==========
+
+    function openEditDescriptionModal() {
+      // Get current description from the display element
+      const currentDescription = document.getElementById('workspace-description').textContent;
+      document.getElementById('edit-description-content').value = currentDescription === 'No description' ? '' : currentDescription;
+
+      const modal = new bootstrap.Modal(document.getElementById('editDescriptionModal'));
+      modal.show();
+    }
+
+    async function submitEditDescription() {
+      const description = document.getElementById('edit-description-content').value.trim();
+
+      const saveBtn = document.getElementById('edit-description-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Saving...';
+
+      try {
+        const resp = await fetch(`/api/orchestration/studios?id=${encodeURIComponent(workspaceId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: description
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to update description');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editDescriptionModal'));
+        modal.hide();
+
+        // Update the display immediately
+        document.getElementById('workspace-description').textContent = description || 'No description';
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to update description: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
     // ========== SCHEDULE EDIT MODAL ==========
 
     function updateEditScheduleInputs() {
@@ -1564,6 +2053,94 @@
       } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== ATTACHMENT CREATE MODAL ==========
+
+    function openCreateAttachmentModal() {
+      // Clear form fields
+      document.getElementById('create-attachment-title').value = '';
+      document.getElementById('create-attachment-type').value = 'doc';
+      document.getElementById('create-attachment-body').value = '';
+      document.getElementById('create-attachment-link').value = '';
+      document.getElementById('create-attachment-color').value = '#3498db';
+
+      const modal = new bootstrap.Modal(document.getElementById('createAttachmentModal'));
+      modal.show();
+    }
+
+    async function submitCreateAttachment() {
+      const title = document.getElementById('create-attachment-title').value.trim();
+      const type = document.getElementById('create-attachment-type').value;
+      const body = document.getElementById('create-attachment-body').value;
+      const linkUrl = document.getElementById('create-attachment-link').value;
+      const color = document.getElementById('create-attachment-color').value;
+
+      if (!title) {
+        alert('Title is required');
+        return;
+      }
+
+      const saveBtn = document.getElementById('create-attachment-save-btn');
+      const oldHtml = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = 'Creating...';
+
+      try {
+        const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title,
+            type: type,
+            body: body,
+            link_url: linkUrl,
+            color: color
+          })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to create attachment');
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('createAttachmentModal'));
+        modal.hide();
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to create attachment: ${err.message || err}`);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== ATTACHMENT DELETE ==========
+
+    async function deleteAttachment(attachmentId) {
+      if (!confirm('Are you sure you want to delete this attachment?')) {
+        return;
+      }
+
+      try {
+        const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(attachmentId)}`, {
+          method: 'DELETE'
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to delete attachment');
+        }
+
+        await loadWorkspaceData();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to delete attachment: ${err.message || err}`);
       }
     }
 

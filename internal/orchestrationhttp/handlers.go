@@ -43,7 +43,6 @@ type HandlerConfig struct {
 // SessionStore interface for fetching session data
 type SessionStore interface {
 	ListSessionsByWorkspace(ctx context.Context, workspaceID string) ([]SessionListItem, error)
-	ListTasksByWorkspace(ctx context.Context, workspaceID string) ([]SessionTaskItem, error)
 	ListNotesByWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceNoteItem, error)
 }
 
@@ -55,18 +54,6 @@ type SessionListItem struct {
 	MessageCount int       `json:"message_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-// SessionTaskItem represents a session task for API responses
-type SessionTaskItem struct {
-	ID          string     `json:"id"`
-	Description string     `json:"description"`
-	Details     string     `json:"details,omitempty"`
-	Status      string     `json:"status"`
-	Priority    int        `json:"priority"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // WorkspaceNoteItem represents a workspace note for API responses
@@ -351,6 +338,12 @@ func (h *Handler) EventHistoryHandler(w http.ResponseWriter, r *http.Request) {
 // Delegates to TaskHandler for modular organization
 func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ExecuteTaskHandler(w, r)
+}
+
+// CompleteTaskHandler handles marking a task as completed (manual completion)
+// Delegates to TaskHandler for modular organization
+func (h *Handler) CompleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.CompleteTaskHandler(w, r)
 }
 
 // ScheduledTasksHandler handles listing and creating scheduled tasks

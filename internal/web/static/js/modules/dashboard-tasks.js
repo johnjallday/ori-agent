@@ -32,13 +32,39 @@ export class DashboardTasks {
   renderTask(task) {
     const statusBadge = this.getStatusBadgeClass(task.status);
     const statusIcon = this.getStatusIcon(task.status);
-    const canExecute = task.status === 'pending' || task.status === 'assigned';
-    const hasResult = task.result && task.status === 'completed';
+    const hasAgent = task.to; // Task has an assigned agent
+    const canExecute = hasAgent && (task.status === 'pending' || task.status === 'assigned');
+    const isCompleted = task.status === 'completed';
+    const hasResult = task.result && isCompleted;
     const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
     const hasCombinationMode = task.result_combination_mode && task.result_combination_mode !== 'default';
 
+    // For tasks without agents, show checkbox for manual completion
+    const checkboxHTML = !hasAgent ? `
+      <input type="checkbox" class="form-check-input me-2"
+             ${isCompleted ? 'checked' : ''}
+             onclick="event.stopPropagation(); workspaceDashboard.toggleTaskComplete('${task.id}', this.checked)"
+             style="cursor: pointer; width: 20px; height: 20px;">
+    ` : '';
+
+    // Agent info (only if task has agents assigned)
+    const agentInfoHTML = hasAgent ? `
+      <div class="d-flex gap-3 text-muted small">
+        ${task.from ? `<span>From: ${this.escapeHtml(task.from)}</span>` : ''}
+        <span>To: ${this.escapeHtml(task.to)}</span>
+        ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
+        ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
+        ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
+      </div>
+    ` : `
+      <div class="d-flex gap-3 text-muted small">
+        ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
+        ${task.details ? `<span>${this.escapeHtml(task.details.substring(0, 50))}${task.details.length > 50 ? '...' : ''}</span>` : ''}
+      </div>
+    `;
+
     return `
-      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer;" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
+      <div class="task-item modern-card p-3 mb-2" data-task-id="${task.id}" style="position: relative; cursor: pointer; ${isCompleted && !hasAgent ? 'opacity: 0.7;' : ''}" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
         ${hasResult ? `
           <span class="position-absolute top-0 end-0 m-2" title="This task has a result that can be used in other tasks" style="cursor: help;">
             📊
@@ -47,16 +73,11 @@ export class DashboardTasks {
         <div class="d-flex justify-content-between align-items-start" onclick="event.stopPropagation();">
           <div class="flex-grow-1">
             <div class="d-flex align-items-center gap-2 mb-2">
-              ${statusIcon}
-              <h6 class="mb-0" style="color: var(--text-primary);">${this.escapeHtml(task.description)}</h6>
+              ${checkboxHTML}
+              ${hasAgent ? statusIcon : ''}
+              <h6 class="mb-0" style="color: var(--text-primary); ${isCompleted && !hasAgent ? 'text-decoration: line-through;' : ''}">${this.escapeHtml(task.description)}</h6>
             </div>
-            <div class="d-flex gap-3 text-muted small">
-              <span>From: ${this.escapeHtml(task.from)}</span>
-              <span>To: ${this.escapeHtml(task.to)}</span>
-              ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
-              ${hasInputTasks ? `<span style="color: #9b59b6;" title="Uses results from ${task.input_task_ids.length} task(s)">🔗 ${task.input_task_ids.length} input(s)</span>` : ''}
-              ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
-            </div>
+            ${agentInfoHTML}
             ${task.result ? `
               <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
                 <strong>Result:</strong>
@@ -134,32 +155,37 @@ export class DashboardTasks {
   }
 
   async createTask() {
-    const from = document.getElementById('task-from').value;
-    const to = document.getElementById('task-to').value;
+    const from = document.getElementById('task-from')?.value || '';
+    const to = document.getElementById('task-to')?.value || '';
     const description = document.getElementById('task-description').value;
+    const details = document.getElementById('task-details')?.value || '';
     const priority = parseInt(document.getElementById('task-priority').value) || 0;
 
     // Get selected input task IDs
     const inputTasksSelect = document.getElementById('task-input-tasks');
-    const inputTaskIds = Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value);
+    const inputTaskIds = inputTasksSelect ? Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value) : [];
 
     // Get combination mode and instruction
     const combinationMode = document.getElementById('task-combination-mode')?.value || 'default';
     const combinationInstruction = document.getElementById('task-combination-instruction')?.value || '';
 
-    if (!from || !to || !description) {
-      alert('Please fill in all required fields');
+    // Only description is required - from/to are optional for simple tasks
+    if (!description) {
+      alert('Please enter a task description');
       return;
     }
 
     // Build request body
     const requestBody = {
       workspace_id: this.workspaceId,
-      from: from,
-      to: to,
       description: description,
       priority: priority,
     };
+
+    // Add optional fields
+    if (from) requestBody.from = from;
+    if (to) requestBody.to = to;
+    if (details) requestBody.details = details;
 
     // Add input_task_ids if any are selected
     if (inputTaskIds.length > 0) {
@@ -269,6 +295,49 @@ export class DashboardTasks {
     } catch (error) {
       console.error('Error deleting task:', error);
       this.showToast('Delete Failed', '❌ Failed to delete task: ' + error.message, 'error');
+    }
+  }
+
+  async toggleTaskComplete(taskId, completed) {
+    try {
+      if (completed) {
+        // Mark as completed via the complete endpoint
+        const response = await fetch(`/api/orchestration/tasks/${taskId}/complete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to complete task');
+        }
+      } else {
+        // Mark as pending via the update endpoint
+        const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            task_id: taskId,
+            status: 'pending',
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(error || 'Failed to update task');
+        }
+      }
+
+      // Reload tasks to show updated status
+      await this.loadTasks();
+      this.renderTaskList();
+    } catch (error) {
+      console.error('Error toggling task completion:', error);
+      this.showToast('❌ Failed to update task: ' + error.message, 'error');
     }
   }
 

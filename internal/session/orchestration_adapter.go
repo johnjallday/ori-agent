@@ -3,7 +3,6 @@ package session
 
 import (
 	"context"
-	"time"
 
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 )
@@ -41,35 +40,6 @@ func (a *OrchestrationSessionStore) ListSessionsByWorkspace(ctx context.Context,
 			MessageCount: s.MessageCount,
 			CreatedAt:    s.CreatedAt,
 			UpdatedAt:    s.UpdatedAt,
-		}
-	}
-
-	return items, nil
-}
-
-// ListTasksByWorkspace returns session tasks for a workspace.
-func (a *OrchestrationSessionStore) ListTasksByWorkspace(ctx context.Context, workspaceID string) ([]orchestrationhttp.SessionTaskItem, error) {
-	tasks, err := a.store.TaskStore().ListTasksByWorkspace(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert to orchestrationhttp.SessionTaskItem
-	items := make([]orchestrationhttp.SessionTaskItem, len(tasks))
-	for i, t := range tasks {
-		var completedAt *time.Time
-		if t.CompletedAt != nil {
-			completedAt = t.CompletedAt
-		}
-		items[i] = orchestrationhttp.SessionTaskItem{
-			ID:          t.ID,
-			Description: t.Description,
-			Details:     t.Details,
-			Status:      string(t.Status),
-			Priority:    t.Priority,
-			CreatedAt:   t.CreatedAt,
-			UpdatedAt:   t.UpdatedAt,
-			CompletedAt: completedAt,
 		}
 	}
 

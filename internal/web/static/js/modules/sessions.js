@@ -295,24 +295,39 @@ const sessionManager = {
     }
   },
 
-  // Load task counts for all visible sessions
+  // Load task counts for all visible sessions (from workspace orchestration API)
   async loadSessionTaskCounts() {
     if (this.sessions.length === 0) return;
 
-    // Fetch counts for each session
-    const fetchPromises = this.sessions.map(async (session) => {
+    // Group sessions by workspace to avoid duplicate API calls
+    const workspaceStats = new Map();
+    const workspaceIds = [...new Set(this.sessions.map(s => s.folder_id).filter(Boolean))];
+
+    // Fetch stats for each unique workspace
+    const fetchPromises = workspaceIds.map(async (workspaceId) => {
       try {
-        const response = await fetch(`/api/sessions/${session.id}/tasks`);
+        const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
         if (response.ok) {
           const data = await response.json();
-          this.sessionTaskCounts.set(session.id, data.counts || { total: 0, pending: 0, completed: 0 });
+          workspaceStats.set(workspaceId, data.stats || { total: 0, pending: 0, completed: 0 });
         }
       } catch (error) {
-        console.error(`Failed to load task counts for session ${session.id}:`, error);
+        console.error(`Failed to load task counts for workspace ${workspaceId}:`, error);
       }
     });
 
     await Promise.all(fetchPromises);
+
+    // Apply workspace stats to sessions
+    this.sessions.forEach(session => {
+      if (session.folder_id) {
+        const stats = workspaceStats.get(session.folder_id);
+        if (stats) {
+          this.sessionTaskCounts.set(session.id, stats);
+        }
+      }
+    });
+
     this.updateSessionTaskBadges();
   },
 
@@ -3979,7 +3994,7 @@ const sessionManager = {
   taskCounts: { total: 0, pending: 0, completed: 0 },
   tasksByWorkspace: new Map(), // Tasks keyed by workspace (folder) ID
 
-  // Load tasks for current session
+  // Load tasks for current session (from workspace/orchestration)
   async loadSessionTasks() {
     if (!this.activeSessionId) {
       this.workspaceTasks = [];
@@ -3988,12 +4003,21 @@ const sessionManager = {
     }
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`);
+      // Get the workspace ID from the active session
+      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+      if (!activeSession || !activeSession.folder_id) {
+        this.workspaceTasks = [];
+        this.taskCounts = { total: 0, pending: 0, completed: 0 };
+        return;
+      }
+
+      const workspaceId = activeSession.folder_id;
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
       this.workspaceTasks = data.tasks || [];
-      this.taskCounts = data.counts || { total: 0, pending: 0, completed: 0 };
+      this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
 
       // Update the counts cache and badges
       this.sessionTaskCounts.set(this.activeSessionId, this.taskCounts);
@@ -4006,11 +4030,8 @@ const sessionManager = {
       }
 
       // Update workspace tasks in sidebar
-      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
-      if (activeSession && activeSession.folder_id) {
-        this.tasksByWorkspace.set(activeSession.folder_id, this.workspaceTasks);
-        this.renderFolderTree();
-      }
+      this.tasksByWorkspace.set(workspaceId, this.workspaceTasks);
+      this.renderFolderTree();
     } catch (error) {
       console.error('Failed to load session tasks:', error);
       this.workspaceTasks = [];
@@ -4019,10 +4040,10 @@ const sessionManager = {
     }
   },
 
-  // Load tasks for a workspace (folder)
+  // Load tasks for a workspace (folder) using orchestration API
   async loadWorkspaceTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`);
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       this.tasksByWorkspace.set(workspaceId, data.tasks || []);
@@ -4043,17 +4064,21 @@ const sessionManager = {
     }
   },
 
-  // Add task to workspace from sidebar
+  // Add task to workspace from sidebar using orchestration API
   async addWorkspaceTask(workspaceId) {
     // Prompt for task description
     const description = prompt('Enter task description:');
     if (!description || !description.trim()) return;
 
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`, {
+      const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: description.trim() })
+        body: JSON.stringify({
+          studio_id: workspaceId,
+          description: description.trim(),
+          priority: 3
+        })
       });
 
       if (!response.ok) throw new Error('Failed to create task');
@@ -4074,7 +4099,7 @@ const sessionManager = {
     }
   },
 
-  // Toggle task completion
+  // Toggle task completion using orchestration API
   async toggleTaskComplete(taskId) {
     const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
@@ -4082,15 +4107,15 @@ const sessionManager = {
     try {
       if (task.status === 'completed') {
         // Uncomplete - update status back to pending
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+        const response = await fetch('/api/orchestration/tasks', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'pending' })
+          body: JSON.stringify({ task_id: taskId, status: 'pending' })
         });
         if (!response.ok) throw new Error('Failed to update task');
       } else {
-        // Complete
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}/complete`, {
+        // Complete using the complete endpoint
+        const response = await fetch(`/api/orchestration/tasks/${taskId}/complete`, {
           method: 'POST'
         });
         if (!response.ok) throw new Error('Failed to complete task');
@@ -4103,12 +4128,12 @@ const sessionManager = {
     }
   },
 
-  // Delete task
+  // Delete task using orchestration API
   async deleteTask(taskId) {
     if (!confirm('Delete this task?')) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
@@ -4220,52 +4245,26 @@ const sessionManager = {
   },
 
   // Open workspace task panel from sidebar
+  // With unified task system, tasks are stored in workspaces (not sessions)
+  // so we can view tasks without needing a session
   async openWorkspaceTaskPanel(workspaceId) {
-    // Check if current session is in this workspace
-    const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+    try {
+      // Load tasks directly from workspace using orchestration API
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load workspace tasks');
 
-    if (activeSession && activeSession.folder_id === workspaceId) {
-      // Current session is in the workspace - open main task panel
-      await this.loadSessionTasks();
+      const data = await response.json();
+      this.workspaceTasks = data.tasks || [];
+      this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+
+      // Store workspace ID for task operations
+      this.currentTaskWorkspaceId = workspaceId;
+
+      // Open main task panel (works without active session)
       this.openMainTaskPanel();
-    } else {
-      // Need to switch to a session in this workspace or create one
-      const workspaceSessions = this.sessionsByFolder?.get(workspaceId) || [];
-
-      if (workspaceSessions.length > 0) {
-        // Switch to the first session in this workspace
-        await this.switchSession(workspaceSessions[0].id);
-        await this.loadSessionTasks();
-        this.openMainTaskPanel();
-      } else {
-        // No sessions in workspace - create one
-        this.showToast('Creating session in workspace...', 'info');
-        const folder = this.folders.find(f => f.id === workspaceId) ||
-                       this.findFolderById(workspaceId, this.folders);
-        const agentName = this.currentAgent || 'assistant';
-
-        try {
-          const response = await fetch('/api/sessions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agent_name: agentName,
-              folder_id: workspaceId
-            })
-          });
-
-          if (!response.ok) throw new Error('Failed to create session');
-
-          const newSession = await response.json();
-          await this.loadSessions();
-          await this.switchSession(newSession.id);
-          await this.loadSessionTasks();
-          this.openMainTaskPanel();
-        } catch (error) {
-          console.error('Failed to create session:', error);
-          this.showToast('Failed to open workspace tasks', 'error');
-        }
-      }
+    } catch (error) {
+      console.error('Failed to open workspace tasks:', error);
+      this.showToast('Failed to open workspace tasks', 'error');
     }
   },
 
@@ -4281,23 +4280,47 @@ const sessionManager = {
     return null;
   },
 
-  // Submit task from main panel
+  // Submit task from main panel using orchestration API
   async submitMainTask() {
     const input = document.getElementById('mainTaskInput');
     const description = input?.value?.trim();
-    if (!description || !this.activeSessionId) return;
+    if (!description) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+      // Get workspace ID from active session or stored workspace context
+      let workspaceId = this.currentTaskWorkspaceId;
+      if (!workspaceId && this.activeSessionId) {
+        const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+        workspaceId = activeSession?.folder_id;
+      }
+
+      if (!workspaceId) {
+        this.showToast('No workspace context available', 'error');
+        return;
+      }
+
+      const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description })
+        body: JSON.stringify({
+          studio_id: workspaceId,
+          description,
+          priority: 3
+        })
       });
 
       if (!response.ok) throw new Error('Failed to create task');
 
       input.value = '';
-      await this.loadSessionTasks();
+
+      // Reload tasks for the workspace
+      const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (tasksResponse.ok) {
+        const data = await tasksResponse.json();
+        this.workspaceTasks = data.tasks || [];
+        this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+      }
+
       this.renderMainTaskPanel();
       this.showToast('Task created', 'success');
     } catch (error) {
@@ -4411,12 +4434,12 @@ const sessionManager = {
     });
   },
 
-  // Delete task from main panel (with confirmation)
+  // Delete task from main panel (with confirmation) using orchestration API
   async deleteMainTask(taskId) {
     if (!confirm('Delete this task?')) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
@@ -4431,17 +4454,17 @@ const sessionManager = {
     }
   },
 
-  // Execute task - send to chat as a prompt
+  // Execute task - send to chat as a prompt using orchestration API
   async executeTask(taskId) {
     const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
 
     try {
-      // Mark task as in_progress
-      await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      // Mark task as in_progress using orchestration API
+      await fetch('/api/orchestration/tasks', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'in_progress' })
+        body: JSON.stringify({ task_id: taskId, status: 'in_progress' })
       });
 
       // Close task panel
@@ -4567,51 +4590,59 @@ const sessionManager = {
     }
 
     try {
-      if (this.taskModalWorkspaceId) {
-        // Creating workspace-level task
-        const response = await fetch(`/api/workspaces/${this.taskModalWorkspaceId}/tasks`, {
+      // Determine workspace ID - either from modal context or from active session
+      let workspaceId = this.taskModalWorkspaceId;
+      if (!workspaceId && this.activeSessionId) {
+        // Get workspace ID from active session
+        const session = this.sessions.find(s => s.id === this.activeSessionId);
+        workspaceId = session?.folder_id;
+      }
+
+      if (!workspaceId) {
+        this.showToast('No workspace selected', 'error');
+        return;
+      }
+
+      if (this.editingTaskId) {
+        // Update existing task via orchestration API
+        const response = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: this.editingTaskId,
+            description,
+            details
+          })
+        });
+
+        if (!response.ok) throw new Error('Failed to update task');
+        this.showToast('Task updated', 'success');
+      } else {
+        // Create new task via orchestration API (simple task - no agent)
+        const response = await fetch('/api/orchestration/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description, details })
+          body: JSON.stringify({
+            studio_id: workspaceId,
+            description,
+            details,
+            priority: 3
+          })
         });
 
         if (!response.ok) throw new Error('Failed to create task');
         this.showToast('Task created', 'success');
-        this.closeTaskModal();
+      }
 
-        // Refresh folder data to update task counts
+      this.closeTaskModal();
+
+      // Refresh data
+      if (this.taskModalWorkspaceId) {
         await this.loadFolders();
         this.renderFolders();
-      } else if (this.activeSessionId) {
-        // Session-level task
-        if (this.editingTaskId) {
-          // Update existing task
-          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${this.editingTaskId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description, details })
-          });
-
-          if (!response.ok) throw new Error('Failed to update task');
-          this.showToast('Task updated', 'success');
-        } else {
-          // Create new task
-          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description, details })
-          });
-
-          if (!response.ok) throw new Error('Failed to create task');
-          this.showToast('Task created', 'success');
-        }
-
-        this.closeTaskModal();
+      } else {
         await this.loadSessionTasks();
         this.renderMainTaskPanel();
-      } else {
-        this.showToast('No session or workspace selected', 'error');
-        return;
       }
     } catch (error) {
       console.error('Failed to save task:', error);

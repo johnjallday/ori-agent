@@ -3,6 +3,7 @@ package orchestrationhttp
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/agentstudio"
@@ -100,6 +101,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		To                     string   `json:"to"`
 		AssignedNodeID         string   `json:"assigned_node_id"`
 		Description            string   `json:"description"`
+		Details                string   `json:"details"`
 		Priority               int      `json:"priority"`
 		InputTaskIDs           []string `json:"input_task_ids"`
 		ResultCombinationMode  string   `json:"result_combination_mode"`
@@ -115,14 +117,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		orihttp.BadRequest(w, "workspace_id is required")
 		return
 	}
-	if req.From == "" {
-		orihttp.BadRequest(w, "from (sender agent) is required")
-		return
-	}
-	if req.To == "" {
-		orihttp.BadRequest(w, "to (recipient agent) is required")
-		return
-	}
+	// from and to are optional - tasks without agents are manual tasks
 	if req.Description == "" {
 		orihttp.BadRequest(w, "description is required")
 		return
@@ -142,6 +137,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		To:             req.To,
 		AssignedNodeID: req.AssignedNodeID,
 		Description:    req.Description,
+		Details:        req.Details,
 		Priority:       req.Priority,
 		InputTaskIDs:   req.InputTaskIDs,
 		Status:         agentstudio.TaskStatusPending,
@@ -447,5 +443,70 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 		"success": true,
 		"message": "Task deleted successfully",
 		"task_id": taskID,
+	})
+}
+
+// CompleteTaskHandler handles POST /api/orchestration/tasks/{id}/complete
+// Marks a task as completed (for manual task completion)
+func (th *TaskHandler) CompleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	// Extract task ID from URL path
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+	if len(pathParts) < 2 || pathParts[0] == "" {
+		orihttp.BadRequest(w, "task_id is required in URL path")
+		return
+	}
+	taskID := pathParts[0]
+
+	// Get task and workspace
+	task, ws, err := th.getTaskWithWorkspace(taskID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Task not found", err)
+		return
+	}
+
+	// Find and update task status to completed
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ID == taskID {
+			now := time.Now()
+			ws.Tasks[i].Status = agentstudio.TaskStatusCompleted
+			ws.Tasks[i].CompletedAt = &now
+			break
+		}
+	}
+
+	// Save workspace
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to complete task", err)
+		return
+	}
+
+	logger.Info("Completed task manually", logger.Fields{"task_id": taskID, "workspace_id": task.WorkspaceID})
+
+	// Publish event
+	if th.eventBus != nil {
+		th.eventBus.Publish(agentstudio.Event{
+			Type:        agentstudio.EventTaskCompleted,
+			WorkspaceID: task.WorkspaceID,
+			Data: map[string]interface{}{
+				"task_id": taskID,
+				"manual":  true,
+			},
+		})
+	}
+
+	// Return updated task
+	updatedTask, _ := ws.GetTask(taskID)
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success": true,
+		"task":    updatedTask,
 	})
 }

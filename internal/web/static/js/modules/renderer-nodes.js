@@ -226,6 +226,9 @@ export class RendererNodes {
       this.ctx.font = '9px system-ui';
 
       let statusText;
+      // Check if this is a simple manual task (no from AND no to)
+      const isSimpleTask = isSystemTask && isUnassigned;
+
       if (treatAsUnassigned) {
         // Find output connection from this task (task is the source)
         const outputConn = this.state.connections.find(c => c.from === task.id);
@@ -237,9 +240,13 @@ export class RendererNodes {
           if (connectedNode) {
             const nodeName = connectedNode.node.name || connectedNode.node.id || 'Unknown';
             statusText = `→ ${nodeName}`;
+          } else if (isSimpleTask) {
+            statusText = '📝 Manual task';
           } else {
             statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
           }
+        } else if (isSimpleTask) {
+          statusText = '📝 Manual task';
         } else {
           statusText = isOrphaned ? `⚠️ MISSING: ${task.to}` : '⚠️ UNASSIGNED';
         }

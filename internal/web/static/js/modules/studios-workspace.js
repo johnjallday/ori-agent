@@ -361,13 +361,15 @@ function renderWorkspaces(workspaces) {
                         <p class="text-muted small mb-3">${escapeHtml(workspace.description)}</p>
                     ` : ''}
 
-                    <div class="mb-3">
-                        <small style="color: var(--text-secondary); font-weight: 500;">Agents: ${workspace.agents ? workspace.agents.length : 0}</small>
+                    <div class="mb-3 d-flex gap-3 flex-wrap">
+                        <small style="color: var(--text-secondary); font-weight: 500;">Tasks: ${workspace.task_count || 0}</small>
+                        <small style="color: var(--text-secondary); font-weight: 500;">Sessions: ${workspace.session_count || 0}</small>
+                        <small style="color: var(--text-secondary); font-weight: 500;">Notes: ${workspace.note_count || 0}</small>
                     </div>
 
                     <div class="d-flex gap-2 mt-3">
                         <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
-                            View
+                            Dashboard
                         </button>
                         <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
                             Canvas

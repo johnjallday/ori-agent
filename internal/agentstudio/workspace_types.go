@@ -138,6 +138,7 @@ type Task struct {
 	To             string                 `json:"to"`
 	AssignedNodeID string                 `json:"assigned_node_id,omitempty"` // Specific agent instance (node) when multiple share a name
 	Description    string                 `json:"description"`
+	Details        string                 `json:"details,omitempty"`
 	Priority       int                    `json:"priority"`
 	Context        map[string]interface{} `json:"context"`
 	Timeout        time.Duration          `json:"timeout"`
