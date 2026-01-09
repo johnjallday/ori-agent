@@ -1040,12 +1040,52 @@
           throw new Error(text || 'Failed to execute task');
         }
 
-        alert('Task execution started!');
+        // Refresh immediately to show in_progress status
         await loadTasks();
+
+        // Poll for task completion
+        pollTaskCompletion(taskId);
       } catch (err) {
         console.error(err);
         alert(`Failed to execute task: ${err.message || err}`);
       }
+    }
+
+    // Poll task status until completed or failed
+    async function pollTaskCompletion(taskId, maxAttempts = 120, intervalMs = 2000) {
+      let attempts = 0;
+
+      const poll = async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+          console.log('Task polling timed out');
+          return;
+        }
+
+        try {
+          const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+          if (resp.ok) {
+            const task = await resp.json();
+            const status = task.status;
+
+            if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+              // Task finished, refresh the list
+              await loadTasks();
+              return;
+            }
+
+            // Still running, continue polling
+            setTimeout(poll, intervalMs);
+          }
+        } catch (err) {
+          console.error('Error polling task status:', err);
+          // Continue polling on error
+          setTimeout(poll, intervalMs);
+        }
+      };
+
+      // Start polling after a short delay
+      setTimeout(poll, intervalMs);
     }
 
     // ========== DELETE FUNCTIONS ==========
