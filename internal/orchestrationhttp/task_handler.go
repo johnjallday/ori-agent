@@ -237,6 +237,15 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		task.NextRun = nextRun
 	}
 
+	// Auto-add agent to workspace if not already present
+	if task.To != "" && task.To != "unassigned" && !ws.HasAgent(task.To) {
+		if err := ws.AddAgent(task.To); err != nil {
+			logger.Warn("Failed to auto-add agent to workspace", logger.Fields{"agent": task.To, "error": err})
+		} else {
+			logger.Info("Auto-added agent to workspace", logger.Fields{"agent": task.To, "workspace_id": ws.ID})
+		}
+	}
+
 	// Add task to workspace
 	if err := ws.AddTask(task); err != nil {
 		logger.Error("Failed to add task to workspace", logger.Fields{"error": err})

@@ -658,6 +658,15 @@ func (th *TaskHandler) updateTaskAssignment(ws *workspace.Workspace, taskID stri
 		if ws.Tasks[i].ID == taskID {
 			if newTo != nil {
 				ws.Tasks[i].To = *newTo
+
+				// Auto-add agent to workspace if not already present
+				if *newTo != "" && *newTo != "unassigned" && !ws.HasAgent(*newTo) {
+					if err := ws.AddAgent(*newTo); err != nil {
+						logger.Warn("Failed to auto-add agent to workspace", logger.Fields{"agent": *newTo, "error": err})
+					} else {
+						logger.Info("Auto-added agent to workspace on task reassignment", logger.Fields{"agent": *newTo, "workspace_id": ws.ID})
+					}
+				}
 			}
 
 			if assignedNodeID != nil {
