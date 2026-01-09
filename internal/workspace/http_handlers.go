@@ -113,6 +113,13 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sync agents from tasks (handles legacy tasks assigned before auto-add feature)
+	if added := studio.SyncAgentsFromTasks(); added > 0 {
+		if saveErr := h.store.Save(studio); saveErr != nil {
+			logger.Warn("Failed to save workspace after syncing agents", logger.Fields{"error": saveErr})
+		}
+	}
+
 	// Get agent statistics
 	agentStats := studio.GetAgentStats()
 

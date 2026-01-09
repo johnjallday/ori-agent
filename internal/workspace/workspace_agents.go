@@ -157,3 +157,40 @@ func (w *Workspace) HasAgent(agentName string) bool {
 
 	return w.hasAgent(agentName)
 }
+
+// SyncAgentsFromTasks ensures all agents assigned to tasks are added to the workspace
+// This handles cases where tasks were assigned agents before the auto-add feature
+func (w *Workspace) SyncAgentsFromTasks() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	added := 0
+	for _, task := range w.Tasks {
+		if task.To != "" && task.To != "unassigned" && !w.hasAgent(task.To) {
+			// Add agent without lock (we already hold it)
+			instanceNumber := 1
+			for _, inst := range w.AgentInstances {
+				if inst.Name == task.To && inst.InstanceNumber >= instanceNumber {
+					instanceNumber = inst.InstanceNumber + 1
+				}
+			}
+
+			instance := AgentInstance{
+				ID:             fmt.Sprintf("%s-%d", task.To, instanceNumber),
+				Name:           task.To,
+				InstanceNumber: instanceNumber,
+				NodeID:         fmt.Sprintf("%s-node-%d", task.To, instanceNumber),
+				CreatedAt:      time.Now(),
+			}
+
+			w.AgentInstances = append(w.AgentInstances, instance)
+			w.Agents = append(w.Agents, task.To)
+			w.UpdatedAt = time.Now()
+			added++
+
+			logger.Info("Synced missing agent from task", logger.Fields{"agent": task.To, "workspace_id": w.ID})
+		}
+	}
+
+	return added
+}
