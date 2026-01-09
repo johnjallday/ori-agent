@@ -145,11 +145,6 @@ func (w *Workspace) hasAgent(agentName string) bool {
 	return false
 }
 
-// hasAgentUnlocked is an alias for hasAgent for clarity when caller already holds lock
-func (w *Workspace) hasAgentUnlocked(agentName string) bool {
-	return w.hasAgent(agentName)
-}
-
 // HasAgent checks if an agent is part of the workspace (thread-safe)
 func (w *Workspace) HasAgent(agentName string) bool {
 	w.mu.RLock()

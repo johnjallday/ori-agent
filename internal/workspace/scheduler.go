@@ -181,24 +181,36 @@ func (ts *TaskScheduler) checkLegacyScheduledTasks(ws *Workspace, now time.Time)
 		if st.Schedule.MaxRuns > 0 && st.ExecutionCount >= st.Schedule.MaxRuns {
 			st.Enabled = false
 			st.NextRun = nil
-			ws.UpdateScheduledTask(*st)
-			ts.workspaceStore.Save(ws)
+			if err := ws.UpdateScheduledTask(*st); err != nil {
+				logger.Error("Failed to update scheduled task", logger.Fields{"error": err, "task_id": st.ID})
+			}
+			if err := ts.workspaceStore.Save(ws); err != nil {
+				logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			}
 			continue
 		}
 
 		if st.Schedule.EndDate != nil && now.After(*st.Schedule.EndDate) {
 			st.Enabled = false
 			st.NextRun = nil
-			ws.UpdateScheduledTask(*st)
-			ts.workspaceStore.Save(ws)
+			if err := ws.UpdateScheduledTask(*st); err != nil {
+				logger.Error("Failed to update scheduled task", logger.Fields{"error": err, "task_id": st.ID})
+			}
+			if err := ts.workspaceStore.Save(ws); err != nil {
+				logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			}
 			continue
 		}
 
 		if st.CanvasNodeID != "" && st.TargetTaskID == "" {
 			nextRun := ts.calculateNextRun(st.Schedule, now)
 			st.NextRun = nextRun
-			ws.UpdateScheduledTask(*st)
-			ts.workspaceStore.Save(ws)
+			if err := ws.UpdateScheduledTask(*st); err != nil {
+				logger.Error("Failed to update scheduled task", logger.Fields{"error": err, "task_id": st.ID})
+			}
+			if err := ts.workspaceStore.Save(ws); err != nil {
+				logger.Error("Failed to save workspace", logger.Fields{"error": err})
+			}
 			continue
 		}
 

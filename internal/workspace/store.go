@@ -113,12 +113,9 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 	}
 
 	// Check if any migration happened and needs to be persisted
-	needsPersist := false
+	needsPersist := len(ws.AgentInstances) > 0 && len(ws.Agents) > 0
 
 	// If migration created AgentInstances, save back to disk
-	if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
-		needsPersist = true
-	}
 
 	// If scheduled tasks were migrated to task schedules
 	if len(ws.ScheduledTasks) > 0 {
