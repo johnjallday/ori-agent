@@ -500,6 +500,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
+	mux.HandleFunc("/api/orchestration/tasks/", s.orchestrationHandler.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
 	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.orchestrationHandler.WorkflowStatusStreamHandler)
@@ -632,12 +633,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				}
 			}
 
-			// Task routes (check if task handler is available)
-			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
-				s.taskHandler.HandleSessionTasks(w, r)
-				return
-			}
-
 			// Fall through to session handler
 			s.sessionHandler.HandleSessions(w, r)
 		})
@@ -667,11 +662,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			// Check if this is a workspace notes request
 			if strings.Contains(path, "/notes") {
 				s.sessionHandler.HandleWorkspaceNotes(w, r)
-				return
-			}
-			// Check if this is a workspace tasks request
-			if s.taskHandler != nil && strings.Contains(path, "/tasks") {
-				s.taskHandler.HandleWorkspaceTasks(w, r)
 				return
 			}
 			// Handle agent management (POST /api/workspaces/{id}/agents, DELETE /api/workspaces/{id}/agents/{name})

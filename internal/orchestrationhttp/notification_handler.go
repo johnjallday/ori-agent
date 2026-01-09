@@ -7,22 +7,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // NotificationHandler manages notification and event history operations
 type NotificationHandler struct {
-	workspaceStore      agentstudio.Store
-	notificationService *agentstudio.NotificationService
-	eventBus            *agentstudio.EventBus
+	workspaceStore      workspace.Store
+	notificationService *workspace.NotificationService
+	eventBus            *workspace.EventBus
 }
 
 // NewNotificationHandler creates a new notification handler
-func NewNotificationHandler(workspaceStore agentstudio.Store,
-	notificationService *agentstudio.NotificationService,
-	eventBus *agentstudio.EventBus) *NotificationHandler {
+func NewNotificationHandler(workspaceStore workspace.Store,
+	notificationService *workspace.NotificationService,
+	eventBus *workspace.EventBus) *NotificationHandler {
 	return &NotificationHandler{
 		workspaceStore:      workspaceStore,
 		notificationService: notificationService,
@@ -215,7 +215,7 @@ func (nh *NotificationHandler) EventHistoryHandler(w http.ResponseWriter, r *htt
 	sinceStr := r.URL.Query().Get("since")
 	limit := 100 // Default limit
 
-	var events []agentstudio.Event
+	var events []workspace.Event
 
 	if sinceStr != "" {
 		// Get events since timestamp

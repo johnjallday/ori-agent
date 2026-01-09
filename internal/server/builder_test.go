@@ -3,11 +3,11 @@ package server
 import (
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestNewServerBuilder(t *testing.T) {
@@ -155,7 +155,7 @@ func TestServerBuilder_WithWorkspaceStore(t *testing.T) {
 	builder, _ := NewServerBuilder()
 
 	tempDir := t.TempDir()
-	mockWorkspaceStore, err := agentstudio.NewFileStore(tempDir)
+	mockWorkspaceStore, err := workspace.NewFileStore(tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create mock workspace store: %v", err)
 	}

@@ -1,4 +1,4 @@
-package agentstudio
+package workspace
 
 import (
 	"encoding/json"
@@ -137,8 +137,9 @@ func FromJSON(data []byte) (*Workspace, error) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
 	}
-	ws.MigrateToAgentInstances() // Auto-migrate legacy format
-	ws.rebuildTaskIndex()        // Build index for O(1) task lookups
+	ws.MigrateToAgentInstances()      // Auto-migrate legacy agent format
+	ws.MigrateScheduledTasksToTasks() // Auto-migrate legacy scheduled tasks
+	ws.rebuildTaskIndex()             // Build index for O(1) task lookups
 	return &ws, nil
 }
 
@@ -170,4 +171,86 @@ func (w *Workspace) MigrateToAgentInstances() {
 	}
 
 	logger.Debug("Migrated workspace : legacy agents -> agent instances", logger.Fields{"workspace_id": w.ID, "agents)": len(w.Agents), "agentinstances)": len(w.AgentInstances)})
+}
+
+// MigrateScheduledTasksToTasks migrates legacy ScheduledTasks to Tasks with Schedule fields
+// Returns the number of tasks migrated
+func (w *Workspace) MigrateScheduledTasksToTasks() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Skip if no legacy scheduled tasks
+	if len(w.ScheduledTasks) == 0 {
+		return 0
+	}
+
+	migrated := 0
+
+	for _, st := range w.ScheduledTasks {
+		// Check if this scheduled task links to an existing task
+		if st.TargetTaskID != "" {
+			// Find the target task and copy schedule to it
+			for i := range w.Tasks {
+				if w.Tasks[i].ID == st.TargetTaskID {
+					w.Tasks[i].Schedule = &st.Schedule
+					w.Tasks[i].ScheduleEnabled = st.Enabled
+					w.Tasks[i].ScheduleName = st.Name
+					w.Tasks[i].NextRun = st.NextRun
+					w.Tasks[i].LastRun = st.LastRun
+					w.Tasks[i].ExecutionCount = st.ExecutionCount
+					w.Tasks[i].FailureCount = st.FailureCount
+					w.Tasks[i].ExecutionHistory = st.ExecutionHistory
+					migrated++
+					break
+				}
+			}
+		} else {
+			// Orphan scheduled task - create a new task with schedule
+			now := time.Now()
+			newTask := Task{
+				ID:               uuid.New().String(),
+				WorkspaceID:      w.ID,
+				From:             st.From,
+				To:               st.To,
+				Description:      st.Prompt,
+				Details:          st.Description,
+				Priority:         st.Priority,
+				Context:          st.Context,
+				Status:           TaskStatusPending,
+				Schedule:         &st.Schedule,
+				ScheduleEnabled:  st.Enabled,
+				ScheduleName:     st.Name,
+				NextRun:          st.NextRun,
+				LastRun:          st.LastRun,
+				ExecutionCount:   st.ExecutionCount,
+				FailureCount:     st.FailureCount,
+				ExecutionHistory: st.ExecutionHistory,
+				CreatedAt:        st.CreatedAt,
+			}
+			if newTask.CreatedAt.IsZero() {
+				newTask.CreatedAt = now
+			}
+			w.Tasks = append(w.Tasks, newTask)
+			migrated++
+		}
+	}
+
+	// Note: We don't clear ScheduledTasks here - the store will detect the migration
+	// (tasks have schedules AND ScheduledTasks exists) and persist, then clear.
+	if migrated > 0 {
+		w.UpdatedAt = time.Now()
+		logger.Info("Migrated scheduled tasks to task schedules", logger.Fields{
+			"workspace_id": w.ID,
+			"migrated":     migrated,
+		})
+	}
+
+	return migrated
+}
+
+// ClearLegacyScheduledTasks removes the deprecated ScheduledTasks array after migration
+func (w *Workspace) ClearLegacyScheduledTasks() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ScheduledTasks = nil
 }

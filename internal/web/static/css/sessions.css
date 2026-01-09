@@ -1450,6 +1450,495 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   color: var(--primary-color);
 }
 
+/* ============================================================================
+   Folder/Workspace Scheduled Tasks Styles
+   ============================================================================ */
+
+/* Schedules wrapper in folder tree - uses orange accent */
+.folder-schedules-wrapper {
+  margin: 2px 0 6px 0;
+  border-left: 2px solid #f59e0b;
+  margin-left: 22px;
+}
+
+.folder-schedules-wrapper.collapsed {
+  display: none;
+}
+
+/* Schedules header row */
+.folder-schedules-header {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px 5px 10px;
+  cursor: pointer;
+  border-radius: 0 6px 6px 0;
+  transition: background-color 0.15s ease;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.folder-schedules-header:hover {
+  background: var(--bg-hover);
+}
+
+.folder-schedules-header-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  color: #f59e0b;
+}
+
+.folder-schedules-header-text {
+  flex: 1;
+}
+
+.folder-schedules-count {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+/* ============================================================================
+   Scheduled Tasks Modal Styles
+   ============================================================================ */
+
+.scheduled-tasks-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+.scheduled-tasks-modal-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.scheduled-tasks-modal-dialog {
+  position: relative;
+  z-index: 1;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  animation: scaleIn 0.2s ease;
+}
+
+.scheduled-tasks-modal-content {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.scheduled-tasks-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  border-radius: 12px 12px 0 0;
+}
+
+.scheduled-tasks-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+}
+
+.scheduled-tasks-modal-close {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.scheduled-tasks-modal-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.scheduled-tasks-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.scheduled-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scheduled-task-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scheduled-task-item:hover {
+  border-color: var(--border-hover, var(--border-color));
+  background: var(--bg-hover);
+}
+
+.scheduled-task-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.scheduled-task-status-indicator.enabled {
+  background: #22c55e;
+}
+
+.scheduled-task-status-indicator.disabled {
+  background: #6b7280;
+}
+
+.scheduled-task-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.scheduled-task-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scheduled-task-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.scheduled-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.scheduled-task-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.scheduled-task-actions button {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.scheduled-task-actions button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.scheduled-task-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scheduled-tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.scheduled-tasks-empty-icon {
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  margin-bottom: 12px;
+}
+
+.scheduled-tasks-empty p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.scheduled-tasks-empty span {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ============================================================================
+   Schedule Detail Modal Styles
+   ============================================================================ */
+
+.schedule-detail-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.schedule-detail-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.schedule-detail-content {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  animation: taskModalSlideIn 0.2s ease-out;
+}
+
+.schedule-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.schedule-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.schedule-detail-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.schedule-detail-close:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.schedule-detail-body {
+  padding: 20px;
+}
+
+.schedule-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.schedule-detail-row:last-child {
+  border-bottom: none;
+}
+
+.schedule-detail-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.schedule-detail-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.schedule-detail-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.schedule-detail-badge.badge-enabled {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.schedule-detail-badge.badge-disabled {
+  background: rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+}
+
+.schedule-detail-section {
+  margin-top: 16px;
+}
+
+.schedule-detail-history {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item.success {
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.history-item.failed {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.history-time {
+  color: var(--text-secondary);
+}
+
+.history-status {
+  font-weight: 600;
+}
+
+.history-item.success .history-status {
+  color: #22c55e;
+}
+
+.history-item.failed .history-status {
+  color: #ef4444;
+}
+
+.history-error {
+  color: #ef4444;
+  font-size: 11px;
+  flex: 1;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.schedule-detail-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.schedule-detail-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.schedule-detail-btn-toggle {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.schedule-detail-btn-toggle:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.schedule-detail-btn-trigger {
+  background: var(--primary-color, #3b82f6);
+  border: 1px solid var(--primary-color, #3b82f6);
+  color: white;
+}
+
+.schedule-detail-btn-trigger:hover {
+  background: var(--primary-hover, #2563eb);
+  border-color: var(--primary-hover, #2563eb);
+}
+
 /* Note Editor Modal */
 .note-title-input {
   background: transparent;

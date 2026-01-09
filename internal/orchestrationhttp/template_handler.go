@@ -6,27 +6,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // TemplateHandler manages workflow template operations
 type TemplateHandler struct {
 	agentStore      store.Store
-	workspaceStore  agentstudio.Store
+	workspaceStore  workspace.Store
 	templateManager *templates.TemplateManager
 	orchestrator    *orchestration.Orchestrator
-	eventBus        *agentstudio.EventBus
+	eventBus        *workspace.EventBus
 }
 
 // NewTemplateHandler creates a new template handler
-func NewTemplateHandler(agentStore store.Store, workspaceStore agentstudio.Store,
+func NewTemplateHandler(agentStore store.Store, workspaceStore workspace.Store,
 	templateManager *templates.TemplateManager, orchestrator *orchestration.Orchestrator,
-	eventBus *agentstudio.EventBus) *TemplateHandler {
+	eventBus *workspace.EventBus) *TemplateHandler {
 	return &TemplateHandler{
 		agentStore:      agentStore,
 		workspaceStore:  workspaceStore,

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -18,7 +18,7 @@ import (
 // Note: Compile-time interface check is in store_generated.go
 type StoreTool struct {
 	pluginapi.BasePlugin
-	store     agentstudio.Store
+	store     workspace.Store
 	agentName string
 	agentDir  string
 }
@@ -34,7 +34,7 @@ func (s *StoreTool) SetAgentContext(ctx pluginapi.AgentContext) {
 
 	// Initialize the workspace store
 	var err error
-	s.store, err = agentstudio.NewFileStore("workspaces")
+	s.store, err = workspace.NewFileStore("workspaces")
 	if err != nil {
 		// Fallback - will fail later with better error message
 		s.store = nil
@@ -65,16 +65,16 @@ func (s *StoreTool) Execute(ctx context.Context, params *Params) (string, error)
 		return "", fmt.Errorf("workspace ID not found - plugin not properly initialized (agentDir: %s)", s.agentDir)
 	}
 
-	workspace, err := s.store.Get(workspaceID)
+	ws, err := s.store.Get(workspaceID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get workspace: %w", err)
 	}
 
 	// Find the store node by canvas node ID
-	var storeNode *agentstudio.StoreNode
-	for i := range workspace.StoreNodes {
-		if workspace.StoreNodes[i].CanvasNodeID == params.StoreNodeId {
-			storeNode = &workspace.StoreNodes[i]
+	var storeNode *workspace.StoreNode
+	for i := range ws.StoreNodes {
+		if ws.StoreNodes[i].CanvasNodeID == params.StoreNodeId {
+			storeNode = &ws.StoreNodes[i]
 			break
 		}
 	}
@@ -83,14 +83,14 @@ func (s *StoreTool) Execute(ctx context.Context, params *Params) (string, error)
 		return "", fmt.Errorf("store node '%s' not found in workspace", params.StoreNodeId)
 	}
 
-	// Call WriteToStore from agentstudio package
-	if err := agentstudio.WriteToStore(storeNode, params.FilePath, params.Data); err != nil {
+	// Call WriteToStore from workspace package
+	if err := workspace.WriteToStore(storeNode, params.FilePath, params.Data); err != nil {
 		// Update error on store node
 		storeNode.LastError = err.Error()
 		storeNode.UpdatedAt = time.Now()
 
 		// Save workspace with error
-		if saveErr := s.store.Save(workspace); saveErr != nil {
+		if saveErr := s.store.Save(ws); saveErr != nil {
 			return "", fmt.Errorf("write failed: %v (also failed to save error state: %v)", err, saveErr)
 		}
 
@@ -98,7 +98,7 @@ func (s *StoreTool) Execute(ctx context.Context, params *Params) (string, error)
 	}
 
 	// Save updated workspace (WriteToStore already updated node stats)
-	if err := s.store.Save(workspace); err != nil {
+	if err := s.store.Save(ws); err != nil {
 		return "", fmt.Errorf("data written successfully but failed to save workspace state: %w", err)
 	}
 

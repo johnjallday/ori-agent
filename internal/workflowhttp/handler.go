@@ -6,20 +6,20 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Handler manages custom workflow HTTP endpoints
 type Handler struct {
 	workflowManager *templates.CustomWorkflowManager
-	workspaceStore  agentstudio.Store
+	workspaceStore  workspace.Store
 }
 
 // NewHandler creates a new workflow handler
-func NewHandler(workflowManager *templates.CustomWorkflowManager, workspaceStore agentstudio.Store) *Handler {
+func NewHandler(workflowManager *templates.CustomWorkflowManager, workspaceStore workspace.Store) *Handler {
 	return &Handler{
 		workflowManager: workflowManager,
 		workspaceStore:  workspaceStore,

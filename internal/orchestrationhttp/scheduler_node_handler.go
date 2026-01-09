@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // SchedulerNodesHandler handles CRUD operations for scheduler nodes (canvas-based scheduled tasks)
@@ -64,7 +64,7 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		}
 
 		// Get position from layout if available, otherwise use default position
-		var position *agentstudio.Position
+		var position *workspace.Position
 		if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
 			if pos, exists := ws.Layout.SchedulerPositions[st.CanvasNodeID]; exists {
 				position = &pos
@@ -75,16 +75,16 @@ func (th *TaskHandler) handleListSchedulerNodes(w http.ResponseWriter, r *http.R
 		if position == nil {
 			defaultX := 100.0 + float64(i*150) // Offset horizontally for each scheduler
 			defaultY := 100.0
-			position = &agentstudio.Position{X: defaultX, Y: defaultY}
+			position = &workspace.Position{X: defaultX, Y: defaultY}
 
 			// Save position to layout
 			if ws.Layout == nil {
-				ws.Layout = &agentstudio.CanvasLayout{
-					SchedulerPositions: make(map[string]agentstudio.Position),
+				ws.Layout = &workspace.CanvasLayout{
+					SchedulerPositions: make(map[string]workspace.Position),
 				}
 			}
 			if ws.Layout.SchedulerPositions == nil {
-				ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
+				ws.Layout.SchedulerPositions = make(map[string]workspace.Position)
 			}
 			ws.Layout.SchedulerPositions[st.CanvasNodeID] = *position
 			needsSave = true
@@ -141,16 +141,16 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	var req struct {
-		Name        string                     `json:"name"`
-		Description string                     `json:"description"`
-		From        string                     `json:"from"`
-		To          string                     `json:"to"`
-		Prompt      string                     `json:"prompt"`
-		Priority    int                        `json:"priority"`
-		Schedule    agentstudio.ScheduleConfig `json:"schedule"`
-		Enabled     bool                       `json:"enabled"`
-		X           float64                    `json:"x"`
-		Y           float64                    `json:"y"`
+		Name        string                   `json:"name"`
+		Description string                   `json:"description"`
+		From        string                   `json:"from"`
+		To          string                   `json:"to"`
+		Prompt      string                   `json:"prompt"`
+		Priority    int                      `json:"priority"`
+		Schedule    workspace.ScheduleConfig `json:"schedule"`
+		Enabled     bool                     `json:"enabled"`
+		X           float64                  `json:"x"`
+		Y           float64                  `json:"y"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -199,7 +199,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Create scheduled task
 	now := time.Now()
-	st := agentstudio.ScheduledTask{
+	st := workspace.ScheduledTask{
 		WorkspaceID:  workspaceID,
 		CanvasNodeID: nodeID,
 		Name:         req.Name,
@@ -229,14 +229,14 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Initialize layout if needed
 	if ws.Layout == nil {
-		ws.Layout = &agentstudio.CanvasLayout{}
+		ws.Layout = &workspace.CanvasLayout{}
 	}
 	if ws.Layout.SchedulerPositions == nil {
-		ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
+		ws.Layout.SchedulerPositions = make(map[string]workspace.Position)
 	}
 
 	// Add position to layout
-	ws.Layout.SchedulerPositions[nodeID] = agentstudio.Position{
+	ws.Layout.SchedulerPositions[nodeID] = workspace.Position{
 		X: req.X,
 		Y: req.Y,
 	}
@@ -249,7 +249,7 @@ func (th *TaskHandler) handleCreateSchedulerNode(w http.ResponseWriter, r *http.
 	}
 
 	// Get the created scheduled task (now has ID)
-	var createdTask *agentstudio.ScheduledTask
+	var createdTask *workspace.ScheduledTask
 	for i := len(ws.ScheduledTasks) - 1; i >= 0; i-- {
 		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
 			createdTask = &ws.ScheduledTasks[i]
@@ -316,7 +316,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	// Find scheduled task by CanvasNodeID
-	var foundTask *agentstudio.ScheduledTask
+	var foundTask *workspace.ScheduledTask
 	for i := range ws.ScheduledTasks {
 		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
 			foundTask = &ws.ScheduledTasks[i]
@@ -330,7 +330,7 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 	}
 
 	// Get position from layout
-	var position *agentstudio.Position
+	var position *workspace.Position
 	if ws.Layout != nil && ws.Layout.SchedulerPositions != nil {
 		if pos, exists := ws.Layout.SchedulerPositions[nodeID]; exists {
 			position = &pos
@@ -347,17 +347,17 @@ func (th *TaskHandler) handleGetSchedulerNode(w http.ResponseWriter, r *http.Req
 // handleUpdateSchedulerNode updates a scheduler node
 func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.Request, nodeID string) {
 	var req struct {
-		WorkspaceID  string                      `json:"studio_id"`
-		To           *string                     `json:"to,omitempty"`
-		TargetTaskID *string                     `json:"target_task_id,omitempty"`
-		Name         *string                     `json:"name,omitempty"`
-		Description  *string                     `json:"description,omitempty"`
-		Prompt       *string                     `json:"prompt,omitempty"`
-		Priority     *int                        `json:"priority,omitempty"`
-		Schedule     *agentstudio.ScheduleConfig `json:"schedule,omitempty"`
-		Enabled      *bool                       `json:"enabled,omitempty"`
-		X            *float64                    `json:"x,omitempty"`
-		Y            *float64                    `json:"y,omitempty"`
+		WorkspaceID  string                    `json:"studio_id"`
+		To           *string                   `json:"to,omitempty"`
+		TargetTaskID *string                   `json:"target_task_id,omitempty"`
+		Name         *string                   `json:"name,omitempty"`
+		Description  *string                   `json:"description,omitempty"`
+		Prompt       *string                   `json:"prompt,omitempty"`
+		Priority     *int                      `json:"priority,omitempty"`
+		Schedule     *workspace.ScheduleConfig `json:"schedule,omitempty"`
+		Enabled      *bool                     `json:"enabled,omitempty"`
+		X            *float64                  `json:"x,omitempty"`
+		Y            *float64                  `json:"y,omitempty"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -392,7 +392,7 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 
 	// Find scheduled task by CanvasNodeID
 	var taskIndex = -1
-	var st *agentstudio.ScheduledTask
+	var st *workspace.ScheduledTask
 	for i := range ws.ScheduledTasks {
 		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
 			taskIndex = i
@@ -456,10 +456,10 @@ func (th *TaskHandler) handleUpdateSchedulerNode(w http.ResponseWriter, r *http.
 	// Update position if provided
 	if req.X != nil || req.Y != nil {
 		if ws.Layout == nil {
-			ws.Layout = &agentstudio.CanvasLayout{}
+			ws.Layout = &workspace.CanvasLayout{}
 		}
 		if ws.Layout.SchedulerPositions == nil {
-			ws.Layout.SchedulerPositions = make(map[string]agentstudio.Position)
+			ws.Layout.SchedulerPositions = make(map[string]workspace.Position)
 		}
 
 		pos := ws.Layout.SchedulerPositions[nodeID]
@@ -574,7 +574,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	}
 
 	// Find scheduled task by CanvasNodeID
-	var foundTask *agentstudio.ScheduledTask
+	var foundTask *workspace.ScheduledTask
 	for i := range ws.ScheduledTasks {
 		if ws.ScheduledTasks[i].CanvasNodeID == nodeID {
 			foundTask = &ws.ScheduledTasks[i]
@@ -589,7 +589,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 
 	now := time.Now()
 	var taskID string
-	var targetTask *agentstudio.Task
+	var targetTask *workspace.Task
 
 	// If linked to a specific task node, reset and execute that task immediately
 	if foundTask.TargetTaskID != "" {
@@ -601,7 +601,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		}
 		targetTask = task
 
-		if targetTask.Status == agentstudio.TaskStatusInProgress {
+		if targetTask.Status == workspace.TaskStatusInProgress {
 			orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Linked task is already running", fmt.Errorf("task %s in progress", targetTask.ID))
 			return
 		}
@@ -612,7 +612,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		}
 
 		// Reset task state for rerun
-		targetTask.Status = agentstudio.TaskStatusInProgress
+		targetTask.Status = workspace.TaskStatusInProgress
 		targetTask.Result = ""
 		targetTask.Error = ""
 		targetTask.Progress = nil
@@ -637,7 +637,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 	foundTask.FailureCount = 0
 	foundTask.LastError = ""
 
-	execution := agentstudio.TaskExecution{
+	execution := workspace.TaskExecution{
 		TaskID:     taskID,
 		ExecutedAt: now,
 		Status:     "success",
@@ -647,7 +647,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 		foundTask.ExecutionHistory = foundTask.ExecutionHistory[len(foundTask.ExecutionHistory)-20:]
 	}
 
-	nextRun := agentstudio.CalculateNextRun(foundTask.Schedule, now)
+	nextRun := workspace.CalculateNextRun(foundTask.Schedule, now)
 	foundTask.NextRun = nextRun
 	if nextRun == nil {
 		foundTask.Enabled = false
@@ -679,7 +679,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
-					task.Status = agentstudio.TaskStatusFailed
+					task.Status = workspace.TaskStatusFailed
 					task.Error = execErr.Error()
 					completedAt := time.Now()
 					task.CompletedAt = &completedAt
@@ -694,7 +694,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			ws, wsErr := th.workspaceStore.Get(workspaceID)
 			if wsErr == nil {
 				if task, getErr := ws.GetTask(taskID); getErr == nil {
-					task.Status = agentstudio.TaskStatusCompleted
+					task.Status = workspace.TaskStatusCompleted
 					task.Result = result
 					completedAt := time.Now()
 					task.CompletedAt = &completedAt
@@ -715,7 +715,7 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 			"scheduled_task":  foundTask,
 			"target_task_id":  foundTask.TargetTaskID,
 		}
-		th.eventBus.Publish(agentstudio.NewScheduledTaskEvent(agentstudio.EventScheduledTaskTriggered, ws.ID, foundTask.ID, foundTask.Name, payload))
+		th.eventBus.Publish(workspace.NewScheduledTaskEvent(workspace.EventScheduledTaskTriggered, ws.ID, foundTask.ID, foundTask.Name, payload))
 	}
 
 	logger.Info("Manually triggered scheduler node", logger.Fields{"node_id": nodeID, "task_id": taskID, "target_task_id": foundTask.TargetTaskID})
@@ -728,9 +728,9 @@ func (th *TaskHandler) SchedulerNodeTriggerHandler(w http.ResponseWriter, r *htt
 }
 
 // validateScheduleConfig validates a schedule configuration
-func validateScheduleConfig(config agentstudio.ScheduleConfig) error {
+func validateScheduleConfig(config workspace.ScheduleConfig) error {
 	switch config.Type {
-	case agentstudio.ScheduleOnce:
+	case workspace.ScheduleOnce:
 		if config.ExecuteAt == nil {
 			return fmt.Errorf("execute_at is required for 'once' schedule type")
 		}
@@ -738,12 +738,12 @@ func validateScheduleConfig(config agentstudio.ScheduleConfig) error {
 			return fmt.Errorf("execute_at must be in the future")
 		}
 
-	case agentstudio.ScheduleInterval:
+	case workspace.ScheduleInterval:
 		if config.Interval <= 0 {
 			return fmt.Errorf("interval must be positive for 'interval' schedule type")
 		}
 
-	case agentstudio.ScheduleDaily:
+	case workspace.ScheduleDaily:
 		if config.TimeOfDay == "" {
 			return fmt.Errorf("time_of_day is required for 'daily' schedule type")
 		}
@@ -751,7 +751,7 @@ func validateScheduleConfig(config agentstudio.ScheduleConfig) error {
 			return fmt.Errorf("invalid time_of_day format: %w", err)
 		}
 
-	case agentstudio.ScheduleWeekly:
+	case workspace.ScheduleWeekly:
 		if config.TimeOfDay == "" {
 			return fmt.Errorf("time_of_day is required for 'weekly' schedule type")
 		}
@@ -762,15 +762,15 @@ func validateScheduleConfig(config agentstudio.ScheduleConfig) error {
 			return fmt.Errorf("day_of_week must be between 0 (Sunday) and 6 (Saturday)")
 		}
 
-	case agentstudio.ScheduleCron:
+	case workspace.ScheduleCron:
 		if config.CronExpr == "" {
 			return fmt.Errorf("cron_expr is required for 'cron' schedule type")
 		}
-		if err := agentstudio.ValidateCronExpression(config.CronExpr); err != nil {
+		if err := workspace.ValidateCronExpression(config.CronExpr); err != nil {
 			return fmt.Errorf("invalid cron expression: %w", err)
 		}
 
-	case agentstudio.ScheduleRelativeDelay:
+	case workspace.ScheduleRelativeDelay:
 		if config.DelayDuration <= 0 {
 			return fmt.Errorf("delay_duration must be positive for 'relative_delay' schedule type")
 		}

@@ -1,4 +1,4 @@
-package agentstudio
+package workspace
 
 import (
 	"fmt"
@@ -112,8 +112,22 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 		return nil, fmt.Errorf("failed to deserialize workspace: %w", err)
 	}
 
+	// Check if any migration happened and needs to be persisted
+	needsPersist := false
+
 	// If migration created AgentInstances, save back to disk
 	if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
+		needsPersist = true
+	}
+
+	// If scheduled tasks were migrated to task schedules
+	if len(ws.ScheduledTasks) > 0 {
+		// Clear legacy data before persisting
+		ws.ClearLegacyScheduledTasks()
+		needsPersist = true
+	}
+
+	if needsPersist {
 		// Migration happened - persist it
 		// We already hold the lock, so inline the save logic without locking again
 		migratedData, err := ws.ToJSON()
@@ -224,8 +238,22 @@ func (s *FileStore) loadCache() error {
 				continue // Skip files that can't be deserialized
 			}
 
+			// Check if any migration happened and needs to be persisted
+			needsPersist := false
+
 			// If migration created AgentInstances, save back to disk
 			if len(ws.AgentInstances) > 0 && len(ws.Agents) > 0 {
+				needsPersist = true
+			}
+
+			// If scheduled tasks were migrated to task schedules
+			if len(ws.ScheduledTasks) > 0 {
+				// Clear legacy data before persisting
+				ws.ClearLegacyScheduledTasks()
+				needsPersist = true
+			}
+
+			if needsPersist {
 				// Migration happened - persist it
 				migratedData, err := ws.ToJSON()
 				if err != nil {

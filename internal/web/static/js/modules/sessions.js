@@ -82,6 +82,7 @@ const sessionManager = {
     this.setupKeyboardShortcuts();
     this.initChatAgentBar();
     this.initMainTaskPanel();
+    this.initScheduledTasksModal();
     await this.loadSessions();
     await this.loadFolders();
     await this.loadTags();
@@ -295,24 +296,39 @@ const sessionManager = {
     }
   },
 
-  // Load task counts for all visible sessions
+  // Load task counts for all visible sessions (from workspace orchestration API)
   async loadSessionTaskCounts() {
     if (this.sessions.length === 0) return;
 
-    // Fetch counts for each session
-    const fetchPromises = this.sessions.map(async (session) => {
+    // Group sessions by workspace to avoid duplicate API calls
+    const workspaceStats = new Map();
+    const workspaceIds = [...new Set(this.sessions.map(s => s.folder_id).filter(Boolean))];
+
+    // Fetch stats for each unique workspace
+    const fetchPromises = workspaceIds.map(async (workspaceId) => {
       try {
-        const response = await fetch(`/api/sessions/${session.id}/tasks`);
+        const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
         if (response.ok) {
           const data = await response.json();
-          this.sessionTaskCounts.set(session.id, data.counts || { total: 0, pending: 0, completed: 0 });
+          workspaceStats.set(workspaceId, data.stats || { total: 0, pending: 0, completed: 0 });
         }
       } catch (error) {
-        console.error(`Failed to load task counts for session ${session.id}:`, error);
+        console.error(`Failed to load task counts for workspace ${workspaceId}:`, error);
       }
     });
 
     await Promise.all(fetchPromises);
+
+    // Apply workspace stats to sessions
+    this.sessions.forEach(session => {
+      if (session.folder_id) {
+        const stats = workspaceStats.get(session.folder_id);
+        if (stats) {
+          this.sessionTaskCounts.set(session.id, stats);
+        }
+      }
+    });
+
     this.updateSessionTaskBadges();
   },
 
@@ -382,6 +398,9 @@ const sessionManager = {
 
       // Load tasks for all workspaces
       await this.loadAllWorkspaceTasks(this.folders);
+
+      // Load scheduled tasks for all workspaces
+      await this.loadAllWorkspaceScheduledTasks(this.folders);
 
       this.renderFolderTree();
     } catch (error) {
@@ -650,6 +669,15 @@ const sessionManager = {
         this.openTaskModalForWorkspace(workspaceId);
       });
     });
+
+    // Bind scheduled tasks section events
+    container.querySelectorAll('.folder-schedules-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const workspaceId = header.dataset.workspaceId;
+        this.openScheduledTasksPanel(workspaceId);
+      });
+    });
   },
 
   // Render folder items recursively
@@ -687,6 +715,26 @@ const sessionManager = {
                   <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                 </svg>
               </button>
+            </div>
+          </div>
+        `
+        : '';
+
+      // Get scheduled tasks for this workspace
+      const workspaceScheduledTasks = this.scheduledTasksByWorkspace?.get(folder.id) || [];
+      const scheduledTaskCount = workspaceScheduledTasks.length;
+      const enabledScheduleCount = workspaceScheduledTasks.filter(st => st.enabled).length;
+
+      // Schedules section - clickable header that opens the scheduled tasks panel
+      const schedulesHtml = scheduledTaskCount > 0
+        ? `
+          <div class="folder-schedules-wrapper ${isCollapsed ? 'collapsed' : ''}">
+            <div class="folder-schedules-header" data-workspace-id="${folder.id}">
+              <svg class="folder-schedules-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+              </svg>
+              <span class="folder-schedules-header-text">Schedules</span>
+              <span class="folder-schedules-count">${enabledScheduleCount}/${scheduledTaskCount}</span>
             </div>
           </div>
         `
@@ -734,6 +782,7 @@ const sessionManager = {
         ${notesHtml}
         ${sessionsHtml}
         ${tasksHtml}
+        ${schedulesHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
     }).join('');
@@ -3978,8 +4027,10 @@ const sessionManager = {
   workspaceTasks: [],
   taskCounts: { total: 0, pending: 0, completed: 0 },
   tasksByWorkspace: new Map(), // Tasks keyed by workspace (folder) ID
+  scheduledTasksByWorkspace: new Map(), // Scheduled tasks keyed by workspace (folder) ID
+  currentScheduledTaskWorkspaceId: null, // Workspace context for scheduled task operations
 
-  // Load tasks for current session
+  // Load tasks for current session (from workspace/orchestration)
   async loadSessionTasks() {
     if (!this.activeSessionId) {
       this.workspaceTasks = [];
@@ -3988,12 +4039,21 @@ const sessionManager = {
     }
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`);
+      // Get the workspace ID from the active session
+      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+      if (!activeSession || !activeSession.folder_id) {
+        this.workspaceTasks = [];
+        this.taskCounts = { total: 0, pending: 0, completed: 0 };
+        return;
+      }
+
+      const workspaceId = activeSession.folder_id;
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
       this.workspaceTasks = data.tasks || [];
-      this.taskCounts = data.counts || { total: 0, pending: 0, completed: 0 };
+      this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
 
       // Update the counts cache and badges
       this.sessionTaskCounts.set(this.activeSessionId, this.taskCounts);
@@ -4006,11 +4066,8 @@ const sessionManager = {
       }
 
       // Update workspace tasks in sidebar
-      const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
-      if (activeSession && activeSession.folder_id) {
-        this.tasksByWorkspace.set(activeSession.folder_id, this.workspaceTasks);
-        this.renderFolderTree();
-      }
+      this.tasksByWorkspace.set(workspaceId, this.workspaceTasks);
+      this.renderFolderTree();
     } catch (error) {
       console.error('Failed to load session tasks:', error);
       this.workspaceTasks = [];
@@ -4019,10 +4076,10 @@ const sessionManager = {
     }
   },
 
-  // Load tasks for a workspace (folder)
+  // Load tasks for a workspace (folder) using orchestration API
   async loadWorkspaceTasks(workspaceId) {
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`);
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
       if (!response.ok) throw new Error('Failed to load workspace tasks');
       const data = await response.json();
       this.tasksByWorkspace.set(workspaceId, data.tasks || []);
@@ -4043,17 +4100,66 @@ const sessionManager = {
     }
   },
 
-  // Add task to workspace from sidebar
+  // Load scheduled tasks for a workspace (folder) using orchestration API
+  // Now returns tasks that have schedules (not legacy ScheduledTask entities)
+  async loadWorkspaceScheduledTasks(workspaceId) {
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load workspace tasks');
+      const data = await response.json();
+      const allTasks = data.tasks || [];
+      // Filter tasks that have schedules - normalize to consistent format
+      const scheduledTasks = allTasks
+        .filter(task => task.schedule != null)
+        .map(task => ({
+          id: task.id,
+          name: task.schedule_name || task.description,
+          description: task.description,
+          enabled: task.schedule_enabled,
+          schedule: task.schedule,
+          next_run: task.next_run,
+          last_run: task.last_run,
+          execution_count: task.execution_count,
+          failure_count: task.failure_count,
+          execution_history: task.execution_history,
+          // Keep reference to original task
+          task_id: task.id,
+          from: task.from,
+          to: task.to
+        }));
+      this.scheduledTasksByWorkspace.set(workspaceId, scheduledTasks);
+      return scheduledTasks;
+    } catch (error) {
+      console.error('Failed to load workspace scheduled tasks:', error);
+      return [];
+    }
+  },
+
+  // Load scheduled tasks for all workspaces recursively
+  async loadAllWorkspaceScheduledTasks(folders) {
+    for (const folder of folders) {
+      await this.loadWorkspaceScheduledTasks(folder.id);
+      if (folder.children && folder.children.length > 0) {
+        await this.loadAllWorkspaceScheduledTasks(folder.children);
+      }
+    }
+  },
+
+  // Add task to workspace from sidebar using orchestration API
   async addWorkspaceTask(workspaceId) {
     // Prompt for task description
     const description = prompt('Enter task description:');
     if (!description || !description.trim()) return;
 
     try {
-      const response = await fetch(`/api/workspaces/${workspaceId}/tasks`, {
+      const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: description.trim() })
+        body: JSON.stringify({
+          studio_id: workspaceId,
+          description: description.trim(),
+          priority: 3
+        })
       });
 
       if (!response.ok) throw new Error('Failed to create task');
@@ -4074,7 +4180,7 @@ const sessionManager = {
     }
   },
 
-  // Toggle task completion
+  // Toggle task completion using orchestration API
   async toggleTaskComplete(taskId) {
     const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
@@ -4082,15 +4188,15 @@ const sessionManager = {
     try {
       if (task.status === 'completed') {
         // Uncomplete - update status back to pending
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+        const response = await fetch('/api/orchestration/tasks', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'pending' })
+          body: JSON.stringify({ task_id: taskId, status: 'pending' })
         });
         if (!response.ok) throw new Error('Failed to update task');
       } else {
-        // Complete
-        const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}/complete`, {
+        // Complete using the complete endpoint
+        const response = await fetch(`/api/orchestration/tasks/${taskId}/complete`, {
           method: 'POST'
         });
         if (!response.ok) throw new Error('Failed to complete task');
@@ -4103,12 +4209,12 @@ const sessionManager = {
     }
   },
 
-  // Delete task
+  // Delete task using orchestration API
   async deleteTask(taskId) {
     if (!confirm('Delete this task?')) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
@@ -4156,6 +4262,19 @@ const sessionManager = {
     document.getElementById('taskModalCancel')?.addEventListener('click', () => this.closeTaskModal());
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
     document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
+
+    // Schedule fields toggle
+    document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
+      const scheduleFields = document.getElementById('taskModalScheduleFields');
+      if (scheduleFields) {
+        scheduleFields.style.display = e.target.checked ? 'block' : 'none';
+      }
+    });
+
+    // Schedule type change handler
+    document.getElementById('taskModalScheduleType')?.addEventListener('change', (e) => {
+      this.updateTaskModalScheduleTypeFields();
+    });
 
     // Modal escape key for task modal
     document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
@@ -4220,53 +4339,326 @@ const sessionManager = {
   },
 
   // Open workspace task panel from sidebar
+  // With unified task system, tasks are stored in workspaces (not sessions)
+  // so we can view tasks without needing a session
   async openWorkspaceTaskPanel(workspaceId) {
-    // Check if current session is in this workspace
-    const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+    try {
+      // Load tasks directly from workspace using orchestration API
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load workspace tasks');
 
-    if (activeSession && activeSession.folder_id === workspaceId) {
-      // Current session is in the workspace - open main task panel
-      await this.loadSessionTasks();
+      const data = await response.json();
+      this.workspaceTasks = data.tasks || [];
+      this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+
+      // Store workspace ID for task operations
+      this.currentTaskWorkspaceId = workspaceId;
+
+      // Open main task panel (works without active session)
       this.openMainTaskPanel();
-    } else {
-      // Need to switch to a session in this workspace or create one
-      const workspaceSessions = this.sessionsByFolder?.get(workspaceId) || [];
-
-      if (workspaceSessions.length > 0) {
-        // Switch to the first session in this workspace
-        await this.switchSession(workspaceSessions[0].id);
-        await this.loadSessionTasks();
-        this.openMainTaskPanel();
-      } else {
-        // No sessions in workspace - create one
-        this.showToast('Creating session in workspace...', 'info');
-        const folder = this.folders.find(f => f.id === workspaceId) ||
-                       this.findFolderById(workspaceId, this.folders);
-        const agentName = this.currentAgent || 'assistant';
-
-        try {
-          const response = await fetch('/api/sessions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              agent_name: agentName,
-              folder_id: workspaceId
-            })
-          });
-
-          if (!response.ok) throw new Error('Failed to create session');
-
-          const newSession = await response.json();
-          await this.loadSessions();
-          await this.switchSession(newSession.id);
-          await this.loadSessionTasks();
-          this.openMainTaskPanel();
-        } catch (error) {
-          console.error('Failed to create session:', error);
-          this.showToast('Failed to open workspace tasks', 'error');
-        }
-      }
+    } catch (error) {
+      console.error('Failed to open workspace tasks:', error);
+      this.showToast('Failed to open workspace tasks', 'error');
     }
+  },
+
+  // =============================================================================
+  // Scheduled Tasks Panel Functions
+  // =============================================================================
+
+  // Open scheduled tasks panel for a workspace
+  async openScheduledTasksPanel(workspaceId) {
+    try {
+      // Load tasks with schedules (not legacy ScheduledTask entities)
+      const scheduledTasks = await this.loadWorkspaceScheduledTasks(workspaceId);
+
+      this.currentScheduledTaskWorkspaceId = workspaceId;
+      this.showScheduledTasksModal(scheduledTasks, workspaceId);
+    } catch (error) {
+      console.error('Failed to open scheduled tasks:', error);
+      this.showToast('Failed to load scheduled tasks', 'error');
+    }
+  },
+
+  // Show scheduled tasks modal
+  showScheduledTasksModal(scheduledTasks, workspaceId) {
+    const modal = document.getElementById('scheduledTasksModal');
+    if (!modal) return;
+
+    const folder = this.findFolderById(workspaceId, this.folders);
+    const workspaceName = folder ? folder.name : 'Workspace';
+
+    // Set title
+    const titleEl = document.getElementById('scheduledTasksModalTitle');
+    if (titleEl) {
+      titleEl.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+          <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+        </svg>
+        Schedules - ${this.escapeHtml(workspaceName)}
+      `;
+    }
+
+    // Render list
+    this.renderScheduledTasksList(scheduledTasks);
+
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  },
+
+  // Render scheduled tasks list
+  renderScheduledTasksList(scheduledTasks) {
+    const listContainer = document.getElementById('scheduledTasksList');
+    const emptyState = document.getElementById('scheduledTasksEmpty');
+
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '';
+
+    if (scheduledTasks.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+
+    scheduledTasks.forEach(st => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'scheduled-task-item';
+      itemEl.dataset.scheduleId = st.id;
+
+      const scheduleDesc = this.getScheduleDescription(st.schedule);
+      const nextRun = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
+      const statusClass = st.enabled ? 'enabled' : 'disabled';
+
+      itemEl.innerHTML = `
+        <div class="scheduled-task-status-indicator ${statusClass}"></div>
+        <div class="scheduled-task-content">
+          <div class="scheduled-task-name">${this.escapeHtml(st.name)}</div>
+          <div class="scheduled-task-desc">${this.escapeHtml(st.description || '')}</div>
+          <div class="scheduled-task-meta">
+            <span class="scheduled-task-schedule">${scheduleDesc}</span>
+            ${st.enabled ? `<span class="scheduled-task-next">Next: ${nextRun}</span>` : ''}
+          </div>
+        </div>
+        <div class="scheduled-task-actions">
+          <button class="scheduled-task-toggle" title="${st.enabled ? 'Disable' : 'Enable'}">
+            ${st.enabled ? '⏸' : '▶'}
+          </button>
+          <button class="scheduled-task-trigger" title="Trigger Now" ${!st.enabled ? 'disabled' : ''}>
+            ⚡
+          </button>
+        </div>
+      `;
+
+      // Bind click for details
+      itemEl.addEventListener('click', (e) => {
+        if (!e.target.closest('button')) {
+          this.showScheduledTaskDetails(st);
+        }
+      });
+
+      // Toggle button
+      itemEl.querySelector('.scheduled-task-toggle')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleScheduledTaskEnabled(st.id, !st.enabled);
+      });
+
+      // Trigger button
+      itemEl.querySelector('.scheduled-task-trigger')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.triggerScheduledTask(st.id);
+      });
+
+      listContainer.appendChild(itemEl);
+    });
+  },
+
+  // Get human-readable schedule description
+  getScheduleDescription(schedule) {
+    if (!schedule) return 'No schedule';
+
+    switch (schedule.type) {
+      case 'daily':
+        return `Daily at ${schedule.time_of_day || '00:00'}`;
+      case 'weekly':
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        return `Weekly on ${days[schedule.day_of_week || 0]} at ${schedule.time_of_day || '00:00'}`;
+      case 'interval':
+        // Interval is in nanoseconds
+        const totalSeconds = Math.floor((schedule.interval || 0) / 1000000000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        if (hours > 0) return `Every ${hours} hour${hours > 1 ? 's' : ''}`;
+        return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      case 'once':
+        return schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'Once';
+      case 'cron':
+        return `Cron: ${schedule.cron_expr || 'custom'}`;
+      default:
+        return 'Custom schedule';
+    }
+  },
+
+  // Show scheduled task details modal
+  showScheduledTaskDetails(st) {
+    const modal = document.getElementById('scheduledTaskDetailModal');
+    if (!modal) return;
+
+    // Populate details
+    document.getElementById('scheduleDetailName').textContent = st.name;
+    document.getElementById('scheduleDetailDesc').textContent = st.description || 'No description';
+
+    const statusEl = document.getElementById('scheduleDetailStatus');
+    statusEl.textContent = st.enabled ? 'Enabled' : 'Disabled';
+    statusEl.className = 'schedule-detail-badge ' + (st.enabled ? 'badge-enabled' : 'badge-disabled');
+
+    document.getElementById('scheduleDetailSchedule').textContent = this.getScheduleDescription(st.schedule);
+    document.getElementById('scheduleDetailNextRun').textContent = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
+    document.getElementById('scheduleDetailLastRun').textContent = st.last_run ? new Date(st.last_run).toLocaleString() : 'Never';
+    document.getElementById('scheduleDetailExecutions').textContent = `${st.execution_count || 0} total, ${st.failure_count || 0} failures`;
+
+    // Render execution history
+    this.renderExecutionHistory(st.execution_history || []);
+
+    // Store current schedule ID for actions
+    modal.dataset.scheduleId = st.id;
+    modal.dataset.enabled = st.enabled;
+
+    // Update toggle button text
+    const toggleBtn = document.getElementById('scheduleDetailToggleBtn');
+    if (toggleBtn) toggleBtn.textContent = st.enabled ? 'Disable' : 'Enable';
+
+    modal.style.display = 'flex';
+  },
+
+  // Render execution history
+  renderExecutionHistory(history) {
+    const container = document.getElementById('scheduleDetailHistory');
+    if (!container) return;
+
+    if (!history || history.length === 0) {
+      container.innerHTML = '<div class="history-empty">No execution history</div>';
+      return;
+    }
+
+    // Show last 10 executions (reversed to show most recent first)
+    const recentHistory = history.slice().reverse().slice(0, 10);
+
+    container.innerHTML = recentHistory.map(exec => `
+      <div class="history-item ${exec.status}">
+        <span class="history-time">${new Date(exec.executed_at).toLocaleString()}</span>
+        <span class="history-status">${exec.status === 'success' ? '✓' : '✗'}</span>
+        ${exec.error ? `<span class="history-error" title="${this.escapeHtml(exec.error)}">${this.escapeHtml(exec.error.substring(0, 30))}...</span>` : ''}
+      </div>
+    `).join('');
+  },
+
+  // Toggle scheduled task enabled/disabled
+  // Now updates the task's schedule_enabled field
+  async toggleScheduledTaskEnabled(taskId, enable) {
+    const action = enable ? 'enable' : 'disable';
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          schedule_enabled: enable
+        })
+      });
+
+      if (!response.ok) throw new Error(`Failed to ${action} task schedule`);
+
+      // Reload and refresh
+      if (this.currentScheduledTaskWorkspaceId) {
+        await this.loadWorkspaceScheduledTasks(this.currentScheduledTaskWorkspaceId);
+        const tasks = this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
+        this.renderScheduledTasksList(tasks);
+        this.renderFolderTree();
+      }
+
+      this.showToast(`Schedule ${enable ? 'enabled' : 'disabled'}`, 'success');
+    } catch (error) {
+      console.error(`Failed to ${action} task schedule:`, error);
+      this.showToast(`Failed to ${action} schedule`, 'error');
+    }
+  },
+
+  // Trigger scheduled task manually (execute the task now)
+  async triggerScheduledTask(taskId) {
+    if (!confirm('Execute this scheduled task now?')) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+
+      if (!response.ok) throw new Error('Failed to trigger scheduled task');
+
+      const data = await response.json();
+      this.showToast(`Task triggered! ID: ${data.task_id?.substring(0, 8)}...`, 'success');
+    } catch (error) {
+      console.error('Failed to trigger scheduled task:', error);
+      this.showToast('Failed to trigger schedule', 'error');
+    }
+  },
+
+  // Close scheduled tasks modal
+  closeScheduledTasksModal() {
+    const modal = document.getElementById('scheduledTasksModal');
+    if (modal) {
+      modal.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+  },
+
+  // Close scheduled task detail modal
+  closeScheduledTaskDetailModal() {
+    const modal = document.getElementById('scheduledTaskDetailModal');
+    if (modal) modal.style.display = 'none';
+  },
+
+  // Initialize scheduled tasks modal events
+  initScheduledTasksModal() {
+    // Close buttons
+    document.getElementById('scheduledTasksModalClose')?.addEventListener('click', () => this.closeScheduledTasksModal());
+    document.getElementById('scheduledTasksModalBackdrop')?.addEventListener('click', () => this.closeScheduledTasksModal());
+
+    // Detail modal close
+    document.getElementById('scheduleDetailClose')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+    document.getElementById('scheduleDetailBackdrop')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+
+    // Detail modal actions
+    document.getElementById('scheduleDetailToggleBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('scheduledTaskDetailModal');
+      if (modal) {
+        const scheduleId = modal.dataset.scheduleId;
+        const currentlyEnabled = modal.dataset.enabled === 'true';
+        this.toggleScheduledTaskEnabled(scheduleId, !currentlyEnabled);
+        this.closeScheduledTaskDetailModal();
+      }
+    });
+
+    document.getElementById('scheduleDetailTriggerBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('scheduledTaskDetailModal');
+      if (modal) {
+        const scheduleId = modal.dataset.scheduleId;
+        this.triggerScheduledTask(scheduleId);
+      }
+    });
+
+    // Escape key handlers
+    document.getElementById('scheduledTasksModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeScheduledTasksModal();
+    });
+
+    document.getElementById('scheduledTaskDetailModal')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeScheduledTaskDetailModal();
+    });
   },
 
   // Helper to find folder by ID recursively
@@ -4281,23 +4673,47 @@ const sessionManager = {
     return null;
   },
 
-  // Submit task from main panel
+  // Submit task from main panel using orchestration API
   async submitMainTask() {
     const input = document.getElementById('mainTaskInput');
     const description = input?.value?.trim();
-    if (!description || !this.activeSessionId) return;
+    if (!description) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
+      // Get workspace ID from active session or stored workspace context
+      let workspaceId = this.currentTaskWorkspaceId;
+      if (!workspaceId && this.activeSessionId) {
+        const activeSession = this.sessions.find(s => s.id === this.activeSessionId);
+        workspaceId = activeSession?.folder_id;
+      }
+
+      if (!workspaceId) {
+        this.showToast('No workspace context available', 'error');
+        return;
+      }
+
+      const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description })
+        body: JSON.stringify({
+          studio_id: workspaceId,
+          description,
+          priority: 3
+        })
       });
 
       if (!response.ok) throw new Error('Failed to create task');
 
       input.value = '';
-      await this.loadSessionTasks();
+
+      // Reload tasks for the workspace
+      const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (tasksResponse.ok) {
+        const data = await tasksResponse.json();
+        this.workspaceTasks = data.tasks || [];
+        this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+      }
+
       this.renderMainTaskPanel();
       this.showToast('Task created', 'success');
     } catch (error) {
@@ -4411,12 +4827,12 @@ const sessionManager = {
     });
   },
 
-  // Delete task from main panel (with confirmation)
+  // Delete task from main panel (with confirmation) using orchestration API
   async deleteMainTask(taskId) {
     if (!confirm('Delete this task?')) return;
 
     try {
-      const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      const response = await fetch(`/api/orchestration/tasks?id=${taskId}`, {
         method: 'DELETE'
       });
 
@@ -4431,17 +4847,17 @@ const sessionManager = {
     }
   },
 
-  // Execute task - send to chat as a prompt
+  // Execute task - send to chat as a prompt using orchestration API
   async executeTask(taskId) {
     const task = this.workspaceTasks.find(t => t.id === taskId);
     if (!task) return;
 
     try {
-      // Mark task as in_progress
-      await fetch(`/api/sessions/${this.activeSessionId}/tasks/${taskId}`, {
+      // Mark task as in_progress using orchestration API
+      await fetch('/api/orchestration/tasks', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'in_progress' })
+        body: JSON.stringify({ task_id: taskId, status: 'in_progress' })
       });
 
       // Close task panel
@@ -4474,10 +4890,39 @@ const sessionManager = {
   openTaskModal(taskId = null, prefillTitle = '') {
     // Clear workspace context when opening for session task
     this.taskModalWorkspaceId = null;
+    this.editingTaskId = taskId;
+
+    // Get workspace ID from active session
+    let workspaceId = null;
+    if (this.activeSessionId) {
+      const session = this.sessions.find(s => s.id === this.activeSessionId);
+      workspaceId = session?.folder_id;
+    }
+
+    // Use shared task modal controller if available
+    if (window.taskModalController && workspaceId) {
+      if (taskId) {
+        // Editing existing task
+        const task = this.workspaceTasks.find(t => t.id === taskId);
+        if (task) {
+          window.taskModalController.openForEdit(task, async () => {
+            await this.loadSessionTasks();
+            this.renderMainTaskPanel();
+          });
+        }
+      } else {
+        // Creating new task
+        window.taskModalController.openForCreate(workspaceId, prefillTitle, async () => {
+          await this.loadSessionTasks();
+          this.renderMainTaskPanel();
+        });
+      }
+      return;
+    }
+
+    // Fallback to legacy implementation
     const modal = document.getElementById('taskModal');
     if (!modal) return;
-
-    this.editingTaskId = taskId;
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
@@ -4495,11 +4940,17 @@ const sessionManager = {
       if (task) {
         if (descriptionInput) descriptionInput.value = task.description || '';
         if (detailsInput) detailsInput.value = task.details || '';
+        // Populate schedule fields if task has schedule
+        this.populateTaskModalScheduleFields(task);
+      } else {
+        this.resetTaskModalScheduleFields();
       }
     } else {
       // New task - clear or prefill
       if (descriptionInput) descriptionInput.value = prefillTitle;
       if (detailsInput) detailsInput.value = '';
+      // Reset schedule fields for new task
+      this.resetTaskModalScheduleFields();
     }
 
     // Show modal
@@ -4521,13 +4972,176 @@ const sessionManager = {
     this.taskModalWorkspaceId = null;
   },
 
+  // Update schedule type fields visibility based on selected schedule type
+  updateTaskModalScheduleTypeFields() {
+    const scheduleType = document.getElementById('taskModalScheduleType')?.value || 'interval';
+
+    const timeField = document.getElementById('taskModalScheduleTimeField');
+    const dayField = document.getElementById('taskModalScheduleDayField');
+    const intervalField = document.getElementById('taskModalScheduleIntervalField');
+    const onceField = document.getElementById('taskModalScheduleOnceField');
+
+    // Hide all
+    if (timeField) timeField.style.display = 'none';
+    if (dayField) dayField.style.display = 'none';
+    if (intervalField) intervalField.style.display = 'none';
+    if (onceField) onceField.style.display = 'none';
+
+    // Show relevant fields
+    switch (scheduleType) {
+      case 'daily':
+        if (timeField) timeField.style.display = 'block';
+        break;
+      case 'weekly':
+        if (timeField) timeField.style.display = 'block';
+        if (dayField) dayField.style.display = 'block';
+        break;
+      case 'interval':
+        if (intervalField) intervalField.style.display = 'block';
+        break;
+      case 'once':
+        if (onceField) onceField.style.display = 'block';
+        break;
+    }
+  },
+
+  // Reset schedule fields in task modal
+  resetTaskModalScheduleFields() {
+    const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
+    const scheduleFields = document.getElementById('taskModalScheduleFields');
+    const scheduleName = document.getElementById('taskModalScheduleName');
+    const scheduleType = document.getElementById('taskModalScheduleType');
+    const scheduleTime = document.getElementById('taskModalScheduleTime');
+    const scheduleDay = document.getElementById('taskModalScheduleDay');
+    const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
+    const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
+    const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
+
+    if (enabledCheckbox) enabledCheckbox.checked = false;
+    if (scheduleFields) scheduleFields.style.display = 'none';
+    if (scheduleName) scheduleName.value = '';
+    if (scheduleType) scheduleType.value = 'interval';
+    if (scheduleTime) scheduleTime.value = '09:00';
+    if (scheduleDay) scheduleDay.value = 'monday';
+    if (scheduleIntervalValue) scheduleIntervalValue.value = '1';
+    if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'hours';
+    if (scheduleDatetime) scheduleDatetime.value = '';
+
+    this.updateTaskModalScheduleTypeFields();
+  },
+
+  // Populate schedule fields from existing task
+  populateTaskModalScheduleFields(task) {
+    const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
+    const scheduleFields = document.getElementById('taskModalScheduleFields');
+    const scheduleName = document.getElementById('taskModalScheduleName');
+    const scheduleType = document.getElementById('taskModalScheduleType');
+    const scheduleTime = document.getElementById('taskModalScheduleTime');
+    const scheduleDay = document.getElementById('taskModalScheduleDay');
+    const scheduleIntervalValue = document.getElementById('taskModalScheduleIntervalValue');
+    const scheduleIntervalUnit = document.getElementById('taskModalScheduleIntervalUnit');
+    const scheduleDatetime = document.getElementById('taskModalScheduleDatetime');
+
+    if (task.schedule_enabled && task.schedule) {
+      if (enabledCheckbox) enabledCheckbox.checked = true;
+      if (scheduleFields) scheduleFields.style.display = 'block';
+      if (scheduleName) scheduleName.value = task.schedule_name || '';
+      if (scheduleType) scheduleType.value = task.schedule.type || 'interval';
+
+      // Populate type-specific fields
+      const schedule = task.schedule;
+      if (schedule.time && scheduleTime) scheduleTime.value = schedule.time;
+      if (schedule.day_of_week && scheduleDay) scheduleDay.value = schedule.day_of_week;
+      if (schedule.interval_minutes) {
+        // Convert minutes to value + unit
+        const minutes = schedule.interval_minutes;
+        if (minutes >= 1440 && minutes % 1440 === 0) {
+          if (scheduleIntervalValue) scheduleIntervalValue.value = minutes / 1440;
+          if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'days';
+        } else if (minutes >= 60 && minutes % 60 === 0) {
+          if (scheduleIntervalValue) scheduleIntervalValue.value = minutes / 60;
+          if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'hours';
+        } else {
+          if (scheduleIntervalValue) scheduleIntervalValue.value = minutes;
+          if (scheduleIntervalUnit) scheduleIntervalUnit.value = 'minutes';
+        }
+      }
+      if (schedule.run_at && scheduleDatetime) {
+        // Convert ISO datetime to local datetime-local format
+        const date = new Date(schedule.run_at);
+        scheduleDatetime.value = date.toISOString().slice(0, 16);
+      }
+
+      this.updateTaskModalScheduleTypeFields();
+    } else {
+      this.resetTaskModalScheduleFields();
+    }
+  },
+
+  // Get schedule data from modal fields
+  getScheduleDataFromModal() {
+    const enabledCheckbox = document.getElementById('taskModalScheduleEnabled');
+    if (!enabledCheckbox?.checked) {
+      return { schedule_enabled: false };
+    }
+
+    const scheduleType = document.getElementById('taskModalScheduleType')?.value || 'interval';
+    const scheduleName = document.getElementById('taskModalScheduleName')?.value || '';
+
+    const schedule = { type: scheduleType };
+
+    switch (scheduleType) {
+      case 'daily':
+        schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+        break;
+      case 'weekly':
+        schedule.time = document.getElementById('taskModalScheduleTime')?.value || '09:00';
+        schedule.day_of_week = document.getElementById('taskModalScheduleDay')?.value || 'monday';
+        break;
+      case 'interval':
+        // Combine value and unit into interval_minutes
+        const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
+        const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
+        let intervalMinutes = intervalValue;
+        if (intervalUnit === 'hours') {
+          intervalMinutes = intervalValue * 60;
+        } else if (intervalUnit === 'days') {
+          intervalMinutes = intervalValue * 1440;
+        }
+        schedule.interval_minutes = intervalMinutes;
+        break;
+      case 'once':
+        const datetime = document.getElementById('taskModalScheduleDatetime')?.value;
+        if (datetime) {
+          schedule.run_at = new Date(datetime).toISOString();
+        }
+        break;
+    }
+
+    return {
+      schedule,
+      schedule_enabled: true,
+      schedule_name: scheduleName
+    };
+  },
+
   // Open task modal for workspace-level task
   openTaskModalForWorkspace(workspaceId) {
-    const modal = document.getElementById('taskModal');
-    if (!modal) return;
-
     this.editingTaskId = null;
     this.taskModalWorkspaceId = workspaceId;
+
+    // Use shared task modal controller if available
+    if (window.taskModalController) {
+      window.taskModalController.openForCreate(workspaceId, '', async () => {
+        await this.loadFolders();
+        this.renderFolders();
+      });
+      return;
+    }
+
+    // Fallback to legacy implementation
+    const modal = document.getElementById('taskModal');
+    if (!modal) return;
 
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
@@ -4542,6 +5156,9 @@ const sessionManager = {
     const detailsInput = document.getElementById('taskModalDetails');
     if (descriptionInput) descriptionInput.value = '';
     if (detailsInput) detailsInput.value = '';
+
+    // Reset schedule fields for new task
+    this.resetTaskModalScheduleFields();
 
     // Show modal
     modal.style.display = 'flex';
@@ -4567,51 +5184,64 @@ const sessionManager = {
     }
 
     try {
-      if (this.taskModalWorkspaceId) {
-        // Creating workspace-level task
-        const response = await fetch(`/api/workspaces/${this.taskModalWorkspaceId}/tasks`, {
+      // Determine workspace ID - either from modal context or from active session
+      let workspaceId = this.taskModalWorkspaceId;
+      if (!workspaceId && this.activeSessionId) {
+        // Get workspace ID from active session
+        const session = this.sessions.find(s => s.id === this.activeSessionId);
+        workspaceId = session?.folder_id;
+      }
+
+      if (!workspaceId) {
+        this.showToast('No workspace selected', 'error');
+        return;
+      }
+
+      // Get schedule data from modal
+      const scheduleData = this.getScheduleDataFromModal();
+
+      if (this.editingTaskId) {
+        // Update existing task via orchestration API
+        const response = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: this.editingTaskId,
+            description,
+            details,
+            ...scheduleData
+          })
+        });
+
+        if (!response.ok) throw new Error('Failed to update task');
+        this.showToast('Task updated', 'success');
+      } else {
+        // Create new task via orchestration API (simple task - no agent)
+        const response = await fetch('/api/orchestration/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description, details })
+          body: JSON.stringify({
+            studio_id: workspaceId,
+            description,
+            details,
+            priority: 3,
+            ...scheduleData
+          })
         });
 
         if (!response.ok) throw new Error('Failed to create task');
         this.showToast('Task created', 'success');
-        this.closeTaskModal();
+      }
 
-        // Refresh folder data to update task counts
+      this.closeTaskModal();
+
+      // Refresh data
+      if (this.taskModalWorkspaceId) {
         await this.loadFolders();
         this.renderFolders();
-      } else if (this.activeSessionId) {
-        // Session-level task
-        if (this.editingTaskId) {
-          // Update existing task
-          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks/${this.editingTaskId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description, details })
-          });
-
-          if (!response.ok) throw new Error('Failed to update task');
-          this.showToast('Task updated', 'success');
-        } else {
-          // Create new task
-          const response = await fetch(`/api/sessions/${this.activeSessionId}/tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description, details })
-          });
-
-          if (!response.ok) throw new Error('Failed to create task');
-          this.showToast('Task created', 'success');
-        }
-
-        this.closeTaskModal();
+      } else {
         await this.loadSessionTasks();
         this.renderMainTaskPanel();
-      } else {
-        this.showToast('No session or workspace selected', 'error');
-        return;
       }
     } catch (error) {
       console.error('Failed to save task:', error);

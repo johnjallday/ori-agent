@@ -166,9 +166,6 @@ type HybridStore interface {
 	// ToolCallStore returns the tool call store for persisting tool execution data.
 	ToolCallStore() ToolCallStore
 
-	// TaskStore returns the task store for session/workspace tasks.
-	TaskStore() TaskStore
-
 	// DB returns the underlying database connection for use by other components.
 	DB() *database.DB
 }

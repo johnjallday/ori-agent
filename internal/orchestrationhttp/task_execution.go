@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // TaskResultsHandler retrieves results from one or more tasks
@@ -108,8 +108,8 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var foundWorkspace *agentstudio.Workspace
-	var foundTask *agentstudio.Task
+	var foundWorkspace *workspace.Workspace
+	var foundTask *workspace.Task
 
 	for _, wsID := range workspaceIDs {
 		ws, err := th.workspaceStore.Get(wsID)
@@ -130,10 +130,10 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if foundTask.Status == agentstudio.TaskStatusCompleted {
+	if foundTask.Status == workspace.TaskStatusCompleted {
 		// Allow rerun of completed tasks by resetting status
 		logger.Info("Rerunning completed task", logger.Fields{"task_id": req.TaskID})
-		foundTask.Status = agentstudio.TaskStatusPending
+		foundTask.Status = workspace.TaskStatusPending
 		foundTask.Result = ""
 		foundTask.Error = ""
 		foundTask.StartedAt = nil
@@ -152,7 +152,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	if foundTask.Status == agentstudio.TaskStatusInProgress {
+	if foundTask.Status == workspace.TaskStatusInProgress {
 		orihttp.BadRequest(w, "Task is already in progress")
 		return
 	}
@@ -180,7 +180,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		defer cancel()
 
 		// Update task status to in_progress
-		foundTask.Status = agentstudio.TaskStatusInProgress
+		foundTask.Status = workspace.TaskStatusInProgress
 		now := time.Now()
 		foundTask.StartedAt = &now
 
@@ -195,7 +195,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		// Publish task started event
 		if th.eventBus != nil {
-			event := agentstudio.NewTaskEvent(agentstudio.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
+			event := workspace.NewTaskEvent(workspace.EventTaskStarted, foundWorkspace.ID, foundTask.ID, foundTask.To, map[string]interface{}{
 				"description": foundTask.Description,
 				"priority":    foundTask.Priority,
 				"manual":      true,
@@ -271,12 +271,12 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		if execErr != nil {
 			logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
-			task.Status = agentstudio.TaskStatusFailed
+			task.Status = workspace.TaskStatusFailed
 			task.Error = execErr.Error()
 
 			// Publish task failed event
 			if th.eventBus != nil {
-				event := agentstudio.NewTaskEvent(agentstudio.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
 					"description": task.Description,
 					"error":       execErr.Error(),
 					"manual":      true,
@@ -285,15 +285,15 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 			}
 		} else {
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-			task.Status = agentstudio.TaskStatusCompleted
+			task.Status = workspace.TaskStatusCompleted
 			task.Result = result
 
 			// Automatically store result if agent is connected to a store node
-			agentstudio.AutoStoreResult(ws, task, result, th.workspaceStore)
+			workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
 
 			// Publish task completed event
 			if th.eventBus != nil {
-				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
 					"description": task.Description,
 					"result":      result,
 					"manual":      true,
@@ -313,7 +313,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 		// Publish workspace updated event
 		if th.eventBus != nil {
-			event := agentstudio.NewWorkspaceEvent(agentstudio.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
+			event := workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
 				"task_id": task.ID,
 				"status":  task.Status,
 			})
@@ -333,7 +333,7 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 // executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks
 // before executing the main task. This ensures fresh results for all inputs.
-func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task *agentstudio.Task) error {
+func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *workspace.Task) error {
 	if len(task.InputTaskIDs) == 0 {
 		return nil
 	}
@@ -348,11 +348,11 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 		}
 
 		// Check if input task needs execution
-		needsExecution := inputTask.Status == agentstudio.TaskStatusPending ||
+		needsExecution := inputTask.Status == workspace.TaskStatusPending ||
 			inputTask.Status == "" ||
 			inputTask.To == "unassigned" ||
 			inputTask.To == "" ||
-			inputTask.Status == agentstudio.TaskStatusFailed
+			inputTask.Status == workspace.TaskStatusFailed
 
 		if !needsExecution {
 			logger.Debug("Input task already completed, skipping", logger.Fields{"input_task_id": inputTaskID, "status": inputTask.Status})
@@ -381,7 +381,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 
 			inputTask.To = task.To
 			inputTask.AssignedNodeID = task.AssignedNodeID
-			inputTask.Status = agentstudio.TaskStatusPending
+			inputTask.Status = workspace.TaskStatusPending
 
 			// Save the assignment
 			if err := ws.UpdateTask(*inputTask); err != nil {
@@ -397,7 +397,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 		defer cancel()
 
 		// Update status to in_progress
-		inputTask.Status = agentstudio.TaskStatusInProgress
+		inputTask.Status = workspace.TaskStatusInProgress
 		now := time.Now()
 		inputTask.StartedAt = &now
 
@@ -424,11 +424,11 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 
 		if err != nil {
 			logger.Error("Input task execution failed", logger.Fields{"input_task_id": inputTaskID, "error": err})
-			inputTask.Status = agentstudio.TaskStatusFailed
+			inputTask.Status = workspace.TaskStatusFailed
 			inputTask.Error = err.Error()
 		} else {
 			logger.Info("Input task completed successfully", logger.Fields{"input_task_id": inputTaskID})
-			inputTask.Status = agentstudio.TaskStatusCompleted
+			inputTask.Status = workspace.TaskStatusCompleted
 			inputTask.Result = result
 		}
 
@@ -442,15 +442,15 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 
 		// Publish events
 		if th.eventBus != nil {
-			if inputTask.Status == agentstudio.TaskStatusFailed {
-				event := agentstudio.NewTaskEvent(agentstudio.EventTaskFailed, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+			if inputTask.Status == workspace.TaskStatusFailed {
+				event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
 					"description": inputTask.Description,
 					"error":       inputTask.Error,
 					"auto":        true,
 				})
 				th.eventBus.Publish(event)
 			} else {
-				event := agentstudio.NewTaskEvent(agentstudio.EventTaskCompleted, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
+				event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, inputTask.ID, inputTask.To, map[string]interface{}{
 					"description": inputTask.Description,
 					"result":      inputTask.Result,
 					"auto":        true,
@@ -460,7 +460,7 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *agentstudio.Workspace, task
 		}
 
 		// If input task failed, don't continue
-		if inputTask.Status == agentstudio.TaskStatusFailed {
+		if inputTask.Status == workspace.TaskStatusFailed {
 			return fmt.Errorf("input task %s failed: %s", inputTaskID, inputTask.Error)
 		}
 	}

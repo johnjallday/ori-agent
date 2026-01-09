@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -289,7 +289,7 @@ func (b *ServerBuilder) WithStore(s store.Store) *ServerBuilder {
 }
 
 // WithWorkspaceStore injects a custom workspace store (for testing).
-func (b *ServerBuilder) WithWorkspaceStore(ws agentstudio.Store) *ServerBuilder {
+func (b *ServerBuilder) WithWorkspaceStore(ws workspace.Store) *ServerBuilder {
 	b.server.workspaceStore = ws
 	return b
 }

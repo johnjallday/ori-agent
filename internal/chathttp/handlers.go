@@ -13,7 +13,6 @@ import (
 	"github.com/openai/openai-go/v3"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -24,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -148,7 +148,7 @@ func (h *Handler) SetMCPRegistry(registry interface {
 }
 
 // SetWorkspaceStore sets the workspace store for workspace commands
-func (h *Handler) SetWorkspaceStore(ws agentstudio.Store) {
+func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 	h.commandHandler.SetWorkspaceStore(ws)
 }
 

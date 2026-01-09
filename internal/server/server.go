@@ -9,7 +9,6 @@ import (
 	"time"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -49,6 +48,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -74,13 +74,13 @@ type Server struct {
 	templateRenderer    *web.TemplateRenderer
 	pluginDownloader    *plugindownloader.PluginDownloader
 	updateMgr           *updatemanager.Manager
-	workspaceStore      agentstudio.Store
-	taskExecutor        *agentstudio.TaskExecutor
-	stepExecutor        *agentstudio.StepExecutor
-	taskScheduler       *agentstudio.TaskScheduler
-	eventBus            *agentstudio.EventBus
-	notificationService *agentstudio.NotificationService
-	studioOrchestrator  *agentstudio.Orchestrator
+	workspaceStore      workspace.Store
+	taskExecutor        *workspace.TaskExecutor
+	stepExecutor        *workspace.StepExecutor
+	taskScheduler       *workspace.TaskScheduler
+	eventBus            *workspace.EventBus
+	notificationService *workspace.NotificationService
+	studioOrchestrator  *workspace.Orchestrator
 	costTracker         *llm.CostTracker
 	mcpRegistry         *mcp.Registry
 	mcpConfigManager    *mcp.ConfigManager
@@ -107,7 +107,7 @@ type Server struct {
 	deviceHandler          *devicehttp.Handler
 	webPageHandler         *pluginhttp.WebPageHandler
 	orchestrationHandler   *orchestrationhttp.Handler
-	studioHandler          *agentstudio.HTTPHandler
+	studioHandler          *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
 	agentMCPHandler        *agenthttp.MCPHandler
@@ -130,7 +130,6 @@ type Server struct {
 	// Session management
 	sessionStore   session.HybridStore
 	sessionHandler *sessionhttp.Handler
-	taskHandler    *sessionhttp.TaskHandler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store

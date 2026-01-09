@@ -1,15 +1,15 @@
 package chathttp
 
 import (
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // CommandHandler handles special chat commands
 type CommandHandler struct {
 	store          store.Store
-	workspaceStore agentstudio.Store
+	workspaceStore workspace.Store
 	enumExtractor  *pluginhttp.EnumExtractor
 	shutdownFunc   func()
 }
@@ -23,7 +23,7 @@ func NewCommandHandler(store store.Store) *CommandHandler {
 }
 
 // SetWorkspaceStore sets the workspace store for workspace commands
-func (ch *CommandHandler) SetWorkspaceStore(ws agentstudio.Store) {
+func (ch *CommandHandler) SetWorkspaceStore(ws workspace.Store) {
 	ch.workspaceStore = ws
 }
 

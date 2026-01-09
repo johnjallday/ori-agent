@@ -7,22 +7,22 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agentstudio"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // WorkspaceHandler manages workspace-related operations
 type WorkspaceHandler struct {
 	agentStore     store.Store
-	workspaceStore agentstudio.Store
-	eventBus       *agentstudio.EventBus
+	workspaceStore workspace.Store
+	eventBus       *workspace.EventBus
 	sessionStore   SessionStore
 }
 
 // NewWorkspaceHandler creates a new workspace handler
-func NewWorkspaceHandler(agentStore store.Store, workspaceStore agentstudio.Store, eventBus *agentstudio.EventBus, sessionStore SessionStore) *WorkspaceHandler {
+func NewWorkspaceHandler(agentStore store.Store, workspaceStore workspace.Store, eventBus *workspace.EventBus, sessionStore SessionStore) *WorkspaceHandler {
 	return &WorkspaceHandler{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
@@ -34,6 +34,7 @@ func NewWorkspaceHandler(agentStore store.Store, workspaceStore agentstudio.Stor
 // WorkspaceHandler handles workspace CRUD operations
 // GET: List all workspaces or get workspace by ID
 // POST: Create new workspace
+// PUT: Update workspace metadata
 // DELETE: Delete workspace
 func (wh *WorkspaceHandler) WorkspaceHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -43,6 +44,8 @@ func (wh *WorkspaceHandler) WorkspaceHandler(w http.ResponseWriter, r *http.Requ
 		wh.handleGetWorkspace(w, r)
 	case http.MethodPost:
 		wh.handleCreateWorkspace(w, r)
+	case http.MethodPut:
+		wh.handleUpdateWorkspace(w, r)
 	case http.MethodDelete:
 		wh.handleDeleteWorkspace(w, r)
 	default:
@@ -94,14 +97,6 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 				response["sessions"] = sessions
 			}
 
-			// Add session tasks
-			sessionTasks, err := wh.sessionStore.ListTasksByWorkspace(ctx, wsID)
-			if err != nil {
-				logger.Debug("Failed to load session tasks for workspace", logger.Fields{"workspace_id": wsID, "error": err})
-			} else {
-				response["session_tasks"] = sessionTasks
-			}
-
 			// Add workspace notes
 			notes, err := wh.sessionStore.ListNotesByWorkspace(ctx, wsID)
 			if err != nil {
@@ -141,14 +136,36 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 	}
 
 	// Load summaries for all workspaces
-
+	ctx := context.Background()
 	summaries := make([]map[string]interface{}, 0, len(ids))
 	for _, id := range ids {
 		ws, err := wh.workspaceStore.Get(id)
 		if err != nil {
 			continue // Skip workspaces that fail to load
 		}
-		summaries = append(summaries, ws.GetSummary())
+		summary := ws.GetSummary()
+
+		// Add session and note counts if session store is available
+		if wh.sessionStore != nil {
+			sessions, err := wh.sessionStore.ListSessionsByWorkspace(ctx, id)
+			if err == nil {
+				summary["session_count"] = len(sessions)
+			} else {
+				summary["session_count"] = 0
+			}
+
+			notes, err := wh.sessionStore.ListNotesByWorkspace(ctx, id)
+			if err == nil {
+				summary["note_count"] = len(notes)
+			} else {
+				summary["note_count"] = 0
+			}
+		} else {
+			summary["session_count"] = 0
+			summary["note_count"] = 0
+		}
+
+		summaries = append(summaries, summary)
 	}
 
 	orihttp.WriteJSON(w, map[string]interface{}{
@@ -187,7 +204,7 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	// Create workspace
 
-	ws := agentstudio.NewWorkspace(agentstudio.CreateWorkspaceParams{
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        req.Name,
 		Description: req.Description,
 		Agents:      req.Agents,
@@ -205,8 +222,8 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	// Publish workspace created event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceCreated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceCreated,
 			ws.ID,
 			"api",
 			map[string]interface{}{
@@ -223,6 +240,73 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 		"studio_id":  ws.ID,
 		"status":     ws.Status,
 		"created_at": ws.CreatedAt,
+	})
+}
+
+// handleUpdateWorkspace updates workspace metadata (name, description)
+func (wh *WorkspaceHandler) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("id")
+	if wsID == "" {
+		orihttp.BadRequest(w, "id is required")
+		return
+	}
+
+	var req struct {
+		Name        *string `json:"name,omitempty"`
+		Description *string `json:"description,omitempty"`
+	}
+
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	// Get existing workspace
+	ws, err := wh.workspaceStore.Get(wsID)
+	if err != nil {
+		logger.Error("Error getting workspace for update", logger.Fields{"workspace_id": wsID, "error": err})
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	// Update fields if provided
+	if req.Name != nil {
+		ws.Name = *req.Name
+	}
+	if req.Description != nil {
+		ws.Description = *req.Description
+	}
+
+	// Update timestamp
+	ws.UpdatedAt = time.Now()
+
+	// Save workspace
+	if err := wh.workspaceStore.Save(ws); err != nil {
+		logger.Error("Error saving workspace update", logger.Fields{"workspace_id": wsID, "error": err})
+		orihttp.InternalError(w, "Failed to save workspace: "+err.Error())
+		return
+	}
+
+	logger.Info("Updated workspace", logger.Fields{"workspace_id": wsID})
+
+	// Publish workspace updated event
+	if wh.eventBus != nil {
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
+			ws.ID,
+			"api",
+			map[string]interface{}{
+				"name":        ws.Name,
+				"description": ws.Description,
+			},
+		)
+		wh.eventBus.Publish(event)
+	}
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"id":          ws.ID,
+		"name":        ws.Name,
+		"description": ws.Description,
+		"updated_at":  ws.UpdatedAt,
 	})
 }
 
@@ -316,8 +400,8 @@ func (wh *WorkspaceHandler) handleAddAgentToWorkspace(w http.ResponseWriter, r *
 
 	// Publish event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceUpdated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
 			req.WorkspaceID,
 			"api",
 			map[string]interface{}{
@@ -377,8 +461,8 @@ func (wh *WorkspaceHandler) handleRemoveAgentFromWorkspace(w http.ResponseWriter
 
 	// Publish event
 	if wh.eventBus != nil {
-		event := agentstudio.NewWorkspaceEvent(
-			agentstudio.EventWorkspaceUpdated,
+		event := workspace.NewWorkspaceEvent(
+			workspace.EventWorkspaceUpdated,
 			workspaceID,
 			"api",
 			map[string]interface{}{
@@ -407,16 +491,16 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	var req struct {
-		WorkspaceID         string                                 `json:"workspace_id"`
-		TaskPositions       map[string]agentstudio.Position        `json:"task_positions"`
-		AgentPositions      map[string]agentstudio.Position        `json:"agent_positions"`
-		AttachmentPositions map[string]agentstudio.Position        `json:"attachment_positions"`
-		SchedulerPositions  map[string]agentstudio.Position        `json:"scheduler_positions"`
-		StorePositions      map[string]agentstudio.Position        `json:"store_positions"`
-		WorkflowConnections []agentstudio.WorkflowConnectionLayout `json:"workflow_connections"`
-		Scale               float64                                `json:"scale"`
-		OffsetX             float64                                `json:"offset_x"`
-		OffsetY             float64                                `json:"offset_y"`
+		WorkspaceID         string                               `json:"workspace_id"`
+		TaskPositions       map[string]workspace.Position        `json:"task_positions"`
+		AgentPositions      map[string]workspace.Position        `json:"agent_positions"`
+		AttachmentPositions map[string]workspace.Position        `json:"attachment_positions"`
+		SchedulerPositions  map[string]workspace.Position        `json:"scheduler_positions"`
+		StorePositions      map[string]workspace.Position        `json:"store_positions"`
+		WorkflowConnections []workspace.WorkflowConnectionLayout `json:"workflow_connections"`
+		Scale               float64                              `json:"scale"`
+		OffsetX             float64                              `json:"offset_x"`
+		OffsetY             float64                              `json:"offset_y"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -438,7 +522,7 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	// Update layout
 
 	if ws.Layout == nil {
-		ws.Layout = &agentstudio.CanvasLayout{}
+		ws.Layout = &workspace.CanvasLayout{}
 	}
 
 	ws.Layout.TaskPositions = req.TaskPositions
@@ -458,9 +542,9 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	// Broadcast workspace update event to notify all connected clients
-	wh.eventBus.Publish(agentstudio.Event{
+	wh.eventBus.Publish(workspace.Event{
 		WorkspaceID: req.WorkspaceID,
-		Type:        agentstudio.EventWorkspaceUpdated,
+		Type:        workspace.EventWorkspaceUpdated,
 		Timestamp:   time.Now(),
 	})
 

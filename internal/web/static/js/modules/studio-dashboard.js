@@ -121,6 +121,12 @@ class WorkspaceDashboard {
   showTaskDetails(taskId) { return this.tasks.showTaskDetails(taskId); }
   useTaskResultInNewTask(taskId) { return this.tasks.useTaskResultInNewTask(taskId); }
   initializeCombinationModeControls() { return this.tasks.initializeCombinationModeControls(); }
+  toggleScheduleFields() { return this.tasks.toggleScheduleFields(); }
+  updateScheduleTypeFields() { return this.tasks.updateScheduleTypeFields(); }
+  toggleTaskComplete(taskId, completed) { return this.tasks.toggleTaskComplete(taskId, completed); }
+  toggleEditScheduleFields() { return this.tasks.toggleEditScheduleFields(); }
+  updateEditScheduleTypeFields() { return this.tasks.updateEditScheduleTypeFields(); }
+  saveTaskSchedule(taskId) { return this.tasks.saveTaskSchedule(taskId); }
 
   // Scheduled methods
   renderScheduledTasksTab() { return this.scheduled.renderScheduledTasksTab(); }
