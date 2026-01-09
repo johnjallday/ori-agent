@@ -197,6 +197,9 @@
         document.getElementById('tasks-completed').textContent = stats.completed || 0;
         document.getElementById('tasks-in-progress').textContent = stats.in_progress || 0;
         document.getElementById('tasks-failed').textContent = stats.failed || 0;
+        // Calculate scheduled count from tasks with schedule_enabled
+        const scheduledCount = stats.scheduled || tasks.filter(t => t.schedule_enabled).length;
+        document.getElementById('tasks-scheduled').textContent = scheduledCount;
 
         // Render tasks list
         const tasksList = document.getElementById('tasks-list');

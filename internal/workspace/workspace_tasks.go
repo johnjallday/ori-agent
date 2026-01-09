@@ -181,6 +181,7 @@ func (w *Workspace) GetTaskStats() map[string]int {
 		"failed":      0,
 		"cancelled":   0,
 		"timeout":     0,
+		"scheduled":   0,
 	}
 
 	for _, task := range w.Tasks {
@@ -199,6 +200,10 @@ func (w *Workspace) GetTaskStats() map[string]int {
 			stats["cancelled"]++
 		case TaskStatusTimeout:
 			stats["timeout"]++
+		}
+		// Count scheduled tasks separately
+		if task.ScheduleEnabled {
+			stats["scheduled"]++
 		}
 	}
 

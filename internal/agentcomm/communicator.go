@@ -415,6 +415,7 @@ func (c *Communicator) GetTaskStats(workspaceID string) map[string]int {
 			"failed":      0,
 			"cancelled":   0,
 			"timeout":     0,
+			"scheduled":   0,
 		}
 	}
 
