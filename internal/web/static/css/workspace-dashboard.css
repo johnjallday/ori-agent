@@ -94,6 +94,16 @@
   justify-self: end;
 }
 
+#createTaskModal .modal-dialog {
+  margin-top: 4.5rem;
+}
+
+@media (max-width: 576px) {
+  #createTaskModal .modal-dialog {
+    margin-top: 3.5rem;
+  }
+}
+
 .agent-badge {
   display: inline-flex;
   align-items: center;
