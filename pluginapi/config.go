@@ -103,76 +103,76 @@ type PluginConfig struct {
 
 // readPluginConfig parses and validates plugin configuration from embedded YAML.
 // This is an internal function used by ServePlugin.
-// It panics if the configuration is invalid to fail fast during plugin initialization.
-func readPluginConfig(embeddedYAML string) PluginConfig {
+// Returns an error if the configuration is invalid.
+func readPluginConfig(embeddedYAML string) (PluginConfig, error) {
 	var config PluginConfig
 
 	// Parse YAML
 	if err := yaml.Unmarshal([]byte(embeddedYAML), &config); err != nil {
-		panic(fmt.Sprintf("invalid plugin config YAML: %v", err))
+		return PluginConfig{}, fmt.Errorf("invalid plugin config YAML: %w", err)
 	}
 
 	// Validate required fields
 	if config.Name == "" {
-		panic("invalid plugin config: missing required field: name")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: name")
 	}
 	if config.Version == "" {
-		panic("invalid plugin config: missing required field: version")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: version")
 	}
 	if config.Description == "" {
-		panic("invalid plugin config: missing required field: description")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: description")
 	}
 	if config.License == "" {
-		panic("invalid plugin config: missing required field: license")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: license")
 	}
 	if config.Repository == "" {
-		panic("invalid plugin config: missing required field: repository")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: repository")
 	}
 	if len(config.Platforms) == 0 {
-		panic("invalid plugin config: missing required field: platforms")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: platforms")
 	}
 	if len(config.Maintainers) == 0 {
-		panic("invalid plugin config: missing required field: maintainers")
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: missing required field: maintainers")
 	}
 
 	// Validate version field is valid semver
 	if _, err := semver.NewVersion(config.Version); err != nil {
-		panic(fmt.Sprintf("invalid plugin config: invalid semver format for version: %s", config.Version))
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: invalid semver format for version: %s", config.Version)
 	}
 
 	// Validate repository field is a valid URL
 	if _, err := url.ParseRequestURI(config.Repository); err != nil {
-		panic(fmt.Sprintf("invalid plugin config: invalid URL format for repository: %s", config.Repository))
+		return PluginConfig{}, fmt.Errorf("invalid plugin config: invalid URL format for repository: %s", config.Repository)
 	}
 
 	// Validate platforms
 	for i, platform := range config.Platforms {
 		if platform.OS == "" {
-			panic(fmt.Sprintf("invalid plugin config: platform[%d] missing os field", i))
+			return PluginConfig{}, fmt.Errorf("invalid plugin config: platform[%d] missing os field", i)
 		}
 		if len(platform.Architectures) == 0 {
-			panic(fmt.Sprintf("invalid plugin config: platform[%d] has empty architectures array", i))
+			return PluginConfig{}, fmt.Errorf("invalid plugin config: platform[%d] has empty architectures array", i)
 		}
 	}
 
 	// Validate maintainers
 	for i, maintainer := range config.Maintainers {
 		if maintainer.Name == "" {
-			panic(fmt.Sprintf("invalid plugin config: maintainer[%d] missing name field", i))
+			return PluginConfig{}, fmt.Errorf("invalid plugin config: maintainer[%d] missing name field", i)
 		}
 		if maintainer.Email == "" {
-			panic(fmt.Sprintf("invalid plugin config: maintainer[%d] missing email field", i))
+			return PluginConfig{}, fmt.Errorf("invalid plugin config: maintainer[%d] missing email field", i)
 		}
 	}
 
 	// Validate min_ori_version if provided
 	if config.Requirements.MinOriVersion != "" {
 		if _, err := semver.NewVersion(config.Requirements.MinOriVersion); err != nil {
-			panic(fmt.Sprintf("invalid plugin config: invalid semver format for min_ori_version: %s", config.Requirements.MinOriVersion))
+			return PluginConfig{}, fmt.Errorf("invalid plugin config: invalid semver format for min_ori_version: %s", config.Requirements.MinOriVersion)
 		}
 	}
 
-	return config
+	return config, nil
 }
 
 // ToMetadata converts PluginConfig to PluginMetadata format for RPC

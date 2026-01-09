@@ -41,7 +41,10 @@ config:
       default_value: "{{OS}}_{{ARCH}}"
 `
 
-	config := readPluginConfig(yaml)
+	config, err := readPluginConfig(yaml)
+	if err != nil {
+		t.Fatalf("readPluginConfig error: %v", err)
+	}
 	vars := config.ToConfigVariables()
 
 	if len(vars) != 2 {
@@ -172,7 +175,10 @@ platforms:
     architectures: [amd64, arm64]
 `
 
-	config := readPluginConfig(yaml)
+	config, err := readPluginConfig(yaml)
+	if err != nil {
+		t.Fatalf("readPluginConfig error: %v", err)
+	}
 	meta, err := config.ToMetadata()
 	if err != nil {
 		t.Fatalf("ToMetadata error: %v", err)

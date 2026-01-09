@@ -34,7 +34,10 @@ import (
 // - configYAML must be a valid plugin.yaml string
 func ServePlugin(tool PluginTool, configYAML string) {
 	// Parse plugin config from embedded YAML
-	config := readPluginConfig(configYAML)
+	config, err := readPluginConfig(configYAML)
+	if err != nil {
+		panic(fmt.Sprintf("ServePlugin failed to parse config: %v", err))
+	}
 
 	// Get API version from config, default to "v1"
 	apiVersion := config.Requirements.ApiVersion

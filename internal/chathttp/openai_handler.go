@@ -162,7 +162,6 @@ func (h *Handler) handleOpenAIToolCalls(
 		}
 
 		toolCtx, toolCancel := context.WithTimeout(baseCtx, ToolExecutionTimeout)
-		defer toolCancel()
 
 		startTime := time.Now()
 
@@ -172,6 +171,8 @@ func (h *Handler) handleOpenAIToolCalls(
 		})
 
 		result, err := ExecuteToolWithFiles(toolCtx, tool, name, args, files)
+		toolCancel() // Cancel context immediately after use to avoid leak
+
 		duration := time.Since(startTime)
 		durationMs := int(duration.Milliseconds())
 
