@@ -1052,7 +1052,7 @@
     }
 
     // Poll task status until completed or failed
-    async function pollTaskCompletion(taskId, maxAttempts = 120, intervalMs = 2000) {
+    async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
       let attempts = 0;
 
       const poll = async () => {
