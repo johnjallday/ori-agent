@@ -46,8 +46,9 @@
 }
 
 .detail-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(120px, 40%) minmax(0, 1fr);
+  gap: 0.5rem 1rem;
   align-items: start;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--border-color);
@@ -61,14 +62,36 @@
   font-weight: 500;
   color: var(--text-secondary);
   font-size: 0.875rem;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .detail-value {
   color: var(--text-primary);
   font-size: 0.875rem;
   text-align: right;
-  max-width: 60%;
+  max-width: 100%;
+  min-width: 0;
+  justify-self: end;
+  white-space: normal;
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.detail-value code {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.detail-row > .detail-value,
+.detail-row > code.detail-value {
+  width: 100%;
+}
+
+.detail-row > div {
+  min-width: 0;
+  justify-self: end;
 }
 
 .agent-badge {
