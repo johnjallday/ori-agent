@@ -1191,6 +1191,14 @@
                       </svg>
                       Edit
                     </button>
+                    ${task.to && (task.status === 'pending' || task.status === 'assigned') ? `
+                    <button class="modern-btn modern-btn-primary btn-sm" onclick="executeTask('${escapeHtml(task.id)}')" title="Execute task now">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                        <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
+                      </svg>
+                      Execute
+                    </button>
+                    ` : ''}
                     <button class="modern-btn modern-btn-danger btn-sm" onclick="deleteTask('${escapeHtml(task.id)}')" title="Delete task">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -1966,6 +1974,31 @@
       } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = oldHtml;
+      }
+    }
+
+    // ========== EXECUTE TASK FUNCTION ==========
+
+    async function executeTask(taskId) {
+      if (!confirm('Execute this task now?')) return;
+
+      try {
+        const resp = await fetch('/api/orchestration/tasks/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_id: taskId })
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || 'Failed to execute task');
+        }
+
+        alert('Task execution started!');
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        alert(`Failed to execute task: ${err.message || err}`);
       }
     }
 

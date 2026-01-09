@@ -5,37 +5,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // AddTask adds a task to the workspace
 func (w *Workspace) AddTask(task Task) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
-	logger.Debug("[DEBUG] AddTask - Workspace: , Agents", logger.Fields{"agent": w.ID, "agents": w.Agents})
-	logger.Debug("[DEBUG] AddTask - Task: From=, To=", logger.Fields{"task_id": task.From, "to": task.To})
-	logger.Debug("[DEBUG] AddTask - hasAgent(From)", logger.Fields{"agent": w.hasAgentUnlocked(task.From)})
-
-	// Validate sender is part of workspace
-	// Allow "user", "system", "scheduler", and empty string as special senders for UI-created tasks
-	systemSources := map[string]bool{
-		"user":      true,
-		"system":    true,
-		"scheduler": true,
-		"":          true, // empty string allowed
-	}
-	if !systemSources[task.From] && !w.hasAgentUnlocked(task.From) {
-		logger.Error("[DEBUG] AddTask - Validation FAILED: From agent not valid", logger.Fields{})
-		return fmt.Errorf("task delegator %s is not part of workspace", task.From)
-	}
-
-	// Validate recipient if specified
-	// Allow "unassigned" as a special value for tasks without a specific recipient
-	if task.To != "" && task.To != "unassigned" && !w.hasAgentUnlocked(task.To) {
-		logger.Error("[DEBUG] AddTask - Validation FAILED: To agent not valid", logger.Fields{})
-		return fmt.Errorf("task recipient %s is not part of workspace", task.To)
-	}
 
 	// Set task ID and timestamp if not set
 	if task.ID == "" {

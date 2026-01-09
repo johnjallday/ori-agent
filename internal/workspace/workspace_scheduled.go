@@ -12,20 +12,6 @@ func (w *Workspace) AddScheduledTask(st ScheduledTask) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// Validate sender is part of workspace (allow system sources like "scheduler", "system")
-	systemSources := map[string]bool{
-		"scheduler": true,
-		"system":    true,
-	}
-	if !systemSources[st.From] && !w.hasAgent(st.From) {
-		return fmt.Errorf("task delegator %s is not part of workspace", st.From)
-	}
-
-	// Validate recipient
-	if st.To != "" && !w.hasAgent(st.To) {
-		return fmt.Errorf("task recipient %s is not part of workspace", st.To)
-	}
-
 	// Set ID and timestamps if not set
 	if st.ID == "" {
 		st.ID = uuid.New().String()
