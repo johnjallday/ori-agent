@@ -119,21 +119,6 @@
               </div>
             </div>
 
-            <!-- Participating Agents -->
-            <div class="modern-card p-4 mb-4">
-              <h4 class="mb-3" style="color: var(--text-primary);">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M16,13C15.71,13 15.38,13 15.03,13.05C16.19,13.89 17,15 17,16.5V19H23V16.5C23,14.17 18.33,13 16,13M8,13C5.67,13 1,14.17 1,16.5V19H15V16.5C15,14.17 10.33,13 8,13M8,11A3,3 0 0,0 11,8A3,3 0 0,0 8,5A3,3 0 0,0 5,8A3,3 0 0,0 8,11M16,11A3,3 0 0,0 19,8A3,3 0 0,0 16,5A3,3 0 0,0 13,8A3,3 0 0,0 16,11Z"/>
-                </svg>
-                Participating Agents
-              </h4>
-              <div id="agents-list" class="d-flex flex-wrap gap-2">
-                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                  <span class="visually-hidden">Loading...</span>
-                </div>
-              </div>
-            </div>
-
             <!-- Tasks List -->
             <div class="modern-card p-4">
               <div class="d-flex justify-content-between align-items-center mb-3">
@@ -265,9 +250,9 @@
         <div class="modal-header">
           <h5 class="modal-title" style="color: var(--text-primary);">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8Z"/>
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
-            Manage Agents
+            Create Agent
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
@@ -378,18 +363,6 @@
             </form>
           </div>
 
-          <!-- Existing Agents Section -->
-          <div>
-            <h6 style="color: var(--text-primary);">Existing Agents</h6>
-            <div id="agents-list-modal" class="modern-card p-3">
-              <div class="text-center py-3">
-                <div class="spinner-border text-primary" role="status">
-                  <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="mt-2" style="color: var(--text-muted);">Loading agents...</p>
-              </div>
-            </div>
-          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -967,18 +940,18 @@
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="js/modules/resizer.js"></script>
-  <script src="js/modules/settings.js"></script>
-  <script src="js/modules/agents.js"></script>
-  <script src="js/modules/plugins.js"></script>
-  <script src="js/modules/plugin-config.js"></script>
-  <script src="js/modules/plugin-store.js"></script>
-  <script src="js/modules/apikey.js"></script>
-  <script src="js/app.js?v=1694538177"></script>
-  <script src="js/modules/sidebar.js"></script>
-  <script src="js/modules/plugin-health.js"></script>
-  <script src="js/modules/file-upload.js"></script>
-  <script src="js/modules/task-modal-controller.js"></script>
+  <script src="/js/modules/resizer.js"></script>
+  <script src="/js/modules/settings.js"></script>
+  <script src="/js/modules/agents.js"></script>
+  <script src="/js/modules/plugins.js"></script>
+  <script src="/js/modules/plugin-config.js"></script>
+  <script src="/js/modules/plugin-store.js"></script>
+  <script src="/js/modules/apikey.js"></script>
+  <script src="/js/app.js?v=1694538177"></script>
+  <script src="/js/modules/sidebar.js"></script>
+  <script src="/js/modules/plugin-health.js"></script>
+  <script src="/js/modules/file-upload.js"></script>
+  <script src="/js/modules/task-modal-controller.js"></script>
   <link rel="stylesheet" href="/css/workspace-dashboard.css">
 
   <script>
@@ -1023,21 +996,6 @@
         const statusBadge = document.getElementById('workspace-status-badge');
         const statusClass = workspace.status || 'active';
         statusBadge.innerHTML = `<span class="workspace-status ${statusClass}">${statusClass}</span>`;
-
-        // Update agents list
-        const agentsList = document.getElementById('agents-list');
-        if (workspace.agents && workspace.agents.length > 0) {
-          agentsList.innerHTML = workspace.agents.map(agent => `
-            <span class="agent-badge">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-              </svg>
-              ${escapeHtml(agent)}
-            </span>
-          `).join('');
-        } else {
-          agentsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem;">No agents</p>';
-        }
 
         // Load tasks
         await loadTasks();
@@ -1255,6 +1213,14 @@
                     </svg>
                     ${task.created_at ? new Date(task.created_at).toLocaleString() : '--'}
                   </span>
+                  ${task.schedule && task.schedule_enabled ? `
+                  <span class="task-schedule-indicator" style="color: var(--accent-primary);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom;">
+                      <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                    </svg>
+                    Next: ${task.next_run ? new Date(task.next_run).toLocaleString() : 'Not set'}
+                  </span>
+                  ` : ''}
                 </div>
 
                 ${task.status === 'completed' && task.result ? `
@@ -1455,20 +1421,15 @@
     function deriveToFromAssignedNodeID(assignedNodeId) {
       if (!assignedNodeId) return 'unassigned';
 
-      const instances = currentWorkspace?.agent_instances || [];
-      if (Array.isArray(instances)) {
-        const inst = instances.find(i => i.node_id === assignedNodeId);
-        if (inst && inst.name) return inst.name;
-      }
-
+      // Extract agent name from node ID (e.g., "agent-name-node-1" -> "agent-name")
       if (assignedNodeId.includes('-node-')) {
         return assignedNodeId.replace(/-node-\d+$/, '');
       }
 
-      return '';
+      return assignedNodeId;
     }
 
-    function buildAssignmentSelectOptions(selectEl, task) {
+    async function buildAssignmentSelectOptions(selectEl, task) {
       if (!selectEl) return;
 
       const currentAssignedNode = task?.assigned_node_id || '';
@@ -1476,23 +1437,24 @@
       const options = [];
       options.push({ label: 'Unassigned', value: 'unassigned' });
 
-      const instances = currentWorkspace?.agent_instances || [];
-      if (Array.isArray(instances) && instances.length > 0) {
-        instances.forEach(inst => {
-          options.push({
-            label: `${inst.name} #${inst.instance_number}`,
-            value: `node:${inst.node_id}`
+      // Fetch all available agents (not workspace-specific)
+      try {
+        const response = await fetch('/api/agents/dashboard/list');
+        if (response.ok) {
+          const data = await response.json();
+          const agents = data.agents || [];
+
+          agents.forEach(agent => {
+            // Use agent name as node ID (agent-name-node-1 format)
+            const nodeId = `${agent.name}-node-1`;
+            options.push({
+              label: agent.name,
+              value: `node:${nodeId}`
+            });
           });
-        });
-      } else {
-        const agents = currentWorkspace?.agents || [];
-        const counters = {};
-        agents.forEach(name => {
-          counters[name] = (counters[name] || 0) + 1;
-          const n = counters[name];
-          const nodeId = `${name}-node-${n}`;
-          options.push({ label: `${name} #${n}`, value: `node:${nodeId}` });
-        });
+        }
+      } catch (err) {
+        console.error('Failed to load agents:', err);
       }
 
       selectEl.innerHTML = options
@@ -1680,7 +1642,7 @@
       }
     }
 
-    function openEditTaskModal(taskId) {
+    async function openEditTaskModal(taskId) {
       const task = tasksById.get(taskId);
       if (!task) {
         alert('Task not found');
@@ -1692,7 +1654,7 @@
       document.getElementById('edit-task-from').value = task.from || 'user';
       document.getElementById('edit-task-description').value = task.description || '';
 
-      buildAssignmentSelectOptions(document.getElementById('edit-task-assignment'), task);
+      await buildAssignmentSelectOptions(document.getElementById('edit-task-assignment'), task);
 
       // Populate schedule fields
       populateEditTaskScheduleFields(task);
@@ -1756,34 +1718,33 @@
 
     // ========== TASK CREATE MODAL ==========
 
-    function openCreateTaskModal() {
+    async function openCreateTaskModal() {
       // Clear form
       document.getElementById('create-task-description').value = '';
       document.getElementById('create-task-details').value = '';
       document.getElementById('create-task-priority').value = '3';
 
-      // Populate agent assignment dropdown
+      // Populate agent assignment dropdown with all available agents
       const selectEl = document.getElementById('create-task-assignment');
       const options = [];
       options.push({ label: '-- No agent (manual task) --', value: '' });
 
-      const instances = currentWorkspace?.agent_instances || [];
-      if (Array.isArray(instances) && instances.length > 0) {
-        instances.forEach(inst => {
-          options.push({
-            label: `${inst.name} #${inst.instance_number}`,
-            value: `node:${inst.node_id}`
+      try {
+        const response = await fetch('/api/agents/dashboard/list');
+        if (response.ok) {
+          const data = await response.json();
+          const agents = data.agents || [];
+
+          agents.forEach(agent => {
+            const nodeId = `${agent.name}-node-1`;
+            options.push({
+              label: agent.name,
+              value: `node:${nodeId}`
+            });
           });
-        });
-      } else {
-        const agents = currentWorkspace?.agents || [];
-        const counters = {};
-        agents.forEach(name => {
-          counters[name] = (counters[name] || 0) + 1;
-          const n = counters[name];
-          const nodeId = `${name}-node-${n}`;
-          options.push({ label: `${name} #${n}`, value: `node:${nodeId}` });
-        });
+        }
+      } catch (err) {
+        console.error('Failed to load agents:', err);
       }
 
       selectEl.innerHTML = options
@@ -2749,7 +2710,6 @@
 
     // ========== AGENT MANAGEMENT FUNCTIONS ==========
 
-    let systemAgents = [];
     let workspaceAvailableProviders = [];
 
     // Load providers for workspace dashboard
@@ -2809,9 +2769,6 @@
       const modal = new bootstrap.Modal(document.getElementById('manageAgentsModal'));
       modal.show();
 
-      // Load agents when modal opens
-      await loadSystemAgents();
-
       // Load and populate available models
       try {
         await loadWorkspaceProviders();
@@ -2823,51 +2780,6 @@
       } catch (error) {
         console.error('Error loading providers:', error);
       }
-    }
-
-    async function loadSystemAgents() {
-      try {
-        const response = await fetch('/api/agents');
-        const data = await response.json();
-
-        systemAgents = data.agents || [];
-        renderAgentsListModal();
-      } catch (error) {
-        console.error('Error loading agents:', error);
-        document.getElementById('agents-list-modal').innerHTML = `
-          <div class="alert alert-danger">Failed to load agents: ${escapeHtml(error.message)}</div>
-        `;
-      }
-    }
-
-    function renderAgentsListModal() {
-      const container = document.getElementById('agents-list-modal');
-
-      if (systemAgents.length === 0) {
-        container.innerHTML = `
-          <div class="text-center py-3">
-            <p style="color: var(--text-muted);">No agents found</p>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = systemAgents.map(agent => `
-        <div class="d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--bg-secondary); border-radius: var(--radius-sm);">
-          <div class="d-flex align-items-center gap-3">
-            <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
-            <div>
-              <div style="color: var(--text-primary); font-weight: 500;">${escapeHtml(agent.name)}</div>
-              <div class="text-muted small">${escapeHtml(agent.type || 'tool-calling')}</div>
-            </div>
-          </div>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteSystemAgent('${escapeHtml(agent.name)}')" title="Delete agent">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-          </button>
-        </div>
-      `).join('');
     }
 
     // Update model dropdown when agent type changes
@@ -3072,12 +2984,6 @@
         return;
       }
 
-      // Check if agent already exists
-      if (systemAgents.some(a => a.name === name)) {
-        alert('An agent with this name already exists');
-        return;
-      }
-
       try {
         const requestBody = { name, type };
 
@@ -3101,12 +3007,6 @@
         // Clear form
         document.getElementById('createAgentForm').reset();
 
-        // Reload agents list
-        await loadSystemAgents();
-
-        // Also reload workspace data to update participating agents
-        await loadWorkspaceData();
-
         // Show success message
         alert('Agent created successfully: ' + name);
       } catch (error) {
@@ -3115,33 +3015,6 @@
       }
     });
 
-    async function deleteSystemAgent(agentName) {
-      if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-          method: 'DELETE'
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(error || 'Failed to delete agent');
-        }
-
-        // Reload agents list
-        await loadSystemAgents();
-
-        // Also reload workspace data to update participating agents
-        await loadWorkspaceData();
-
-        alert('Agent deleted successfully: ' + agentName);
-      } catch (error) {
-        console.error('Error deleting agent:', error);
-        alert('Failed to delete agent: ' + error.message);
-      }
-    }
   </script>
   <script src="/js/modules/themeManager.js"></script>
   <script>

@@ -68,14 +68,22 @@ class TaskModalController {
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
-      modalTitle.textContent = 'Add Task';
+      modalTitle.textContent = 'Create Task';
     }
 
     // Clear/prefill form
     const descriptionInput = document.getElementById('taskModalDescription');
     const detailsInput = document.getElementById('taskModalDetails');
+    const priorityInput = document.getElementById('taskModalPriority');
+    const assignmentInput = document.getElementById('taskModalAssignment');
+
     if (descriptionInput) descriptionInput.value = prefillTitle;
     if (detailsInput) detailsInput.value = '';
+    if (priorityInput) priorityInput.value = '3';
+
+    // Populate agent assignment dropdown
+    this.populateAgentDropdown(workspaceId);
+    if (assignmentInput) assignmentInput.value = '';
 
     // Reset schedule fields
     this.resetScheduleFields();
@@ -107,6 +115,15 @@ class TaskModalController {
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
       modalTitle.textContent = 'Edit Task';
+    }
+
+    // Populate agent assignment dropdown first
+    this.populateAgentDropdown(this.workspaceId, task);
+
+    // Set priority
+    const priorityInput = document.getElementById('taskModalPriority');
+    if (priorityInput) {
+      priorityInput.value = task.priority || '3';
     }
 
     // Populate form fields
@@ -146,9 +163,13 @@ class TaskModalController {
   async save() {
     const descriptionInput = document.getElementById('taskModalDescription');
     const detailsInput = document.getElementById('taskModalDetails');
+    const priorityInput = document.getElementById('taskModalPriority');
+    const assignmentInput = document.getElementById('taskModalAssignment');
 
     const description = descriptionInput?.value?.trim();
     const details = detailsInput?.value?.trim() || '';
+    const priority = parseInt(priorityInput?.value || '3', 10);
+    const assignment = assignmentInput?.value || '';
 
     if (!description) {
       this.showToast('Task title is required', 'error');
@@ -159,6 +180,16 @@ class TaskModalController {
     if (!this.workspaceId) {
       this.showToast('No workspace selected', 'error');
       return;
+    }
+
+    // Parse assignment to get 'to' and 'assigned_node_id'
+    let to = '';
+    let assignedNodeId = '';
+    if (assignment && assignment.startsWith('node:')) {
+      assignedNodeId = assignment.slice('node:'.length);
+      // Derive agent name from node ID (e.g., "agent-name-node-1" -> "agent-name")
+      const match = assignedNodeId.match(/^(.+)-node-\d+$/);
+      to = match ? match[1] : assignedNodeId;
     }
 
     try {
@@ -174,11 +205,16 @@ class TaskModalController {
             task_id: this.editingTaskId,
             description,
             details,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
             ...scheduleData
           })
         });
 
-        if (!response.ok) throw new Error('Failed to update task');
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(errText || 'Failed to update task');
+        }
         this.showToast('Task updated', 'success');
       } else {
         // Create new task
@@ -189,12 +225,17 @@ class TaskModalController {
             studio_id: this.workspaceId,
             description,
             details,
-            priority: 3,
+            priority,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
             ...scheduleData
           })
         });
 
-        if (!response.ok) throw new Error('Failed to create task');
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(errText || 'Failed to create task');
+        }
         this.showToast('Task created', 'success');
       }
 
@@ -206,7 +247,7 @@ class TaskModalController {
       }
     } catch (error) {
       console.error('Failed to save task:', error);
-      this.showToast('Failed to save task', 'error');
+      this.showToast(error.message || 'Failed to save task', 'error');
     }
   }
 
@@ -373,6 +414,55 @@ class TaskModalController {
       schedule_enabled: true,
       schedule_name: scheduleName
     };
+  }
+
+  /**
+   * Populate the agent assignment dropdown with all available agents
+   * @param {string} workspaceId - The workspace ID (for context, not used for filtering)
+   * @param {object} task - Optional task to set current assignment
+   */
+  async populateAgentDropdown(workspaceId, task = null) {
+    const selectEl = document.getElementById('taskModalAssignment');
+    if (!selectEl) return;
+
+    // Start with default option
+    const options = [{ label: '-- No agent (manual task) --', value: '' }];
+
+    try {
+      // Fetch all available agents (not workspace-specific)
+      const response = await fetch('/api/agents/dashboard/list');
+      if (response.ok) {
+        const data = await response.json();
+        const agents = data.agents || [];
+
+        agents.forEach(agent => {
+          // Use agent name as node ID (agent-name-node-1 format)
+          const nodeId = `${agent.name}-node-1`;
+          options.push({
+            label: agent.name,
+            value: `node:${nodeId}`
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load agents:', err);
+    }
+
+    // Build options HTML
+    selectEl.innerHTML = options
+      .map(o => `<option value="${o.value}">${o.label}</option>`)
+      .join('');
+
+    // Set current value if editing
+    if (task?.assigned_node_id) {
+      selectEl.value = `node:${task.assigned_node_id}`;
+    } else if (task?.to) {
+      // Try to match by agent name
+      const nodeId = `${task.to}-node-1`;
+      selectEl.value = `node:${nodeId}`;
+    } else {
+      selectEl.value = '';
+    }
   }
 
   /**

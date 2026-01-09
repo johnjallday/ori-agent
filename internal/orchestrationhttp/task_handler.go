@@ -1,6 +1,7 @@
 package orchestrationhttp
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,76 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// FrontendScheduleConfig mirrors what the frontend sends
+// and allows conversion to workspace.ScheduleConfig
+type FrontendScheduleConfig struct {
+	Type            string     `json:"type"`
+	IntervalMinutes int        `json:"interval_minutes,omitempty"` // Frontend sends interval in minutes
+	Time            string     `json:"time,omitempty"`             // Frontend sends "time" for daily/weekly
+	TimeOfDay       string     `json:"time_of_day,omitempty"`      // Alternate field name
+	DayOfWeek       int        `json:"day_of_week,omitempty"`
+	RunAt           *time.Time `json:"run_at,omitempty"`     // Frontend sends "run_at" for once
+	ExecuteAt       *time.Time `json:"execute_at,omitempty"` // Alternate field name
+	CronExpr        string     `json:"cron_expr,omitempty"`
+	MaxRuns         int        `json:"max_runs,omitempty"`
+	EndDate         *time.Time `json:"end_date,omitempty"`
+}
+
+// convertScheduleConfig converts frontend schedule format to backend format
+func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
+	if raw == nil {
+		return nil
+	}
+
+	var frontend FrontendScheduleConfig
+	if err := json.Unmarshal(raw, &frontend); err != nil {
+		logger.Warn("Failed to parse schedule config", logger.Fields{"err": err})
+		return nil
+	}
+
+	config := &workspace.ScheduleConfig{
+		Type:     workspace.ScheduleType(frontend.Type),
+		MaxRuns:  frontend.MaxRuns,
+		EndDate:  frontend.EndDate,
+		CronExpr: frontend.CronExpr,
+	}
+
+	// Handle interval conversion (minutes to time.Duration)
+	if frontend.IntervalMinutes > 0 {
+		config.Interval = time.Duration(frontend.IntervalMinutes) * time.Minute
+		logger.Debug("Converted interval_minutes to Duration", logger.Fields{
+			"interval_minutes": frontend.IntervalMinutes,
+			"interval":         config.Interval,
+		})
+	}
+
+	// Handle time_of_day (frontend sends "time" or "time_of_day")
+	if frontend.Time != "" {
+		config.TimeOfDay = frontend.Time
+	} else if frontend.TimeOfDay != "" {
+		config.TimeOfDay = frontend.TimeOfDay
+	}
+
+	// Handle day_of_week
+	config.DayOfWeek = frontend.DayOfWeek
+
+	// Handle execute_at (frontend sends "run_at" or "execute_at")
+	if frontend.RunAt != nil {
+		config.ExecuteAt = frontend.RunAt
+	} else if frontend.ExecuteAt != nil {
+		config.ExecuteAt = frontend.ExecuteAt
+	}
+
+	logger.Debug("Converted frontend schedule to backend format", logger.Fields{
+		"type":        config.Type,
+		"interval":    config.Interval,
+		"time_of_day": config.TimeOfDay,
+		"day_of_week": config.DayOfWeek,
+	})
+
+	return config
+}
 
 // TaskHandler manages task and scheduled task operations
 type TaskHandler struct {
@@ -96,23 +167,29 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		WorkspaceID            string                    `json:"studio_id"`
-		From                   string                    `json:"from"`
-		To                     string                    `json:"to"`
-		AssignedNodeID         string                    `json:"assigned_node_id"`
-		Description            string                    `json:"description"`
-		Details                string                    `json:"details"`
-		Priority               int                       `json:"priority"`
-		InputTaskIDs           []string                  `json:"input_task_ids"`
-		ResultCombinationMode  string                    `json:"result_combination_mode"`
-		CombinationInstruction string                    `json:"combination_instruction"`
-		Schedule               *workspace.ScheduleConfig `json:"schedule"`
-		ScheduleEnabled        bool                      `json:"schedule_enabled"`
-		ScheduleName           string                    `json:"schedule_name"`
+		WorkspaceID            string          `json:"studio_id"`
+		From                   string          `json:"from"`
+		To                     string          `json:"to"`
+		AssignedNodeID         string          `json:"assigned_node_id"`
+		Description            string          `json:"description"`
+		Details                string          `json:"details"`
+		Priority               int             `json:"priority"`
+		InputTaskIDs           []string        `json:"input_task_ids"`
+		ResultCombinationMode  string          `json:"result_combination_mode"`
+		CombinationInstruction string          `json:"combination_instruction"`
+		Schedule               json.RawMessage `json:"schedule"`
+		ScheduleEnabled        bool            `json:"schedule_enabled"`
+		ScheduleName           string          `json:"schedule_name"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+
+	// Convert frontend schedule format to backend format
+	var schedule *workspace.ScheduleConfig
+	if len(req.Schedule) > 0 {
+		schedule = convertScheduleConfig(req.Schedule)
 	}
 
 	// Validate required fields
@@ -144,13 +221,18 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Priority:        req.Priority,
 		InputTaskIDs:    req.InputTaskIDs,
 		Status:          workspace.TaskStatusPending,
-		Schedule:        req.Schedule,
+		Schedule:        schedule,
 		ScheduleEnabled: req.ScheduleEnabled,
 		ScheduleName:    req.ScheduleName,
 	}
 
-	// Calculate NextRun if schedule is enabled
-	if task.Schedule != nil && task.ScheduleEnabled {
+	// Validate: scheduled tasks must be assigned to an agent
+	if task.ScheduleEnabled && task.Schedule != nil {
+		if task.To == "" || task.To == "unassigned" {
+			orihttp.BadRequest(w, "Scheduled tasks must be assigned to an agent. Please assign an agent before enabling the schedule.")
+			return
+		}
+		// Calculate NextRun
 		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Now())
 		task.NextRun = nextRun
 	}
@@ -206,22 +288,30 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 
 func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TaskID                 string                    `json:"task_id"`
-		Status                 string                    `json:"status"`
-		Result                 string                    `json:"result"`
-		Error                  string                    `json:"error"`
-		To                     *string                   `json:"to"`                      // Optional: reassign task to different agent
-		AssignedNodeID         *string                   `json:"assigned_node_id"`        // Optional: target specific agent instance/node
-		InputTaskIDs           []string                  `json:"input_task_ids"`          // Optional: update input task connections
-		ResultCombinationMode  *string                   `json:"result_combination_mode"` // Optional: update combination mode
-		CombinationInstruction *string                   `json:"combination_instruction"` // Optional: update combination instruction
-		Schedule               *workspace.ScheduleConfig `json:"schedule"`                // Optional: schedule configuration
-		ScheduleEnabled        *bool                     `json:"schedule_enabled"`        // Optional: enable/disable schedule
-		ScheduleName           *string                   `json:"schedule_name"`           // Optional: schedule name
+		TaskID                 string          `json:"task_id"`
+		Status                 string          `json:"status"`
+		Result                 string          `json:"result"`
+		Error                  string          `json:"error"`
+		Description            *string         `json:"description"`             // Optional: update task description
+		Details                *string         `json:"details"`                 // Optional: update task details
+		To                     *string         `json:"to"`                      // Optional: reassign task to different agent
+		AssignedNodeID         *string         `json:"assigned_node_id"`        // Optional: target specific agent instance/node
+		InputTaskIDs           []string        `json:"input_task_ids"`          // Optional: update input task connections
+		ResultCombinationMode  *string         `json:"result_combination_mode"` // Optional: update combination mode
+		CombinationInstruction *string         `json:"combination_instruction"` // Optional: update combination instruction
+		Schedule               json.RawMessage `json:"schedule"`                // Optional: schedule configuration (frontend format)
+		ScheduleEnabled        *bool           `json:"schedule_enabled"`        // Optional: enable/disable schedule
+		ScheduleName           *string         `json:"schedule_name"`           // Optional: schedule name
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+
+	// Convert frontend schedule format to backend format
+	var schedule *workspace.ScheduleConfig
+	if len(req.Schedule) > 0 {
+		schedule = convertScheduleConfig(req.Schedule)
 	}
 
 	// Extract task ID from URL path if present (e.g., /api/orchestration/tasks/{id})
@@ -235,8 +325,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Handle task updates (input connections, reassignment, combination mode, or schedule)
-	if req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || req.Schedule != nil || req.ScheduleEnabled != nil || req.ScheduleName != nil {
+	// Handle task updates (description, details, input connections, reassignment, combination mode, or schedule)
+	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || schedule != nil || req.ScheduleEnabled != nil || req.ScheduleName != nil {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
 		// Get task and workspace using helper
@@ -252,6 +342,18 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == req.TaskID {
 				taskIndex = i
+
+				// Update description
+				if req.Description != nil {
+					ws.Tasks[i].Description = *req.Description
+					logger.Debug("Updated task description", logger.Fields{"task_id": req.TaskID})
+				}
+
+				// Update details
+				if req.Details != nil {
+					ws.Tasks[i].Details = *req.Details
+					logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
+				}
 
 				// Update input connections
 				if req.InputTaskIDs != nil {
@@ -275,17 +377,30 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 				}
 
 				// Update schedule configuration
-				if req.Schedule != nil {
-					ws.Tasks[i].Schedule = req.Schedule
+				if schedule != nil {
+					ws.Tasks[i].Schedule = schedule
 					// Calculate initial NextRun if schedule is being set
 					if ws.Tasks[i].ScheduleEnabled {
-						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*req.Schedule, time.Now())
+						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*schedule, time.Now())
 					}
 					logger.Debug("Updated task schedule", logger.Fields{"task_id": req.TaskID})
 				}
 
 				// Update schedule enabled state
 				if req.ScheduleEnabled != nil {
+					// Validate: can't enable schedule if task is unassigned
+					if *req.ScheduleEnabled {
+						taskTo := ws.Tasks[i].To
+						// Check if we're also updating the assignment in this request
+						if req.To != nil {
+							taskTo = *req.To
+						}
+						if taskTo == "" || taskTo == "unassigned" {
+							orihttp.BadRequest(w, "Scheduled tasks must be assigned to an agent. Please assign an agent before enabling the schedule.")
+							return
+						}
+					}
+
 					ws.Tasks[i].ScheduleEnabled = *req.ScheduleEnabled
 					// Calculate NextRun when enabling, clear when disabling
 					if *req.ScheduleEnabled && ws.Tasks[i].Schedule != nil {
@@ -334,8 +449,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			if req.AssignedNodeID != nil {
 				eventData["assigned_node_id"] = *req.AssignedNodeID
 			}
-			if req.Schedule != nil {
-				eventData["schedule"] = req.Schedule
+			if schedule != nil {
+				eventData["schedule"] = schedule
 			}
 			if req.ScheduleEnabled != nil {
 				eventData["schedule_enabled"] = *req.ScheduleEnabled
@@ -497,9 +612,40 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// CompleteTaskHandler handles POST /api/orchestration/tasks/{id}/complete
+// TasksPathHandler handles requests to /api/orchestration/tasks/{id}...
+// Routes to appropriate handler based on path and method:
+// - PUT /api/orchestration/tasks/{id} -> handleUpdateTask
+// - GET /api/orchestration/tasks/{id} -> handleGetTasks (single task)
+// - DELETE /api/orchestration/tasks/{id} -> handleDeleteTask
+// - POST /api/orchestration/tasks/{id}/complete -> CompleteTaskHandler
+func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract path after /api/orchestration/tasks/
+	path := strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/")
+
+	// Check if this is a /complete endpoint
+	if strings.HasSuffix(path, "/complete") {
+		th.handleCompleteTask(w, r)
+		return
+	}
+
+	// Route based on method
+	switch r.Method {
+	case http.MethodGet:
+		th.handleGetTasks(w, r)
+	case http.MethodPut, http.MethodPatch:
+		th.handleUpdateTask(w, r)
+	case http.MethodDelete:
+		th.handleDeleteTask(w, r)
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// handleCompleteTask handles POST /api/orchestration/tasks/{id}/complete
 // Marks a task as completed (for manual task completion)
-func (th *TaskHandler) CompleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {

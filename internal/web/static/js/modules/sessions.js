@@ -4369,12 +4369,8 @@ const sessionManager = {
   // Open scheduled tasks panel for a workspace
   async openScheduledTasksPanel(workspaceId) {
     try {
-      // Load scheduled tasks from workspace
-      const response = await fetch(`/api/orchestration/scheduled-tasks?studio_id=${workspaceId}`);
-      if (!response.ok) throw new Error('Failed to load scheduled tasks');
-
-      const data = await response.json();
-      const scheduledTasks = data.scheduled_tasks || [];
+      // Load tasks with schedules (not legacy ScheduledTask entities)
+      const scheduledTasks = await this.loadWorkspaceScheduledTasks(workspaceId);
 
       this.currentScheduledTaskWorkspaceId = workspaceId;
       this.showScheduledTasksModal(scheduledTasks, workspaceId);

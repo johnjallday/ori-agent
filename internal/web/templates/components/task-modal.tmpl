@@ -18,7 +18,25 @@
       </div>
       <div class="task-modal-field">
         <label for="taskModalDetails" class="task-modal-label">Details <span class="task-modal-optional">(optional)</span></label>
-        <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="4"></textarea>
+        <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="3"></textarea>
+      </div>
+      <div style="display: flex; gap: 12px;">
+        <div class="task-modal-field" style="flex: 1;">
+          <label for="taskModalPriority" class="task-modal-label">Priority</label>
+          <select id="taskModalPriority" class="task-modal-input" style="cursor: pointer;">
+            <option value="1">1 - Highest</option>
+            <option value="2">2 - High</option>
+            <option value="3" selected>3 - Medium</option>
+            <option value="4">4 - Low</option>
+            <option value="5">5 - Lowest</option>
+          </select>
+        </div>
+        <div class="task-modal-field" style="flex: 2;">
+          <label for="taskModalAssignment" class="task-modal-label">Assign to Agent <span class="task-modal-optional">(optional)</span></label>
+          <select id="taskModalAssignment" class="task-modal-input" style="cursor: pointer;">
+            <option value="">-- No agent (manual task) --</option>
+          </select>
+        </div>
       </div>
       <!-- Schedule Section -->
       <div class="task-modal-field" style="margin-top: 16px;">

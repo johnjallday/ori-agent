@@ -340,10 +340,11 @@ func (h *Handler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ExecuteTaskHandler(w, r)
 }
 
-// CompleteTaskHandler handles marking a task as completed (manual completion)
+// TasksPathHandler handles requests to /api/orchestration/tasks/{id}...
+// Routes to appropriate handler based on path and method
 // Delegates to TaskHandler for modular organization
-func (h *Handler) CompleteTaskHandler(w http.ResponseWriter, r *http.Request) {
-	h.taskHandlerSub.CompleteTaskHandler(w, r)
+func (h *Handler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.TasksPathHandler(w, r)
 }
 
 // ScheduledTasksHandler handles listing and creating scheduled tasks
