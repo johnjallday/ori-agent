@@ -1,0 +1,33 @@
+{{define "components/workspaces/create-workspace-modal.tmpl"}}
+<!-- Create Workspace Modal -->
+<div class="modal fade" id="addFolderModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+        <h6 class="modal-title" style="color: var(--text-primary);">Create Workspace</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+        <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="Description (optional)" rows="2" style="resize: vertical;"></textarea>
+        <div class="folder-color-picker">
+          <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
+          <div id="folderColorOptions" class="folder-color-options mt-1">
+            <button class="folder-color-btn active" data-color="" title="Default"></button>
+            <button class="folder-color-btn" data-color="#ef4444" title="Red" style="background: #ef4444;"></button>
+            <button class="folder-color-btn" data-color="#f59e0b" title="Orange" style="background: #f59e0b;"></button>
+            <button class="folder-color-btn" data-color="#22c55e" title="Green" style="background: #22c55e;"></button>
+            <button class="folder-color-btn" data-color="#3b82f6" title="Blue" style="background: #3b82f6;"></button>
+            <button class="folder-color-btn" data-color="#8b5cf6" title="Purple" style="background: #8b5cf6;"></button>
+            <button class="folder-color-btn" data-color="#ec4899" title="Pink" style="background: #ec4899;"></button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

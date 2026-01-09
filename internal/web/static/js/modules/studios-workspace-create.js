@@ -13,9 +13,6 @@
 function openCreateWorkspaceModal() {
     // Populate agent selection
     const container = document.getElementById('agents-selection');
-    if (!container) {
-        console.warn('[workspace-create] agents-selection container not found; continuing without agent list');
-    }
 
     // Ensure availableAgents is initialized
     if (!window.availableAgents) {
@@ -41,7 +38,12 @@ function openCreateWorkspaceModal() {
     // Reset selected agents
     selectedAgents = new Set();
 
-    const modal = new bootstrap.Modal(document.getElementById('createWorkspaceModal'));
+    const modalElement = document.getElementById('addFolderModal');
+    if (!modalElement) {
+        return;
+    }
+
+    const modal = new bootstrap.Modal(modalElement);
     modal.show();
 }
 
@@ -64,8 +66,13 @@ function toggleAgent(agentName) {
  * @returns {Promise<void>}
  */
 async function createWorkspace() {
-    const name = document.getElementById('workspace-name').value;
-    const description = document.getElementById('workspace-description').value;
+    const nameInput = document.getElementById('folderNameInput');
+    const descriptionInput = document.getElementById('folderDescriptionInput');
+    const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
+
+    const name = nameInput?.value.trim();
+    const description = descriptionInput?.value.trim() || '';
+    const color = colorBtn?.dataset.color || '';
 
     if (!name) {
         showError('Please fill in all required fields');
@@ -81,7 +88,8 @@ async function createWorkspace() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                description: description
+                description: description,
+                color: color
             })
         });
 
@@ -105,15 +113,15 @@ async function createWorkspace() {
         }
 
         // Close modal
-        const modalElement = document.getElementById('createWorkspaceModal');
+        const modalElement = document.getElementById('addFolderModal');
         const modal = bootstrap.Modal.getInstance(modalElement);
         if (modal) {
             modal.hide();
         }
 
         // Clear form
-        document.getElementById('workspace-name').value = '';
-        document.getElementById('workspace-description').value = '';
+        if (nameInput) nameInput.value = '';
+        if (descriptionInput) descriptionInput.value = '';
         selectedAgents.clear();
 
         // Refresh workspaces list if function exists
@@ -167,10 +175,19 @@ function setAvailableAgents(agents) {
  * @description Sets up click handler for create workspace button
  */
 function initializeWorkspaceCreationListeners() {
-    const createBtn = document.getElementById('createWorkspaceBtn');
+    const createBtn = document.getElementById('createFolderBtn');
     if (createBtn) {
         createBtn.addEventListener('click', createWorkspace);
     }
+
+    document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(colorBtn => {
+                colorBtn.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+        });
+    });
 }
 
 // Export functions for global access
