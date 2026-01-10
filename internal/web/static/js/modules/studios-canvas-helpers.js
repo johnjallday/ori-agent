@@ -667,8 +667,8 @@ function hideCombinerDetails() {
  * Show add task modal using shared TaskModalController
  */
 function showAddTaskModal() {
-  // Get workspace ID from canvas
-  const workspaceId = window.canvasWorkspaceId || window.agentCanvas?.workspaceId;
+  // Get workspace ID from canvas (multiple possible sources)
+  const workspaceId = window.currentStudioId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
   if (!workspaceId) {
     console.error('No workspace ID available for creating task');
     alert('Unable to create task: workspace not loaded');
