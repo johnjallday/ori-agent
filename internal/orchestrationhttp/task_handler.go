@@ -2,7 +2,10 @@ package orchestrationhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -627,6 +630,7 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 // - GET /api/orchestration/tasks/{id} -> handleGetTasks (single task)
 // - DELETE /api/orchestration/tasks/{id} -> handleDeleteTask
 // - POST /api/orchestration/tasks/{id}/complete -> CompleteTaskHandler
+// - POST /api/orchestration/tasks/{id}/save-result -> SaveTaskResult (via workspace handler)
 func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -636,6 +640,12 @@ func (th *TaskHandler) TasksPathHandler(w http.ResponseWriter, r *http.Request) 
 	// Check if this is a /complete endpoint
 	if strings.HasSuffix(path, "/complete") {
 		th.handleCompleteTask(w, r)
+		return
+	}
+
+	// Check if this is a /save-result endpoint
+	if strings.HasSuffix(path, "/save-result") {
+		th.handleSaveTaskResult(w, r)
 		return
 	}
 
@@ -714,5 +724,150 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"task":    updatedTask,
+	})
+}
+
+// SaveTaskResultRequest represents the request to save a task result
+type SaveTaskResultRequest struct {
+	TaskID      string `json:"task_id"`
+	StoreNodeID string `json:"store_node_id,omitempty"` // Optional: save to specific store node
+	FilePath    string `json:"file_path"`               // Required: relative file path within store or absolute path for direct save
+	Format      string `json:"format,omitempty"`        // Optional: json, text, markdown (default: text)
+}
+
+// handleSaveTaskResult handles POST /api/orchestration/tasks/{id}/save-result
+func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req SaveTaskResultRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		orihttp.BadRequest(w, "Invalid request body")
+		return
+	}
+
+	// Extract task ID from URL if not in body
+	if req.TaskID == "" {
+		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/orchestration/tasks/"), "/")
+		if len(pathParts) >= 1 && pathParts[0] != "" {
+			req.TaskID = pathParts[0]
+		}
+	}
+
+	if req.TaskID == "" {
+		orihttp.BadRequest(w, "Task ID is required")
+		return
+	}
+	if req.FilePath == "" {
+		orihttp.BadRequest(w, "File path is required")
+		return
+	}
+
+	// Set default format
+	if req.Format == "" {
+		req.Format = "text"
+	}
+
+	// Validate format
+	validFormats := map[string]bool{"json": true, "text": true, "markdown": true}
+	if !validFormats[req.Format] {
+		orihttp.BadRequest(w, "Format must be one of: json, text, markdown")
+		return
+	}
+
+	// Find the task
+	task, ws, err := th.getTaskWithWorkspace(req.TaskID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Task not found: %v", err))
+		return
+	}
+
+	if task.Result == "" {
+		orihttp.BadRequest(w, "Task has no result to save")
+		return
+	}
+
+	var finalPath string
+
+	if req.StoreNodeID != "" {
+		// Save via store node
+		var storeNode *workspace.StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == req.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == req.StoreNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+
+		if storeNode == nil {
+			orihttp.NotFound(w, "Store node not found")
+			return
+		}
+
+		// Override format with store node's format
+		storeNode.Format = req.Format
+
+		// Write to store
+		if err := workspace.WriteToStore(storeNode, req.FilePath, task.Result); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to save result: %v", err))
+			return
+		}
+
+		finalPath = filepath.Join(storeNode.BaseDir, req.FilePath)
+
+		// Save workspace to persist store node stats
+		if err := th.workspaceStore.Save(ws); err != nil {
+			logger.Warn("Failed to save workspace after store write", logger.Fields{"error": err})
+		}
+	} else {
+		// Direct file save (for Quick Save or custom path)
+		// Format data based on format type
+		var formattedData []byte
+		switch req.Format {
+		case "json":
+			// Pretty-print JSON
+			var obj interface{}
+			if err := json.Unmarshal([]byte(task.Result), &obj); err != nil {
+				// If not valid JSON, treat as plain text
+				formattedData = []byte(task.Result)
+			} else {
+				formattedData, _ = json.MarshalIndent(obj, "", "  ")
+			}
+		default:
+			formattedData = []byte(task.Result)
+		}
+
+		// Create directories
+		dir := filepath.Dir(req.FilePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to create directories: %v", err))
+			return
+		}
+
+		// Write file
+		if err := os.WriteFile(req.FilePath, formattedData, 0644); err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("Failed to write file: %v", err))
+			return
+		}
+
+		finalPath = req.FilePath
+	}
+
+	logger.Info("Saved task result", logger.Fields{
+		"task_id":   req.TaskID,
+		"file_path": finalPath,
+		"format":    req.Format,
+	})
+
+	w.WriteHeader(http.StatusOK)
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":   true,
+		"message":   "Result saved successfully",
+		"file_path": finalPath,
+		"task_id":   req.TaskID,
 	})
 }

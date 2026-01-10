@@ -302,13 +302,38 @@
                         </svg>
                     </div>
                     <div class="task-collapsible-content task-result" id="${taskId}-result">
-                        <div class="d-flex justify-content-end mb-2">
+                        <div class="d-flex justify-content-end gap-2 mb-2">
                             <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); copyTaskResult('${escapeHtml(task.id)}')">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                                     <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
                                 </svg>
                                 Copy
                             </button>
+                            <div class="dropdown">
+                                <button class="modern-btn modern-btn-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" onclick="event.stopPropagation()">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                                        <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                                    </svg>
+                                    Save Result
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); event.stopPropagation(); quickSaveTaskResult('${escapeHtml(task.id)}');">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                                            <path d="M13,9V3.5L18.5,9M6,2C4.89,2 4,2.89 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6Z"/>
+                                        </svg>
+                                        Quick Save
+                                    </a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); event.stopPropagation(); openSaveToFileModal('${escapeHtml(task.id)}');">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                                            <path d="M14,2L20,8V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2H14M18,20V9H13V4H6V20H18M12,12L16,16H13V20H11V16H8L12,12Z"/>
+                                        </svg>
+                                        Save to File...
+                                    </a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li class="dropdown-header px-3 py-1 text-muted small">Store Nodes</li>
+                                    ${renderStoreNodeOptions(task.id, store)}
+                                </ul>
+                            </div>
                         </div>
                         <pre class="task-result-pre">${escapeHtml(task.result)}</pre>
                     </div>
@@ -498,6 +523,172 @@
             el.select();
             document.execCommand('copy');
             document.body.removeChild(el);
+        }
+    }
+
+    // Render store node options for the save dropdown
+    function renderStoreNodeOptions(taskId, store) {
+        if (!store || !store.store_nodes || store.store_nodes.length === 0) {
+            return '<li><span class="dropdown-item text-muted disabled">No store nodes configured</span></li>';
+        }
+
+        return store.store_nodes.map(node => `
+            <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); event.stopPropagation(); saveTaskResultToStore('${escapeHtml(taskId)}', '${escapeHtml(node.id)}', '${escapeHtml(node.name)}');">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                    <path d="M6,2C4.89,2 4,2.9 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6M13,3.5L18.5,9H13V3.5M8,12H16V14H8V12M8,16H13V18H8V16Z"/>
+                </svg>
+                ${escapeHtml(node.name)}
+            </a></li>
+        `).join('');
+    }
+
+    // Quick save to workspace output folder
+    async function quickSaveTaskResult(taskId) {
+        const task = state.tasksById.get(taskId);
+        if (!task || !task.result) {
+            alert('No task result to save');
+            return;
+        }
+
+        try {
+            // Get workspace output directory
+            const outputResp = await fetch(`/api/workspaces/${workspaceId}/output-dir`);
+            if (!outputResp.ok) {
+                throw new Error('Failed to get output directory');
+            }
+            const outputData = await outputResp.json();
+            const outputDir = outputData.output_dir || `outputs/${workspaceId}`;
+
+            // Generate filename based on task name and timestamp
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+            const filename = `${taskName}_${timestamp}.txt`;
+            const filePath = `${outputDir}/${filename}`;
+
+            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    file_path: filePath,
+                    format: 'text'
+                })
+            });
+
+            if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(text || 'Failed to save result');
+            }
+
+            const data = await resp.json();
+            alert(`Result saved to: ${data.file_path}`);
+        } catch (err) {
+            console.error('Failed to quick save:', err);
+            alert(`Failed to save result: ${err.message || err}`);
+        }
+    }
+
+    // Open save to file modal
+    function openSaveToFileModal(taskId) {
+        const task = state.tasksById.get(taskId);
+        if (!task || !task.result) {
+            alert('No task result to save');
+            return;
+        }
+
+        state.currentSaveTaskId = taskId;
+
+        // Generate suggested filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+        const suggestedFilename = `${taskName}_${timestamp}.txt`;
+
+        document.getElementById('save-file-path').value = suggestedFilename;
+        document.getElementById('save-file-format').value = 'text';
+
+        const modal = new bootstrap.Modal(document.getElementById('saveToFileModal'));
+        modal.show();
+    }
+
+    // Save task result to file
+    async function saveTaskResultToFile() {
+        const taskId = state.currentSaveTaskId;
+        if (!taskId) {
+            alert('No task selected');
+            return;
+        }
+
+        const filePath = document.getElementById('save-file-path').value.trim();
+        const format = document.getElementById('save-file-format').value;
+
+        if (!filePath) {
+            alert('Please enter a file path');
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    file_path: filePath,
+                    format: format
+                })
+            });
+
+            if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(text || 'Failed to save result');
+            }
+
+            const data = await resp.json();
+            alert(`Result saved to: ${data.file_path}`);
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('saveToFileModal'));
+            if (modal) modal.hide();
+        } catch (err) {
+            console.error('Failed to save to file:', err);
+            alert(`Failed to save result: ${err.message || err}`);
+        }
+    }
+
+    // Save task result to store node
+    async function saveTaskResultToStore(taskId, storeNodeId, storeName) {
+        const task = state.tasksById.get(taskId);
+        if (!task || !task.result) {
+            alert('No task result to save');
+            return;
+        }
+
+        // Generate filename
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+        const filename = `${taskName}_${timestamp}.txt`;
+
+        try {
+            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_id: taskId,
+                    store_node_id: storeNodeId,
+                    file_path: filename,
+                    format: 'text'
+                })
+            });
+
+            if (!resp.ok) {
+                const text = await resp.text();
+                throw new Error(text || 'Failed to save result');
+            }
+
+            const data = await resp.json();
+            alert(`Result saved to ${storeName}: ${data.file_path}`);
+        } catch (err) {
+            console.error('Failed to save to store:', err);
+            alert(`Failed to save result: ${err.message || err}`);
         }
     }
 
@@ -745,6 +936,10 @@
     window.toggleTaskCollapsible = toggleTaskCollapsible;
     window.toggleEditTaskScheduleFields = function() { state.toggleEditTaskScheduleFields(); };
     window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
+    window.quickSaveTaskResult = quickSaveTaskResult;
+    window.openSaveToFileModal = openSaveToFileModal;
+    window.saveTaskResultToFile = saveTaskResultToFile;
+    window.saveTaskResultToStore = saveTaskResultToStore;
 
     // Load data when page loads
     document.addEventListener('DOMContentLoaded', () => {

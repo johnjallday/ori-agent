@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -450,6 +451,40 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 		"write_count":     storeNode.WriteCount,
 		"last_error":      storeNode.LastError,
 		"last_file_path":  storeNode.LastFilePath,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// GetWorkspaceOutputDir handles GET /api/workspaces/:id/output-dir
+// Returns the default output directory for a workspace
+func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 1 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	workspaceID := parts[0]
+
+	studio, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	// Default output directory: outputs/<workspace-name>/
+	outputDir := filepath.Join("outputs", studio.Name)
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"output_dir":   outputDir,
+		"workspace_id": workspaceID,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
