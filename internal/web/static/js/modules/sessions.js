@@ -87,11 +87,11 @@ const sessionManager = {
     await this.loadFolders();
     await this.loadTags();
 
-    // Try to restore active session, or auto-create one
+    // Try to restore active session, or prompt to create workspace
     const restored = await this.restoreActiveSession();
-    if (!restored && this.sessions.length === 0) {
-      // Auto-create initial session for this tab
-      await this.createNewSession();
+    if (!restored && this.sessions.length === 0 && this.folders.length === 0) {
+      // Show create workspace modal when no workspaces exist
+      this.showAddWorkspaceModal();
     } else if (!restored && this.sessions.length > 0) {
       // No saved session but sessions exist - use the first one
       await this.switchToSession(this.sessions[0].id);
@@ -118,7 +118,7 @@ const sessionManager = {
       e.stopPropagation();
       this.showCreateChatModal();
     });
-    document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.showCreateChatModal());
+    document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.handleEmptyStateAction());
 
     // Create chat modal - create button
     document.getElementById('createChatBtn')?.addEventListener('click', () => this.handleCreateChatFromModal());
@@ -163,7 +163,7 @@ const sessionManager = {
     // Add folder button
     document.getElementById('addFolderBtn')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.showAddFolderModal();
+      this.showAddWorkspaceModal();
     });
 
     // Create folder button
@@ -392,6 +392,7 @@ const sessionManager = {
 
       const data = await response.json();
       this.folders = data.folders || [];
+      this.updateSessionsEmptyState();
 
       // Load notes for all folders
       await this.loadAllFolderNotes(this.folders);
@@ -406,6 +407,7 @@ const sessionManager = {
     } catch (error) {
       console.error('Failed to load folders:', error);
       this.folders = [];
+      this.updateSessionsEmptyState();
     }
   },
 
@@ -437,7 +439,6 @@ const sessionManager = {
   // Render sessions list
   renderSessions() {
     const container = document.getElementById('sessionsList');
-    const emptyState = document.getElementById('sessionsEmpty');
     const loadingState = document.getElementById('sessionsLoading');
 
     if (!container) return;
@@ -446,14 +447,18 @@ const sessionManager = {
 
     const hasNotes = this.noteSearchResults.length > 0;
     const hasSessions = this.sessions.length > 0;
+    const hasWorkspaces = this.folders.length > 0;
+    const shouldShowEmpty = !hasSessions && !hasNotes;
 
-    if (!hasSessions && !hasNotes) {
+    if (shouldShowEmpty) {
       container.innerHTML = '';
-      if (emptyState) emptyState.style.display = 'flex';
-      return;
     }
 
-    if (emptyState) emptyState.style.display = 'none';
+    this.updateSessionsEmptyState();
+
+    if (shouldShowEmpty && !hasWorkspaces) {
+      return;
+    }
 
     const folderGroups = new Map();
     this.sessions.forEach(session => {
@@ -855,6 +860,43 @@ const sessionManager = {
     localStorage.setItem('sessionFolderCollapsed', JSON.stringify(Array.from(this.collapsedFolderIds)));
   },
 
+  // Update empty state copy and visibility
+  updateSessionsEmptyState() {
+    const emptyState = document.getElementById('sessionsEmpty');
+    if (!emptyState) return;
+
+    const emptyText = document.getElementById('sessionsEmptyText');
+    const emptyActionLabel = document.getElementById('sessionsEmptyActionLabel');
+    const hasSessions = this.sessions.length > 0;
+    const hasNotes = this.noteSearchResults.length > 0;
+    const hasWorkspaces = this.folders.length > 0;
+    const shouldShow = !hasSessions && !hasNotes;
+
+    if (!shouldShow) {
+      emptyState.style.display = 'none';
+      return;
+    }
+
+    if (hasWorkspaces) {
+      if (emptyText) emptyText.textContent = 'No sessions yet';
+      if (emptyActionLabel) emptyActionLabel.textContent = 'New Chat';
+    } else {
+      if (emptyText) emptyText.textContent = 'No workspaces yet';
+      if (emptyActionLabel) emptyActionLabel.textContent = 'Create Workspace';
+    }
+
+    emptyState.style.display = 'flex';
+  },
+
+  // Handle empty state action button
+  handleEmptyStateAction() {
+    if (this.folders.length === 0) {
+      this.showAddWorkspaceModal();
+      return;
+    }
+    this.showCreateChatModal();
+  },
+
 
   // Render loading state
   renderLoadingState() {
@@ -869,11 +911,10 @@ const sessionManager = {
 
   // Render empty state
   renderEmptyState() {
-    const emptyState = document.getElementById('sessionsEmpty');
     const loadingState = document.getElementById('sessionsLoading');
 
     if (loadingState) loadingState.style.display = 'none';
-    if (emptyState) emptyState.style.display = 'flex';
+    this.updateSessionsEmptyState();
   },
 
   // Render tag filters
@@ -2730,7 +2771,7 @@ const sessionManager = {
   },
 
   // Show add folder modal
-  showAddFolderModal() {
+  showAddWorkspaceModal() {
     const modal = new bootstrap.Modal(document.getElementById('addFolderModal'));
     modal.show();
   },

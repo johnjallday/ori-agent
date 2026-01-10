@@ -101,6 +101,20 @@ class AgentCanvas {
         this.draw(); // Redraw to update countdown displays
       }
     }, 10000); // 10 seconds
+
+    // Window resize listener
+    window.addEventListener('resize', () => {
+      this.initModule.resize();
+      this.draw();
+    });
+
+    // ResizeObserver for container changes (e.g., sidebar toggle)
+    // This handles cases where the canvas container size changes without a window resize
+    this.resizeObserver = new ResizeObserver(() => {
+      this.initModule.resize();
+      this.draw();
+    });
+    this.resizeObserver.observe(this.canvas.parentElement);
   }
 
   // ==================== PROPERTY ACCESSORS (Backward Compatibility) ====================
@@ -1181,6 +1195,9 @@ class AgentCanvas {
     }
     if (this.countdownTimer) {
       clearInterval(this.countdownTimer);
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
     }
   }
 
