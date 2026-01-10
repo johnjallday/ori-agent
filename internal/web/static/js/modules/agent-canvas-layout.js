@@ -56,17 +56,6 @@ export class AgentCanvasLayoutManager {
       }
     });
 
-    // Include scheduler nodes
-    this.state.schedulerNodes.forEach(s => {
-      if (s.x != null && s.y != null) {
-        minX = Math.min(minX, s.x);
-        maxX = Math.max(maxX, s.x);
-        minY = Math.min(minY, s.y);
-        maxY = Math.max(maxY, s.y);
-        hasContent = true;
-      }
-    });
-
     // Include store nodes
     this.state.storeNodes.forEach(s => {
       if (s.x != null && s.y != null) {
@@ -158,7 +147,6 @@ export class AgentCanvasLayoutManager {
       (this.state.tasks && this.state.tasks.length > 0) ||
       (this.state.agents && this.state.agents.length > 0) ||
       (this.state.attachments && this.state.attachments.length > 0) ||
-      (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) ||
       (this.state.storeNodes && this.state.storeNodes.length > 0) ||
       (this.state.combinerNodes && this.state.combinerNodes.length > 0);
 
@@ -201,17 +189,6 @@ export class AgentCanvasLayoutManager {
       maxX = Math.max(maxX, att.x + cardWidth / 2);
       minY = Math.min(minY, att.y - cardHeight / 2);
       maxY = Math.max(maxY, att.y + cardHeight / 2);
-    });
-
-    // Include scheduler nodes
-    this.state.schedulerNodes.forEach(s => {
-      if (s.x == null || s.y == null) return;
-      const nodeWidth = 180;
-      const nodeHeight = 120;
-      minX = Math.min(minX, s.x - nodeWidth / 2);
-      maxX = Math.max(maxX, s.x + nodeWidth / 2);
-      minY = Math.min(minY, s.y - nodeHeight / 2);
-      maxY = Math.max(maxY, s.y + nodeHeight / 2);
     });
 
     // Include store nodes
@@ -361,14 +338,6 @@ export class AgentCanvasLayoutManager {
         taskId: node.taskId // Include taskId for backend task association
       }));
 
-      // Collect scheduler positions
-      const schedulerPositions = {};
-      this.state.schedulerNodes.forEach(s => {
-        if (s.x == null || s.y == null) return;
-        const key = s.canvas_node_id || s.id;
-        schedulerPositions[key] = { x: s.x, y: s.y };
-      });
-
       // Collect store node positions
       const storePositions = {};
       this.state.storeNodes.forEach(s => {
@@ -389,7 +358,7 @@ export class AgentCanvasLayoutManager {
       }));
 
       console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Schedulers: ${Object.keys(schedulerPositions).length}, Stores: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
+      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Stores: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
       console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
       console.log(`  Task positions:`, taskPositions);
       console.log(`  Agent positions:`, agentPositions);
@@ -399,7 +368,6 @@ export class AgentCanvasLayoutManager {
         task_positions: taskPositions,
         agent_positions: agentPositions,
         attachment_positions: attachmentPositions,
-        scheduler_positions: schedulerPositions,
         store_positions: storePositions,
         combiner_nodes: combinerNodes,
         workflow_connections: workflowConnections,
@@ -625,59 +593,6 @@ export class AgentCanvasLayoutManager {
     // Remove stale combiner input ports so only active connections are shown
     if (this.state.combinerNodes.length > 0) {
       this.state.combinerNodes.forEach(node => this.parent.cleanupCombinerInputPorts(node));
-    }
-
-    // Restore scheduler positions
-    if (layout.scheduler_positions) {
-      const schedulersWithPositions = [];
-      const schedulersWithoutPositions = [];
-
-      this.state.schedulerNodes.forEach(s => {
-        const key = s.canvas_node_id || s.id;
-        const savedPos = layout.scheduler_positions[key];
-        if (savedPos) {
-          s.x = savedPos.x;
-          s.y = savedPos.y;
-          schedulersWithPositions.push(s);
-        } else {
-          schedulersWithoutPositions.push(s);
-        }
-      });
-
-      // Position new scheduler nodes near existing content
-      if (schedulersWithoutPositions.length > 0) {
-        let baseX, baseY;
-        const spacing = 180;
-
-        if (schedulersWithPositions.length > 0) {
-          // Position near existing schedulers
-          let maxX = -Infinity;
-          let totalY = 0;
-          schedulersWithPositions.forEach(s => {
-            maxX = Math.max(maxX, s.x);
-            totalY += s.y;
-          });
-          baseX = maxX;
-          baseY = totalY / schedulersWithPositions.length;
-        } else {
-          // Fallback: position near general content cluster
-          const bounds = this.getContentBounds();
-          if (bounds) {
-            baseX = bounds.maxX;
-            baseY = bounds.centerY;
-          } else {
-            // No content at all, use center of canvas
-            baseX = this.parent.width / 2;
-            baseY = this.parent.height / 2;
-          }
-        }
-
-        schedulersWithoutPositions.forEach((s, index) => {
-          s.x = baseX + spacing * (index + 1);
-          s.y = baseY;
-          console.log(`  Positioning new scheduler ${s.canvas_node_id || s.id} at (${s.x}, ${s.y})`);
-        });
-      }
     }
 
     // Restore store node positions

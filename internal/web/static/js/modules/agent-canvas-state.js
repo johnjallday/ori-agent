@@ -92,12 +92,6 @@ export const EVENT_TYPES = {
   ATTACHMENT_MOVED: 'attachment.moved',
   ATTACHMENT_DELETED: 'attachment.deleted',
 
-  // Scheduler Node events
-  SCHEDULER_NODE_CREATED: 'scheduler_node.created',
-  SCHEDULER_NODE_UPDATED: 'scheduler_node.updated',
-  SCHEDULER_NODE_MOVED: 'scheduler_node.moved',
-  SCHEDULER_NODE_DELETED: 'scheduler_node.deleted',
-
   // Store Node events
   STORE_NODE_CREATED: 'store_node.created',
   STORE_NODE_UPDATED: 'store_node.updated',
@@ -156,7 +150,6 @@ export class AgentCanvasState {
     this.agents = [];
     this.tasks = [];
     this.attachments = [];
-    this.schedulerNodes = [];  // Scheduler nodes (canvas-based scheduled tasks)
     this.storeNodes = [];  // Store nodes (file storage nodes)
 
     // Data & Communication
@@ -186,10 +179,6 @@ export class AgentCanvasState {
     // Drag State - Attachment
     this.isDraggingAttachment = false;
     this.draggedAttachment = null;
-
-    // Drag State - Scheduler Node
-    this.isDraggingSchedulerNode = false;
-    this.draggedSchedulerNode = null;
 
     // Drag State - Connection
     this.isDraggingConnection = false;
@@ -466,57 +455,14 @@ export class AgentCanvasState {
   }
 
   // ========================================================================
-  // Scheduler Node Management
+  // Store Node Management
   // ========================================================================
-
-  /**
-   * Set scheduler nodes
-   */
-  setSchedulerNodes(schedulerNodes) {
-    this.schedulerNodes = schedulerNodes || [];
-  }
 
   /**
    * Set store nodes
    */
   setStoreNodes(storeNodes) {
     this.storeNodes = storeNodes || [];
-  }
-
-  /**
-   * Add scheduler node
-   */
-  addSchedulerNode(schedulerNode) {
-    this.schedulerNodes.push(schedulerNode);
-    this.eventBus.emit(EVENT_TYPES.SCHEDULER_NODE_CREATED, { schedulerNode });
-  }
-
-  /**
-   * Get scheduler node by ID
-   */
-  getSchedulerNode(schedulerNodeId) {
-    return this.schedulerNodes.find(s => s.id === schedulerNodeId);
-  }
-
-  /**
-   * Update scheduler node position
-   */
-  updateSchedulerNodePosition(schedulerNode, x, y) {
-    schedulerNode.x = x;
-    schedulerNode.y = y;
-    this.eventBus.emit(EVENT_TYPES.SCHEDULER_NODE_MOVED, { schedulerNode, x, y });
-  }
-
-  /**
-   * Remove scheduler node by ID
-   */
-  removeSchedulerNode(schedulerNodeId) {
-    const index = this.schedulerNodes.findIndex(s => s.id === schedulerNodeId);
-    if (index !== -1) {
-      const schedulerNode = this.schedulerNodes[index];
-      this.schedulerNodes.splice(index, 1);
-      this.eventBus.emit(EVENT_TYPES.SCHEDULER_NODE_DELETED, { schedulerNode });
-    }
   }
 
   /**
@@ -836,7 +782,7 @@ export class AgentCanvasState {
   /**
    * Select a node (add to selection)
    * @param {string} id - Node ID
-   * @param {string} type - Node type ('agent'|'task'|'scheduler'|'store'|'attachment')
+   * @param {string} type - Node type ('agent'|'task'|'store'|'attachment'|'combiner')
    * @param {object} node - Node object reference
    */
   selectNode(id, type, node) {

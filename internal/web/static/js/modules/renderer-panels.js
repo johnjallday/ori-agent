@@ -109,6 +109,171 @@ export class RendererPanels {
     this.ctx.fillText(`From: ${this.state.expandedTask.from}  →  To: ${this.state.expandedTask.to}`, contentX, currentY);
     currentY += 25;
 
+    // Schedule section (if task has or can have a schedule)
+    const hasSchedule = this.state.expandedTask.schedule;
+    const scheduleEnabled = this.state.expandedTask.schedule_enabled;
+
+    // Schedule header
+    this.ctx.fillStyle = '#8b5cf6';
+    this.ctx.font = 'bold 14px system-ui';
+    this.ctx.fillText('⏰ Schedule', contentX, currentY);
+    currentY += 20;
+
+    if (hasSchedule) {
+      // Schedule info box
+      const scheduleBoxHeight = 80;
+      const scheduleBoxWidth = this.state.expandedPanelWidth - padding * 2;
+
+      this.ctx.fillStyle = scheduleEnabled ? '#f3e8ff' : '#f3f4f6';
+      this.ctx.strokeStyle = scheduleEnabled ? '#8b5cf6' : '#9ca3af';
+      this.ctx.lineWidth = 2;
+      this.primitives.roundRect(contentX, currentY, scheduleBoxWidth, scheduleBoxHeight, 6);
+      this.ctx.fill();
+      this.ctx.stroke();
+
+      let scheduleY = currentY + 18;
+
+      // Schedule type/pattern
+      const schedule = this.state.expandedTask.schedule;
+      let scheduleText = 'Unknown schedule';
+      if (schedule.type === 'interval') {
+        const minutes = schedule.interval ? Math.floor(schedule.interval / 60000000000) : 60;
+        scheduleText = `Every ${minutes} minutes`;
+      } else if (schedule.type === 'daily') {
+        scheduleText = `Daily at ${schedule.time_of_day || '09:00'}`;
+      } else if (schedule.type === 'weekly') {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        scheduleText = `${days[schedule.day_of_week || 0]} at ${schedule.time_of_day || '09:00'}`;
+      } else if (schedule.type === 'cron') {
+        scheduleText = `Cron: ${schedule.cron_expr || '0 9 * * *'}`;
+      } else if (schedule.type === 'once') {
+        scheduleText = schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'One-time';
+      }
+
+      this.ctx.fillStyle = '#1f2937';
+      this.ctx.font = '12px system-ui';
+      this.ctx.fillText(scheduleText, contentX + 10, scheduleY);
+      scheduleY += 18;
+
+      // Status badge
+      this.ctx.fillStyle = scheduleEnabled ? '#10b981' : '#6b7280';
+      this.ctx.font = 'bold 9px system-ui';
+      const statusText = scheduleEnabled ? 'ENABLED' : 'DISABLED';
+      const statusWidth = this.ctx.measureText(statusText).width + 8;
+      this.primitives.roundRect(contentX + 10, scheduleY - 8, statusWidth, 14, 3);
+      this.ctx.fill();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillText(statusText, contentX + 14, scheduleY + 2);
+
+      // Next run time
+      if (this.state.expandedTask.next_run && scheduleEnabled) {
+        const nextRun = new Date(this.state.expandedTask.next_run);
+        const now = new Date();
+        const diff = nextRun - now;
+        let timeText;
+        if (diff < 0) {
+          timeText = 'Overdue';
+        } else if (diff < 60000) {
+          timeText = `in ${Math.floor(diff / 1000)}s`;
+        } else if (diff < 3600000) {
+          timeText = `in ${Math.floor(diff / 60000)}m`;
+        } else if (diff < 86400000) {
+          timeText = `in ${Math.floor(diff / 3600000)}h`;
+        } else {
+          timeText = `in ${Math.floor(diff / 86400000)}d`;
+        }
+        this.ctx.fillStyle = '#6b7280';
+        this.ctx.font = '11px system-ui';
+        this.ctx.fillText(`Next run: ${timeText}`, contentX + 10, scheduleY + 18);
+      }
+
+      // Toggle button (enable/disable)
+      const toggleBtnWidth = 70;
+      const toggleBtnHeight = 24;
+      const toggleBtnX = contentX + scheduleBoxWidth - toggleBtnWidth - 10;
+      const toggleBtnY = currentY + 10;
+
+      this.ctx.fillStyle = scheduleEnabled ? '#f59e0b' : '#10b981';
+      this.primitives.roundRect(toggleBtnX, toggleBtnY, toggleBtnWidth, toggleBtnHeight, 4);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 10px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText(scheduleEnabled ? 'Disable' : 'Enable', toggleBtnX + toggleBtnWidth / 2, toggleBtnY + 16);
+      this.ctx.textAlign = 'left';
+
+      // Store toggle button bounds
+      this.state.scheduleToggleBounds = {
+        x: toggleBtnX,
+        y: toggleBtnY,
+        width: toggleBtnWidth,
+        height: toggleBtnHeight
+      };
+
+      // Trigger button (run now)
+      const triggerBtnWidth = 70;
+      const triggerBtnHeight = 24;
+      const triggerBtnX = toggleBtnX;
+      const triggerBtnY = toggleBtnY + toggleBtnHeight + 8;
+
+      this.ctx.fillStyle = scheduleEnabled ? '#10b981' : '#9ca3af';
+      this.primitives.roundRect(triggerBtnX, triggerBtnY, triggerBtnWidth, triggerBtnHeight, 4);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 10px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('Run Now', triggerBtnX + triggerBtnWidth / 2, triggerBtnY + 16);
+      this.ctx.textAlign = 'left';
+
+      // Store trigger button bounds
+      this.state.scheduleTriggerBounds = {
+        x: triggerBtnX,
+        y: triggerBtnY,
+        width: triggerBtnWidth,
+        height: triggerBtnHeight
+      };
+
+      currentY += scheduleBoxHeight + 15;
+    } else {
+      // No schedule - show "Add Schedule" option
+      this.ctx.fillStyle = '#9ca3af';
+      this.ctx.font = 'italic 12px system-ui';
+      this.ctx.fillText('No schedule configured', contentX, currentY);
+      currentY += 20;
+
+      // Add schedule button
+      const addBtnWidth = 100;
+      const addBtnHeight = 24;
+      const addBtnX = contentX;
+      const addBtnY = currentY;
+
+      this.ctx.fillStyle = '#8b5cf6';
+      this.primitives.roundRect(addBtnX, addBtnY, addBtnWidth, addBtnHeight, 4);
+      this.ctx.fill();
+
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.font = 'bold 10px system-ui';
+      this.ctx.textAlign = 'center';
+      this.ctx.fillText('+ Add Schedule', addBtnX + addBtnWidth / 2, addBtnY + 16);
+      this.ctx.textAlign = 'left';
+
+      // Store add schedule button bounds
+      this.state.addScheduleBounds = {
+        x: addBtnX,
+        y: addBtnY,
+        width: addBtnWidth,
+        height: addBtnHeight
+      };
+
+      // Clear other schedule bounds
+      this.state.scheduleToggleBounds = null;
+      this.state.scheduleTriggerBounds = null;
+
+      currentY += addBtnHeight + 15;
+    }
+
     // Progress section (for in_progress tasks)
     if (this.state.expandedTask.status === 'in_progress') {
       this.ctx.fillStyle = '#3b82f6';

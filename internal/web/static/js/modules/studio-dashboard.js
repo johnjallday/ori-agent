@@ -12,7 +12,6 @@ import { DashboardUI } from './dashboard-ui.js';
 import { DashboardAgents } from './dashboard-agents.js';
 import { DashboardRenderer } from './dashboard-renderer.js';
 import { DashboardTasks } from './dashboard-tasks.js';
-import { DashboardScheduled } from './dashboard-scheduled.js';
 
 class WorkspaceDashboard {
   constructor(workspaceId, containerId) {
@@ -24,7 +23,6 @@ class WorkspaceDashboard {
       agents: [],
       messages: [],
       events: [],
-      scheduledTasks: []
     };
     this.unsubscribe = null;
     this.refreshInterval = null;
@@ -37,7 +35,6 @@ class WorkspaceDashboard {
     this.agents = new DashboardAgents(this);
     this.renderer = new DashboardRenderer(this);
     this.tasks = new DashboardTasks(this);
-    this.scheduled = new DashboardScheduled(this);
   }
 
   /**
@@ -47,7 +44,6 @@ class WorkspaceDashboard {
     // Load initial data
     await this.state.loadWorkspaceData();
     await this.state.loadTasks();
-    await this.state.loadScheduledTasks();
 
     // Render dashboard
     this.renderer.render();
@@ -76,7 +72,6 @@ class WorkspaceDashboard {
   // State methods
   loadWorkspaceData() { return this.state.loadWorkspaceData(); }
   loadTasks() { return this.state.loadTasks(); }
-  loadScheduledTasks() { return this.state.loadScheduledTasks(); }
   handleRealtimeEvent(event) { return this.state.handleRealtimeEvent(event); }
   updateWorkspaceStatus(statusData) { return this.state.updateWorkspaceStatus(statusData); }
   handleTaskUpdate(event) { return this.state.handleTaskUpdate(event); }
@@ -127,20 +122,6 @@ class WorkspaceDashboard {
   toggleEditScheduleFields() { return this.tasks.toggleEditScheduleFields(); }
   updateEditScheduleTypeFields() { return this.tasks.updateEditScheduleTypeFields(); }
   saveTaskSchedule(taskId) { return this.tasks.saveTaskSchedule(taskId); }
-
-  // Scheduled methods
-  renderScheduledTasksTab() { return this.scheduled.renderScheduledTasksTab(); }
-  renderScheduledTasksList() { return this.scheduled.renderScheduledTasksList(); }
-  renderScheduledTask(st) { return this.scheduled.renderScheduledTask(st); }
-  getScheduleDescription(schedule) { return this.scheduled.getScheduleDescription(schedule); }
-  showCreateScheduledTaskForm() { return this.scheduled.showCreateScheduledTaskForm(); }
-  hideCreateScheduledTaskForm() { return this.scheduled.hideCreateScheduledTaskForm(); }
-  updateScheduleFields() { return this.scheduled.updateScheduleFields(); }
-  createScheduledTask() { return this.scheduled.createScheduledTask(); }
-  toggleScheduledTask(id, enable) { return this.scheduled.toggleScheduledTask(id, enable); }
-  triggerScheduledTask(id) { return this.scheduled.triggerScheduledTask(id); }
-  deleteScheduledTask(id) { return this.scheduled.deleteScheduledTask(id); }
-  toggleHistory(id) { return this.scheduled.toggleHistory(id); }
 }
 
 // Make available globally

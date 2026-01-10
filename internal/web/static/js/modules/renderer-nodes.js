@@ -306,6 +306,52 @@ export class RendererNodes {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.fillText(badge, cardX + 12, cardY + 49);
 
+      // Schedule indicator (show clock icon if task has a schedule)
+      if (task.schedule && task.schedule_enabled) {
+        const scheduleIconX = cardX + badgeWidth + 14;
+        const scheduleIconY = cardY + 46;
+        const iconRadius = 5;
+
+        // Clock circle
+        this.ctx.strokeStyle = '#8b5cf6'; // Purple for scheduled
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        this.ctx.arc(scheduleIconX, scheduleIconY, iconRadius, 0, Math.PI * 2);
+        this.ctx.stroke();
+
+        // Clock hands
+        this.ctx.beginPath();
+        this.ctx.moveTo(scheduleIconX, scheduleIconY);
+        this.ctx.lineTo(scheduleIconX, scheduleIconY - 3);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(scheduleIconX, scheduleIconY);
+        this.ctx.lineTo(scheduleIconX + 2, scheduleIconY + 1);
+        this.ctx.stroke();
+
+        // Next run indicator (small text)
+        if (task.next_run) {
+          const nextRun = new Date(task.next_run);
+          const now = new Date();
+          const diff = nextRun - now;
+          let timeText;
+          if (diff < 0) {
+            timeText = 'Due';
+          } else if (diff < 60000) {
+            timeText = `${Math.floor(diff / 1000)}s`;
+          } else if (diff < 3600000) {
+            timeText = `${Math.floor(diff / 60000)}m`;
+          } else if (diff < 86400000) {
+            timeText = `${Math.floor(diff / 3600000)}h`;
+          } else {
+            timeText = `${Math.floor(diff / 86400000)}d`;
+          }
+          this.ctx.fillStyle = '#8b5cf6';
+          this.ctx.font = '7px system-ui';
+          this.ctx.fillText(timeText, scheduleIconX + iconRadius + 2, scheduleIconY + 2);
+        }
+      }
+
       // Delete button (always visible, top-right corner)
       const deleteBtnSize = 18;
       const deleteBtnX = cardX + cardWidth - deleteBtnSize - 4;
@@ -819,288 +865,6 @@ export class RendererNodes {
       this.ctx.fillStyle = baseColor;
       this.ctx.beginPath();
       this.ctx.arc(attachment.x, cardY + cardHeight + 5, 6, 0, Math.PI * 2);
-      this.ctx.fill();
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = 1;
-      this.ctx.stroke();
-    });
-  }
-
-  /**
-   * Draw scheduler nodes (canvas-based scheduled tasks)
-   */
-  drawSchedulerNodes() {
-    if (!this.state.schedulerNodes || this.state.schedulerNodes.length === 0) return;
-
-    this.state.schedulerNodes.forEach((schedulerNode) => {
-      if (schedulerNode.x == null || schedulerNode.y == null) return;
-
-      const cardWidth = 180;
-      const cardHeight = 90;
-      const cardX = schedulerNode.x - cardWidth / 2;
-      const cardY = schedulerNode.y - cardHeight / 2;
-
-      // Store bounds for hit testing
-      schedulerNode.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
-
-      // Draw selection highlight if this scheduler node is selected
-      if (this.state.isNodeSelected(schedulerNode.id)) {
-        const isPrimary = this.state.isFirstSelected(schedulerNode.id);
-        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
-      }
-
-      // Determine node status color
-      const enabled = schedulerNode.enabled !== false;
-      const baseColor = enabled ? '#8b5cf6' : '#94a3b8'; // Purple when enabled, gray when paused
-
-      // Check if scheduler is connected to a task
-      const isConnected = schedulerNode.target_task_id ||
-        this.state.connections.some(conn => conn.from === schedulerNode.id);
-
-      // Background
-      this.ctx.save();
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.shadowColor = 'rgba(0,0,0,0.1)';
-      this.ctx.shadowBlur = 8;
-      this.ctx.shadowOffsetY = 2;
-      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
-      this.ctx.fill();
-      this.ctx.restore();
-
-      // Border (thicker when enabled, dashed when not connected)
-      this.ctx.strokeStyle = baseColor;
-      this.ctx.lineWidth = enabled ? 3 : 2;
-
-      // Use dashed border if not connected to indicate it needs configuration
-      if (!isConnected) {
-        this.ctx.setLineDash([5, 3]);
-      }
-
-      this.ctx.beginPath();
-      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
-      this.ctx.stroke();
-      this.ctx.setLineDash([]); // Reset dash pattern
-
-      // Clock icon (SVG-style drawing)
-      const iconSize = 20;
-      const iconX = cardX + 10;
-      const iconY = cardY + 16;
-
-      this.ctx.strokeStyle = baseColor;
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.arc(iconX + iconSize / 2, iconY, iconSize / 2, 0, Math.PI * 2);
-      this.ctx.stroke();
-
-      // Clock hands
-      this.ctx.beginPath();
-      this.ctx.moveTo(iconX + iconSize / 2, iconY);
-      this.ctx.lineTo(iconX + iconSize / 2, iconY - iconSize / 4);
-      this.ctx.stroke();
-
-      this.ctx.beginPath();
-      this.ctx.moveTo(iconX + iconSize / 2, iconY);
-      this.ctx.lineTo(iconX + iconSize / 2 + iconSize / 4, iconY + iconSize / 6);
-      this.ctx.stroke();
-
-      // Title
-      this.ctx.fillStyle = '#0f172a';
-      this.ctx.font = 'bold 12px system-ui';
-      const title = schedulerNode.name || 'Scheduler';
-      this.ctx.fillText(title, iconX + iconSize + 10, iconY + 4);
-
-      // Pause/Play toggle button (top right, before status badge)
-      const toggleBtnSize = 22;
-      const toggleBtnX = cardX + cardWidth - toggleBtnSize - 8;
-      const toggleBtnY = cardY + 6;
-
-      // Button background
-      this.ctx.fillStyle = enabled ? '#f59e0b' : '#10b981'; // Orange to pause, green to play
-      this.ctx.beginPath();
-      this.ctx.arc(toggleBtnX + toggleBtnSize / 2, toggleBtnY + toggleBtnSize / 2, toggleBtnSize / 2, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      // Draw pause or play icon
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = 2;
-
-      if (enabled) {
-        // Draw pause icon (two vertical bars)
-        const barWidth = 3;
-        const barHeight = 10;
-        const barY = toggleBtnY + toggleBtnSize / 2 - barHeight / 2;
-        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 - barWidth - 2, barY, barWidth, barHeight);
-        this.ctx.fillRect(toggleBtnX + toggleBtnSize / 2 + 2, barY, barWidth, barHeight);
-      } else {
-        // Draw play icon (triangle)
-        const centerX = toggleBtnX + toggleBtnSize / 2;
-        const centerY = toggleBtnY + toggleBtnSize / 2;
-        this.ctx.beginPath();
-        this.ctx.moveTo(centerX - 3, centerY - 5);
-        this.ctx.lineTo(centerX - 3, centerY + 5);
-        this.ctx.lineTo(centerX + 5, centerY);
-        this.ctx.closePath();
-        this.ctx.fill();
-      }
-
-      // Store toggle button bounds
-      schedulerNode.toggleBtnBounds = {
-        x: toggleBtnX,
-        y: toggleBtnY,
-        width: toggleBtnSize,
-        height: toggleBtnSize
-      };
-
-      // Status badge (moved left to make room for toggle button)
-      const statusText = enabled ? 'Active' : 'Paused';
-      const statusColor = enabled ? '#10b981' : '#64748b';
-      const badgeX = cardX + cardWidth - toggleBtnSize - 65;
-      const badgeY = cardY + 8;
-      this.ctx.fillStyle = statusColor + '20'; // 20% opacity background
-      this.primitives.roundRect(badgeX, badgeY, 50, 18, 4);
-      this.ctx.fill();
-      this.ctx.fillStyle = statusColor;
-      this.ctx.font = '10px system-ui';
-      this.ctx.fillText(statusText, badgeX + 6, badgeY + 12);
-
-      // Connection indicator (small link icon if connected)
-      if (isConnected) {
-        const linkIconX = cardX + 10;
-        const linkIconY = cardY + cardHeight - 28;
-        this.ctx.strokeStyle = '#10b981';
-        this.ctx.lineWidth = 1.5;
-        this.ctx.beginPath();
-        // Draw link icon (two circles connected)
-        this.ctx.arc(linkIconX + 3, linkIconY + 3, 2, 0, Math.PI * 2);
-        this.ctx.arc(linkIconX + 9, linkIconY + 3, 2, 0, Math.PI * 2);
-        this.ctx.moveTo(linkIconX + 5, linkIconY + 2);
-        this.ctx.lineTo(linkIconX + 7, linkIconY + 4);
-        this.ctx.stroke();
-
-        // "Connected" text
-        this.ctx.fillStyle = '#10b981';
-        this.ctx.font = '9px system-ui';
-        this.ctx.fillText('Connected', linkIconX + 14, linkIconY + 7);
-      }
-
-      // Schedule pattern summary
-      this.ctx.fillStyle = '#475569';
-      this.ctx.font = '11px system-ui';
-      const scheduleText = this.getScheduleSummary(schedulerNode.schedule_config);
-      this.ctx.fillText(scheduleText, cardX + 10, cardY + 45);
-
-      // Target agent indicator
-      if (schedulerNode.to && schedulerNode.to !== '') {
-        this.ctx.fillStyle = '#8b5cf6';
-        this.ctx.font = 'bold 10px system-ui';
-        this.ctx.fillText(`→ ${schedulerNode.to}`, cardX + 10, cardY + 58);
-      } else {
-        this.ctx.fillStyle = '#94a3b8';
-        this.ctx.font = 'italic 10px system-ui';
-        this.ctx.fillText('(unassigned)', cardX + 10, cardY + 58);
-      }
-
-      // Next run time
-      if (schedulerNode.next_run) {
-        const nextRun = new Date(schedulerNode.next_run);
-        const now = new Date();
-        const diff = nextRun - now;
-
-        let timeText;
-        if (diff < 0) {
-          timeText = 'Overdue';
-        } else if (diff < 60000) {
-          timeText = `in ${Math.floor(diff / 1000)}s`;
-        } else if (diff < 3600000) {
-          timeText = `in ${Math.floor(diff / 60000)}m`;
-        } else if (diff < 86400000) {
-          timeText = `in ${Math.floor(diff / 3600000)}h`;
-        } else {
-          timeText = `in ${Math.floor(diff / 86400000)}d`;
-        }
-
-        this.ctx.fillStyle = '#64748b';
-        this.ctx.font = '10px system-ui';
-        this.ctx.fillText(`Next: ${timeText}`, cardX + 10, cardY + 72);
-      }
-
-      // Assign button (left side, below schedule text)
-      const assignBtnWidth = 50;
-      const assignBtnHeight = 14;
-      const assignBtnX = cardX + 10;
-      const assignBtnY = cardY + cardHeight - 28;
-
-      // Check if in assignment mode for this scheduler
-      const isActiveAssignment = this.state.schedulerAssignmentMode &&
-                                  this.state.schedulerAssignmentSource &&
-                                  this.state.schedulerAssignmentSource.canvas_node_id === schedulerNode.canvas_node_id;
-
-      this.ctx.fillStyle = isActiveAssignment ? '#fd7e14' : '#6c757d';
-      this.primitives.roundRect(assignBtnX, assignBtnY, assignBtnWidth, assignBtnHeight, 3);
-      this.ctx.fill();
-
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = 'bold 8px system-ui';
-      this.ctx.textAlign = 'center';
-      this.ctx.fillText('⇄ LINK', assignBtnX + assignBtnWidth / 2, assignBtnY + 10);
-      this.ctx.textAlign = 'left';
-
-      schedulerNode.assignBtnBounds = {
-        x: assignBtnX,
-        y: assignBtnY,
-        width: assignBtnWidth,
-        height: assignBtnHeight
-      };
-
-      // Trigger button (bottom right)
-      const triggerWidth = 60;
-      const triggerHeight = 20;
-      const triggerX = cardX + cardWidth - triggerWidth - 10;
-      const triggerY = cardY + cardHeight - triggerHeight - 10;
-      this.ctx.fillStyle = enabled ? '#10b981' : '#94a3b8';
-      this.primitives.roundRect(triggerX, triggerY, triggerWidth, triggerHeight, 6);
-      this.ctx.fill();
-      this.ctx.fillStyle = '#ffffff';
-      this.ctx.font = '10px system-ui';
-      this.ctx.fillText('Trigger', triggerX + 10, triggerY + 14);
-
-      schedulerNode.triggerButton = {
-        x: triggerX,
-        y: triggerY,
-        width: triggerWidth,
-        height: triggerHeight
-      };
-
-      // Delete button (top-right, next to status badge)
-      const deleteSize = 18;
-      const deleteX = cardX + cardWidth - deleteSize - 6;
-      const deleteY = cardY + 30;
-      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
-      this.ctx.beginPath();
-      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
-      this.ctx.fill();
-
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.moveTo(deleteX + 5, deleteY + 5);
-      this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
-      this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
-      this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
-      this.ctx.stroke();
-
-      schedulerNode.deleteButton = {
-        x: deleteX,
-        y: deleteY,
-        width: deleteSize,
-        height: deleteSize
-      };
-
-      // Output port indicator (for connecting to tasks)
-      this.ctx.fillStyle = baseColor;
-      this.ctx.beginPath();
-      this.ctx.arc(schedulerNode.x, cardY + cardHeight + 5, 6, 0, Math.PI * 2);
       this.ctx.fill();
       this.ctx.strokeStyle = '#ffffff';
       this.ctx.lineWidth = 1;

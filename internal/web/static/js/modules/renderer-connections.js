@@ -490,8 +490,6 @@ export class RendererConnections {
     switch (type) {
       case 'task':
         return 40;
-      case 'scheduler':
-        return 50;
       case 'agent':
         return 45;
       case 'attachment':
@@ -510,8 +508,6 @@ export class RendererConnections {
     switch (type) {
       case 'task':
         return { x: (node.x || 0) - 80, y: (node.y || 0) - 50, width: 160, height: 100 };
-      case 'scheduler':
-        return { x: (node.x || 0) - 90, y: (node.y || 0) - 45, width: 180, height: 90 };
       case 'agent':
         const halfW = (node.width || 120) / 2;
         const halfH = (node.height || 70) / 2;

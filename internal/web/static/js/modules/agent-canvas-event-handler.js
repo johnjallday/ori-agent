@@ -290,58 +290,52 @@ export class AgentCanvasEventHandler {
 
   /**
    * Handle scheduled task events from SSE.
-   * Updates scheduler nodes with execution status, next run time, etc.
+   * Updates tasks with schedule execution status, next run time, etc.
    */
   handleScheduledTaskEvent(eventData) {
     const scheduledTask = eventData.data?.scheduled_task;
-    const schedulerId = eventData.data?.scheduled_task_id || scheduledTask?.id;
+    const taskId = eventData.data?.task_id || scheduledTask?.target_task_id;
 
-    if (!schedulerId || !scheduledTask) {
+    if (!taskId || !scheduledTask) {
       console.warn('Scheduled task event missing data:', eventData);
       return;
     }
 
-    // Find the scheduler node in state
-    const schedulerNode = this.state.schedulerNodes.find(s => s.id === schedulerId);
-    if (!schedulerNode) {
-      console.log('Scheduler node not found in canvas:', schedulerId);
+    // Find the task in state
+    const task = this.state.tasks.find(t => t.id === taskId);
+    if (!task) {
+      console.log('Task not found in canvas:', taskId);
       return;
     }
 
-    // Update scheduler node with latest data
+    // Update task's schedule data
     if (eventData.type === 'scheduled_task.triggered') {
-      // Update last execution time and execution count
-      schedulerNode.last_execution = scheduledTask.last_execution || new Date().toISOString();
-      schedulerNode.execution_count = (schedulerNode.execution_count || 0) + 1;
-      schedulerNode.next_run = scheduledTask.next_run;
+      task.last_scheduled_run = scheduledTask.last_execution || new Date().toISOString();
+      task.next_run = scheduledTask.next_run;
 
-      console.log(`Scheduler "${schedulerNode.name}" triggered (execution #${schedulerNode.execution_count})`);
+      console.log(`Task "${task.description}" schedule triggered`);
 
-      // Show notification
       this.parent.notifications?.showNotification?.(
-        `Scheduler "${schedulerNode.name}" triggered`,
+        `Scheduled task triggered: ${task.description?.substring(0, 30) || 'Task'}`,
         'info'
       );
     } else if (eventData.type === 'scheduled_task.failed') {
-      // Update failure status
-      schedulerNode.last_execution = scheduledTask.last_execution || new Date().toISOString();
-      schedulerNode.last_error = eventData.data?.error || 'Execution failed';
-      schedulerNode.next_run = scheduledTask.next_run;
+      task.last_scheduled_run = scheduledTask.last_execution || new Date().toISOString();
+      task.schedule_error = eventData.data?.error || 'Execution failed';
+      task.next_run = scheduledTask.next_run;
 
-      console.error(`Scheduler "${schedulerNode.name}" failed:`, schedulerNode.last_error);
+      console.error(`Task "${task.description}" schedule failed:`, task.schedule_error);
 
-      // Show error notification
       this.parent.notifications?.showNotification?.(
-        `Scheduler "${schedulerNode.name}" failed: ${schedulerNode.last_error}`,
+        `Schedule failed: ${task.schedule_error}`,
         'error'
       );
     } else if (eventData.type === 'scheduled_task.completed') {
-      // Update completion status
-      schedulerNode.last_execution = scheduledTask.last_execution || new Date().toISOString();
-      schedulerNode.last_error = null; // Clear any previous errors
-      schedulerNode.next_run = scheduledTask.next_run;
+      task.last_scheduled_run = scheduledTask.last_execution || new Date().toISOString();
+      task.schedule_error = null;
+      task.next_run = scheduledTask.next_run;
 
-      console.log(`Scheduler "${schedulerNode.name}" completed successfully`);
+      console.log(`Task "${task.description}" schedule completed`);
     }
 
     // Trigger redraw to update visual state

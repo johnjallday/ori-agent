@@ -244,13 +244,6 @@ export class AgentCanvasContextMenu {
           type: node.type || 'tool-calling',
           model: node.model || ''
         };
-      case 'scheduler':
-        return {
-          name: node.name || '',
-          schedule_type: node.schedule_type || 'cron',
-          cron_expression: node.cron_expression || '',
-          enabled: node.enabled !== false
-        };
       case 'store':
         return {
           name: node.name || '',
@@ -329,24 +322,6 @@ export class AgentCanvasContextMenu {
           deletedCount++;
         } catch (err) {
           console.error(`Failed to delete task ${id}:`, err);
-          errorCount++;
-        }
-      }
-    }
-
-    // Delete scheduler nodes
-    if (nodesByType.scheduler && nodesByType.scheduler.length > 0) {
-      for (const { id, node } of nodesByType.scheduler) {
-        try {
-          await apiDelete(`/api/studios/${encodeURIComponent(this.parent.studioId)}/schedulers/${encodeURIComponent(id)}`);
-
-          // Remove from local state
-          const filteredSchedulers = this.state.schedulerNodes.filter(s => s.id !== id);
-          this.state.setSchedulerNodes(filteredSchedulers);
-
-          deletedCount++;
-        } catch (err) {
-          console.error(`Failed to delete scheduler ${id}:`, err);
           errorCount++;
         }
       }

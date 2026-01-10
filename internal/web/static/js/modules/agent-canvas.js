@@ -95,9 +95,11 @@ class AgentCanvas {
     this.state.on(EVENT_TYPES.CANVAS_PANNED, () => this.draw());
     this.state.on(EVENT_TYPES.CANVAS_ZOOMED, () => this.draw());
 
-    // Start periodic countdown timer for scheduler nodes (update every 10 seconds)
+    // Start periodic countdown timer for scheduled tasks (update every 10 seconds)
     this.countdownTimer = setInterval(() => {
-      if (this.state.schedulerNodes && this.state.schedulerNodes.length > 0) {
+      // Check for tasks with schedules that need countdown updates
+      const hasScheduledTasks = this.state.tasks && this.state.tasks.some(t => t.schedule && t.schedule_enabled);
+      if (hasScheduledTasks) {
         this.draw(); // Redraw to update countdown displays
       }
     }, 10000); // 10 seconds
@@ -402,7 +404,7 @@ class AgentCanvas {
     this.ctx.translate(this.offsetX, this.offsetY);
     this.ctx.scale(this.scale, this.scale);
 
-    // Draw scheduler/task connections
+    // Draw connections
     this.renderer.drawConnections();
 
     // Draw chain connections (highlighted paths for active chains)
@@ -413,9 +415,6 @@ class AgentCanvas {
 
     // Draw attachments
     this.renderer.drawAttachments();
-
-    // Draw scheduler nodes
-    this.renderer.drawSchedulerNodes();
 
     // Draw store nodes
     this.renderer.drawStoreNodes();
@@ -891,16 +890,6 @@ class AgentCanvas {
     if (!connectionId) return;
     const idx = this.state.connections.findIndex(c => c.id === connectionId);
     if (idx !== -1) {
-      const conn = this.state.connections[idx];
-
-      // If this is a scheduler→task connection, clear the scheduler's target_task_id
-      const fromNode = this.helpers.getNodeById(conn.from);
-      if (fromNode?.type === 'scheduler') {
-        this.updateSchedulerTargetTask(fromNode.node.id, null).catch(err => {
-          console.error('Failed to clear scheduler target task', err);
-        });
-      }
-
       this.state.connections.splice(idx, 1);
       this.saveLayout();
       this.draw();
@@ -924,27 +913,6 @@ class AgentCanvas {
     } catch (err) {
       console.error('Failed to delete attachment', err);
       alert('Failed to delete attachment: ' + (err?.message || err));
-    }
-  }
-
-  /**
-   * Delete a scheduler node
-   */
-  async deleteSchedulerNode(schedulerNode) {
-    const nodeId = schedulerNode?.canvas_node_id;
-    if (!schedulerNode || !nodeId || !this.studioId) {
-      alert('Cannot delete scheduler node: missing ID or workspace');
-      return;
-    }
-    try {
-      await apiDelete(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}?studio_id=${this.studioId}`);
-      this.state.removeSchedulerNode(schedulerNode.id);
-      this.saveLayout();
-      this.draw();
-      this.notifications?.showNotification?.('Scheduler node deleted', 'success');
-    } catch (err) {
-      console.error('Failed to delete scheduler node', err);
-      alert('Failed to delete scheduler node: ' + (err?.message || err));
     }
   }
 
@@ -1019,153 +987,6 @@ class AgentCanvas {
     } catch (err) {
       console.error('Failed to assign agent to store', err);
       alert('Failed to assign agent: ' + (err?.message || err));
-    }
-  }
-
-  /**
-   * Manually trigger a scheduler node
-   */
-  async triggerSchedulerNode(schedulerNode) {
-    const nodeId = schedulerNode?.canvas_node_id;
-    if (!schedulerNode || !nodeId || !this.studioId) {
-      alert('Cannot trigger scheduler node: missing ID or workspace');
-      return;
-    }
-
-    // Prevent multiple simultaneous triggers
-    if (this._triggering === nodeId) {
-      console.warn('Trigger already in progress for node:', nodeId);
-      return;
-    }
-
-    this._triggering = nodeId;
-    console.log('🎯 Triggering scheduler node:', nodeId);
-
-    try {
-      await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}/trigger?studio_id=${this.studioId}`, {});
-      this.notifications?.showNotification?.('Scheduler node triggered', 'success');
-    } catch (err) {
-      console.error('Failed to trigger scheduler node', err);
-      alert('Failed to trigger scheduler node: ' + (err?.message || err));
-    } finally {
-      // Clear the lock after a short delay to prevent accidental rapid clicks
-      setTimeout(() => {
-        this._triggering = null;
-      }, 1000);
-    }
-  }
-
-  /**
-   * Toggle scheduler enabled/paused state
-   */
-  async toggleSchedulerEnabled(schedulerNode) {
-    const nodeId = schedulerNode?.canvas_node_id;
-    if (!schedulerNode || !nodeId || !this.studioId) {
-      alert('Cannot toggle scheduler: missing ID or workspace');
-      return;
-    }
-
-    const newEnabled = schedulerNode.enabled === false ? true : false;
-    const action = newEnabled ? 'resume' : 'pause';
-
-    console.log(`⏯️ ${action} scheduler node:`, nodeId);
-
-    try {
-      await apiPatch(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${nodeId}?studio_id=${this.studioId}`, {
-        enabled: newEnabled
-      });
-
-      // Update local state
-      schedulerNode.enabled = newEnabled;
-
-      this.notifications?.showNotification?.(`Scheduler ${newEnabled ? 'resumed' : 'paused'}`, 'success');
-      this.draw();
-    } catch (err) {
-      console.error('Failed to toggle scheduler enabled state', err);
-      alert('Failed to toggle scheduler: ' + (err?.message || err));
-    }
-  }
-
-  /**
-   * Toggle scheduler assignment mode
-   */
-  toggleSchedulerAssignmentMode(schedulerNode) {
-    if (this.state.schedulerAssignmentMode &&
-        this.state.schedulerAssignmentSource?.canvas_node_id === schedulerNode.canvas_node_id) {
-      // Cancel if clicking same scheduler
-      this.state.schedulerAssignmentMode = false;
-      this.state.schedulerAssignmentSource = null;
-      this.state.schedulerAssignmentMouseX = 0;
-      this.state.schedulerAssignmentMouseY = 0;
-      this.canvas.style.cursor = 'grab';
-      console.log('Scheduler assignment mode cancelled');
-    } else {
-      // Enter assignment mode
-      this.state.schedulerAssignmentMode = true;
-      this.state.schedulerAssignmentSource = schedulerNode;
-      this.canvas.style.cursor = 'crosshair';
-      console.log('Scheduler assignment mode activated for:', schedulerNode.name);
-    }
-    this.draw();
-  }
-
-  /**
-   * Assign scheduler node to a task
-   */
-  async assignSchedulerToTask(task) {
-    const schedulerNode = this.state.schedulerAssignmentSource;
-    if (!schedulerNode || !task) return;
-
-    try {
-      await this.updateSchedulerTargetTask(schedulerNode.canvas_node_id, task.id);
-
-      // Add a visual connection if it doesn't exist
-      const schedulerNodeId = schedulerNode.canvas_node_id || schedulerNode.id;
-      const existing = this.state.connections.find(conn =>
-        conn.from === schedulerNodeId && conn.to === task.id
-      );
-      if (!existing) {
-        const conn = {
-          id: `conn-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-          from: schedulerNodeId,
-          fromPort: 'out',
-          to: task.id,
-          toPort: 'in',
-          color: '#cbd5e1',
-          animated: false
-        };
-        this.state.connections.push(conn);
-        this.saveLayout();
-        this.draw();
-      }
-
-      this.notifications?.showNotification?.(`Scheduler linked to task "${task.description || task.id}"`, 'success');
-      console.log('✅ Scheduler linked to task:', task.id);
-    } catch (err) {
-      console.error('Failed to link scheduler to task', err);
-      alert('Failed to link scheduler to task: ' + (err?.message || err));
-    }
-  }
-
-  /**
-   * Update scheduler node's target task ID
-   */
-  async updateSchedulerTargetTask(schedulerNodeId, targetTaskId) {
-    if (!schedulerNodeId || !this.studioId) {
-      throw new Error('Cannot update scheduler: missing ID or workspace');
-    }
-    try {
-      await apiPut(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes/${schedulerNodeId}?studio_id=${this.studioId}`, {
-        target_task_id: targetTaskId
-      });
-      // Update local state (search by canvas_node_id)
-      const scheduler = this.state.schedulerNodes.find(s => s.canvas_node_id === schedulerNodeId);
-      if (scheduler) {
-        scheduler.target_task_id = targetTaskId;
-      }
-    } catch (err) {
-      console.error('Failed to update scheduler target task', err);
-      throw err;
     }
   }
 
@@ -1346,16 +1167,6 @@ class AgentCanvas {
       return null;
     }
 
-    // Enforce scheduler direction: schedulers can only connect to tasks
-    if (fromNode.type === 'scheduler' && toNode.type !== 'task') {
-      this.notifications?.showNotification?.('Scheduler nodes can only connect to tasks', 'warning');
-      return null;
-    }
-    if (toNode.type === 'scheduler') {
-      this.notifications?.showNotification?.('Scheduler nodes cannot receive connections', 'warning');
-      return null;
-    }
-
     // Avoid duplicate connections - check for any connection between same nodes
     // This prevents creating multiple connections from same source to same destination
     const existing = this.state.connections.find(conn =>
@@ -1380,16 +1191,6 @@ class AgentCanvas {
 
     this.state.connections.push(conn);
     this.saveLayout();
-
-    // If this is a scheduler→task connection, update the scheduler's target_task_id
-    if (fromNode.type === 'scheduler' && toNode.type === 'task') {
-      const schedulerNodeId = fromNode.node.canvas_node_id || fromNode.node.id;
-      this.updateSchedulerTargetTask(schedulerNodeId, toNode.node.id).catch(err => {
-        console.error('Failed to update scheduler target task', err);
-        this.notifications?.showNotification?.('Failed to link scheduler to task', 'error');
-      });
-    }
-
     this.draw();
     return conn;
   }
@@ -1456,9 +1257,6 @@ class AgentCanvas {
             break;
           case 'agent':
             createdNode = await this.createWorkflowAgentNode(node, x, y);
-            break;
-          case 'scheduler':
-            createdNode = await this.createWorkflowSchedulerNode(node, x, y);
             break;
           case 'store':
             createdNode = await this.createWorkflowStoreNode(node, x, y);
@@ -1555,28 +1353,6 @@ class AgentCanvas {
     }
 
     throw new Error('Failed to add agent');
-  }
-
-  /**
-   * Create a scheduler node from workflow template
-   */
-  async createWorkflowSchedulerNode(node, x, y) {
-    const config = node.config || {};
-
-    const response = await apiPost(`/api/orchestration/workspaces/${this.studioId}/scheduler-nodes`, {
-      name: config.name || 'New Scheduler',
-      schedule_type: config.schedule_type || 'cron',
-      cron_expression: config.cron_expression || '0 * * * *',
-      enabled: config.enabled !== false,
-      x: x,
-      y: y
-    });
-
-    if (response && response.scheduler_node) {
-      return response.scheduler_node;
-    }
-
-    throw new Error('Failed to create scheduler');
   }
 
   /**

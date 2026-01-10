@@ -12,8 +12,6 @@
         workspaceId: workspaceId,
         currentWorkspace: null,
         workspaceLayout: null,
-        scheduledTasks: [],
-        schedulerNodes: [],
         storeNodes: [],
         workspaceConnections: [],
         workspaceAttachments: [],
@@ -32,10 +30,6 @@
             const workspace = await response.json();
             state.currentWorkspace = workspace;
             state.workspaceLayout = workspace.layout;
-
-            // Load scheduler nodes (ensures canvas_node_id exists) for schedule lookup/editing
-            state.schedulerNodes = await loadSchedulerNodes(workspaceId);
-            state.scheduledTasks = normalizeScheduledTasks(state.schedulerNodes, workspace.scheduled_tasks || []);
             state.storeNodes = workspace.store_nodes || workspace.layout?.store_nodes || [];
             state.workspaceConnections = workspace.layout?.workflow_connections || [];
             state.workspaceAttachments = workspace.attachments || [];
@@ -227,7 +221,6 @@
         const assignedTo = getFormattedAgentAssignment(task);
         const assignedNodeId = task.assigned_node_id || null;
         const taskId = `task-${task.id}`;
-        const scheduler = state.scheduledTasks.find(s => s.target_task_id === task.id);
         const store = assignedNodeId ? state.storeNodes.find(s => s.agent_node_id === assignedNodeId) : null;
         const attachments = getTaskAttachments(task.id);
 
@@ -287,12 +280,12 @@
                     </span>
                     ` : ''}
                 </div>
-                ${renderTaskCollapsibles(task, taskId, scheduler, store, attachments)}
+                ${renderTaskCollapsibles(task, taskId, store, attachments)}
             </div>
         `;
     }
 
-    function renderTaskCollapsibles(task, taskId, scheduler, store, attachments) {
+    function renderTaskCollapsibles(task, taskId, store, attachments) {
         let html = '';
 
         // Result section
@@ -343,8 +336,10 @@
             `;
         }
 
-        // Schedule section
-        if (scheduler) {
+        // Schedule section (show if task has a schedule)
+        if (task.schedule) {
+            const schedule = task.schedule;
+            const scheduleType = schedule.type || 'interval';
             html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-schedule')">
@@ -355,37 +350,53 @@
                         <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
                         </svg>
-                        <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); openEditScheduleModal('${escapeHtml(task.id)}')" title="Edit schedule">Edit</button>
+                        <button class="modern-btn modern-btn-secondary btn-sm" onclick="event.stopPropagation(); openEditTaskModal('${escapeHtml(task.id)}')" title="Edit schedule">Edit</button>
                     </div>
                     <div class="task-collapsible-content" id="${taskId}-schedule">
                         <div class="task-detail-row">
                             <span class="task-detail-label">Type:</span>
-                            <span class="task-detail-value">${escapeHtml(scheduler.schedule_type || 'N/A')}</span>
+                            <span class="task-detail-value">${escapeHtml(scheduleType)}</span>
                         </div>
-                        ${scheduler.schedule_type === 'cron' ? `
+                        ${scheduleType === 'daily' ? `
                         <div class="task-detail-row">
-                            <span class="task-detail-label">Cron:</span>
-                            <code class="task-detail-value">${escapeHtml(scheduler.cron_expression || 'N/A')}</code>
+                            <span class="task-detail-label">Time:</span>
+                            <span class="task-detail-value">${escapeHtml(schedule.time || '09:00')}</span>
                         </div>
                         ` : ''}
-                        ${scheduler.schedule_type === 'interval' ? `
+                        ${scheduleType === 'weekly' ? `
+                        <div class="task-detail-row">
+                            <span class="task-detail-label">Day:</span>
+                            <span class="task-detail-value">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][schedule.day_of_week || 0]}</span>
+                        </div>
+                        <div class="task-detail-row">
+                            <span class="task-detail-label">Time:</span>
+                            <span class="task-detail-value">${escapeHtml(schedule.time || '09:00')}</span>
+                        </div>
+                        ` : ''}
+                        ${scheduleType === 'interval' ? `
                         <div class="task-detail-row">
                             <span class="task-detail-label">Every:</span>
-                            <span class="task-detail-value">${scheduler.interval_minutes || 0} minutes</span>
+                            <span class="task-detail-value">${schedule.interval_minutes || 60} minutes</span>
                         </div>
                         ` : ''}
-                        ${scheduler.schedule_type === 'once' && scheduler.run_at ? `
+                        ${scheduleType === 'once' && schedule.run_at ? `
                         <div class="task-detail-row">
                             <span class="task-detail-label">Run at:</span>
-                            <span class="task-detail-value">${new Date(scheduler.run_at).toLocaleString()}</span>
+                            <span class="task-detail-value">${new Date(schedule.run_at).toLocaleString()}</span>
                         </div>
                         ` : ''}
                         <div class="task-detail-row">
                             <span class="task-detail-label">Status:</span>
-                            <span class="task-detail-value status-badge ${scheduler.enabled !== false ? 'enabled' : 'disabled'}">
-                                ${scheduler.enabled !== false ? 'Enabled' : 'Disabled'}
+                            <span class="task-detail-value status-badge ${task.schedule_enabled ? 'enabled' : 'disabled'}">
+                                ${task.schedule_enabled ? 'Enabled' : 'Disabled'}
                             </span>
                         </div>
+                        ${task.next_run ? `
+                        <div class="task-detail-row">
+                            <span class="task-detail-label">Next Run:</span>
+                            <span class="task-detail-value">${new Date(task.next_run).toLocaleString()}</span>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -687,97 +698,6 @@
         return task.to;
     }
 
-    // Normalize scheduled tasks from API
-    function normalizeScheduledTasks(nodeWrappers, fallbackScheduledTasks) {
-        const rows = [];
-
-        if (Array.isArray(nodeWrappers) && nodeWrappers.length > 0) {
-            nodeWrappers.forEach(item => {
-                const task = item && item.scheduled_task ? item.scheduled_task : null;
-                if (!task) return;
-                const schedule = task.schedule || {};
-                const scheduleType = schedule.type || task.schedule_type || 'cron';
-                const cron = schedule.cron_expr || task.cron_expression || '';
-                const intervalMinutes = parseIntervalToMinutes(schedule.interval || schedule.delay_duration);
-                const runAt = schedule.execute_at || null;
-                rows.push({
-                    id: task.id,
-                    canvas_node_id: task.canvas_node_id || item.node_id,
-                    target_task_id: task.target_task_id || null,
-                    schedule_type: scheduleType,
-                    cron_expression: cron,
-                    interval_minutes: intervalMinutes,
-                    run_at: runAt,
-                    enabled: task.enabled !== false
-                });
-            });
-            return rows;
-        }
-
-        if (Array.isArray(fallbackScheduledTasks)) {
-            fallbackScheduledTasks.forEach(task => {
-                const schedule = task.schedule || {};
-                const scheduleType = schedule.type || task.schedule_type || 'cron';
-                const cron = schedule.cron_expr || task.cron_expression || '';
-                const intervalMinutes = parseIntervalToMinutes(schedule.interval || schedule.delay_duration);
-                const runAt = schedule.execute_at || null;
-                rows.push({
-                    id: task.id,
-                    canvas_node_id: task.canvas_node_id || null,
-                    target_task_id: task.target_task_id || null,
-                    schedule_type: scheduleType,
-                    cron_expression: cron,
-                    interval_minutes: intervalMinutes,
-                    run_at: runAt,
-                    enabled: task.enabled !== false
-                });
-            });
-        }
-
-        return rows;
-    }
-
-    // Convert Go time.Duration to minutes
-    function parseIntervalToMinutes(value) {
-        if (value === undefined || value === null) return null;
-
-        if (typeof value === 'number') {
-            return Math.round(value / 60000000000);
-        }
-
-        if (typeof value === 'string') {
-            let minutes = 0;
-            const hoursMatch = value.match(/([\d.]+)h/);
-            const minsMatch = value.match(/([\d.]+)m/);
-            const secsMatch = value.match(/([\d.]+)s/);
-
-            if (hoursMatch) minutes += parseFloat(hoursMatch[1]) * 60;
-            if (minsMatch) minutes += parseFloat(minsMatch[1]);
-            if (!hoursMatch && !minsMatch && secsMatch) {
-                minutes += parseFloat(secsMatch[1]) / 60;
-            }
-
-            if (minutes > 0) {
-                return Math.round(minutes);
-            }
-        }
-
-        return null;
-    }
-
-    async function loadSchedulerNodes(studioId) {
-        try {
-            const resp = await fetch(`/api/orchestration/workspaces/${encodeURIComponent(studioId)}/scheduler-nodes?studio_id=${encodeURIComponent(studioId)}`);
-            if (!resp.ok) {
-                return [];
-            }
-            const data = await resp.json();
-            return data.scheduler_nodes || [];
-        } catch {
-            return [];
-        }
-    }
-
     // Toggle task collapsible section
     function toggleTaskCollapsible(contentId) {
         const content = document.getElementById(contentId);
@@ -808,8 +728,6 @@
     window.submitEditNote = function() { state.submitEditNote(); };
     window.openEditDescriptionModal = function() { state.openEditDescriptionModal(); };
     window.submitEditDescription = function() { state.submitEditDescription(); };
-    window.openEditScheduleModal = function(taskId) { state.openEditScheduleModal(taskId); };
-    window.submitEditSchedule = function() { state.submitEditSchedule(); };
     window.openEditStorageModal = function(taskId) { state.openEditStorageModal(taskId); };
     window.submitEditStorage = function() { state.submitEditStorage(); };
     window.openEditAttachmentModal = function(attachmentId) { state.openEditAttachmentModal(attachmentId); };
@@ -830,8 +748,6 @@
     window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
     window.toggleCreateTaskScheduleFields = function() { state.toggleCreateTaskScheduleFields(); };
     window.updateCreateTaskScheduleTypeFields = function() { state.updateCreateTaskScheduleTypeFields(); };
-    window.updateEditScheduleInputs = function() { state.updateEditScheduleInputs(); };
-    window.toggleEditScheduleEndDate = function() { state.toggleEditScheduleEndDate(); };
 
     // Load data when page loads
     document.addEventListener('DOMContentLoaded', () => {

@@ -293,49 +293,50 @@ function showTaskDetails(task) {
         ` : '';
       })()}
       ${(() => {
-        // Find scheduler targeting this task
-        const schedulers = window.agentCanvas?.state?.schedulerNodes || [];
-        const scheduler = schedulers.find(s => s.target_task_id === task.id);
-        if (!scheduler) return '';
+        // Show schedule info if task has a schedule
+        if (!task.schedule) return '';
 
-        const scheduleType = scheduler.schedule?.type || 'unknown';
-        const interval = scheduler.schedule?.interval;
-        const cronExpr = scheduler.schedule?.cron_expression;
+        const schedule = task.schedule;
+        const scheduleType = schedule.type || 'unknown';
         let scheduleDesc = '';
-        if (scheduleType === 'interval' && interval) {
-          const mins = Math.floor(interval / 60000000000);
+        if (scheduleType === 'interval' && schedule.interval) {
+          const mins = Math.floor(schedule.interval / 60000000000);
           scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
-        } else if (scheduleType === 'cron' && cronExpr) {
-          scheduleDesc = `Cron: ${cronExpr}`;
+        } else if (scheduleType === 'cron' && schedule.cron_expression) {
+          scheduleDesc = `Cron: ${schedule.cron_expression}`;
+        } else if (scheduleType === 'daily') {
+          scheduleDesc = `Daily at ${schedule.time_of_day || '00:00'}`;
+        } else if (scheduleType === 'weekly') {
+          scheduleDesc = `Weekly on ${schedule.day_of_week || 'Monday'}`;
+        } else if (scheduleType === 'once') {
+          scheduleDesc = `Once at ${schedule.run_at ? new Date(schedule.run_at).toLocaleString() : 'N/A'}`;
         }
-        const nextRun = scheduler.next_run ? new Date(scheduler.next_run).toLocaleString() : 'N/A';
-        const lastRun = scheduler.last_run ? new Date(scheduler.last_run).toLocaleString() : 'Never';
+        const nextRun = task.next_run ? new Date(task.next_run).toLocaleString() : 'N/A';
+        const lastRun = task.last_scheduled_run ? new Date(task.last_scheduled_run).toLocaleString() : 'Never';
 
         return `
           <div class="mb-3">
-            <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
-              <span style="color: #10b981; font-weight: 600;">
+            <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
+              <span style="color: #8b5cf6; font-weight: 600;">
                 <span style="margin-right: 6px;">⏰</span> Schedule
-                <span class="badge bg-success ms-2" style="font-size: 0.7rem;">${scheduler.enabled ? 'Active' : 'Disabled'}</span>
+                <span class="badge ms-2" style="font-size: 0.7rem; background: ${task.schedule_enabled ? '#10b981' : '#6b7280'};">${task.schedule_enabled ? 'Active' : 'Disabled'}</span>
               </span>
-              <svg class="collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="transition: transform 0.2s;">
+              <svg class="collapse-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" style="transition: transform 0.2s;">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </div>
             <div class="collapsible-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease;">
-              <div style="padding: 10px; background: rgba(16, 185, 129, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(16, 185, 129, 0.2); border-top: none;">
+              <div style="padding: 10px; background: rgba(139, 92, 246, 0.05); border-radius: 0 0 6px 6px; border: 1px solid rgba(139, 92, 246, 0.2); border-top: none;">
                 <div style="font-size: 0.85rem; color: var(--text-secondary);">
-                  <div class="mb-1"><strong>Name:</strong> ${scheduler.name || 'Unnamed'}</div>
                   <div class="mb-1"><strong>Type:</strong> ${scheduleDesc}</div>
                   <div class="mb-1"><strong>Next Run:</strong> ${nextRun}</div>
                   <div class="mb-1"><strong>Last Run:</strong> ${lastRun}</div>
-                  <div><strong>Executions:</strong> ${scheduler.execution_count || 0} (${scheduler.failure_count || 0} failed)</div>
                 </div>
               </div>
             </div>
           </div>
           <style>
-            .collapsible-header:hover { background: rgba(16, 185, 129, 0.15) !important; }
+            .collapsible-header:hover { background: rgba(139, 92, 246, 0.15) !important; }
             .expanded .collapsible-content { max-height: 200px !important; }
             .expanded .collapse-icon { transform: rotate(180deg); }
           </style>
@@ -1085,392 +1086,6 @@ async function unassignCurrentTask() {
   }
 }
 
-function showSchedulerDetails(schedulerNode) {
-  console.log('[SIDEBAR] showSchedulerDetails called for:', schedulerNode.name);
-  const canvas = window.agentCanvas;
-  const tasks = canvas?.state?.tasks || [];
-  const targetTask = tasks.find(t => t.id === schedulerNode.target_task_id);
-
-  // Hide other details
-  hideAgentDetails();
-  hideAttachmentDetails();
-  const taskPanel = document.getElementById('task-details-panel');
-  if (taskPanel) taskPanel.style.display = 'none';
-
-  // Use the same task details panel but rename title
-  const panel = document.getElementById('task-details-panel');
-  const content = document.getElementById('task-details-content');
-
-  if (!panel || !content) {
-    console.error('[SIDEBAR] Panel or content not found!');
-    return;
-  }
-
-  // Show panel
-  panel.style.display = 'block';
-
-  // Change title
-  const titleElement = panel.querySelector('h6');
-  if (titleElement) {
-    titleElement.textContent = 'Scheduler Details';
-  }
-
-  // Extract current schedule values
-  const sched = schedulerNode.schedule || {};
-  let schedType = sched.type || 'interval';
-  // Map relative_delay to interval for UI display (merged types)
-  const isRelativeDelay = schedType === 'relative_delay';
-  if (isRelativeDelay) {
-    schedType = 'interval';
-  }
-  // Get interval minutes from either interval or delay_duration field
-  const intervalMins = isRelativeDelay
-    ? Math.floor((sched.delay_duration || 0) / (60 * 1e9))
-    : (schedType === 'interval' ? Math.floor((sched.interval || 0) / (60 * 1e9)) : 60);
-  const runOnce = isRelativeDelay && sched.trigger_once;
-  const timeOfDay = sched.time_of_day || '09:00';
-  const dayOfWeek = sched.day_of_week || 0;
-  const cronExpr = sched.cron_expr || '0 9 * * *';
-  // For 'once' type, format the execute_at datetime for the input
-  const executeAt = sched.execute_at ? new Date(sched.execute_at).toISOString().slice(0, 16) : '';
-
-  // Build task options for dropdown
-  let taskOptions = '<option value="">-- Not linked --</option>';
-  tasks.forEach(t => {
-    const selected = t.id === schedulerNode.target_task_id ? 'selected' : '';
-    const label = t.description || t.id;
-    taskOptions += `<option value="${t.id}" ${selected}>${label}</option>`;
-  });
-
-  // Day of week options
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  let dayOptions = '';
-  days.forEach((day, idx) => {
-    const selected = idx === dayOfWeek ? 'selected' : '';
-    dayOptions += `<option value="${idx}" ${selected}>${day}</option>`;
-  });
-
-  const html = `
-    <div class="mb-3">
-      <div style="font-size: 24px; text-align: center; margin-bottom: 10px;">⏰</div>
-    </div>
-
-    <!-- Editable Name -->
-    <div class="mb-3">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Name</label>
-      <input type="text" id="scheduler-name" class="form-control form-control-sm"
-             value="${schedulerNode.name || 'Scheduler'}"
-             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-    </div>
-
-    <!-- Enabled Toggle -->
-    <div class="mb-3">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Status</label>
-      <div class="form-check form-switch">
-        <input class="form-check-input" type="checkbox" id="scheduler-enabled"
-               ${schedulerNode.enabled !== false ? 'checked' : ''}>
-        <label class="form-check-label" for="scheduler-enabled" style="color: var(--text-secondary);">
-          ${schedulerNode.enabled !== false ? 'Enabled' : 'Paused'}
-        </label>
-      </div>
-    </div>
-
-    <!-- Linked Task -->
-    <div class="mb-3">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Linked Task</label>
-      <select id="scheduler-target-task" class="form-select form-select-sm"
-              style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-        ${taskOptions}
-      </select>
-    </div>
-
-    <!-- Schedule Type -->
-    <div class="mb-3">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Schedule Type</label>
-      <select id="scheduler-type" class="form-select form-select-sm"
-              style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
-              onchange="updateSchedulerTypeFields()">
-        <option value="once" ${schedType === 'once' ? 'selected' : ''}>One-time (specific date/time)</option>
-        <option value="interval" ${schedType === 'interval' ? 'selected' : ''}>Interval</option>
-        <option value="daily" ${schedType === 'daily' ? 'selected' : ''}>Daily</option>
-        <option value="weekly" ${schedType === 'weekly' ? 'selected' : ''}>Weekly</option>
-        <option value="cron" ${schedType === 'cron' ? 'selected' : ''}>Cron Expression</option>
-      </select>
-    </div>
-
-    <!-- Once (specific date/time) fields -->
-    <div id="scheduler-once-fields" class="mb-3" style="display: ${schedType === 'once' ? 'block' : 'none'};">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Execute At</label>
-      <input type="datetime-local" id="scheduler-execute-at" class="form-control form-control-sm"
-             value="${executeAt}"
-             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-      <small style="color: var(--text-muted);">Select the exact date and time for execution</small>
-    </div>
-
-    <!-- Interval fields -->
-    <div id="scheduler-interval-fields" style="display: ${schedType === 'interval' ? 'block' : 'none'};">
-      <div class="mb-3">
-        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Interval (minutes)</label>
-        <input type="number" id="scheduler-interval" class="form-control form-control-sm"
-               value="${intervalMins}" min="1"
-               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-      </div>
-      <div class="mb-3">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" id="scheduler-run-once"
-                 ${runOnce ? 'checked' : ''}>
-          <label class="form-check-label" for="scheduler-run-once" style="color: var(--text-secondary);">
-            Run once only (don't repeat)
-          </label>
-        </div>
-      </div>
-    </div>
-
-    <!-- Daily fields -->
-    <div id="scheduler-daily-fields" class="mb-3" style="display: ${schedType === 'daily' ? 'block' : 'none'};">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Time of Day</label>
-      <input type="time" id="scheduler-time-daily" class="form-control form-control-sm"
-             value="${timeOfDay}"
-             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-    </div>
-
-    <!-- Weekly fields -->
-    <div id="scheduler-weekly-fields" style="display: ${schedType === 'weekly' ? 'block' : 'none'};">
-      <div class="mb-3">
-        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Day of Week</label>
-        <select id="scheduler-day-of-week" class="form-select form-select-sm"
-                style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-          ${dayOptions}
-        </select>
-      </div>
-      <div class="mb-3">
-        <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Time of Day</label>
-        <input type="time" id="scheduler-time-weekly" class="form-control form-control-sm"
-               value="${timeOfDay}"
-               style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-      </div>
-    </div>
-
-    <!-- Cron fields -->
-    <div id="scheduler-cron-fields" class="mb-3" style="display: ${schedType === 'cron' ? 'block' : 'none'};">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Cron Expression</label>
-      <input type="text" id="scheduler-cron" class="form-control form-control-sm"
-             value="${cronExpr}" placeholder="0 9 * * *"
-             style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);">
-      <small style="color: var(--text-muted);">Format: minute hour day month weekday</small>
-    </div>
-
-
-    <!-- Prompt -->
-    <div class="mb-3">
-      <label style="color: var(--text-primary); font-weight: 600; font-size: 0.85rem;">Task Prompt</label>
-      <textarea id="scheduler-prompt" class="form-control form-control-sm" rows="3"
-                style="background: var(--input-bg); border-color: var(--border-color); color: var(--text-primary);"
-                placeholder="Optional prompt for scheduled task">${schedulerNode.prompt || ''}</textarea>
-    </div>
-
-    <!-- Read-only stats -->
-    ${schedulerNode.next_run ? `
-      <div class="mb-2">
-        <small style="color: var(--text-muted);">Next Run:</small>
-        <div style="color: var(--text-secondary); font-size: 0.85rem;">${new Date(schedulerNode.next_run).toLocaleString()}</div>
-      </div>
-    ` : ''}
-    ${schedulerNode.last_run ? `
-      <div class="mb-2">
-        <small style="color: var(--text-muted);">Last Run:</small>
-        <div style="color: var(--text-secondary); font-size: 0.85rem;">${new Date(schedulerNode.last_run).toLocaleString()}</div>
-      </div>
-    ` : ''}
-    <div class="mb-3">
-      <small style="color: var(--text-muted);">Execution Count:</small>
-      <div style="color: var(--text-secondary); font-size: 0.85rem;">${schedulerNode.execution_count || 0}</div>
-    </div>
-
-    <!-- Save Button -->
-    <div class="mt-3">
-      <button class="btn btn-primary btn-sm w-100" onclick="saveSchedulerDetails(window.currentSchedulerNode)">
-        Save Changes
-      </button>
-    </div>
-  `;
-
-  content.innerHTML = html;
-
-  // Store the scheduler node reference for saving
-  window.currentSchedulerNode = schedulerNode;
-
-  // Update enabled label on toggle change
-  const enabledCheckbox = document.getElementById('scheduler-enabled');
-  if (enabledCheckbox) {
-    enabledCheckbox.addEventListener('change', function() {
-      const label = this.nextElementSibling;
-      if (label) {
-        label.textContent = this.checked ? 'Enabled' : 'Paused';
-      }
-    });
-  }
-}
-
-/**
- * Update schedule type-specific fields visibility
- */
-function updateSchedulerTypeFields() {
-  const schedType = document.getElementById('scheduler-type')?.value || 'interval';
-
-  // Hide all type-specific fields
-  const fieldGroups = ['once', 'interval', 'daily', 'weekly', 'cron'];
-  fieldGroups.forEach(group => {
-    const el = document.getElementById(`scheduler-${group}-fields`);
-    if (el) el.style.display = 'none';
-  });
-
-  // Show relevant fields
-  switch (schedType) {
-    case 'once':
-      document.getElementById('scheduler-once-fields').style.display = 'block';
-      break;
-    case 'interval':
-      document.getElementById('scheduler-interval-fields').style.display = 'block';
-      break;
-    case 'daily':
-      document.getElementById('scheduler-daily-fields').style.display = 'block';
-      break;
-    case 'weekly':
-      document.getElementById('scheduler-weekly-fields').style.display = 'block';
-      break;
-    case 'cron':
-      document.getElementById('scheduler-cron-fields').style.display = 'block';
-      break;
-  }
-}
-
-/**
- * Save scheduler node details
- */
-async function saveSchedulerDetails(schedulerNode) {
-  const canvas = window.agentCanvas;
-  if (!canvas || !schedulerNode) {
-    console.error('[SIDEBAR] Cannot save: missing canvas or schedulerNode');
-    return;
-  }
-
-  const nodeId = schedulerNode.canvas_node_id;
-  if (!nodeId) {
-    console.error('[SIDEBAR] Cannot save: missing canvas_node_id');
-    return;
-  }
-
-  // Gather form values
-  const name = document.getElementById('scheduler-name')?.value || 'Scheduler';
-  const enabled = document.getElementById('scheduler-enabled')?.checked ?? true;
-  const targetTaskId = document.getElementById('scheduler-target-task')?.value || '';
-  const schedType = document.getElementById('scheduler-type')?.value || 'interval';
-  const prompt = document.getElementById('scheduler-prompt')?.value || '';
-
-  // Build schedule config based on type
-  const schedule = { type: schedType };
-
-  switch (schedType) {
-    case 'once':
-      const executeAtStr = document.getElementById('scheduler-execute-at')?.value;
-      if (executeAtStr) {
-        schedule.execute_at = new Date(executeAtStr).toISOString();
-      }
-      break;
-    case 'interval':
-      const intervalMins = parseInt(document.getElementById('scheduler-interval')?.value) || 60;
-      const runOnce = document.getElementById('scheduler-run-once')?.checked || false;
-      if (runOnce) {
-        // Use relative_delay type with trigger_once=true for one-shot execution
-        schedule.type = 'relative_delay';
-        schedule.delay_duration = intervalMins * 60 * 1e9; // Convert to nanoseconds
-        schedule.trigger_once = true;
-      } else {
-        schedule.interval = intervalMins * 60 * 1e9; // Convert to nanoseconds
-      }
-      break;
-    case 'daily':
-      schedule.time_of_day = document.getElementById('scheduler-time-daily')?.value || '09:00';
-      break;
-    case 'weekly':
-      schedule.day_of_week = parseInt(document.getElementById('scheduler-day-of-week')?.value) || 0;
-      schedule.time_of_day = document.getElementById('scheduler-time-weekly')?.value || '09:00';
-      break;
-    case 'cron':
-      schedule.cron_expr = document.getElementById('scheduler-cron')?.value || '0 9 * * *';
-      break;
-  }
-
-  // Build update request
-  const updateData = {
-    name: name,
-    enabled: enabled,
-    schedule: schedule,
-    prompt: prompt
-  };
-
-  // Only include target_task_id if set
-  if (targetTaskId) {
-    updateData.target_task_id = targetTaskId;
-  }
-
-  console.log('[SIDEBAR] Saving scheduler details:', updateData);
-
-  try {
-    const response = await fetch(`/api/orchestration/workspaces/${canvas.studioId}/scheduler-nodes/${nodeId}?studio_id=${canvas.studioId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updateData)
-    });
-
-    if (response.ok) {
-      console.log('[SIDEBAR] Scheduler updated successfully');
-
-      // Update local scheduler node data
-      schedulerNode.name = name;
-      schedulerNode.enabled = enabled;
-      schedulerNode.schedule = schedule;
-      schedulerNode.prompt = prompt;
-      if (targetTaskId) {
-        schedulerNode.target_task_id = targetTaskId;
-      }
-
-      // Update in canvas state
-      if (canvas.state?.layout?.scheduler_nodes) {
-        const idx = canvas.state.layout.scheduler_nodes.findIndex(sn => sn.canvas_node_id === nodeId);
-        if (idx >= 0) {
-          Object.assign(canvas.state.layout.scheduler_nodes[idx], schedulerNode);
-        }
-      }
-
-      // Redraw canvas
-      canvas.draw();
-
-      // Show success feedback
-      const saveBtn = document.querySelector('#task-details-content button.btn-primary');
-      if (saveBtn) {
-        const originalText = saveBtn.textContent;
-        saveBtn.textContent = 'Saved!';
-        saveBtn.classList.remove('btn-primary');
-        saveBtn.classList.add('btn-success');
-        setTimeout(() => {
-          saveBtn.textContent = originalText;
-          saveBtn.classList.remove('btn-success');
-          saveBtn.classList.add('btn-primary');
-        }, 1500);
-      }
-    } else {
-      const error = await response.text();
-      console.error('[SIDEBAR] Failed to save scheduler:', error);
-      alert(`Failed to save scheduler: ${error}`);
-    }
-  } catch (error) {
-    console.error('[SIDEBAR] Error saving scheduler:', error);
-    alert(`Error saving scheduler: ${error.message}`);
-  }
-}
-
 /**
  * Show Store Details in the sidebar with edit capabilities
  */
@@ -1712,7 +1327,6 @@ async function saveStoreDetails(storeNode) {
 window.showAgentDetails = showAgentDetails;
 window.hideAgentDetails = hideAgentDetails;
 window.showTaskDetails = showTaskDetails;
-window.showSchedulerDetails = showSchedulerDetails;
 window.showStoreDetails = showStoreDetails;
 window.hideAttachmentDetails = hideAttachmentDetails;
 window.showAttachmentDetails = showAttachmentDetails;
@@ -3085,192 +2699,6 @@ window.editAgentSettings = editAgentSettings;
 window.cancelEditAgentSettings = cancelEditAgentSettings;
 window.saveAgentSettings = saveAgentSettings;
 
-// ============================================================================
-// Scheduler Node Functions
-// ============================================================================
-
-/**
- * Show add scheduler node modal
- */
-async function showAddSchedulerNodeModal() {
-  const modal = new bootstrap.Modal(document.getElementById('addSchedulerNodeModal'));
-  modal.show();
-}
-
-/**
- * Update schedule input fields based on selected schedule type
- */
-function updateScheduleInputs() {
-  const scheduleType = document.getElementById('scheduler-type').value;
-
-  // Hide all config sections
-  document.querySelectorAll('.schedule-type-config').forEach(el => {
-    el.style.display = 'none';
-  });
-
-  // Show relevant config section
-  const configMap = {
-    'once': 'once-config',
-    'interval': 'interval-config',
-    'daily': 'daily-config',
-    'weekly': 'weekly-config',
-    'cron': 'cron-config'
-  };
-
-  const configId = configMap[scheduleType];
-  if (configId) {
-    document.getElementById(configId).style.display = 'block';
-  }
-}
-
-/**
- * Toggle end date input visibility
- */
-function toggleEndDate() {
-  const checkbox = document.getElementById('has-end-date');
-  const input = document.getElementById('end-date');
-  input.style.display = checkbox.checked ? 'block' : 'none';
-}
-
-/**
- * Build schedule config object from form inputs
- */
-function buildScheduleConfig() {
-  const scheduleType = document.getElementById('scheduler-type').value || 'interval';
-  const config = {
-    type: scheduleType  // Backend expects 'type', not 'schedule_type'
-  };
-
-  switch (scheduleType) {
-    case 'once':
-      // One-time execution at a specific date/time
-      const executeAtStr = document.getElementById('execute-at').value;
-      if (!executeAtStr) {
-        throw new Error('Please select a date and time for the one-time execution');
-      }
-      const executeAt = new Date(executeAtStr);
-      if (executeAt <= new Date()) {
-        throw new Error('Execution time must be in the future');
-      }
-      config.execute_at = executeAt.toISOString();
-      break;
-
-    case 'interval':
-      // Convert minutes to nanoseconds (time.Duration is int64 nanoseconds in JSON)
-      let intervalMinutes = parseInt(document.getElementById('interval-minutes').value, 10);
-      if (isNaN(intervalMinutes) || intervalMinutes <= 0) {
-        intervalMinutes = 60; // sensible default
-      }
-      const runOnce = document.getElementById('interval-run-once')?.checked || false;
-      if (runOnce) {
-        // Use relative_delay type with trigger_once=true for one-shot execution
-        config.type = 'relative_delay';
-        config.delay_duration = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
-        config.trigger_once = true;
-      } else {
-        config.interval = intervalMinutes * 60 * 1000000000;  // minutes to nanoseconds
-      }
-      break;
-
-    case 'daily':
-      // Backend expects time_of_day as "HH:MM" string
-      config.time_of_day = document.getElementById('daily-time').value;
-      break;
-
-    case 'weekly':
-      // Backend expects time_of_day as "HH:MM" string
-      config.time_of_day = document.getElementById('weekly-time').value;
-      config.day_of_week = parseInt(document.getElementById('weekly-day').value);
-      break;
-
-    case 'cron':
-      config.cron_expr = document.getElementById('cron-expr').value.trim();
-      if (!config.cron_expr) {
-        throw new Error('Cron expression is required');
-      }
-      break;
-  }
-
-  // Add end date if specified
-  if (document.getElementById('has-end-date').checked) {
-    const endDateStr = document.getElementById('end-date').value;
-    if (endDateStr) {
-      config.end_date = new Date(endDateStr).toISOString();
-    }
-  }
-
-  return config;
-}
-
-/**
- * Submit scheduler node creation
- */
-async function submitSchedulerNode() {
-  try {
-    const name = document.getElementById('scheduler-name').value.trim();
-    if (!name) {
-      alert('Please enter a name for the scheduler');
-      return;
-    }
-
-    const studioId = currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
-    if (!studioId) {
-      alert('No workspace loaded');
-      return;
-    }
-
-    // Build schedule config
-    let scheduleConfig;
-    try {
-      scheduleConfig = buildScheduleConfig();
-    } catch (err) {
-      alert(err.message || 'Invalid schedule configuration');
-      return;
-    }
-
-    const enabled = document.getElementById('scheduler-enabled').checked;
-
-    // Create scheduler node (without 'to' - assign agent later using ASSIGN button)
-    const schedulerNode = {
-      name: name,
-      to: '',  // Empty - use ASSIGN button to set target agent
-      from: 'scheduler',  // Scheduler nodes always use 'scheduler' as the source
-      schedule: scheduleConfig,
-      enabled: enabled,
-      x: 300,  // Default position
-      y: 300
-    };
-
-    console.log('Creating scheduler node:', schedulerNode);
-
-    const response = await fetch(`/api/orchestration/workspaces/${studioId}/scheduler-nodes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(schedulerNode)
-    });
-
-    if (response.ok) {
-      console.log('Scheduler node created successfully');
-
-      // Close modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('addSchedulerNodeModal'));
-      modal.hide();
-
-      // Reset form
-      document.getElementById('schedulerNodeForm').reset();
-
-      // Reload page to show new scheduler node
-      window.location.reload();
-    } else {
-      const error = await response.text();
-      alert(`Failed to create scheduler node: ${error}`);
-    }
-  } catch (error) {
-    console.error('Error creating scheduler node:', error);
-    alert(`Error creating scheduler node: ${error.message}`);
-  }
-}
-
 // ==================== STORE NODE FUNCTIONS ====================
 
 /**
@@ -3605,10 +3033,6 @@ async function submitStoreNode() {
 }
 
 // Export functions to window
-window.showAddSchedulerNodeModal = showAddSchedulerNodeModal;
-window.updateScheduleInputs = updateScheduleInputs;
-window.toggleEndDate = toggleEndDate;
-window.submitSchedulerNode = submitSchedulerNode;
 window.setCronPreset = setCronPreset;
 window.toggleCronBuilder = toggleCronBuilder;
 window.buildCronFromFields = buildCronFromFields;
@@ -3793,13 +3217,6 @@ function extractNodeConfig(node, type) {
         name: node.name || node.nodeId || '',
         type: node.type || 'tool-calling',
         model: node.model || ''
-      };
-    case 'scheduler':
-      return {
-        name: node.name || '',
-        schedule_type: node.schedule_type || 'cron',
-        cron_expression: node.cron_expression || '',
-        enabled: node.enabled !== false
       };
     case 'store':
       return {

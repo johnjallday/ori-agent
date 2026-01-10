@@ -398,9 +398,6 @@ class WorkflowPanel {
           case 'agent':
             await this.createAgentNode(node, x, y);
             break;
-          case 'scheduler':
-            await this.createSchedulerNode(node, x, y);
-            break;
           case 'store':
             await this.createStoreNode(node, x, y);
             break;
@@ -476,36 +473,6 @@ class WorkflowPanel {
 
     if (!response.ok) {
       throw new Error('Failed to add agent');
-    }
-
-    return response.json();
-  }
-
-  /**
-   * Create a scheduler node via API
-   * @param {Object} node - Node definition from workflow
-   * @param {number} x - X position on canvas
-   * @param {number} y - Y position on canvas
-   * @returns {Promise<Object>} Created scheduler object
-   * @private
-   */
-  async createSchedulerNode(node, x, y) {
-    const config = node.config || {};
-    const response = await fetch(`/api/studios/${this.studioId}/schedulers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: config.name || 'New Scheduler',
-        schedule_type: config.schedule_type || 'cron',
-        cron_expression: config.cron_expression || '0 * * * *',
-        enabled: config.enabled !== false,
-        x: x,
-        y: y
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to create scheduler');
     }
 
     return response.json();

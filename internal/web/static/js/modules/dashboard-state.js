@@ -49,24 +49,6 @@ export class DashboardState {
     }
   }
 
-  async loadScheduledTasks() {
-    try {
-      const response = await fetch(`/api/orchestration/scheduled-tasks?workspace_id=${this.workspaceId}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      this.data.scheduledTasks = data.scheduled_tasks || [];
-    } catch (error) {
-      console.error('Error loading scheduled tasks:', error);
-      this.data.scheduledTasks = [];
-    }
-  }
 
   handleRealtimeEvent(event) {
     console.log('📡 Real-time event:', event.type, event);
