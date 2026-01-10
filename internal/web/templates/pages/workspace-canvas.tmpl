@@ -414,50 +414,6 @@
     </div>
   </div>
 
-  <!-- Add Task Node Modal -->
-  <div class="modal fade" id="addTaskNodeModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-            </svg>
-            Add Task
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
-        </div>
-        <div class="modal-body">
-          <form id="addTaskNodeForm">
-            <div class="mb-3">
-              <label for="taskDescription" class="form-label" style="color: var(--text-primary); font-weight: 500;">Task Description <span class="text-danger">*</span></label>
-              <textarea id="taskDescription" class="form-control" rows="3"
-                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"
-                        placeholder="Describe what this task should accomplish..." required></textarea>
-            </div>
-            <div class="mb-3">
-              <label for="taskPriority" class="form-label" style="color: var(--text-primary); font-weight: 500;">Priority</label>
-              <select id="taskPriority" class="form-select" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                <option value="low">Low</option>
-                <option value="medium" selected>Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </form>
-        </div>
-        <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" id="addTaskNodeBtn" class="modern-btn modern-btn-primary" onclick="submitTaskNode()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-            </svg>
-            Add Task
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Color Picker Modal -->
   <div class="modal fade" id="colorPickerModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -1048,67 +1004,6 @@
       }
     }
 
-    // Submit task node from modal
-    async function submitTaskNode() {
-      const descriptionInput = document.getElementById('taskDescription');
-      const priorityInput = document.getElementById('taskPriority');
-      const addBtn = document.getElementById('addTaskNodeBtn');
-
-      const description = descriptionInput?.value?.trim();
-      if (!description) {
-        alert('Please enter a task description');
-        descriptionInput?.focus();
-        return;
-      }
-
-      const originalText = addBtn.innerHTML;
-      addBtn.disabled = true;
-      addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Adding...';
-
-      // Convert priority string to integer (low=0, medium=1, high=2)
-      const priorityMap = { 'low': 0, 'medium': 1, 'high': 2 };
-      const priorityValue = priorityMap[priorityInput?.value] ?? 1;
-
-      const task = {
-        description: description,
-        priority: priorityValue,
-        status: 'pending',
-        x: 100,
-        y: 100
-      };
-
-      try {
-        const response = await fetch(`/api/studios/${workspaceId}/tasks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(task)
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(error || 'Failed to create task');
-        }
-
-        console.log('Task created successfully');
-
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('addTaskNodeModal'));
-        if (modal) modal.hide();
-
-        // Reload canvas to show new task
-        if (window.agentCanvas) {
-          await window.agentCanvas.init();
-        }
-
-      } catch (error) {
-        console.error('Error creating task:', error);
-        alert(`Failed to create task: ${error.message}`);
-      } finally {
-        addBtn.disabled = false;
-        addBtn.innerHTML = originalText;
-      }
-    }
-
     // Switch to create agent modal
     function switchToCreateAgentModal() {
       // Hide add agent modal
@@ -1328,6 +1223,9 @@
       themeManager.initialize();
     });
   </script>
+
+  <!-- Shared Task Modal -->
+  {{template "task-modal" .}}
 </body>
 </html>
 {{end}}

@@ -664,23 +664,29 @@ function hideCombinerDetails() {
 }
 
 /**
- * Show add task modal
+ * Show add task modal using shared TaskModalController
  */
 function showAddTaskModal() {
-  const modal = new bootstrap.Modal(document.getElementById('addTaskNodeModal'));
-  const descriptionInput = document.getElementById('taskDescription');
-  const priorityInput = document.getElementById('taskPriority');
+  // Get workspace ID from canvas
+  const workspaceId = window.canvasWorkspaceId || window.agentCanvas?.workspaceId;
+  if (!workspaceId) {
+    console.error('No workspace ID available for creating task');
+    alert('Unable to create task: workspace not loaded');
+    return;
+  }
 
-  // Reset form
-  if (descriptionInput) descriptionInput.value = '';
-  if (priorityInput) priorityInput.value = 'medium';
-
-  modal.show();
-
-  // Focus on description after modal is shown
-  setTimeout(() => {
-    if (descriptionInput) descriptionInput.focus();
-  }, 500);
+  // Use shared task modal controller
+  if (window.taskModalController) {
+    window.taskModalController.openForCreate(workspaceId, '', () => {
+      // Refresh canvas after task creation
+      if (window.agentCanvas) {
+        window.agentCanvas.loadWorkspaceData();
+      }
+    });
+  } else {
+    console.error('TaskModalController not available');
+    alert('Task creation modal not available');
+  }
 }
 
 /**

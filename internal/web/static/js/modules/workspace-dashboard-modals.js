@@ -295,193 +295,15 @@
     // ========== TASK CREATE MODAL ==========
 
     async function openCreateTaskModal() {
-        document.getElementById('create-task-description').value = '';
-        document.getElementById('create-task-details').value = '';
-        document.getElementById('create-task-priority').value = '3';
-
-        const selectEl = document.getElementById('create-task-assignment');
-        const options = [];
-        options.push({ label: '-- No agent (manual task) --', value: '' });
-
-        try {
-            const response = await fetch('/api/agents/dashboard/list');
-            if (response.ok) {
-                const data = await response.json();
-                const agents = data.agents || [];
-                agents.forEach(agent => {
-                    const nodeId = `${agent.name}-node-1`;
-                    options.push({
-                        label: agent.name,
-                        value: `node:${nodeId}`
-                    });
-                });
-            }
-        } catch (err) {
-            console.error('Failed to load agents:', err);
-        }
-
-        selectEl.innerHTML = options
-            .map(o => `<option value="${state.escapeHtml(o.value)}">${state.escapeHtml(o.label)}</option>`)
-            .join('');
-
-        const modal = new bootstrap.Modal(document.getElementById('createTaskModal'));
-        modal.show();
-    }
-
-    function toggleCreateTaskScheduleFields() {
-        const enabled = document.getElementById('create-task-schedule-enabled').checked;
-        const fields = document.getElementById('create-task-schedule-fields');
-        if (fields) {
-            fields.style.display = enabled ? 'block' : 'none';
-        }
-        if (enabled) {
-            updateCreateTaskScheduleTypeFields();
-        }
-    }
-
-    function updateCreateTaskScheduleTypeFields() {
-        const scheduleType = document.getElementById('create-task-schedule-type').value;
-
-        const timeField = document.getElementById('create-task-schedule-time-field');
-        const dayField = document.getElementById('create-task-schedule-day-field');
-        const intervalField = document.getElementById('create-task-schedule-interval-field');
-        const onceField = document.getElementById('create-task-schedule-once-field');
-
-        if (timeField) timeField.style.display = 'none';
-        if (dayField) dayField.style.display = 'none';
-        if (intervalField) intervalField.style.display = 'none';
-        if (onceField) onceField.style.display = 'none';
-
-        switch (scheduleType) {
-            case 'daily':
-                if (timeField) timeField.style.display = 'block';
-                break;
-            case 'weekly':
-                if (timeField) timeField.style.display = 'block';
-                if (dayField) dayField.style.display = 'block';
-                break;
-            case 'interval':
-                if (intervalField) intervalField.style.display = 'block';
-                break;
-            case 'once':
-                if (onceField) onceField.style.display = 'block';
-                break;
-        }
-    }
-
-    function getCreateTaskScheduleData() {
-        const enabled = document.getElementById('create-task-schedule-enabled')?.checked;
-        if (!enabled) {
-            return { schedule_enabled: false };
-        }
-
-        const scheduleType = document.getElementById('create-task-schedule-type').value;
-        const scheduleName = document.getElementById('create-task-schedule-name').value.trim();
-        const schedule = { type: scheduleType };
-
-        switch (scheduleType) {
-            case 'daily':
-                schedule.time = document.getElementById('create-task-schedule-time').value || '09:00';
-                break;
-            case 'weekly':
-                schedule.time = document.getElementById('create-task-schedule-time').value || '09:00';
-                schedule.day_of_week = document.getElementById('create-task-schedule-day').value || '1';
-                break;
-            case 'interval':
-                const intervalValue = parseInt(document.getElementById('create-task-schedule-interval-value').value) || 1;
-                const intervalUnit = document.getElementById('create-task-schedule-interval-unit').value || 'hours';
-                let intervalMinutes = intervalValue;
-                if (intervalUnit === 'hours') {
-                    intervalMinutes = intervalValue * 60;
-                } else if (intervalUnit === 'days') {
-                    intervalMinutes = intervalValue * 1440;
-                }
-                schedule.interval_minutes = intervalMinutes;
-                break;
-            case 'once':
-                const datetime = document.getElementById('create-task-schedule-datetime').value;
-                if (datetime) {
-                    schedule.run_at = new Date(datetime).toISOString();
-                }
-                break;
-        }
-
-        return {
-            schedule,
-            schedule_enabled: true,
-            schedule_name: scheduleName || undefined
-        };
-    }
-
-    function resetCreateTaskModal() {
-        document.getElementById('create-task-description').value = '';
-        document.getElementById('create-task-details').value = '';
-        document.getElementById('create-task-priority').value = '3';
-        document.getElementById('create-task-assignment').value = '';
-        document.getElementById('create-task-schedule-enabled').checked = false;
-        document.getElementById('create-task-schedule-fields').style.display = 'none';
-        document.getElementById('create-task-schedule-name').value = '';
-        document.getElementById('create-task-schedule-type').value = 'interval';
-        updateCreateTaskScheduleTypeFields();
-    }
-
-    async function submitCreateTask() {
-        const description = document.getElementById('create-task-description').value.trim();
-        const details = document.getElementById('create-task-details').value.trim();
-        const priority = parseInt(document.getElementById('create-task-priority').value) || 3;
-        const assignment = document.getElementById('create-task-assignment').value;
-
-        if (!description) {
-            alert('Task title is required');
-            return;
-        }
-
-        let to = '';
-        let assignedNodeId = '';
-        if (assignment && assignment.startsWith('node:')) {
-            assignedNodeId = assignment.slice('node:'.length);
-            to = deriveToFromAssignedNodeID(assignedNodeId);
-        }
-
-        const saveBtn = document.getElementById('create-task-save-btn');
-        const oldHtml = saveBtn.innerHTML;
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = 'Creating...';
-
-        const scheduleData = getCreateTaskScheduleData();
-
-        try {
-            const resp = await fetch('/api/orchestration/tasks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    studio_id: state.workspaceId,
-                    description: description,
-                    details: details,
-                    priority: priority,
-                    to: to || undefined,
-                    assigned_node_id: assignedNodeId || undefined,
-                    ...scheduleData
-                })
+        // Use shared TaskModalController
+        if (window.taskModalController) {
+            window.taskModalController.openForCreate(state.workspaceId, '', () => {
+                // Refresh task list after creation
+                state.loadTasks();
             });
-
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to create task');
-            }
-
-            const modal = bootstrap.Modal.getInstance(document.getElementById('createTaskModal'));
-            modal.hide();
-            resetCreateTaskModal();
-
-            await state.loadWorkspaceData();
-            await state.loadTasks();
-        } catch (err) {
-            console.error(err);
-            alert(`Failed to create task: ${err.message || err}`);
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = oldHtml;
+        } else {
+            console.error('TaskModalController not available');
+            alert('Task creation modal not available');
         }
     }
 
@@ -840,11 +662,8 @@
         openEditTaskModal,
         submitEditTask,
         openCreateTaskModal,
-        submitCreateTask,
         toggleEditTaskScheduleFields,
         updateEditTaskScheduleTypeFields,
-        toggleCreateTaskScheduleFields,
-        updateCreateTaskScheduleTypeFields,
 
         // Note modals
         openCreateNoteModal,

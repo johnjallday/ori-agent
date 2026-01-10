@@ -720,7 +720,6 @@
     // Export global functions for onclick handlers
     window.openEditTaskModal = function(taskId) { state.openEditTaskModal(taskId); };
     window.openCreateTaskModal = function() { state.openCreateTaskModal(); };
-    window.submitCreateTask = function() { state.submitCreateTask(); };
     window.submitEditTask = function() { state.submitEditTask(); };
     window.openCreateNoteModal = function() { state.openCreateNoteModal(); };
     window.submitCreateNote = function() { state.submitCreateNote(); };
@@ -746,8 +745,6 @@
     window.toggleTaskCollapsible = toggleTaskCollapsible;
     window.toggleEditTaskScheduleFields = function() { state.toggleEditTaskScheduleFields(); };
     window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
-    window.toggleCreateTaskScheduleFields = function() { state.toggleCreateTaskScheduleFields(); };
-    window.updateCreateTaskScheduleTypeFields = function() { state.updateCreateTaskScheduleTypeFields(); };
 
     // Load data when page loads
     document.addEventListener('DOMContentLoaded', () => {
