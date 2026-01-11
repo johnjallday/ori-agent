@@ -30,49 +30,104 @@ type FrontendScheduleConfig struct {
 	EndDate         *time.Time `json:"end_date,omitempty"`
 }
 
+// FrontendScheduleConfigRaw is used for initial parsing to handle datetime strings without timezone
+type FrontendScheduleConfigRaw struct {
+	Type            string  `json:"type"`
+	IntervalMinutes int     `json:"interval_minutes,omitempty"`
+	Time            string  `json:"time,omitempty"`
+	TimeOfDay       string  `json:"time_of_day,omitempty"`
+	DayOfWeek       int     `json:"day_of_week,omitempty"`
+	RunAt           *string `json:"run_at,omitempty"`     // String to handle various formats
+	ExecuteAt       *string `json:"execute_at,omitempty"` // String to handle various formats
+	CronExpr        string  `json:"cron_expr,omitempty"`
+	MaxRuns         int     `json:"max_runs,omitempty"`
+	EndDate         *string `json:"end_date,omitempty"`
+}
+
+// parseFlexibleTime parses a datetime string with or without timezone
+func parseFlexibleTime(s string) (*time.Time, error) {
+	if s == "" {
+		return nil, nil
+	}
+
+	// Try RFC3339 first (with timezone)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return &t, nil
+	}
+
+	// Try without timezone (assume local)
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, time.Local); err == nil {
+		return &t, nil
+	}
+
+	// Try without seconds
+	if t, err := time.ParseInLocation("2006-01-02T15:04", s, time.Local); err == nil {
+		return &t, nil
+	}
+
+	return nil, fmt.Errorf("unable to parse time: %s", s)
+}
+
 // convertScheduleConfig converts frontend schedule format to backend format
 func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
 	if raw == nil {
 		return nil
 	}
 
-	var frontend FrontendScheduleConfig
-	if err := json.Unmarshal(raw, &frontend); err != nil {
+	// First try parsing with raw strings to handle flexible datetime formats
+	var rawConfig FrontendScheduleConfigRaw
+	if err := json.Unmarshal(raw, &rawConfig); err != nil {
 		logger.Warn("Failed to parse schedule config", logger.Fields{"err": err})
 		return nil
 	}
 
 	config := &workspace.ScheduleConfig{
-		Type:     workspace.ScheduleType(frontend.Type),
-		MaxRuns:  frontend.MaxRuns,
-		EndDate:  frontend.EndDate,
-		CronExpr: frontend.CronExpr,
+		Type:     workspace.ScheduleType(rawConfig.Type),
+		MaxRuns:  rawConfig.MaxRuns,
+		CronExpr: rawConfig.CronExpr,
 	}
 
 	// Handle interval conversion (minutes to time.Duration)
-	if frontend.IntervalMinutes > 0 {
-		config.Interval = time.Duration(frontend.IntervalMinutes) * time.Minute
+	if rawConfig.IntervalMinutes > 0 {
+		config.Interval = time.Duration(rawConfig.IntervalMinutes) * time.Minute
 		logger.Debug("Converted interval_minutes to Duration", logger.Fields{
-			"interval_minutes": frontend.IntervalMinutes,
+			"interval_minutes": rawConfig.IntervalMinutes,
 			"interval":         config.Interval,
 		})
 	}
 
 	// Handle time_of_day (frontend sends "time" or "time_of_day")
-	if frontend.Time != "" {
-		config.TimeOfDay = frontend.Time
-	} else if frontend.TimeOfDay != "" {
-		config.TimeOfDay = frontend.TimeOfDay
+	if rawConfig.Time != "" {
+		config.TimeOfDay = rawConfig.Time
+	} else if rawConfig.TimeOfDay != "" {
+		config.TimeOfDay = rawConfig.TimeOfDay
 	}
 
 	// Handle day_of_week
-	config.DayOfWeek = frontend.DayOfWeek
+	config.DayOfWeek = rawConfig.DayOfWeek
 
-	// Handle execute_at (frontend sends "run_at" or "execute_at")
-	if frontend.RunAt != nil {
-		config.ExecuteAt = frontend.RunAt
-	} else if frontend.ExecuteAt != nil {
-		config.ExecuteAt = frontend.ExecuteAt
+	// Handle execute_at (frontend sends "run_at" or "execute_at") with flexible parsing
+	if rawConfig.RunAt != nil {
+		if t, err := parseFlexibleTime(*rawConfig.RunAt); err == nil {
+			config.ExecuteAt = t
+		} else {
+			logger.Warn("Failed to parse run_at time", logger.Fields{"value": *rawConfig.RunAt, "err": err})
+		}
+	} else if rawConfig.ExecuteAt != nil {
+		if t, err := parseFlexibleTime(*rawConfig.ExecuteAt); err == nil {
+			config.ExecuteAt = t
+		} else {
+			logger.Warn("Failed to parse execute_at time", logger.Fields{"value": *rawConfig.ExecuteAt, "err": err})
+		}
+	}
+
+	// Handle end_date with flexible parsing
+	if rawConfig.EndDate != nil {
+		if t, err := parseFlexibleTime(*rawConfig.EndDate); err == nil {
+			config.EndDate = t
+		} else {
+			logger.Warn("Failed to parse end_date time", logger.Fields{"value": *rawConfig.EndDate, "err": err})
+		}
 	}
 
 	logger.Debug("Converted frontend schedule to backend format", logger.Fields{
@@ -80,6 +135,7 @@ func convertScheduleConfig(raw json.RawMessage) *workspace.ScheduleConfig {
 		"interval":    config.Interval,
 		"time_of_day": config.TimeOfDay,
 		"day_of_week": config.DayOfWeek,
+		"execute_at":  config.ExecuteAt,
 	})
 
 	return config

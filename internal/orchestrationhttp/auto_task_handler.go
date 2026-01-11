@@ -47,14 +47,15 @@ type AutoTaskRequest struct {
 
 // AutoTaskResponse represents the parsed task configuration with jsonschema tags for structured output
 type AutoTaskResponse struct {
-	Title           string          `json:"title" jsonschema_description:"A concise title for the task"`
-	Details         string          `json:"details" jsonschema_description:"Additional details or context, can be empty"`
-	AgentName       string          `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
-	Priority        int             `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
-	Schedule        *ScheduleConfig `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
-	ScheduleEnabled bool            `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
-	ScheduleName    string          `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
-	Reasoning       string          `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
+	Title           string               `json:"title" jsonschema_description:"A concise title for the task"`
+	Details         string               `json:"details" jsonschema_description:"Additional details or context, can be empty"`
+	AgentName       string               `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
+	Priority        int                  `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
+	Schedule        *ScheduleConfig      `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
+	ScheduleEnabled bool                 `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
+	ScheduleName    string               `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
+	ResultStorage   *ResultStorageConfig `json:"result_storage" jsonschema_description:"Result storage configuration, null if no storage requested"`
+	Reasoning       string               `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
 }
 
 // ScheduleConfig for auto task with jsonschema tags
@@ -64,6 +65,14 @@ type ScheduleConfig struct {
 	DayOfWeek       int    `json:"day_of_week" jsonschema:"minimum=0,maximum=6" jsonschema_description:"Day of week 0-6 where 0 is Sunday"`
 	IntervalMinutes int    `json:"interval_minutes" jsonschema_description:"Minutes between runs for interval schedules"`
 	OnceAt          string `json:"once_at" jsonschema_description:"ISO datetime for one-time scheduled tasks"`
+}
+
+// ResultStorageConfig for auto task with jsonschema tags
+type ResultStorageConfig struct {
+	Enabled     bool   `json:"enabled" jsonschema_description:"True if result storage was requested"`
+	StoreNodeID string `json:"store_node_id" jsonschema_description:"Store node ID to save results to, empty string if not specified"`
+	FilePath    string `json:"file_path" jsonschema_description:"Custom file path to save results, empty string if not specified"`
+	Format      string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown" jsonschema_description:"Output format: text, json, or markdown"`
 }
 
 // Schema for structured output - generated at init time
@@ -148,6 +157,13 @@ Schedule parsing rules:
 - "every Monday at 10am" -> type=weekly, day_of_week=1, time="10:00"
 - "every 30 minutes" -> type=interval, interval_minutes=30
 - No time mentioned -> schedule_enabled=false, schedule=null
+
+Result storage parsing rules:
+- "save to file", "save results", "store output" -> enabled=true, format based on context
+- "save as json" or "output json" -> enabled=true, format="json"
+- "save as markdown" or "as md" -> enabled=true, format="markdown"
+- "save to /path/to/file" -> enabled=true, file_path="/path/to/file"
+- No save/store mentioned -> result_storage=null
 
 Agent assignment: Match task type to available agent names. Leave empty if no clear match.`, currentTime, currentDay, agentList)
 
@@ -314,6 +330,22 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 		if !validTypes[config.Schedule.Type] {
 			config.Schedule = nil
 			config.ScheduleEnabled = false
+		}
+	}
+
+	// Validate result storage configuration
+	if config.ResultStorage != nil {
+		// Validate format - default to "text" if invalid
+		validFormats := map[string]bool{"text": true, "json": true, "markdown": true}
+		if !validFormats[config.ResultStorage.Format] {
+			config.ResultStorage.Format = "text"
+		}
+
+		// If not enabled and no storage details, set to nil
+		if !config.ResultStorage.Enabled &&
+			config.ResultStorage.StoreNodeID == "" &&
+			config.ResultStorage.FilePath == "" {
+			config.ResultStorage = nil
 		}
 	}
 

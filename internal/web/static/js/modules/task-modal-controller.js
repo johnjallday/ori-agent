@@ -479,10 +479,32 @@ class TaskModalController {
       // Build schedule data from parsed response
       let scheduleData = { schedule_enabled: false };
       if (parsed.schedule_enabled && parsed.schedule) {
+        // Convert LLM response field names to backend expected names
+        const schedule = { ...parsed.schedule };
+
+        // Convert once_at to run_at (backend expects run_at for "once" type)
+        if (schedule.once_at && !schedule.run_at) {
+          schedule.run_at = schedule.once_at;
+          delete schedule.once_at;
+        }
+
         scheduleData = {
-          schedule: parsed.schedule,
+          schedule: schedule,
           schedule_enabled: true,
           schedule_name: parsed.schedule_name || ''
+        };
+      }
+
+      // Build result storage data from parsed response
+      let resultStorageData = {};
+      if (parsed.result_storage && parsed.result_storage.enabled) {
+        resultStorageData = {
+          result_storage: {
+            enabled: true,
+            format: parsed.result_storage.format || 'text',
+            store_node_id: parsed.result_storage.store_node_id || undefined,
+            file_path: parsed.result_storage.file_path || undefined
+          }
         };
       }
 
@@ -497,7 +519,8 @@ class TaskModalController {
           priority: parsed.priority || 3,
           to: to || undefined,
           assigned_node_id: assignedNodeId || undefined,
-          ...scheduleData
+          ...scheduleData,
+          ...resultStorageData
         })
       });
 
