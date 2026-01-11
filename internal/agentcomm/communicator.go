@@ -206,6 +206,13 @@ func (c *Communicator) UpdateTaskStatus(taskID string, status workspace.TaskStat
 		// Update task based on status
 		now := time.Now()
 		switch status {
+		case workspace.TaskStatusPending:
+			task.Status = workspace.TaskStatusPending
+			// Clear completion-related fields when reverting to pending
+			task.StartedAt = nil
+			task.CompletedAt = nil
+			task.Result = ""
+			task.Error = ""
 		case workspace.TaskStatusInProgress:
 			task.Status = workspace.TaskStatusInProgress
 			task.StartedAt = &now
