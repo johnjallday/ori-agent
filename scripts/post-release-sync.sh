@@ -7,6 +7,7 @@
 #   3. Updates local main from origin
 #   4. Merges main to dev (in dev worktree)
 #   5. Refreshes other worktrees (optional)
+#   6. Prunes assets from old releases (keeps binaries for 5 most recent)
 #
 # Usage:
 #   ./scripts/post-release-sync.sh <version>
@@ -311,6 +312,54 @@ refresh_worktree "$CLAUDE_WORKTREE" "Claude"
 refresh_worktree "$CODEX_WORKTREE" "Codex"
 echo ""
 
+# Step 6: Prune assets from old releases (keep binaries only for 5 most recent)
+RELEASES_WITH_ASSETS=5
+print_status "Pruning assets from old releases (keeping binaries for $RELEASES_WITH_ASSETS most recent)..."
+
+# Get all releases sorted by creation date (newest first)
+ALL_RELEASES=$(gh release list --json tagName --limit 100 -q '.[].tagName' 2>/dev/null || echo "")
+
+if [ -n "$ALL_RELEASES" ]; then
+  RELEASE_COUNT=$(echo "$ALL_RELEASES" | wc -l | tr -d ' ')
+
+  if [ "$RELEASE_COUNT" -gt "$RELEASES_WITH_ASSETS" ]; then
+    # Get older releases to prune (skip the first N releases which are the newest)
+    RELEASES_TO_PRUNE=$(echo "$ALL_RELEASES" | tail -n +$((RELEASES_WITH_ASSETS + 1)))
+    PRUNE_COUNT=$(echo "$RELEASES_TO_PRUNE" | wc -l | tr -d ' ')
+
+    print_status "Found $RELEASE_COUNT releases, pruning assets from $PRUNE_COUNT older releases..."
+
+    while IFS= read -r release_tag; do
+      if [ -n "$release_tag" ]; then
+        # Get assets for this release
+        ASSETS=$(gh release view "$release_tag" --json assets -q '.assets[].name' 2>/dev/null || echo "")
+
+        if [ -n "$ASSETS" ]; then
+          print_status "  Pruning assets from: $release_tag"
+          while IFS= read -r asset_name; do
+            if [ -n "$asset_name" ]; then
+              if gh release delete-asset "$release_tag" "$asset_name" --yes 2>/dev/null; then
+                print_success "    Deleted: $asset_name"
+              else
+                print_warning "    Failed to delete: $asset_name"
+              fi
+            fi
+          done <<< "$ASSETS"
+        else
+          print_status "  $release_tag: no assets to prune"
+        fi
+      fi
+    done <<< "$RELEASES_TO_PRUNE"
+
+    print_success "Pruned assets from old releases"
+  else
+    print_status "Only $RELEASE_COUNT releases exist, no pruning needed"
+  fi
+else
+  print_warning "Could not fetch release list"
+fi
+echo ""
+
 # Summary
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
@@ -319,6 +368,7 @@ echo ""
 echo "  ✓ Release verified on GitHub ($ASSET_COUNT assets)"
 echo "  ✓ Main branch updated from origin"
 echo "  ✓ Dev branch synced with main"
+echo "  ✓ Old release assets pruned (binaries kept for $RELEASES_WITH_ASSETS most recent)"
 echo ""
 print_status "All branches now at: $(git rev-parse --short main)"
 print_status "Current branch: $(git branch --show-current)"
