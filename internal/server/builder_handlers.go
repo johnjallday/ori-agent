@@ -115,6 +115,8 @@ func (b *ServerBuilder) initializeHandlers() error {
 	} else {
 		s.sessionStore = sessionStore
 		s.sessionHandler = sessionhttp.New(sessionStore)
+		// Initialize auto-classify handler for session classification
+		s.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, s.st, s.llmFactory, s.configManager)
 		// Wire session store to chat handler for multi-tab support
 		s.chatHandler.SetSessionStore(sessionStore)
 		// Wire tool call store for conversation review

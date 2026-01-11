@@ -567,6 +567,12 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Cleanup and stats routes (must be registered before the wildcard routes)
 		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
 		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
+
+		// Auto-classify route (must be registered before the wildcard routes)
+		if s.autoClassifyHandler != nil {
+			mux.HandleFunc("/api/sessions/auto-classify", s.autoClassifyHandler.HandleAutoClassify)
+		}
+
 		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 

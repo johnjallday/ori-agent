@@ -984,6 +984,7 @@ const sessionManager = {
     const autoSection = document.getElementById('chatAutoSection');
     const llmWarning = document.getElementById('chatLlmNotAvailableWarning');
     const llmWarningMessage = document.getElementById('chatLlmWarningMessage');
+    const createBtnText = document.getElementById('createChatBtnText');
 
     this.chatAutoMode = (mode === 'auto');
 
@@ -992,11 +993,13 @@ const sessionManager = {
         if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.remove('d-none');
         if (llmWarning) llmWarning.classList.add('d-none');
+        if (createBtnText) createBtnText.textContent = 'Start Chat';
       } else {
-        // LLM not available - show warning, keep manual section visible
-        if (manualSection) manualSection.classList.remove('d-none');
+        // LLM not available - show warning with action button
+        if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.add('d-none');
         if (llmWarning) llmWarning.classList.remove('d-none');
+        if (createBtnText) createBtnText.textContent = 'Go to Settings';
         if (llmWarningMessage) {
           if (!this.chatSystemModelConfigured) {
             llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
@@ -1010,6 +1013,7 @@ const sessionManager = {
       if (manualSection) manualSection.classList.remove('d-none');
       if (autoSection) autoSection.classList.add('d-none');
       if (llmWarning) llmWarning.classList.add('d-none');
+      if (createBtnText) createBtnText.textContent = 'Create';
     }
   },
 
@@ -1029,6 +1033,10 @@ const sessionManager = {
       const manualRadio = document.getElementById('chatConfigModeManual');
       if (manualRadio) manualRadio.checked = true;
       this.handleChatModeChange('manual');
+
+      // Clear auto message textarea
+      const autoMessageInput = document.getElementById('chatAutoMessage');
+      if (autoMessageInput) autoMessageInput.value = '';
 
       // Populate workspace dropdown
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
@@ -1116,7 +1124,33 @@ const sessionManager = {
 
   // Handle create chat from modal
   async handleCreateChatFromModal() {
-    // Close the modal first
+    // If auto mode selected but LLM not available, redirect to settings
+    if (this.chatAutoMode && !this.chatLlmAvailable) {
+      // Close the modal first
+      const modal = document.getElementById('createChatModal');
+      if (modal) {
+        const bsModal = bootstrap.Modal.getInstance(modal);
+        bsModal?.hide();
+      }
+      // Redirect to settings
+      window.location.href = '/settings';
+      return;
+    }
+
+    // Get the initial message for auto mode before closing modal
+    const autoMessageInput = document.getElementById('chatAutoMessage');
+    const initialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+
+    // Validate message in auto mode
+    if (this.chatAutoMode && this.chatLlmAvailable && !initialMessage) {
+      if (window.Toast) {
+        Toast.warning('Please enter a message to start the chat');
+      }
+      autoMessageInput?.focus();
+      return;
+    }
+
+    // Close the modal
     const modal = document.getElementById('createChatModal');
     if (modal) {
       const bsModal = bootstrap.Modal.getInstance(modal);
@@ -1140,6 +1174,13 @@ const sessionManager = {
         // Mark this session for auto-classification
         this.autoModeSessionIds.add(session.id);
         console.log('Auto-mode session created:', session.id);
+
+        // Send the initial message after a brief delay to ensure UI is ready
+        if (initialMessage && window.sendMessageToChat) {
+          setTimeout(() => {
+            window.sendMessageToChat(initialMessage);
+          }, 100);
+        }
       }
     } else {
       // Manual mode - use selected workspace and agent
@@ -3380,7 +3421,92 @@ const sessionManager = {
     }
     this.messageDebounceTimer = setTimeout(() => {
       this.refreshActiveSession();
+      // Check if active session needs auto-classification
+      this.checkAutoClassification();
     }, 500);
+  },
+
+  // Track message count for auto-mode sessions
+  autoModeMessageCounts: new Map(),
+
+  // Check if the active session needs auto-classification
+  async checkAutoClassification() {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return;
+
+    // Only check sessions that are in auto mode
+    if (!this.autoModeSessionIds.has(sessionId)) return;
+
+    // Increment message count for this session
+    const currentCount = (this.autoModeMessageCounts.get(sessionId) || 0) + 1;
+    this.autoModeMessageCounts.set(sessionId, currentCount);
+
+    // Trigger classification after 3 message exchanges (6 messages: 3 user + 3 assistant)
+    // This gives the AI enough context to understand the conversation
+    if (currentCount >= 3) {
+      console.log('Triggering auto-classification for session:', sessionId);
+      await this.triggerAutoClassification(sessionId);
+    }
+  },
+
+  // Trigger auto-classification for a session
+  async triggerAutoClassification(sessionId) {
+    try {
+      const response = await fetch('/api/sessions/auto-classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+
+      if (!response.ok) {
+        console.error('Auto-classify failed:', response.statusText);
+        return;
+      }
+
+      const result = await response.json();
+      console.log('Auto-classification result:', result);
+
+      if (result.applied) {
+        // Remove from auto-mode tracking
+        this.autoModeSessionIds.delete(sessionId);
+        this.autoModeMessageCounts.delete(sessionId);
+
+        // Refresh session list to show updated workspace/agent
+        await this.loadSessions();
+
+        // Show a notification
+        if (window.Toast) {
+          let message = 'Chat auto-assigned';
+          if (result.workspace_name) {
+            message += ` to workspace "${result.workspace_name}"`;
+          }
+          if (result.agent_name) {
+            message += result.workspace_name ? ` with agent "${result.agent_name}"` : ` to agent "${result.agent_name}"`;
+          }
+          Toast.success(message);
+        }
+
+        // Update the chat info bar if the agent changed
+        if (result.agent_name) {
+          const session = this.sessions.find(s => s.id === sessionId);
+          if (session) {
+            this.updateChatInfoBar(session.title || 'Chat', result.agent_name);
+            this.updateCurrentAgent(result.agent_name);
+          }
+        }
+      } else if (result.reasoning) {
+        console.log('Auto-classification not applied:', result.reasoning);
+        // After 3 attempts without a match, stop trying
+        const count = this.autoModeMessageCounts.get(sessionId) || 0;
+        if (count >= 6) {
+          this.autoModeSessionIds.delete(sessionId);
+          this.autoModeMessageCounts.delete(sessionId);
+          console.log('Auto-classification attempts exhausted for session:', sessionId);
+        }
+      }
+    } catch (error) {
+      console.error('Auto-classify error:', error);
+    }
   },
 
   // Format time ago
