@@ -7,6 +7,7 @@
 let availableAgents = [];
 let selectedAgents = new Set();
 let workspaceRefreshInterval = null;
+let hasLoadedWorkspaces = false;
 
 // Server connection state management
 let isServerConnected = true;
@@ -24,7 +25,7 @@ let studiosSystemAgents = [];
  * Initialize the studios page
  */
 function initializeStudiosPage() {
-    loadWorkspaces();
+    loadWorkspaces({ showLoading: true });
     loadWorkspaceAgents();
 
     // Check URL parameters for view and workspace
@@ -214,28 +215,22 @@ window.manualRetryConnection = async function() {
     console.log('Manual retry triggered');
     hideServerOfflineNotification();
 
-    // Show loading state
-    const grid = document.getElementById('workspaces-grid');
-    grid.innerHTML = `
-        <div class="col-12 text-center py-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Reconnecting...</span>
-            </div>
-            <p class="mt-3" style="color: var(--text-muted);">Attempting to reconnect...</p>
-        </div>
-    `;
-
-    await loadWorkspaces();
+    await loadWorkspaces({ showLoading: true });
 };
 
 /**
  * Load workspaces from server (unified workspace API)
  */
-async function loadWorkspaces() {
+async function loadWorkspaces(options = {}) {
+    const { showLoading = false } = options;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
     try {
+        if (showLoading || !hasLoadedWorkspaces) {
+            renderWorkspacesLoadingState();
+        }
+
         // Use unified workspace API (same as sessions sidebar)
         const response = await fetch('/api/workspaces?tree=true', {
             signal: controller.signal
@@ -259,6 +254,7 @@ async function loadWorkspaces() {
         handleConnectionSuccess();
         // API returns { folders: [...] } - map to workspaces for rendering
         renderWorkspaces(data.folders || []);
+        hasLoadedWorkspaces = true;
 
     } catch (error) {
         clearTimeout(timeoutId);
@@ -282,108 +278,216 @@ async function loadWorkspaces() {
     }
 }
 
+function renderWorkspacesLoadingState() {
+    const grid = document.getElementById('workspaces-grid');
+    if (!grid) return;
+
+    const skeletons = Array.from({ length: 6 }).map(() => `
+        <div class="col-12 col-sm-6 col-lg-4">
+            <div class="modern-card p-4 h-100 workspace-card workspace-card-skeleton">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="skeleton skeleton-heading" style="width: 60%;"></div>
+                    <div class="skeleton" style="width: 72px; height: 20px;"></div>
+                </div>
+                <div class="skeleton skeleton-text"></div>
+                <div class="skeleton skeleton-text" style="width: 80%;"></div>
+                <div class="workspace-card-metrics">
+                    <div class="skeleton" style="height: 18px;"></div>
+                    <div class="skeleton" style="height: 18px;"></div>
+                    <div class="skeleton" style="height: 18px;"></div>
+                </div>
+                <div class="workspace-card-actions mt-auto">
+                    <div class="skeleton" style="height: 34px; flex: 1;"></div>
+                    <div class="skeleton" style="height: 34px; flex: 1;"></div>
+                    <div class="skeleton" style="height: 34px; width: 38px;"></div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    grid.innerHTML = skeletons;
+}
+
+function renderWorkspacesEmptyState() {
+    return `
+        <div class="col-12">
+            <div class="workspace-empty-card modern-card">
+                <div class="workspace-empty-content">
+                    <span class="modern-badge badge-secondary workspace-empty-badge">Get started</span>
+                    <h3 class="workspace-empty-title">No workspaces yet</h3>
+                    <p class="workspace-empty-description">
+                        Create your first workspace to organize agents, sessions, and notes in one place.
+                    </p>
+                </div>
+                <div class="workspace-empty-features">
+                    <div class="workspace-empty-feature">
+                        <span class="workspace-empty-dot"></span>
+                        <div>
+                            <div class="workspace-empty-feature-title">Shared canvas</div>
+                            <div class="workspace-empty-feature-text">See agents collaborate in real time.</div>
+                        </div>
+                    </div>
+                    <div class="workspace-empty-feature">
+                        <span class="workspace-empty-dot"></span>
+                        <div>
+                            <div class="workspace-empty-feature-title">Structured context</div>
+                            <div class="workspace-empty-feature-text">Keep tasks, notes, and sessions together.</div>
+                        </div>
+                    </div>
+                    <div class="workspace-empty-feature">
+                        <span class="workspace-empty-dot"></span>
+                        <div>
+                            <div class="workspace-empty-feature-title">Quick actions</div>
+                            <div class="workspace-empty-feature-text">Jump into canvas or dashboard instantly.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function getWorkspaceStatusMeta(status) {
+    const normalized = (status || '').toString().toLowerCase();
+    if (normalized === 'active') {
+        return { label: 'Active', badgeClass: 'badge-success', indicatorClass: 'status-online', isActive: true };
+    }
+    if (normalized === 'completed') {
+        return { label: 'Completed', badgeClass: 'badge-info', indicatorClass: '', isActive: false };
+    }
+    if (normalized === 'failed') {
+        return { label: 'Failed', badgeClass: 'badge-danger', indicatorClass: '', isActive: false };
+    }
+    if (normalized === 'paused') {
+        return { label: 'Paused', badgeClass: 'badge-warning', indicatorClass: '', isActive: false };
+    }
+    const label = normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Idle';
+    return { label, badgeClass: 'badge-secondary', indicatorClass: '', isActive: false };
+}
+
+function sanitizeWorkspaceColor(color) {
+    if (!color || typeof color !== 'string') return '';
+    const trimmed = color.trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
+        return trimmed;
+    }
+    return '';
+}
+
+function formatRelativeTime(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (diffSeconds < 60) return 'just now';
+    if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+    if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
+    if (diffSeconds < 604800) return `${Math.floor(diffSeconds / 86400)}d ago`;
+    if (diffSeconds < 2592000) return `${Math.floor(diffSeconds / 604800)}w ago`;
+
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateTime(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+}
+
 /**
  * Render workspaces grid
  */
 function renderWorkspaces(workspaces) {
     const grid = document.getElementById('workspaces-grid');
+    if (!grid) return;
 
-    if (workspaces.length === 0) {
-        grid.innerHTML = `
-            <div class="col-12 text-center py-5">
-                <div class="empty-state-container" style="max-width: 500px; margin: 0 auto; padding: 3rem 2rem;">
-                    <div class="empty-state-icon-wrapper" style="display: inline-block; position: relative; margin-bottom: 2rem;">
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 120px; height: 120px; background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 70%); border-radius: 50%; animation: pulse-bg 3s ease-in-out infinite;"></div>
-                        <svg width="80" height="80" viewBox="0 0 24 24" fill="currentColor" style="color: var(--primary-color); position: relative; z-index: 1; opacity: 0.9;">
-                            <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
-                        </svg>
-                    </div>
-                    <h3 style="color: var(--text-primary); font-weight: 700; margin-bottom: 1rem; font-size: 1.75rem;">Welcome to Agent Studios</h3>
-                    <p style="color: var(--text-secondary); margin-bottom: 0.5rem; font-size: 1.1rem; line-height: 1.6;">Create your first workspace to unlock collaborative multi-agent capabilities</p>
-                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 2rem;">Workspaces let multiple AI agents work together on complex tasks with real-time visualization</p>
-                    <button class="modern-btn modern-btn-primary" onclick="openCreateWorkspaceModal()" style="padding: 0.75rem 2rem; font-size: 1rem; box-shadow: 0 4px 14px rgba(29, 78, 216, 0.3);">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                            <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                        </svg>
-                        Create Your First Workspace
-                    </button>
-                    <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
-                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">Quick features:</p>
-                        <div style="display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; font-size: 0.85rem;">
-                            <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Multi-agent collaboration</span>
-                            <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Visual canvas</span>
-                            <span style="color: var(--text-secondary);"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; color: var(--success-color);" class="me-1"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Real-time updates</span>
-                        </div>
-                    </div>
-                </div>
-                <style>
-                    @keyframes pulse-bg {
-                        0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.3; }
-                        50% { transform: translate(-50%, -50%) scale(1.2); opacity: 0.5; }
-                    }
-                    .empty-state-container {
-                        animation: fadeIn 0.5s ease-in-out;
-                    }
-                    @keyframes fadeIn {
-                        from { opacity: 0; transform: translateY(20px); }
-                        to { opacity: 1; transform: translateY(0); }
-                    }
-                </style>
-            </div>
-        `;
+    if (!Array.isArray(workspaces) || workspaces.length === 0) {
+        grid.innerHTML = renderWorkspacesEmptyState();
         return;
     }
 
-    grid.innerHTML = workspaces.map(workspace => {
-        const statusBadge = workspace.status === 'active' ? 'badge-success' :
-                           workspace.status === 'completed' ? 'badge-info' : 'badge-secondary';
+    grid.innerHTML = workspaces.map(renderWorkspaceCard).join('');
+}
 
-        const isActive = workspace.status === 'active';
-        const activityIndicator = isActive ? `
-            <span class="d-inline-flex align-items-center gap-1 text-success" style="font-size: 0.75rem;">
-                <span class="status-indicator status-online"></span>
-                <span>Active</span>
-            </span>
-        ` : '';
+function renderWorkspaceCard(workspace) {
+    const statusMeta = getWorkspaceStatusMeta(workspace.status);
+    const safeColor = sanitizeWorkspaceColor(workspace.color);
+    const activityDate = workspace.updated_at || workspace.created_at;
+    const relativeActivity = activityDate ? formatRelativeTime(activityDate) : '';
+    const activityLabel = relativeActivity ? `Updated ${relativeActivity}` : 'Activity unknown';
+    const activityTitle = activityDate ? formatDateTime(activityDate) : '';
+    const description = workspace.description ? escapeHtml(workspace.description) : 'No description provided yet.';
+    const tasksCount = workspace.task_count || 0;
+    const sessionsCount = workspace.session_count || 0;
+    const notesCount = workspace.note_count || 0;
 
-        return `
-            <div class="col-12 col-sm-6 col-lg-4">
-                <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${isActive ? 'active-workspace' : ''}" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
-                    <div class="d-flex justify-content-between align-items-start mb-3">
-                        <div class="flex-grow-1">
-                            <h5 style="color: var(--text-primary);" class="mb-1">${escapeHtml(workspace.name || workspace.id)}</h5>
-                            ${activityIndicator}
+    return `
+        <div class="col-12 col-sm-6 col-lg-4">
+            <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${statusMeta.isActive ? 'active-workspace' : ''}" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
+                <div class="workspace-card-header">
+                    <div class="workspace-card-title">
+                        <span class="workspace-card-dot" ${safeColor ? `style="background: ${safeColor}; border-color: ${safeColor};"` : ''}></span>
+                        <div>
+                            <h5 class="workspace-card-name">${escapeHtml(workspace.name || workspace.id)}</h5>
+                            <div class="workspace-card-activity" ${activityTitle ? `title="${activityTitle}"` : ''}>${activityLabel}</div>
                         </div>
-                        <span class="modern-badge ${statusBadge}">${escapeHtml(workspace.status || 'unknown')}</span>
                     </div>
+                    <span class="modern-badge ${statusMeta.badgeClass} workspace-card-status">
+                        ${statusMeta.indicatorClass ? `<span class="status-indicator ${statusMeta.indicatorClass}"></span>` : ''}
+                        ${escapeHtml(statusMeta.label)}
+                    </span>
+                </div>
 
-                    ${workspace.description ? `
-                        <p class="text-muted small mb-3">${escapeHtml(workspace.description)}</p>
-                    ` : ''}
+                <p class="workspace-card-description">${description}</p>
 
-                    <div class="mb-3 d-flex gap-3 flex-wrap">
-                        <small style="color: var(--text-secondary); font-weight: 500;">Tasks: ${workspace.task_count || 0}</small>
-                        <small style="color: var(--text-secondary); font-weight: 500;">Sessions: ${workspace.session_count || 0}</small>
-                        <small style="color: var(--text-secondary); font-weight: 500;">Notes: ${workspace.note_count || 0}</small>
+                <div class="workspace-card-metrics">
+                    <div class="workspace-card-metric">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M5,3H19A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3M7,7V9H17V7H7M7,11V13H17V11H7M7,15V17H13V15H7Z"/>
+                        </svg>
+                        <span>Tasks</span>
+                        <strong>${tasksCount}</strong>
                     </div>
-
-                    <div class="d-flex gap-2 mt-3">
-                        <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
-                            Dashboard
-                        </button>
-                        <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
-                            Canvas
-                        </button>
-                        <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-                            </svg>
-                        </button>
+                    <div class="workspace-card-metric">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+                        </svg>
+                        <span>Sessions</span>
+                        <strong>${sessionsCount}</strong>
+                    </div>
+                    <div class="workspace-card-metric">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M7,13H17V11H7V13M7,17H17V15H7V17Z"/>
+                        </svg>
+                        <span>Notes</span>
+                        <strong>${notesCount}</strong>
                     </div>
                 </div>
+
+                <div class="workspace-card-actions mt-auto">
+                    <button class="modern-btn modern-btn-secondary flex-grow-1" onclick="event.stopPropagation(); viewWorkspace('${workspace.id}')">
+                        Dashboard
+                    </button>
+                    <button class="modern-btn modern-btn-primary flex-grow-1" onclick="event.stopPropagation(); openWorkspaceCanvas('${workspace.id}')">
+                        Canvas
+                    </button>
+                    <button class="modern-btn modern-btn-danger" onclick="event.stopPropagation(); deleteWorkspace('${workspace.id}')" title="Delete Workspace">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
-        `;
-    }).join('');
+        </div>
+    `;
 }
 
 /**

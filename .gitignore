@@ -118,6 +118,8 @@ agents.json
 local_plugin_registry.json
 
 workspaces/
+!internal/web/templates/components/workspaces/
+!internal/web/templates/components/workspaces/**
 
 ori-agent
 /server

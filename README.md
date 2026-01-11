@@ -1,4 +1,4 @@
-# <img src="assets/logo.svg" alt="Ori Agent logo" width="48" height="48" style="vertical-align: -0.1em;" /> Ori Agent
+# <img src="assets/logo.svg" alt="Ori Agent logo" width="48" height="48" style="vertical-align: -0.15em;" /> Ori Agent
 
 <!-- AUTO:VERSION -->
 ![Version](https://img.shields.io/badge/Version-v0.0.40-blue)
@@ -7,7 +7,7 @@
 ![Go](https://img.shields.io/badge/Go-1.25.5-00add8)
 <!-- AUTO:GO_VERSION_END -->
 
-**Ori Agent** is a local AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents call plugins (gRPC tools) to act—everything stays on your machine unless you opt into cloud LLMs.
+**Ori Agent** is a local first AI agent management platform. Spin up multiple named agents, each with its own model, prompt, and tool loadout, and run them through a browser UI or API. Agents call plugins (gRPC tools) to act—everything stays on your machine unless you opt into cloud LLMs.
 
 If you want to keep your information local, this is a way to go.
 
@@ -38,6 +38,14 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
   - Supports: Llama 3, Mistral, Phi-3, and other Ollama models
 
 ## 🚀 Quick Start
+### For Mac Users
+Download and install the DMG from the latest release:
+- https://github.com/johnjallday/ori-agent/releases/latest
+
+Open the DMG and drag `OriAgent.app` to Applications.
+
+
+### For Devs
 
 ### Prerequisites
 - Go 1.25 or later
@@ -47,9 +55,7 @@ Ori Agent supports multiple AI providers, giving you flexibility in choosing you
 
 #### Option 1: macOS DMG Installer (Recommended for macOS)
 
-1. **Download the DMG** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest):
-   - **Apple Silicon**: `OriAgent-{version}-arm64.dmg`
-   - **Intel Macs**: `OriAgent-{version}-amd64.dmg`
+1. **Download the DMG** from the [latest release](https://github.com/johnjallday/ori-agent/releases/latest)
 
 2. **Open the DMG** and drag `OriAgent.app` to Applications
 
@@ -323,7 +329,11 @@ MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
 - v0.2.0 => Blockchain Integration
 
 
+buymeacoffee.com/johnjallday
+
+
 
 ---
 
 Made with ❤️ using Go and modern web technologies
+
