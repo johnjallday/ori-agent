@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // TaskExecutor handles automatic execution of workspace tasks
@@ -591,8 +592,14 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	// Otherwise use file path (or default output directory)
 	filePath := storage.FilePath
 	if filePath == "" {
-		// Default to workspace output directory
-		filePath = filepath.Join("outputs", ws.Name, filename)
+		// Default to workspace output directory: ~/Documents/Ori/outputs/<workspace-name>/
+		baseOutputDir, err := platform.GetDefaultOutputDir()
+		if err != nil {
+			// Fallback to relative path if home dir lookup fails
+			baseOutputDir = "outputs"
+			logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+		}
+		filePath = filepath.Join(baseOutputDir, ws.Name, filename)
 	} else {
 		// If user specified a directory-like path, append filename
 		if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {

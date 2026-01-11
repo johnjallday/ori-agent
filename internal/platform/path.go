@@ -161,6 +161,16 @@ func GetHomeDir() (string, error) {
 	return os.UserHomeDir()
 }
 
+// GetDefaultOutputDir returns the default directory for storing task outputs
+// This is in the user's Documents folder: ~/Documents/Ori/outputs
+func GetDefaultOutputDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Documents", "Ori", "outputs"), nil
+}
+
 // GetWorkingDir returns the current working directory
 func GetWorkingDir() (string, error) {
 	return os.Getwd()

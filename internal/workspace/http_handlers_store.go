@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // CreateStoreNodeRequest represents the request to create a store node
@@ -478,8 +479,14 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Default output directory: outputs/<workspace-name>/
-	outputDir := filepath.Join("outputs", studio.Name)
+	// Default output directory: ~/Documents/Ori/outputs/<workspace-name>/
+	baseOutputDir, err := platform.GetDefaultOutputDir()
+	if err != nil {
+		// Fallback to relative path if home dir lookup fails
+		baseOutputDir = "outputs"
+		logger.Warn("Failed to get default output dir, using fallback", logger.Fields{"error": err})
+	}
+	outputDir := filepath.Join(baseOutputDir, studio.Name)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
