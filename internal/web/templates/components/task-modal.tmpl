@@ -12,10 +12,57 @@
       </button>
     </div>
     <div class="task-modal-body">
-      <div class="task-modal-field">
-        <label for="taskModalDescription" class="task-modal-label">Title</label>
-        <input type="text" id="taskModalDescription" class="task-modal-input" placeholder="What needs to be done?" autocomplete="off">
+      <!-- Config Mode Toggle -->
+      <div class="task-modal-field" style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <label class="task-modal-label" style="margin: 0; font-size: 0.75rem; color: var(--text-secondary);">Mode</label>
+          <div class="btn-group" role="group" aria-label="Task mode toggle">
+            <input type="radio" class="btn-check" name="taskConfigMode" id="taskConfigModeManual" value="manual" checked>
+            <label class="btn btn-outline-secondary btn-sm" for="taskConfigModeManual">Manual</label>
+            <input type="radio" class="btn-check" name="taskConfigMode" id="taskConfigModeAuto" value="auto">
+            <label class="btn btn-outline-secondary btn-sm" for="taskConfigModeAuto">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px;">
+                <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
+              </svg>
+              Auto
+            </label>
+          </div>
+        </div>
       </div>
+
+      <!-- LLM Not Available Warning (for Auto mode) -->
+      <div id="taskLlmNotAvailableWarning" class="task-modal-field" style="display: none; margin-bottom: 16px;">
+        <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: #f59e0b;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px;">
+            <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+          </svg>
+          <span id="taskLlmWarningMessage">Auto mode requires a System Model to be configured.</span>
+          <a href="/settings" style="color: #f59e0b; margin-left: 4px;">Go to Settings</a>
+        </div>
+      </div>
+
+      <!-- Auto Mode Section -->
+      <div id="taskAutoSection" style="display: none;">
+        <div class="task-modal-field" style="margin-bottom: 12px;">
+          <div style="background: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: var(--text-secondary);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
+              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+            </svg>
+            Describe your task in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
+          </div>
+        </div>
+        <div class="task-modal-field">
+          <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+          <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
+        </div>
+      </div>
+
+      <!-- Manual Mode Section -->
+      <div id="taskManualSection">
+        <div class="task-modal-field">
+          <label for="taskModalDescription" class="task-modal-label">Title</label>
+          <input type="text" id="taskModalDescription" class="task-modal-input" placeholder="What needs to be done?" autocomplete="off">
+        </div>
       <div class="task-modal-field">
         <label for="taskModalDetails" class="task-modal-label">Details <span class="task-modal-optional">(optional)</span></label>
         <textarea id="taskModalDetails" class="task-modal-textarea" placeholder="Add additional context, notes, or instructions..." rows="3"></textarea>
@@ -150,10 +197,13 @@
           </select>
         </div>
       </div>
+      </div><!-- End taskManualSection -->
     </div>
     <div class="task-modal-footer">
       <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskModalCancel">Cancel</button>
-      <button type="button" class="task-modal-btn task-modal-btn-save" id="taskModalSave">Save Task</button>
+      <button type="button" class="task-modal-btn task-modal-btn-save" id="taskModalSave">
+        <span id="taskModalSaveText">Save Task</span>
+      </button>
     </div>
   </div>
 </div>

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/invopop/jsonschema"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -120,6 +121,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil, fmt.Errorf("openai api error: %w", err)
 	}
 
+	// Check for empty response (can happen with invalid models)
+	if len(completion.Choices) == 0 {
+		return nil, fmt.Errorf("openai returned no response choices - model %q may be invalid or unavailable", req.Model)
+	}
+
 	// Convert response
 	return p.convertResponse(completion), nil
 }
@@ -127,6 +133,74 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 // StreamChat streams a chat completion response (not yet implemented)
 func (p *OpenAIProvider) StreamChat(ctx context.Context, req ChatRequest) (StreamReader, error) {
 	return nil, fmt.Errorf("streaming not yet implemented for OpenAI provider")
+}
+
+// StructuredOutputRequest contains parameters for structured output requests
+type StructuredOutputRequest struct {
+	Model        string
+	Messages     []Message
+	SystemPrompt string
+	SchemaName   string
+	Schema       interface{}
+}
+
+// GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs
+func GenerateSchema[T any]() interface{} {
+	reflector := jsonschema.Reflector{
+		AllowAdditionalProperties: false,
+		DoNotReference:            true,
+	}
+	var v T
+	return reflector.Reflect(v)
+}
+
+// ChatWithStructuredOutput sends a chat request with structured output format
+func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
+	if p.apiKey == "" {
+		return nil, fmt.Errorf("OpenAI API key is required")
+	}
+
+	// Convert messages to OpenAI format
+	var openaiMessages []openai.ChatCompletionMessageParamUnion
+	if req.SystemPrompt != "" {
+		openaiMessages = append(openaiMessages, openai.SystemMessage(req.SystemPrompt))
+	}
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case RoleUser:
+			openaiMessages = append(openaiMessages, openai.UserMessage(msg.Content))
+		case RoleAssistant:
+			openaiMessages = append(openaiMessages, openai.AssistantMessage(msg.Content))
+		}
+	}
+
+	// Build schema parameter
+	schemaParam := openai.ResponseFormatJSONSchemaJSONSchemaParam{
+		Name:   req.SchemaName,
+		Schema: req.Schema,
+		Strict: openai.Bool(true),
+	}
+
+	// Build request params
+	params := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(req.Model),
+		Messages: openaiMessages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{JSONSchema: schemaParam},
+		},
+	}
+
+	// Make API call
+	completion, err := p.client.Chat.Completions.New(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("openai api error: %w", err)
+	}
+
+	if len(completion.Choices) == 0 {
+		return nil, fmt.Errorf("openai returned no response choices")
+	}
+
+	return p.convertResponse(completion), nil
 }
 
 // convertMessages converts unified messages to OpenAI format

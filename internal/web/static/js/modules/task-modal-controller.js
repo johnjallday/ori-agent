@@ -13,6 +13,10 @@ class TaskModalController {
     this.initialized = false;
     this.defaultOutputDir = null;
     this.homeDir = null;
+    // Auto mode state
+    this.autoMode = false;
+    this.llmAvailable = false;
+    this.systemModelConfigured = false;
   }
 
   /**
@@ -67,10 +71,83 @@ class TaskModalController {
       this.handleBrowseClick();
     });
 
+    // Mode toggle handlers
+    document.getElementById('taskConfigModeManual')?.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        this.handleModeChange('manual');
+      }
+    });
+
+    document.getElementById('taskConfigModeAuto')?.addEventListener('change', async (e) => {
+      if (e.target.checked) {
+        await this.checkLlmAvailability();
+        this.handleModeChange('auto');
+      }
+    });
+
     // Fetch system paths
     this.fetchSystemPaths();
 
     this.initialized = true;
+  }
+
+  /**
+   * Check LLM availability for auto mode
+   */
+  async checkLlmAvailability() {
+    try {
+      const response = await fetch('/api/agents/auto-config/availability');
+      const data = await response.json();
+      this.llmAvailable = data.available;
+      this.systemModelConfigured = data.system_model_configured || false;
+      return data;
+    } catch (error) {
+      console.error('Failed to check LLM availability:', error);
+      this.llmAvailable = false;
+      this.systemModelConfigured = false;
+      return { available: false, system_model_configured: false };
+    }
+  }
+
+  /**
+   * Handle mode toggle change
+   */
+  handleModeChange(mode) {
+    const manualSection = document.getElementById('taskManualSection');
+    const autoSection = document.getElementById('taskAutoSection');
+    const llmWarning = document.getElementById('taskLlmNotAvailableWarning');
+    const llmWarningMessage = document.getElementById('taskLlmWarningMessage');
+    const saveButtonText = document.getElementById('taskModalSaveText');
+
+    this.autoMode = (mode === 'auto');
+
+    if (mode === 'auto') {
+      if (this.llmAvailable) {
+        if (manualSection) manualSection.style.display = 'none';
+        if (autoSection) autoSection.style.display = 'block';
+        if (llmWarning) llmWarning.style.display = 'none';
+        if (saveButtonText) saveButtonText.textContent = 'Create Task';
+      } else {
+        // LLM not available - show warning
+        if (manualSection) manualSection.style.display = 'none';
+        if (autoSection) autoSection.style.display = 'none';
+        if (llmWarning) llmWarning.style.display = 'block';
+        if (saveButtonText) saveButtonText.textContent = 'Go to Settings';
+        if (llmWarningMessage) {
+          if (!this.systemModelConfigured) {
+            llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
+          } else {
+            llmWarningMessage.textContent = 'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
+          }
+        }
+      }
+    } else {
+      // Manual mode
+      if (manualSection) manualSection.style.display = 'block';
+      if (autoSection) autoSection.style.display = 'none';
+      if (llmWarning) llmWarning.style.display = 'none';
+      if (saveButtonText) saveButtonText.textContent = this.editingTaskId ? 'Save Task' : 'Save Task';
+    }
   }
 
   /**
@@ -132,6 +209,18 @@ class TaskModalController {
     if (modalTitle) {
       modalTitle.textContent = 'Create Task';
     }
+
+    // Reset to manual mode
+    this.autoMode = false;
+    const manualRadio = document.getElementById('taskConfigModeManual');
+    const autoRadio = document.getElementById('taskConfigModeAuto');
+    if (manualRadio) manualRadio.checked = true;
+    if (autoRadio) autoRadio.checked = false;
+    this.handleModeChange('manual');
+
+    // Clear auto description textarea
+    const autoDescription = document.getElementById('taskAutoDescription');
+    if (autoDescription) autoDescription.value = '';
 
     // Clear/prefill form
     const descriptionInput = document.getElementById('taskModalDescription');
@@ -229,6 +318,18 @@ class TaskModalController {
    * Save the task (create or update)
    */
   async save() {
+    // Handle auto mode - redirect to settings if LLM not available
+    if (this.autoMode && !this.llmAvailable) {
+      window.location.href = '/settings';
+      return;
+    }
+
+    // Handle auto mode - parse natural language description
+    if (this.autoMode && !this.editingTaskId) {
+      await this.saveAutoMode();
+      return;
+    }
+
     const descriptionInput = document.getElementById('taskModalDescription');
     const detailsInput = document.getElementById('taskModalDetails');
     const priorityInput = document.getElementById('taskModalPriority');
@@ -321,6 +422,104 @@ class TaskModalController {
     } catch (error) {
       console.error('Failed to save task:', error);
       this.showToast(error.message || 'Failed to save task', 'error');
+    }
+  }
+
+  /**
+   * Save task in auto mode - parse natural language and create task
+   */
+  async saveAutoMode() {
+    const autoDescriptionInput = document.getElementById('taskAutoDescription');
+    const description = autoDescriptionInput?.value?.trim();
+
+    if (!description) {
+      this.showToast('Please describe the task you want to create', 'error');
+      autoDescriptionInput?.focus();
+      return;
+    }
+
+    if (!this.workspaceId) {
+      this.showToast('No workspace selected', 'error');
+      return;
+    }
+
+    // Show loading state
+    const saveButton = document.getElementById('taskModalSave');
+    const saveText = document.getElementById('taskModalSaveText');
+    const originalText = saveText?.textContent;
+    if (saveButton) saveButton.disabled = true;
+    if (saveText) saveText.textContent = 'Parsing...';
+
+    try {
+      // Call auto-parse endpoint
+      const parseResponse = await fetch('/api/orchestration/tasks/auto-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: description,
+          workspace_id: this.workspaceId
+        })
+      });
+
+      if (!parseResponse.ok) {
+        const errText = await parseResponse.text();
+        throw new Error(errText || 'Failed to parse task description');
+      }
+
+      const parsed = await parseResponse.json();
+
+      // Build task data from parsed response
+      let to = '';
+      let assignedNodeId = '';
+      if (parsed.agent_name) {
+        assignedNodeId = `${parsed.agent_name}-node-1`;
+        to = parsed.agent_name;
+      }
+
+      // Build schedule data from parsed response
+      let scheduleData = { schedule_enabled: false };
+      if (parsed.schedule_enabled && parsed.schedule) {
+        scheduleData = {
+          schedule: parsed.schedule,
+          schedule_enabled: true,
+          schedule_name: parsed.schedule_name || ''
+        };
+      }
+
+      // Create the task
+      const createResponse = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studio_id: this.workspaceId,
+          description: parsed.title,
+          details: parsed.details || '',
+          priority: parsed.priority || 3,
+          to: to || undefined,
+          assigned_node_id: assignedNodeId || undefined,
+          ...scheduleData
+        })
+      });
+
+      if (!createResponse.ok) {
+        const errText = await createResponse.text();
+        throw new Error(errText || 'Failed to create task');
+      }
+
+      this.showToast('Task created', 'success');
+      this.close();
+
+      // Call the callback if provided
+      if (this.onSaveCallback) {
+        this.onSaveCallback();
+      }
+    } catch (error) {
+      console.error('Failed to save task in auto mode:', error);
+      this.showToast(error.message || 'Failed to create task', 'error');
+    } finally {
+      // Restore button state
+      if (saveButton) saveButton.disabled = false;
+      if (saveText) saveText.textContent = originalText || 'Create Task';
     }
   }
 

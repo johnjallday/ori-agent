@@ -106,6 +106,7 @@ type Server struct {
 	deviceHandler          *devicehttp.Handler
 	webPageHandler         *pluginhttp.WebPageHandler
 	orchestrationHandler   *orchestrationhttp.Handler
+	autoTaskHandler        *orchestrationhttp.AutoTaskHandler
 	studioHandler          *workspace.HTTPHandler
 	usageHandler           *usagehttp.Handler
 	mcpHandler             *mcphttp.Handler
