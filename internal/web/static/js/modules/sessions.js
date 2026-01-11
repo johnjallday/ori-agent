@@ -26,6 +26,12 @@ const sessionManager = {
   editAgentModalInitialized: false,
   editAgentModelOptionsLoaded: false,
 
+  // Auto mode state
+  chatAutoMode: false,
+  chatLlmAvailable: false,
+  chatSystemModelConfigured: false,
+  autoModeSessionIds: new Set(), // Sessions that need auto-classification
+
   // Tab ID for multi-tab support
   tabId: null,
 
@@ -224,6 +230,21 @@ const sessionManager = {
     document.getElementById('openFolderBtn')?.addEventListener('click', () => {
       if (window.sessionFileManager) {
         window.sessionFileManager.openFolder();
+      }
+    });
+
+    // Chat mode toggle - Manual
+    document.getElementById('chatConfigModeManual')?.addEventListener('change', function() {
+      if (this.checked) {
+        sessionManager.handleChatModeChange('manual');
+      }
+    });
+
+    // Chat mode toggle - Auto
+    document.getElementById('chatConfigModeAuto')?.addEventListener('change', async function() {
+      if (this.checked) {
+        await sessionManager.checkChatLlmAvailability();
+        sessionManager.handleChatModeChange('auto');
       }
     });
   },
@@ -941,6 +962,57 @@ const sessionManager = {
     });
   },
 
+  // Check LLM availability for auto mode
+  async checkChatLlmAvailability() {
+    try {
+      const response = await fetch('/api/agents/auto-config/availability');
+      const data = await response.json();
+      this.chatLlmAvailable = data.available;
+      this.chatSystemModelConfigured = data.system_model_configured || false;
+      return data;
+    } catch (error) {
+      console.error('Failed to check LLM availability:', error);
+      this.chatLlmAvailable = false;
+      this.chatSystemModelConfigured = false;
+      return { available: false, system_model_configured: false };
+    }
+  },
+
+  // Handle chat mode toggle change
+  handleChatModeChange(mode) {
+    const manualSection = document.getElementById('chatManualSection');
+    const autoSection = document.getElementById('chatAutoSection');
+    const llmWarning = document.getElementById('chatLlmNotAvailableWarning');
+    const llmWarningMessage = document.getElementById('chatLlmWarningMessage');
+
+    this.chatAutoMode = (mode === 'auto');
+
+    if (mode === 'auto') {
+      if (this.chatLlmAvailable) {
+        if (manualSection) manualSection.classList.add('d-none');
+        if (autoSection) autoSection.classList.remove('d-none');
+        if (llmWarning) llmWarning.classList.add('d-none');
+      } else {
+        // LLM not available - show warning, keep manual section visible
+        if (manualSection) manualSection.classList.remove('d-none');
+        if (autoSection) autoSection.classList.add('d-none');
+        if (llmWarning) llmWarning.classList.remove('d-none');
+        if (llmWarningMessage) {
+          if (!this.chatSystemModelConfigured) {
+            llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
+          } else {
+            llmWarningMessage.textContent = 'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
+          }
+        }
+      }
+    } else {
+      // Manual mode
+      if (manualSection) manualSection.classList.remove('d-none');
+      if (autoSection) autoSection.classList.add('d-none');
+      if (llmWarning) llmWarning.classList.add('d-none');
+    }
+  },
+
   // Show create chat modal with workspace and agent selection
   async showCreateChatModal() {
     try {
@@ -951,6 +1023,12 @@ const sessionManager = {
         console.error('No agents available');
         return;
       }
+
+      // Reset mode to manual
+      this.chatAutoMode = false;
+      const manualRadio = document.getElementById('chatConfigModeManual');
+      if (manualRadio) manualRadio.checked = true;
+      this.handleChatModeChange('manual');
 
       // Populate workspace dropdown
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
@@ -1038,29 +1116,50 @@ const sessionManager = {
 
   // Handle create chat from modal
   async handleCreateChatFromModal() {
-    const workspaceSelect = document.getElementById('chatWorkspaceSelect');
-    const agentSelect = document.getElementById('chatAgentSelect');
-
-    const workspaceId = workspaceSelect?.value || '';
-    const agentName = agentSelect?.value;
-
-    if (!agentName) {
-      console.error('No agent selected');
-      return;
-    }
-
-    // Close the modal
+    // Close the modal first
     const modal = document.getElementById('createChatModal');
     if (modal) {
       const bsModal = bootstrap.Modal.getInstance(modal);
       bsModal?.hide();
     }
 
-    // Create the session
-    if (workspaceId) {
-      await this.createSessionWithAgentInFolder(agentName, workspaceId);
+    if (this.chatAutoMode && this.chatLlmAvailable) {
+      // Auto mode - create session with default agent, no workspace
+      // The workspace and agent will be determined after a few messages
+      const agents = await this.fetchAgents();
+      if (!agents || agents.length === 0) {
+        console.error('No agents available');
+        return;
+      }
+
+      // Use first agent as default
+      const defaultAgent = agents[0].name;
+      const session = await this.createSessionWithAgent(defaultAgent);
+
+      if (session && session.id) {
+        // Mark this session for auto-classification
+        this.autoModeSessionIds.add(session.id);
+        console.log('Auto-mode session created:', session.id);
+      }
     } else {
-      await this.createSessionWithAgent(agentName);
+      // Manual mode - use selected workspace and agent
+      const workspaceSelect = document.getElementById('chatWorkspaceSelect');
+      const agentSelect = document.getElementById('chatAgentSelect');
+
+      const workspaceId = workspaceSelect?.value || '';
+      const agentName = agentSelect?.value;
+
+      if (!agentName) {
+        console.error('No agent selected');
+        return;
+      }
+
+      // Create the session
+      if (workspaceId) {
+        await this.createSessionWithAgentInFolder(agentName, workspaceId);
+      } else {
+        await this.createSessionWithAgent(agentName);
+      }
     }
   },
 
@@ -1181,9 +1280,13 @@ const sessionManager = {
         if (typeof clearChatHistory === 'function') {
           clearChatHistory();
         }
+
+        return data.session;
       }
+      return null;
     } catch (error) {
       console.error('Failed to create session:', error);
+      return null;
     }
   },
 
