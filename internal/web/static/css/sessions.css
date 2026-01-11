@@ -2767,6 +2767,9 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   position: relative;
   width: 100%;
   max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
   border-radius: 12px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
@@ -2790,6 +2793,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .task-modal-title {
@@ -2821,6 +2825,9 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 .task-modal-body {
   padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .task-modal-field {
@@ -2889,6 +2896,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .task-modal-btn {
@@ -2920,6 +2928,23 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 .task-modal-btn-save:hover {
   background: var(--primary-hover, #2563eb);
   border-color: var(--primary-hover, #2563eb);
+}
+
+.task-modal-btn-browse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.task-modal-btn-browse:hover {
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text-primary);
+  border-color: var(--primary-color, #3b82f6);
 }
 
 /* Dark mode adjustments for modal */

@@ -11,6 +11,8 @@ class TaskModalController {
     this.workspaceId = null;
     this.onSaveCallback = null;
     this.initialized = false;
+    this.defaultOutputDir = null;
+    this.homeDir = null;
   }
 
   /**
@@ -60,7 +62,54 @@ class TaskModalController {
       }
     });
 
+    // Browse button handler
+    document.getElementById('taskModalBrowseBtn')?.addEventListener('click', () => {
+      this.handleBrowseClick();
+    });
+
+    // Fetch system paths
+    this.fetchSystemPaths();
+
     this.initialized = true;
+  }
+
+  /**
+   * Fetch system paths including default output directory
+   */
+  async fetchSystemPaths() {
+    try {
+      const response = await fetch('/api/settings/system-paths');
+      if (response.ok) {
+        const data = await response.json();
+        this.defaultOutputDir = data.default_output_dir;
+        this.homeDir = data.home_dir;
+
+        // Update the display
+        const pathDisplay = document.getElementById('taskModalDefaultOutputPath');
+        if (pathDisplay && this.defaultOutputDir) {
+          pathDisplay.textContent = this.defaultOutputDir;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch system paths:', err);
+    }
+  }
+
+  /**
+   * Handle browse button click - opens folder in file manager
+   */
+  async handleBrowseClick() {
+    // For now, we'll show the default output directory and let user know to copy the path
+    // In a future update, we could implement a full file browser component
+    if (this.defaultOutputDir) {
+      const pathInput = document.getElementById('taskModalAutoSavePath');
+      if (pathInput && !pathInput.value) {
+        pathInput.value = this.defaultOutputDir;
+      }
+
+      // Show a tip toast if available
+      this.showToast('Default output path inserted. You can modify it as needed.', 'info');
+    }
   }
 
   /**
@@ -448,10 +497,12 @@ class TaskModalController {
 
     const storeNodeField = document.getElementById('taskModalAutoSaveStoreNodeField');
     const pathField = document.getElementById('taskModalAutoSavePathField');
+    const defaultPathDisplay = document.getElementById('taskModalAutoSaveDefaultPathDisplay');
 
     // Hide all
     if (storeNodeField) storeNodeField.style.display = 'none';
     if (pathField) pathField.style.display = 'none';
+    if (defaultPathDisplay) defaultPathDisplay.style.display = 'none';
 
     // Show relevant fields
     switch (target) {
@@ -461,7 +512,9 @@ class TaskModalController {
       case 'custom':
         if (pathField) pathField.style.display = 'block';
         break;
-      // 'default' shows no additional fields
+      case 'default':
+        if (defaultPathDisplay) defaultPathDisplay.style.display = 'block';
+        break;
     }
   }
 
@@ -475,6 +528,7 @@ class TaskModalController {
     const storeNodeSelect = document.getElementById('taskModalAutoSaveStoreNode');
     const pathInput = document.getElementById('taskModalAutoSavePath');
     const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+    const defaultPathDisplay = document.getElementById('taskModalDefaultOutputPath');
 
     if (enabledCheckbox) enabledCheckbox.checked = false;
     if (autoSaveFields) autoSaveFields.style.display = 'none';
@@ -482,6 +536,11 @@ class TaskModalController {
     if (storeNodeSelect) storeNodeSelect.innerHTML = '';
     if (pathInput) pathInput.value = '';
     if (formatSelect) formatSelect.value = 'text';
+
+    // Update default path display
+    if (defaultPathDisplay && this.defaultOutputDir) {
+      defaultPathDisplay.textContent = this.defaultOutputDir;
+    }
 
     this.updateAutoSaveTargetFields();
   }

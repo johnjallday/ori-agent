@@ -9,6 +9,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/modelinfo"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -515,5 +516,37 @@ func (h *Handler) AvailableModelsHandler(w http.ResponseWriter, r *http.Request)
 		"provider":  providerName,
 		"available": true,
 		"models":    models,
+	})
+}
+
+// SystemPathsResponse represents system paths information
+type SystemPathsResponse struct {
+	DefaultOutputDir string `json:"default_output_dir"`
+	HomeDir          string `json:"home_dir"`
+}
+
+// SystemPathsHandler returns system paths including default output directory
+func (h *Handler) SystemPathsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get default output directory
+	defaultOutputDir, err := platform.GetDefaultOutputDir()
+	if err != nil {
+		orihttp.InternalError(w, "Failed to get default output directory: "+err.Error())
+		return
+	}
+
+	// Get home directory
+	homeDir, err := platform.GetHomeDir()
+	if err != nil {
+		homeDir = "" // Non-fatal, just return empty
+	}
+
+	orihttp.WriteJSON(w, SystemPathsResponse{
+		DefaultOutputDir: defaultOutputDir,
+		HomeDir:          homeDir,
 	})
 }

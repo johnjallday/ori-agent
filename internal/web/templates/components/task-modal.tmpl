@@ -116,6 +116,14 @@
             <option value="custom">Custom Path...</option>
           </select>
         </div>
+        <div id="taskModalAutoSaveDefaultPathDisplay" class="task-modal-field" style="margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(16, 185, 129, 0.15); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0;">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            <span id="taskModalDefaultOutputPath" style="word-break: break-all;">Loading...</span>
+          </div>
+        </div>
         <div id="taskModalAutoSaveStoreNodeField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
           <label for="taskModalAutoSaveStoreNode" class="task-modal-label" style="font-size: 0.8rem;">Store Node</label>
           <select id="taskModalAutoSaveStoreNode" class="task-modal-input" style="cursor: pointer;">
@@ -124,7 +132,14 @@
         </div>
         <div id="taskModalAutoSavePathField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
           <label for="taskModalAutoSavePath" class="task-modal-label" style="font-size: 0.8rem;">File Path <span class="task-modal-optional">(directory or file)</span></label>
-          <input type="text" id="taskModalAutoSavePath" class="task-modal-input" placeholder="outputs/my-results/">
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="taskModalAutoSavePath" class="task-modal-input" placeholder="outputs/my-results/" style="flex: 1;">
+            <button type="button" id="taskModalBrowseBtn" class="task-modal-btn task-modal-btn-browse" title="Browse folder">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="task-modal-field" style="margin-bottom: 0;">
           <label for="taskModalAutoSaveFormat" class="task-modal-label" style="font-size: 0.8rem;">Format</label>
