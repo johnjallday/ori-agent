@@ -496,6 +496,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
+	if s.autoTaskHandler != nil {
+		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.autoTaskHandler.HandleAutoTask)
+	}
 	mux.HandleFunc("/api/orchestration/tasks/", s.orchestrationHandler.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
 	mux.HandleFunc("/api/orchestration/task-results", s.orchestrationHandler.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.orchestrationHandler.WorkflowStatusHandler)
