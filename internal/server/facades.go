@@ -33,7 +33,6 @@ type PluginSystemFacade struct {
 	PluginDownloader    *plugindownloader.PluginDownloader
 	CategoryManager     *pluginmanager.CategoryManager
 	PermissionManager   *pluginmanager.PermissionManager
-	VersionManager      *pluginmanager.VersionManager
 	NotificationManager *pluginmanager.NotificationManager
 	BackupManager       *pluginmanager.BackupManager
 }
@@ -91,7 +90,6 @@ func NewPluginSystemFacade(
 	pluginDownloader *plugindownloader.PluginDownloader,
 	categoryManager *pluginmanager.CategoryManager,
 	permissionManager *pluginmanager.PermissionManager,
-	versionManager *pluginmanager.VersionManager,
 	notificationManager *pluginmanager.NotificationManager,
 	backupManager *pluginmanager.BackupManager,
 ) *PluginSystemFacade {
@@ -101,7 +99,6 @@ func NewPluginSystemFacade(
 		PluginDownloader:    pluginDownloader,
 		CategoryManager:     categoryManager,
 		PermissionManager:   permissionManager,
-		VersionManager:      versionManager,
 		NotificationManager: notificationManager,
 		BackupManager:       backupManager,
 	}

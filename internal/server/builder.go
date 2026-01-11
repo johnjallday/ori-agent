@@ -206,7 +206,6 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.server.pluginDownloader,
 		b.server.categoryManager,
 		b.server.permissionManager,
-		b.server.versionManager,
 		b.server.notificationManager,
 		b.server.backupManager,
 	)

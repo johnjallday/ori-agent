@@ -88,7 +88,6 @@ type Server struct {
 	onboardingMgr       *onboarding.Manager
 	categoryManager     *pluginmanager.CategoryManager
 	permissionManager   *pluginmanager.PermissionManager
-	versionManager      *pluginmanager.VersionManager
 	notificationManager *pluginmanager.NotificationManager
 	backupManager       *pluginmanager.BackupManager
 	pluginUpdateService *pluginupdateservice.Service
@@ -113,7 +112,6 @@ type Server struct {
 	agentMCPHandler        *agenthttp.MCPHandler
 	locationHandler        *locationhttp.Handler
 	pluginsPageHandler     *pluginhttp.PluginsPageHandler
-	rollbackHandler        *pluginhttp.RollbackHandler
 	permissionsHandler     *pluginhttp.PermissionsHandler
 	backupHandler          *pluginhttp.BackupHandler
 	notificationsHandler   *pluginhttp.NotificationsHandler

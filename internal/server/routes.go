@@ -190,11 +190,6 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)
 			return
 		}
-		// Check if this is a rollback endpoint (new dedicated handler)
-		if strings.HasSuffix(r.URL.Path, "/rollback") {
-			s.rollbackHandler.HandleRollbackPlugin(w, r)
-			return
-		}
 		// Check if this is a config endpoint
 		if strings.HasSuffix(r.URL.Path, "/config") {
 			if r.Method == http.MethodPut {

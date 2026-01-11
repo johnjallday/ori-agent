@@ -77,7 +77,6 @@ func (b *ServerBuilder) initializeHandlers() error {
 	// Initialize plugin management components
 	s.categoryManager = pluginmanager.NewCategoryManager()
 	s.permissionManager = pluginmanager.NewPermissionManager("plugin_permissions.json")
-	s.versionManager = pluginmanager.NewVersionManager("plugin_versions")
 	s.notificationManager = pluginmanager.NewNotificationManager("plugin_notifications.json")
 	s.backupManager = pluginmanager.NewBackupManager("plugin_backups")
 
@@ -87,12 +86,6 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.registryManager,
 		s.categoryManager,
 		s.permissionManager,
-		pluginhttp.NativeLoader{},
-	)
-	s.rollbackHandler = pluginhttp.NewRollbackHandler(
-		s.st,
-		s.versionManager,
-		s.registryManager,
 		pluginhttp.NativeLoader{},
 	)
 	s.permissionsHandler = pluginhttp.NewPermissionsHandler(
