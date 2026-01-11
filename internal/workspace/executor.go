@@ -493,10 +493,6 @@ func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStor
 	}
 
 	// Generate filename
-	taskIDShort := task.ID
-	if len(taskIDShort) > 8 {
-		taskIDShort = taskIDShort[:8]
-	}
 	timestamp := time.Now().Format("20060102-150405")
 
 	// Determine format and extension
