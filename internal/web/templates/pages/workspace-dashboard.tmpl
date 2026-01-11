@@ -487,6 +487,40 @@
             </div>
           </div>
 
+          <!-- Auto Save Results Section -->
+          <div class="mb-3" style="background: rgba(16, 185, 129, 0.1); border-radius: 8px; padding: 16px;">
+            <div class="form-check mb-3">
+              <input type="checkbox" class="form-check-input" id="edit-task-autosave-enabled" onchange="toggleEditTaskAutoSaveFields()">
+              <label class="form-check-label" for="edit-task-autosave-enabled" style="color: var(--text-primary); font-weight: 500;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#10b981" class="me-1" style="vertical-align: text-bottom;">
+                  <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+                </svg>
+                Auto-save Results
+              </label>
+            </div>
+            <div id="edit-task-autosave-fields" style="display: none;">
+              <div class="mb-2">
+                <label class="form-label small" style="color: var(--text-secondary);">Save To</label>
+                <select class="form-select form-select-sm" id="edit-task-autosave-target" onchange="updateEditTaskAutoSaveTargetFields()">
+                  <option value="default">Default Output Folder</option>
+                  <option value="custom">Custom Path...</option>
+                </select>
+              </div>
+              <div id="edit-task-autosave-path-field" class="mb-2" style="display: none;">
+                <label class="form-label small" style="color: var(--text-secondary);">File Path (directory or file)</label>
+                <input type="text" class="form-control form-control-sm" id="edit-task-autosave-path" placeholder="outputs/my-results/">
+              </div>
+              <div class="mb-2">
+                <label class="form-label small" style="color: var(--text-secondary);">Format</label>
+                <select class="form-select form-select-sm" id="edit-task-autosave-format">
+                  <option value="text">Plain Text</option>
+                  <option value="json">JSON</option>
+                  <option value="markdown">Markdown</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
         </div>
         <div class="modal-footer">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>

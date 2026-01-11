@@ -936,6 +936,8 @@
     window.toggleTaskCollapsible = toggleTaskCollapsible;
     window.toggleEditTaskScheduleFields = function() { state.toggleEditTaskScheduleFields(); };
     window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
+    window.toggleEditTaskAutoSaveFields = function() { state.toggleEditTaskAutoSaveFields(); };
+    window.updateEditTaskAutoSaveTargetFields = function() { state.updateEditTaskAutoSaveTargetFields(); };
     window.quickSaveTaskResult = quickSaveTaskResult;
     window.openSaveToFileModal = openSaveToFileModal;
     window.saveTaskResultToFile = saveTaskResultToFile;

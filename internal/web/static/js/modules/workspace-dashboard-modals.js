@@ -142,6 +142,85 @@
         };
     }
 
+    // ========== AUTO-SAVE FUNCTIONS ==========
+
+    function toggleEditTaskAutoSaveFields() {
+        const enabled = document.getElementById('edit-task-autosave-enabled').checked;
+        const fields = document.getElementById('edit-task-autosave-fields');
+        if (fields) {
+            fields.style.display = enabled ? 'block' : 'none';
+        }
+        if (enabled) {
+            updateEditTaskAutoSaveTargetFields();
+        }
+    }
+
+    function updateEditTaskAutoSaveTargetFields() {
+        const target = document.getElementById('edit-task-autosave-target').value;
+        const pathField = document.getElementById('edit-task-autosave-path-field');
+
+        if (pathField) {
+            pathField.style.display = target === 'custom' ? 'block' : 'none';
+        }
+    }
+
+    function getEditTaskAutoSaveData() {
+        const enabled = document.getElementById('edit-task-autosave-enabled')?.checked;
+        if (!enabled) {
+            return { result_storage: null };
+        }
+
+        const target = document.getElementById('edit-task-autosave-target').value;
+        const format = document.getElementById('edit-task-autosave-format').value;
+
+        const resultStorage = {
+            enabled: true,
+            format: format
+        };
+
+        if (target === 'custom') {
+            const filePath = document.getElementById('edit-task-autosave-path').value.trim();
+            if (filePath) {
+                resultStorage.file_path = filePath;
+            }
+        }
+
+        return { result_storage: resultStorage };
+    }
+
+    function populateEditTaskAutoSaveFields(task) {
+        const enabledCheckbox = document.getElementById('edit-task-autosave-enabled');
+        const autoSaveFields = document.getElementById('edit-task-autosave-fields');
+        const targetSelect = document.getElementById('edit-task-autosave-target');
+        const pathInput = document.getElementById('edit-task-autosave-path');
+        const formatSelect = document.getElementById('edit-task-autosave-format');
+
+        if (task.result_storage?.enabled) {
+            if (enabledCheckbox) enabledCheckbox.checked = true;
+            if (autoSaveFields) autoSaveFields.style.display = 'block';
+
+            if (task.result_storage.file_path) {
+                if (targetSelect) targetSelect.value = 'custom';
+                if (pathInput) pathInput.value = task.result_storage.file_path;
+            } else {
+                if (targetSelect) targetSelect.value = 'default';
+            }
+
+            if (formatSelect && task.result_storage.format) {
+                formatSelect.value = task.result_storage.format;
+            }
+
+            updateEditTaskAutoSaveTargetFields();
+        } else {
+            if (enabledCheckbox) enabledCheckbox.checked = false;
+            if (autoSaveFields) autoSaveFields.style.display = 'none';
+            if (targetSelect) targetSelect.value = 'default';
+            if (pathInput) pathInput.value = '';
+            if (formatSelect) formatSelect.value = 'text';
+            updateEditTaskAutoSaveTargetFields();
+        }
+    }
+
     function populateEditTaskScheduleFields(task) {
         const enabledCheckbox = document.getElementById('edit-task-schedule-enabled');
         const scheduleFields = document.getElementById('edit-task-schedule-fields');
@@ -235,6 +314,7 @@
 
         await buildAssignmentSelectOptions(document.getElementById('edit-task-assignment'), task);
         populateEditTaskScheduleFields(task);
+        populateEditTaskAutoSaveFields(task);
 
         const modal = new bootstrap.Modal(document.getElementById('editTaskModal'));
         modal.show();
@@ -259,6 +339,7 @@
         saveBtn.innerHTML = 'Saving...';
 
         const scheduleData = getEditTaskScheduleData();
+        const autoSaveData = getEditTaskAutoSaveData();
 
         try {
             const resp = await fetch(`/api/studios/${encodeURIComponent(state.workspaceId)}/tasks/${encodeURIComponent(taskId)}`, {
@@ -269,7 +350,8 @@
                     to: to,
                     from: from,
                     assigned_node_id: assignedNodeId,
-                    ...scheduleData
+                    ...scheduleData,
+                    ...autoSaveData
                 })
             });
 
@@ -664,6 +746,8 @@
         openCreateTaskModal,
         toggleEditTaskScheduleFields,
         updateEditTaskScheduleTypeFields,
+        toggleEditTaskAutoSaveFields,
+        updateEditTaskAutoSaveTargetFields,
 
         // Note modals
         openCreateNoteModal,
