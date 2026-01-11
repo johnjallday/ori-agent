@@ -640,21 +640,14 @@ else
   FAILED_CHECKS+=("Not on dev, release, or main branch")
 fi
 
-# 8. SMOKE TESTS (OPTIONAL)
+# 8. SMOKE TESTS
 echo ""
 echo "════════════════════════════════════════════"
-echo "8. SMOKE TESTS (Optional)"
+echo "8. SMOKE TESTS"
 echo "════════════════════════════════════════════"
 echo ""
 
-read -p "Run smoke tests? (takes ~10 minutes) [y/N]: " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  run_check "Smoke Tests" "./scripts/test-all-installers.sh" || true
-else
-  echo -e "${YELLOW}⚠️  Smoke Tests: SKIPPED (user choice)${NC}"
-  echo ""
-fi
+run_check "Smoke Tests" "./scripts/test-all-installers.sh" || true
 
 # 9. SUMMARY
 echo ""
