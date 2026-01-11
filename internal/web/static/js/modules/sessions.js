@@ -4243,7 +4243,18 @@ const sessionManager = {
         if (!response.ok) throw new Error('Failed to complete task');
       }
 
-      await this.loadSessionTasks();
+      // Reload tasks - use workspace ID if no active session
+      if (this.activeSessionId) {
+        await this.loadSessionTasks();
+      } else if (this.currentTaskWorkspaceId) {
+        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        if (tasksResponse.ok) {
+          const data = await tasksResponse.json();
+          this.workspaceTasks = data.tasks || [];
+          this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+        }
+        this.renderMainTaskPanel();
+      }
     } catch (error) {
       console.error('Failed to toggle task:', error);
       this.showToast('Failed to update task', 'error');
@@ -4344,7 +4355,8 @@ const sessionManager = {
   // Open main task modal
   openMainTaskPanel() {
     const modal = document.getElementById('mainTaskModal');
-    if (!modal || !this.activeSessionId) return;
+    // Allow opening if we have either an active session or a workspace ID (from sidebar click)
+    if (!modal || (!this.activeSessionId && !this.currentTaskWorkspaceId)) return;
 
     modal.style.display = 'flex';
     this.mainTaskPanelOpen = true;
@@ -4879,7 +4891,17 @@ const sessionManager = {
 
       if (!response.ok) throw new Error('Failed to delete task');
 
-      await this.loadSessionTasks();
+      // Reload tasks - use workspace ID if no active session
+      if (this.activeSessionId) {
+        await this.loadSessionTasks();
+      } else if (this.currentTaskWorkspaceId) {
+        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${this.currentTaskWorkspaceId}`);
+        if (tasksResponse.ok) {
+          const data = await tasksResponse.json();
+          this.workspaceTasks = data.tasks || [];
+          this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+        }
+      }
       this.renderMainTaskPanel();
       this.showToast('Task deleted', 'success');
     } catch (error) {
@@ -4933,12 +4955,27 @@ const sessionManager = {
     this.taskModalWorkspaceId = null;
     this.editingTaskId = taskId;
 
-    // Get workspace ID from active session
-    let workspaceId = null;
-    if (this.activeSessionId) {
+    // Get workspace ID from active session or stored workspace context (from sidebar click)
+    let workspaceId = this.currentTaskWorkspaceId;
+    if (!workspaceId && this.activeSessionId) {
       const session = this.sessions.find(s => s.id === this.activeSessionId);
       workspaceId = session?.folder_id;
     }
+
+    // Helper to reload tasks after modal save
+    const reloadTasks = async () => {
+      if (this.activeSessionId) {
+        await this.loadSessionTasks();
+      } else if (workspaceId) {
+        const tasksResponse = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+        if (tasksResponse.ok) {
+          const data = await tasksResponse.json();
+          this.workspaceTasks = data.tasks || [];
+          this.taskCounts = data.stats || { total: 0, pending: 0, completed: 0 };
+        }
+      }
+      this.renderMainTaskPanel();
+    };
 
     // Use shared task modal controller if available
     if (window.taskModalController && workspaceId) {
@@ -4946,17 +4983,11 @@ const sessionManager = {
         // Editing existing task
         const task = this.workspaceTasks.find(t => t.id === taskId);
         if (task) {
-          window.taskModalController.openForEdit(task, async () => {
-            await this.loadSessionTasks();
-            this.renderMainTaskPanel();
-          });
+          window.taskModalController.openForEdit(task, reloadTasks);
         }
       } else {
         // Creating new task
-        window.taskModalController.openForCreate(workspaceId, prefillTitle, async () => {
-          await this.loadSessionTasks();
-          this.renderMainTaskPanel();
-        });
+        window.taskModalController.openForCreate(workspaceId, prefillTitle, reloadTasks);
       }
       return;
     }
