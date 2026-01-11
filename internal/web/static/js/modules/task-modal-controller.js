@@ -40,6 +40,19 @@ class TaskModalController {
       this.updateScheduleTypeFields();
     });
 
+    // Auto-save fields toggle
+    document.getElementById('taskModalAutoSaveEnabled')?.addEventListener('change', (e) => {
+      const autoSaveFields = document.getElementById('taskModalAutoSaveFields');
+      if (autoSaveFields) {
+        autoSaveFields.style.display = e.target.checked ? 'block' : 'none';
+      }
+    });
+
+    // Auto-save target change handler
+    document.getElementById('taskModalAutoSaveTarget')?.addEventListener('change', () => {
+      this.updateAutoSaveTargetFields();
+    });
+
     // Escape key handler
     document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -88,6 +101,9 @@ class TaskModalController {
     // Reset schedule fields
     this.resetScheduleFields();
 
+    // Reset auto-save fields
+    this.resetAutoSaveFields();
+
     // Show modal
     modal.style.display = 'flex';
 
@@ -134,6 +150,9 @@ class TaskModalController {
 
     // Populate schedule fields
     this.populateScheduleFields(task);
+
+    // Populate auto-save fields
+    this.populateAutoSaveFields(task);
 
     // Show modal
     modal.style.display = 'flex';
@@ -196,6 +215,9 @@ class TaskModalController {
       // Get schedule data
       const scheduleData = this.getScheduleData();
 
+      // Get auto-save data
+      const autoSaveData = this.getAutoSaveData();
+
       if (this.editingTaskId) {
         // Update existing task
         const response = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
@@ -207,7 +229,8 @@ class TaskModalController {
             details,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
-            ...scheduleData
+            ...scheduleData,
+            ...autoSaveData
           })
         });
 
@@ -228,7 +251,8 @@ class TaskModalController {
             priority,
             to: to || undefined,
             assigned_node_id: assignedNodeId || undefined,
-            ...scheduleData
+            ...scheduleData,
+            ...autoSaveData
           })
         });
 
@@ -414,6 +438,123 @@ class TaskModalController {
       schedule_enabled: true,
       schedule_name: scheduleName
     };
+  }
+
+  /**
+   * Update auto-save target fields visibility
+   */
+  updateAutoSaveTargetFields() {
+    const target = document.getElementById('taskModalAutoSaveTarget')?.value || 'default';
+
+    const storeNodeField = document.getElementById('taskModalAutoSaveStoreNodeField');
+    const pathField = document.getElementById('taskModalAutoSavePathField');
+
+    // Hide all
+    if (storeNodeField) storeNodeField.style.display = 'none';
+    if (pathField) pathField.style.display = 'none';
+
+    // Show relevant fields
+    switch (target) {
+      case 'store':
+        if (storeNodeField) storeNodeField.style.display = 'block';
+        break;
+      case 'custom':
+        if (pathField) pathField.style.display = 'block';
+        break;
+      // 'default' shows no additional fields
+    }
+  }
+
+  /**
+   * Reset auto-save fields to defaults
+   */
+  resetAutoSaveFields() {
+    const enabledCheckbox = document.getElementById('taskModalAutoSaveEnabled');
+    const autoSaveFields = document.getElementById('taskModalAutoSaveFields');
+    const targetSelect = document.getElementById('taskModalAutoSaveTarget');
+    const storeNodeSelect = document.getElementById('taskModalAutoSaveStoreNode');
+    const pathInput = document.getElementById('taskModalAutoSavePath');
+    const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+
+    if (enabledCheckbox) enabledCheckbox.checked = false;
+    if (autoSaveFields) autoSaveFields.style.display = 'none';
+    if (targetSelect) targetSelect.value = 'default';
+    if (storeNodeSelect) storeNodeSelect.innerHTML = '';
+    if (pathInput) pathInput.value = '';
+    if (formatSelect) formatSelect.value = 'text';
+
+    this.updateAutoSaveTargetFields();
+  }
+
+  /**
+   * Populate auto-save fields from task
+   */
+  populateAutoSaveFields(task) {
+    const enabledCheckbox = document.getElementById('taskModalAutoSaveEnabled');
+    const autoSaveFields = document.getElementById('taskModalAutoSaveFields');
+    const targetSelect = document.getElementById('taskModalAutoSaveTarget');
+    const pathInput = document.getElementById('taskModalAutoSavePath');
+    const formatSelect = document.getElementById('taskModalAutoSaveFormat');
+
+    if (task.result_storage?.enabled) {
+      if (enabledCheckbox) enabledCheckbox.checked = true;
+      if (autoSaveFields) autoSaveFields.style.display = 'block';
+
+      // Determine target type
+      if (task.result_storage.store_node_id) {
+        if (targetSelect) targetSelect.value = 'store';
+        // TODO: Populate and select store node
+      } else if (task.result_storage.file_path) {
+        if (targetSelect) targetSelect.value = 'custom';
+        if (pathInput) pathInput.value = task.result_storage.file_path;
+      } else {
+        if (targetSelect) targetSelect.value = 'default';
+      }
+
+      if (formatSelect && task.result_storage.format) {
+        formatSelect.value = task.result_storage.format;
+      }
+
+      this.updateAutoSaveTargetFields();
+    } else {
+      this.resetAutoSaveFields();
+    }
+  }
+
+  /**
+   * Get auto-save data from modal fields
+   */
+  getAutoSaveData() {
+    const enabledCheckbox = document.getElementById('taskModalAutoSaveEnabled');
+    if (!enabledCheckbox?.checked) {
+      return { result_storage: null };
+    }
+
+    const target = document.getElementById('taskModalAutoSaveTarget')?.value || 'default';
+    const format = document.getElementById('taskModalAutoSaveFormat')?.value || 'text';
+
+    const resultStorage = {
+      enabled: true,
+      format: format
+    };
+
+    switch (target) {
+      case 'store':
+        const storeNodeId = document.getElementById('taskModalAutoSaveStoreNode')?.value;
+        if (storeNodeId) {
+          resultStorage.store_node_id = storeNodeId;
+        }
+        break;
+      case 'custom':
+        const filePath = document.getElementById('taskModalAutoSavePath')?.value?.trim();
+        if (filePath) {
+          resultStorage.file_path = filePath;
+        }
+        break;
+      // 'default' uses workspace output folder (no additional config needed)
+    }
+
+    return { result_storage: resultStorage };
   }
 
   /**

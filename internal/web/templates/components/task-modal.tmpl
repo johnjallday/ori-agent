@@ -96,6 +96,45 @@
           <input type="datetime-local" id="taskModalScheduleDatetime" class="task-modal-input">
         </div>
       </div>
+      <!-- Auto-save Results Section -->
+      <div class="task-modal-field" style="margin-top: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="taskModalAutoSaveEnabled" style="width: 16px; height: 16px; cursor: pointer;">
+          <label for="taskModalAutoSaveEnabled" class="task-modal-label" style="margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#10b981">
+              <path d="M15,9H5V5H15M12,19A3,3 0 0,1 9,16A3,3 0 0,1 12,13A3,3 0 0,1 15,16A3,3 0 0,1 12,19M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3Z"/>
+            </svg>
+            Auto-save Results
+          </label>
+        </div>
+      </div>
+      <div id="taskModalAutoSaveFields" style="display: none; background: rgba(16, 185, 129, 0.1); border-radius: 8px; padding: 12px; margin-top: 8px;">
+        <div class="task-modal-field" style="margin-bottom: 12px;">
+          <label for="taskModalAutoSaveTarget" class="task-modal-label" style="font-size: 0.8rem;">Save To</label>
+          <select id="taskModalAutoSaveTarget" class="task-modal-input" style="cursor: pointer;">
+            <option value="default">Default Output Folder</option>
+            <option value="custom">Custom Path...</option>
+          </select>
+        </div>
+        <div id="taskModalAutoSaveStoreNodeField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
+          <label for="taskModalAutoSaveStoreNode" class="task-modal-label" style="font-size: 0.8rem;">Store Node</label>
+          <select id="taskModalAutoSaveStoreNode" class="task-modal-input" style="cursor: pointer;">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+        <div id="taskModalAutoSavePathField" class="task-modal-field" style="margin-bottom: 12px; display: none;">
+          <label for="taskModalAutoSavePath" class="task-modal-label" style="font-size: 0.8rem;">File Path <span class="task-modal-optional">(directory or file)</span></label>
+          <input type="text" id="taskModalAutoSavePath" class="task-modal-input" placeholder="outputs/my-results/">
+        </div>
+        <div class="task-modal-field" style="margin-bottom: 0;">
+          <label for="taskModalAutoSaveFormat" class="task-modal-label" style="font-size: 0.8rem;">Format</label>
+          <select id="taskModalAutoSaveFormat" class="task-modal-input" style="cursor: pointer;">
+            <option value="text">Plain Text</option>
+            <option value="json">JSON</option>
+            <option value="markdown">Markdown</option>
+          </select>
+        </div>
+      </div>
     </div>
     <div class="task-modal-footer">
       <button type="button" class="task-modal-btn task-modal-btn-cancel" id="taskModalCancel">Cancel</button>

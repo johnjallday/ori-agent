@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
-	"github.com/johnjallday/ori-agent/internal/logger"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // TaskExecutor handles automatic execution of workspace tasks
@@ -375,9 +378,18 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task) {
 	}()
 }
 
-// AutoStoreResult automatically stores task result if the agent is connected to a store node
+// AutoStoreResult automatically stores task result based on:
+// 1. Task-level ResultStorage configuration (if enabled)
+// 2. Agent's connected store node (if auto-store enabled)
 // This is a package-level function so it can be called from both executor and HTTP handlers
 func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+	// Check for task-level result storage configuration first
+	if task.ResultStorage != nil && task.ResultStorage.Enabled {
+		autoStoreTaskResult(ws, task, result, workspaceStore)
+		return
+	}
+
+	// Fall back to agent-based store node lookup
 	// Find agent's canvas node ID (use AssignedNodeID for multi-instance agents)
 	agentNodeID := task.AssignedNodeID
 	if agentNodeID == "" || agentNodeID == "unassigned" {
@@ -470,6 +482,149 @@ func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore St
 	if err := workspaceStore.Save(ws); err != nil {
 		logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
 	}
+}
+
+// autoStoreTaskResult handles task-level result storage configuration
+func autoStoreTaskResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
+	storage := task.ResultStorage
+	if storage == nil || !storage.Enabled {
+		return
+	}
+
+	// Generate filename
+	taskIDShort := task.ID
+	if len(taskIDShort) > 8 {
+		taskIDShort = taskIDShort[:8]
+	}
+	timestamp := time.Now().Format("20060102-150405")
+
+	// Determine format and extension
+	format := storage.Format
+	if format == "" {
+		format = "text"
+	}
+	ext := "txt"
+	switch format {
+	case "json":
+		ext = "json"
+	case "markdown":
+		ext = "md"
+	}
+
+	// Generate task name slug for filename
+	taskName := task.Description
+	if len(taskName) > 30 {
+		taskName = taskName[:30]
+	}
+	// Sanitize: replace non-alphanumeric with underscore
+	sanitized := ""
+	for _, r := range taskName {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			sanitized += string(r)
+		} else if r == ' ' {
+			sanitized += "_"
+		}
+	}
+	if sanitized == "" {
+		sanitized = "task"
+	}
+
+	filename := fmt.Sprintf("%s_%s.%s", sanitized, timestamp, ext)
+
+	// Prepare data for storage
+	dataToStore := result
+	if format == "json" {
+		jsonData := map[string]interface{}{
+			"task_id":     task.ID,
+			"result":      result,
+			"timestamp":   timestamp,
+			"description": task.Description,
+		}
+		jsonBytes, err := json.Marshal(jsonData)
+		if err != nil {
+			logger.Error("Failed to marshal result to JSON", logger.Fields{"task_id": task.ID, "err": err})
+			return
+		}
+		dataToStore = string(jsonBytes)
+	}
+
+	// If store node is specified, use it
+	if storage.StoreNodeID != "" {
+		var storeNode *StoreNode
+		for i := range ws.StoreNodes {
+			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
+				storeNode = &ws.StoreNodes[i]
+				break
+			}
+		}
+
+		if storeNode == nil {
+			logger.Error("Store node not found for task result storage", logger.Fields{
+				"task_id":       task.ID,
+				"store_node_id": storage.StoreNodeID,
+			})
+			return
+		}
+
+		if err := WriteToStore(storeNode, filename, dataToStore); err != nil {
+			logger.Error("Failed to auto-store task result to store node", logger.Fields{
+				"task_id":       task.ID,
+				"store_node_id": storeNode.ID,
+				"filename":      filename,
+				"err":           err,
+			})
+			return
+		}
+
+		logger.Info("Task result auto-stored to store node", logger.Fields{
+			"task_id":       task.ID,
+			"store_node_id": storeNode.ID,
+			"filename":      filename,
+		})
+
+		if err := workspaceStore.Save(ws); err != nil {
+			logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
+		}
+		return
+	}
+
+	// Otherwise use file path (or default output directory)
+	filePath := storage.FilePath
+	if filePath == "" {
+		// Default to workspace output directory
+		filePath = filepath.Join("outputs", ws.Name, filename)
+	} else {
+		// If user specified a directory-like path, append filename
+		if strings.HasSuffix(filePath, "/") || !strings.Contains(filepath.Base(filePath), ".") {
+			filePath = filepath.Join(filePath, filename)
+		}
+	}
+
+	// Create directories
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		logger.Error("Failed to create directories for task result", logger.Fields{
+			"task_id": task.ID,
+			"dir":     dir,
+			"err":     err,
+		})
+		return
+	}
+
+	// Write file
+	if err := os.WriteFile(filePath, []byte(dataToStore), 0644); err != nil {
+		logger.Error("Failed to auto-store task result to file", logger.Fields{
+			"task_id":   task.ID,
+			"file_path": filePath,
+			"err":       err,
+		})
+		return
+	}
+
+	logger.Info("Task result auto-stored to file", logger.Fields{
+		"task_id":   task.ID,
+		"file_path": filePath,
+	})
 }
 
 // autoStoreResult is a convenience wrapper that calls AutoStoreResult with the executor's workspace store

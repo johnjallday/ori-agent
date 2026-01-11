@@ -161,6 +161,17 @@ type Task struct {
 	ExecutionCount   int             `json:"execution_count,omitempty"`
 	FailureCount     int             `json:"failure_count,omitempty"`
 	ExecutionHistory []TaskExecution `json:"execution_history,omitempty"`
+
+	// Result storage configuration - auto-save results on completion
+	ResultStorage *ResultStorageConfig `json:"result_storage,omitempty"`
+}
+
+// ResultStorageConfig specifies how task results should be automatically stored
+type ResultStorageConfig struct {
+	Enabled     bool   `json:"enabled"`                 // Enable auto-save on completion
+	StoreNodeID string `json:"store_node_id,omitempty"` // Save to specific store node (if set)
+	FilePath    string `json:"file_path,omitempty"`     // Custom file path (if no store node)
+	Format      string `json:"format,omitempty"`        // Output format: text, json, markdown
 }
 
 // TaskStatus represents the current state of a task
