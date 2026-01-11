@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/getlantern/systray"
+	"github.com/johnjallday/ori-agent/internal/environ"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -24,6 +25,10 @@ import (
 )
 
 func main() {
+	// Expand PATH to include common development tool locations
+	// This ensures tools like codex, go, node are available when launched from macOS app bundle
+	environ.ExpandPath()
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Ori Agent Menu Bar App (systray)...")
 

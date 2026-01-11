@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/environ"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
 	"github.com/johnjallday/ori-agent/internal/server"
@@ -24,6 +25,10 @@ import (
 )
 
 func main() {
+	// Expand PATH to include common development tool locations
+	// This ensures tools like codex, go, node are available when launched from macOS app bundle
+	environ.ExpandPath()
+
 	// Define command-line flags
 	port := flag.Int("port", 8765, "Port to run server on")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging")
