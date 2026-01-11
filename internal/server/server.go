@@ -126,8 +126,9 @@ type Server struct {
 	smartOnboardingHandler *onboardinghttp.SmartOnboardingHandler
 
 	// Session management
-	sessionStore   session.HybridStore
-	sessionHandler *sessionhttp.Handler
+	sessionStore        session.HybridStore
+	sessionHandler      *sessionhttp.Handler
+	autoClassifyHandler *sessionhttp.AutoClassifyHandler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
