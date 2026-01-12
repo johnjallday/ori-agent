@@ -513,7 +513,7 @@ func (ts *TaskScheduler) recordScheduleFailure(ws *Workspace, st *ScheduledTask,
 // and respects end_date constraints. Returns nil if no future execution should occur.
 //
 // Schedule type behaviors:
-// - ScheduleOnce: Returns nil (single execution only)
+// - ScheduleOnce: Returns ExecuteAt if not yet run (lastRun is zero), nil after execution
 // - ScheduleInterval: Adds interval duration to lastRun
 // - ScheduleDaily: Schedules for same time next day
 // - ScheduleWeekly: Schedules for same time on target weekday next week
@@ -527,7 +527,15 @@ func (ts *TaskScheduler) calculateNextRun(config ScheduleConfig, lastRun time.Ti
 func CalculateNextRun(config ScheduleConfig, lastRun time.Time) *time.Time {
 	switch config.Type {
 	case ScheduleOnce:
-		// One-time execution, no next run
+		// One-time execution: return ExecuteAt if task hasn't run yet, nil otherwise
+		if config.ExecuteAt == nil {
+			return nil
+		}
+		// If lastRun is zero (never run), return the scheduled time
+		if lastRun.IsZero() {
+			return config.ExecuteAt
+		}
+		// Already ran once, no next run
 		return nil
 
 	case ScheduleInterval:

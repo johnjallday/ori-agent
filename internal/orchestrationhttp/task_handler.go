@@ -293,8 +293,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 			orihttp.BadRequest(w, "Scheduled tasks must be assigned to an agent. Please assign an agent before enabling the schedule.")
 			return
 		}
-		// Calculate NextRun
-		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Now())
+		// Calculate NextRun - pass zero time since task has never run
+		nextRun := workspace.CalculateNextRun(*task.Schedule, time.Time{})
 		task.NextRun = nextRun
 	}
 
@@ -381,8 +381,14 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 	// Convert frontend schedule format to backend format
 	var schedule *workspace.ScheduleConfig
+	clearSchedule := false // Track if we should explicitly clear the schedule
 	if len(req.Schedule) > 0 {
-		schedule = convertScheduleConfig(req.Schedule)
+		// Check if schedule is explicitly set to null (4 bytes: "null")
+		if string(req.Schedule) == "null" {
+			clearSchedule = true
+		} else {
+			schedule = convertScheduleConfig(req.Schedule)
+		}
 	}
 
 	// Extract task ID from URL path if present (e.g., /api/orchestration/tasks/{id})
@@ -397,7 +403,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Handle task updates (description, details, input connections, reassignment, combination mode, schedule, or result storage)
-	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || schedule != nil || req.ScheduleEnabled != nil || req.ScheduleName != nil || req.ResultStorage != nil {
+	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || schedule != nil || clearSchedule || req.ScheduleEnabled != nil || req.ScheduleName != nil || req.ResultStorage != nil {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
 		// Get task and workspace using helper
@@ -452,9 +458,23 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					ws.Tasks[i].Schedule = schedule
 					// Calculate initial NextRun if schedule is being set
 					if ws.Tasks[i].ScheduleEnabled {
-						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*schedule, time.Now())
+						// Use task's LastRun if available, otherwise zero time
+						lastRun := time.Time{}
+						if ws.Tasks[i].LastRun != nil {
+							lastRun = *ws.Tasks[i].LastRun
+						}
+						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*schedule, lastRun)
 					}
 					logger.Debug("Updated task schedule", logger.Fields{"task_id": req.TaskID})
+				}
+
+				// Clear schedule if explicitly set to null
+				if clearSchedule {
+					ws.Tasks[i].Schedule = nil
+					ws.Tasks[i].ScheduleEnabled = false
+					ws.Tasks[i].ScheduleName = ""
+					ws.Tasks[i].NextRun = nil
+					logger.Debug("Cleared task schedule", logger.Fields{"task_id": req.TaskID})
 				}
 
 				// Update schedule enabled state
@@ -475,7 +495,12 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					ws.Tasks[i].ScheduleEnabled = *req.ScheduleEnabled
 					// Calculate NextRun when enabling, clear when disabling
 					if *req.ScheduleEnabled && ws.Tasks[i].Schedule != nil {
-						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*ws.Tasks[i].Schedule, time.Now())
+						// Use task's LastRun if available, otherwise zero time
+						lastRun := time.Time{}
+						if ws.Tasks[i].LastRun != nil {
+							lastRun = *ws.Tasks[i].LastRun
+						}
+						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*ws.Tasks[i].Schedule, lastRun)
 					} else if !*req.ScheduleEnabled {
 						ws.Tasks[i].NextRun = nil
 					}

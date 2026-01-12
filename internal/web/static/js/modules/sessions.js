@@ -4889,6 +4889,41 @@ const sessionManager = {
     }
   },
 
+  // Delete/clear schedule from a task
+  async deleteScheduledTask(taskId) {
+    if (!confirm('Are you sure you want to delete this schedule? The task itself will remain but will no longer run on a schedule.')) return;
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          schedule_enabled: false,
+          schedule: null
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to delete schedule');
+
+      // Close the detail modal
+      this.closeScheduledTaskDetailModal();
+
+      // Reload and refresh the scheduled tasks list
+      if (this.currentScheduledTaskWorkspaceId) {
+        await this.loadWorkspaceScheduledTasks(this.currentScheduledTaskWorkspaceId);
+        const tasks = this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
+        this.renderScheduledTasksList(tasks);
+        this.renderFolderTree();
+      }
+
+      this.showToast('Schedule deleted', 'success');
+    } catch (error) {
+      console.error('Failed to delete schedule:', error);
+      this.showToast('Failed to delete schedule', 'error');
+    }
+  },
+
   // Close scheduled tasks modal
   closeScheduledTasksModal() {
     const modal = document.getElementById('scheduledTasksModal');
@@ -4930,6 +4965,14 @@ const sessionManager = {
       if (modal) {
         const scheduleId = modal.dataset.scheduleId;
         this.triggerScheduledTask(scheduleId);
+      }
+    });
+
+    document.getElementById('scheduleDetailDeleteBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('scheduledTaskDetailModal');
+      if (modal) {
+        const scheduleId = modal.dataset.scheduleId;
+        this.deleteScheduledTask(scheduleId);
       }
     });
 

@@ -1939,6 +1939,17 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   border-color: var(--primary-hover, #2563eb);
 }
 
+.schedule-detail-btn-delete {
+  background: none;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+}
+
+.schedule-detail-btn-delete:hover {
+  background: #ef4444;
+  color: white;
+}
+
 /* Note Editor Modal */
 .note-title-input {
   background: transparent;
