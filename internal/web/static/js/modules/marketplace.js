@@ -2,481 +2,481 @@
 // Handles plugin browsing, installation, and updates
 
 class PluginMarketplace {
-    constructor() {
-        this.plugins = [];
-        this.installedPlugins = new Set();
-        this.updates = [];
-        this.filter = 'all';
-        this.searchTerm = '';
-        this.currentPlatform = '';
-        this.currentPlatformDisplay = '';
-        this.showIncompatible = true; // Track compatibility filter state (default to showing all)
-        this.viewMode = localStorage.getItem('marketplaceViewMode') || 'grid';
-        this.marketplaces = new Map(); // Cache marketplace names by ID
+  constructor() {
+    this.plugins = [];
+    this.installedPlugins = new Set();
+    this.updates = [];
+    this.filter = 'all';
+    this.searchTerm = '';
+    this.currentPlatform = '';
+    this.currentPlatformDisplay = '';
+    this.showIncompatible = true; // Track compatibility filter state (default to showing all)
+    this.viewMode = localStorage.getItem('marketplaceViewMode') || 'grid';
+    this.marketplaces = new Map(); // Cache marketplace names by ID
+  }
+
+  async init() {
+    // Get current platform information from hidden inputs
+    this.currentPlatform = document.getElementById('currentPlatform')?.value || '';
+    this.currentPlatformDisplay = document.getElementById('currentPlatformDisplay')?.value || '';
+
+    // Restore compatibility filter state from localStorage
+    const savedState = localStorage.getItem('showIncompatiblePlugins');
+    if (savedState !== null) {
+      this.showIncompatible = savedState === 'true';
     }
 
-    async init() {
-        // Get current platform information from hidden inputs
-        this.currentPlatform = document.getElementById('currentPlatform')?.value || '';
-        this.currentPlatformDisplay = document.getElementById('currentPlatformDisplay')?.value || '';
+    // Load marketplace data
+    await this.loadMarketplaceData();
 
-        // Restore compatibility filter state from localStorage
-        const savedState = localStorage.getItem('showIncompatiblePlugins');
-        if (savedState !== null) {
-            this.showIncompatible = savedState === 'true';
-        }
+    // Setup event listeners
+    this.setupEventListeners();
 
-        // Load marketplace data
-        await this.loadMarketplaceData();
-
-        // Setup event listeners
-        this.setupEventListeners();
-
-        // Set initial toggle state
-        const toggle = document.getElementById('showIncompatibleToggle');
-        if (toggle) {
-            toggle.checked = this.showIncompatible;
-        }
-
-        // Render initial view
-        this.updateViewToggleButtons();
-        this.render();
+    // Set initial toggle state
+    const toggle = document.getElementById('showIncompatibleToggle');
+    if (toggle) {
+      toggle.checked = this.showIncompatible;
     }
 
-    async loadMarketplaceData() {
-        try {
-            // Load marketplace list to cache names by ID
-            try {
-                const marketplacesResp = await fetch('/api/marketplaces');
-                const marketplacesData = await marketplacesResp.json();
-                this.marketplaces.clear();
-                (marketplacesData.marketplaces || []).forEach(mp => {
-                    this.marketplaces.set(mp.id, mp.name);
-                });
-            } catch (err) {
-                console.warn('Could not load marketplaces:', err);
-            }
+    // Render initial view
+    this.updateViewToggleButtons();
+    this.render();
+  }
 
-            // Load plugins from online registry only (exclude local uploads)
-            // Request online registry only and include incompatible platforms so the list is never empty
-            const registryResp = await fetch('/api/plugin-registry?online_only=true&filter_compatible=false');
-            const registryData = await registryResp.json();
-            this.plugins = this.normalizePluginList(registryData.plugins || []);
+  async loadMarketplaceData() {
+    try {
+      // Load marketplace list to cache names by ID
+      try {
+        const marketplacesResp = await fetch('/api/marketplaces');
+        const marketplacesData = await marketplacesResp.json();
+        this.marketplaces.clear();
+        (marketplacesData.marketplaces || []).forEach(mp => {
+          this.marketplaces.set(mp.id, mp.name);
+        });
+      } catch (err) {
+        console.warn('Could not load marketplaces:', err);
+      }
 
-            // Load locally installed plugins to mark them as installed
-            const installedResp = await fetch('/api/plugins');
-            const installedData = await installedResp.json();
-            const installedPluginNames = new Set();
-            (installedData.plugins || []).forEach(plugin => {
-                this.getPluginNameVariants(plugin).forEach(variant => {
-                    if (variant) {
-                        installedPluginNames.add(variant);
-                    }
-                });
-            });
+      // Load plugins from online registry only (exclude local uploads)
+      // Request online registry only and include incompatible platforms so the list is never empty
+      const registryResp = await fetch('/api/plugin-registry?online_only=true&filter_compatible=false');
+      const registryData = await registryResp.json();
+      this.plugins = this.normalizePluginList(registryData.plugins || []);
 
-            // Mark plugins as installed if they exist locally
-            this.installedPlugins = installedPluginNames;
-            this.plugins.forEach(plugin => {
-                const variants = this.getPluginNameVariants(plugin);
-                plugin.installed = variants.some(variant => installedPluginNames.has(variant));
-            });
+      // Load locally installed plugins to mark them as installed
+      const installedResp = await fetch('/api/plugins');
+      const installedData = await installedResp.json();
+      const installedPluginNames = new Set();
+      (installedData.plugins || []).forEach(plugin => {
+        this.getPluginNameVariants(plugin).forEach(variant => {
+          if (variant) {
+            installedPluginNames.add(variant);
+          }
+        });
+      });
 
-            // Load available updates
-            const updatesResp = await fetch('/api/plugins/check-updates');
-            const updatesData = await updatesResp.json();
-            this.updates = updatesData.updates || [];
+      // Mark plugins as installed if they exist locally
+      this.installedPlugins = installedPluginNames;
+      this.plugins.forEach(plugin => {
+        const variants = this.getPluginNameVariants(plugin);
+        plugin.installed = variants.some(variant => installedPluginNames.has(variant));
+      });
 
-        } catch (error) {
-            console.error('Error loading marketplace data:', error);
-        }
+      // Load available updates
+      const updatesResp = await fetch('/api/plugins/check-updates');
+      const updatesData = await updatesResp.json();
+      this.updates = updatesData.updates || [];
+
+    } catch (error) {
+      console.error('Error loading marketplace data:', error);
     }
+  }
 
-    setupEventListeners() {
-        // Search input
-        document.getElementById('searchPlugins')?.addEventListener('input', (e) => {
-            this.searchTerm = e.target.value.toLowerCase();
-            this.render();
-        });
+  setupEventListeners() {
+    // Search input
+    document.getElementById('searchPlugins')?.addEventListener('input', (e) => {
+      this.searchTerm = e.target.value.toLowerCase();
+      this.render();
+    });
 
-        // Filter buttons
-        document.getElementById('filterAll')?.addEventListener('change', () => {
-            this.filter = 'all';
-            this.render();
-        });
+    // Filter buttons
+    document.getElementById('filterAll')?.addEventListener('change', () => {
+      this.filter = 'all';
+      this.render();
+    });
 
-        document.getElementById('filterInstalled')?.addEventListener('change', () => {
-            this.filter = 'installed';
-            this.render();
-        });
+    document.getElementById('filterInstalled')?.addEventListener('change', () => {
+      this.filter = 'installed';
+      this.render();
+    });
 
-        document.getElementById('filterAvailable')?.addEventListener('change', () => {
-            this.filter = 'available';
-            this.render();
-        });
+    document.getElementById('filterAvailable')?.addEventListener('change', () => {
+      this.filter = 'available';
+      this.render();
+    });
 
-        document.getElementById('filterUpdates')?.addEventListener('change', () => {
-            this.filter = 'updates';
-            this.render();
-        });
+    document.getElementById('filterUpdates')?.addEventListener('change', () => {
+      this.filter = 'updates';
+      this.render();
+    });
 
-        // Refresh button
-        document.getElementById('refreshMarketplaceBtn')?.addEventListener('click', async () => {
-            await this.loadMarketplaceData();
-            this.render();
-        });
+    // Refresh button
+    document.getElementById('refreshMarketplaceBtn')?.addEventListener('click', async () => {
+      await this.loadMarketplaceData();
+      this.render();
+    });
 
-        // Platform compatibility toggle
-        document.getElementById('showIncompatibleToggle')?.addEventListener('change', (e) => {
-            this.showIncompatible = e.target.checked;
-            // Save state to localStorage
-            localStorage.setItem('showIncompatiblePlugins', this.showIncompatible.toString());
-            this.render();
-        });
+    // Platform compatibility toggle
+    document.getElementById('showIncompatibleToggle')?.addEventListener('change', (e) => {
+      this.showIncompatible = e.target.checked;
+      // Save state to localStorage
+      localStorage.setItem('showIncompatiblePlugins', this.showIncompatible.toString());
+      this.render();
+    });
 
-        // View mode buttons
-        document.getElementById('gridViewBtn')?.addEventListener('click', () => {
-            this.setViewMode('grid');
-        });
-        document.getElementById('listViewBtn')?.addEventListener('click', () => {
-            this.setViewMode('list');
-        });
+    // View mode buttons
+    document.getElementById('gridViewBtn')?.addEventListener('click', () => {
+      this.setViewMode('grid');
+    });
+    document.getElementById('listViewBtn')?.addEventListener('click', () => {
+      this.setViewMode('list');
+    });
 
-        // Add Marketplace button - uses shared modal from modals.tmpl
-        document.getElementById('addMarketplaceBtn')?.addEventListener('click', () => {
-            this.showAddMarketplaceModal();
-        });
+    // Add Marketplace button - uses shared modal from modals.tmpl
+    document.getElementById('addMarketplaceBtn')?.addEventListener('click', () => {
+      this.showAddMarketplaceModal();
+    });
 
-        // Shared modal buttons (same IDs used by settings page)
-        document.getElementById('testMarketplaceBtn')?.addEventListener('click', () => {
-            this.testMarketplace();
-        });
+    // Shared modal buttons (same IDs used by settings page)
+    document.getElementById('testMarketplaceBtn')?.addEventListener('click', () => {
+      this.testMarketplace();
+    });
 
-        document.getElementById('saveMarketplaceBtn')?.addEventListener('click', () => {
-            this.saveMarketplace();
-        });
-    }
+    document.getElementById('saveMarketplaceBtn')?.addEventListener('click', () => {
+      this.saveMarketplace();
+    });
+  }
 
-    showAddMarketplaceModal() {
-        document.getElementById('marketplaceNameInput').value = '';
-        document.getElementById('marketplaceSourceInput').value = '';
-        document.getElementById('marketplaceTestResult').style.display = 'none';
-        document.getElementById('marketplaceTestResult').innerHTML = '';
-        document.getElementById('saveMarketplaceBtn').disabled = true;
+  showAddMarketplaceModal() {
+    document.getElementById('marketplaceNameInput').value = '';
+    document.getElementById('marketplaceSourceInput').value = '';
+    document.getElementById('marketplaceTestResult').style.display = 'none';
+    document.getElementById('marketplaceTestResult').innerHTML = '';
+    document.getElementById('saveMarketplaceBtn').disabled = true;
 
-        const modal = new bootstrap.Modal(document.getElementById('marketplaceModal'));
-        modal.show();
-    }
+    const modal = new bootstrap.Modal(document.getElementById('marketplaceModal'));
+    modal.show();
+  }
 
-    async testMarketplace() {
-        const source = document.getElementById('marketplaceSourceInput').value.trim();
-        const resultDiv = document.getElementById('marketplaceTestResult');
-        const saveBtn = document.getElementById('saveMarketplaceBtn');
+  async testMarketplace() {
+    const source = document.getElementById('marketplaceSourceInput').value.trim();
+    const resultDiv = document.getElementById('marketplaceTestResult');
+    const saveBtn = document.getElementById('saveMarketplaceBtn');
 
-        if (!source) {
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = `
+    if (!source) {
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = `
                 <div class="alert alert-warning mb-0">
                     Please enter a source URL or repository.
                 </div>`;
-            return;
-        }
+      return;
+    }
 
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = `
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
             <div class="d-flex align-items-center" style="color: var(--text-secondary);">
                 <div class="spinner-border spinner-border-sm me-2"></div>
                 Testing connection...
             </div>`;
 
-        try {
-            const response = await fetch('/api/marketplaces/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source })
-            });
+    try {
+      const response = await fetch('/api/marketplaces/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source })
+      });
 
-            const result = await response.json();
+      const result = await response.json();
 
-            if (result.valid) {
-                const typeLabel = result.source_type === 'github'
-                    ? 'GitHub'
-                    : result.source_type === 'gitlab'
-                    ? 'GitLab'
-                    : result.source_type === 'bitbucket'
-                    ? 'Bitbucket'
-                    : result.source_type === 'file'
-                    ? 'Local File'
-                    : 'Direct URL';
-                resultDiv.innerHTML = `
+      if (result.valid) {
+        const typeLabel = result.source_type === 'github'
+          ? 'GitHub'
+          : result.source_type === 'gitlab'
+            ? 'GitLab'
+            : result.source_type === 'bitbucket'
+              ? 'Bitbucket'
+              : result.source_type === 'file'
+                ? 'Local File'
+                : 'Direct URL';
+        resultDiv.innerHTML = `
                     <div class="alert alert-success mb-0">
                         <strong>Valid source!</strong><br>
                         <small>Found ${result.plugin_count} plugin(s)</small><br>
                         <small class="text-muted">Type: ${typeLabel}</small>
                     </div>`;
-                saveBtn.disabled = false;
-            } else {
-                resultDiv.innerHTML = `
+        saveBtn.disabled = false;
+      } else {
+        resultDiv.innerHTML = `
                     <div class="alert alert-danger mb-0">
                         <strong>Invalid source</strong><br>
                         <small>${this.escapeHtml(result.error)}</small>
                     </div>`;
-                saveBtn.disabled = true;
-            }
-        } catch (error) {
-            resultDiv.innerHTML = `
+        saveBtn.disabled = true;
+      }
+    } catch (error) {
+      resultDiv.innerHTML = `
                 <div class="alert alert-danger mb-0">
                     <strong>Connection failed</strong><br>
                     <small>${this.escapeHtml(error.message)}</small>
                 </div>`;
-            saveBtn.disabled = true;
-        }
+      saveBtn.disabled = true;
+    }
+  }
+
+  async saveMarketplace() {
+    const name = document.getElementById('marketplaceNameInput').value.trim();
+    const source = document.getElementById('marketplaceSourceInput').value.trim();
+
+    if (!name || !source) {
+      if (window.Toast) {
+        Toast.warning('Please fill in both name and source fields', { title: 'Missing Fields' });
+      }
+      return;
     }
 
-    async saveMarketplace() {
-        const name = document.getElementById('marketplaceNameInput').value.trim();
-        const source = document.getElementById('marketplaceSourceInput').value.trim();
+    try {
+      const response = await fetch('/api/marketplaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, source })
+      });
 
-        if (!name || !source) {
-            if (window.Toast) {
-                Toast.warning('Please fill in both name and source fields', { title: 'Missing Fields' });
-            }
-            return;
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('marketplaceModal'));
+      modal.hide();
+
+      // Show success message
+      if (window.Toast) {
+        Toast.success('Marketplace added! Refreshing plugins...');
+      }
+
+      const marketplacesResp = await fetch('/api/marketplaces');
+      if (marketplacesResp.ok) {
+        const marketplacesData = await marketplacesResp.json();
+        const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
+        if (matches.length > 0) {
+          const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
+          await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
         }
+      }
 
-        try {
-            const response = await fetch('/api/marketplaces', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, source })
-            });
+      // Reload marketplace data
+      await this.loadMarketplaceData();
+      this.render();
+    } catch (error) {
+      console.error('Error adding marketplace:', error);
+      if (window.Toast) {
+        Toast.error('Failed to add marketplace: ' + error.message);
+      }
+    }
+  }
 
-            if (!response.ok) {
-                const error = await response.text();
-                throw new Error(error);
-            }
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-            // Close modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('marketplaceModal'));
-            modal.hide();
-
-            // Show success message
-            if (window.Toast) {
-                Toast.success('Marketplace added! Refreshing plugins...');
-            }
-
-            const marketplacesResp = await fetch('/api/marketplaces');
-            if (marketplacesResp.ok) {
-                const marketplacesData = await marketplacesResp.json();
-                const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
-                if (matches.length > 0) {
-                    const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
-                    await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
-                }
-            }
-
-            // Reload marketplace data
-            await this.loadMarketplaceData();
-            this.render();
-        } catch (error) {
-            console.error('Error adding marketplace:', error);
-            if (window.Toast) {
-                Toast.error('Failed to add marketplace: ' + error.message);
-            }
-        }
+  // Check if plugin is compatible with current platform
+  isPluginCompatible(plugin) {
+    if (!this.currentPlatform) {
+      return true; // If we can't detect platform, assume compatible
     }
 
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    // Check platforms array first
+    if (plugin.platforms && plugin.platforms.length > 0) {
+      // If platforms contains "unknown", fall through to OS/arch check
+      if (plugin.platforms.length === 1 && plugin.platforms[0] === 'unknown') {
+        // Fall through to OS/arch check below
+      } else {
+        // Check if current platform is in the platforms array
+        return plugin.platforms.includes(this.currentPlatform) || plugin.platforms.includes('all');
+      }
     }
 
-    // Check if plugin is compatible with current platform
-    isPluginCompatible(plugin) {
-        if (!this.currentPlatform) {
-            return true; // If we can't detect platform, assume compatible
-        }
+    // Fallback to checking supported_os and supported_arch
+    const [os, arch] = this.currentPlatform.split('-');
 
-        // Check platforms array first
-        if (plugin.platforms && plugin.platforms.length > 0) {
-            // If platforms contains "unknown", fall through to OS/arch check
-            if (plugin.platforms.length === 1 && plugin.platforms[0] === 'unknown') {
-                // Fall through to OS/arch check below
-            } else {
-                // Check if current platform is in the platforms array
-                return plugin.platforms.includes(this.currentPlatform) || plugin.platforms.includes('all');
-            }
-        }
-
-        // Fallback to checking supported_os and supported_arch
-        const [os, arch] = this.currentPlatform.split('-');
-
-        // If no OS support specified, assume compatible
-        if (!plugin.supported_os || plugin.supported_os.length === 0) {
-            return true;
-        }
-
-        // Check OS compatibility
-        const osCompatible = plugin.supported_os.includes(os) || plugin.supported_os.includes('all');
-
-        // If no arch support specified, just check OS
-        if (!plugin.supported_arch || plugin.supported_arch.length === 0) {
-            return osCompatible;
-        }
-
-        // Check arch compatibility
-        const archCompatible = plugin.supported_arch.includes(arch) || plugin.supported_arch.includes('all');
-
-        return osCompatible && archCompatible;
+    // If no OS support specified, assume compatible
+    if (!plugin.supported_os || plugin.supported_os.length === 0) {
+      return true;
     }
 
-    setViewMode(mode) {
-        if (this.viewMode === mode) {
-            return;
+    // Check OS compatibility
+    const osCompatible = plugin.supported_os.includes(os) || plugin.supported_os.includes('all');
+
+    // If no arch support specified, just check OS
+    if (!plugin.supported_arch || plugin.supported_arch.length === 0) {
+      return osCompatible;
+    }
+
+    // Check arch compatibility
+    const archCompatible = plugin.supported_arch.includes(arch) || plugin.supported_arch.includes('all');
+
+    return osCompatible && archCompatible;
+  }
+
+  setViewMode(mode) {
+    if (this.viewMode === mode) {
+      return;
+    }
+    this.viewMode = mode;
+    localStorage.setItem('marketplaceViewMode', mode);
+    this.updateViewToggleButtons();
+    this.render();
+  }
+
+  updateViewToggleButtons() {
+    const gridBtn = document.getElementById('gridViewBtn');
+    const listBtn = document.getElementById('listViewBtn');
+    if (!gridBtn || !listBtn) return;
+
+    if (this.viewMode === 'list') {
+      gridBtn.classList.remove('active', 'btn-primary');
+      gridBtn.classList.add('btn-outline-secondary');
+      listBtn.classList.add('active', 'btn-primary');
+      listBtn.classList.remove('btn-outline-secondary');
+    } else {
+      listBtn.classList.remove('active', 'btn-primary');
+      listBtn.classList.add('btn-outline-secondary');
+      gridBtn.classList.add('active', 'btn-primary');
+      gridBtn.classList.remove('btn-outline-secondary');
+    }
+  }
+
+  // Get platform icon badges for a plugin
+  getPlatformBadges(plugin) {
+    const badges = [];
+    const platformIcons = {
+      'darwin': '🍎',
+      'linux': '🐧',
+      'windows': '🪟',
+      'freebsd': '🐡'
+    };
+    const platformNames = {
+      'darwin': 'macOS',
+      'linux': 'Linux',
+      'windows': 'Windows',
+      'freebsd': 'FreeBSD'
+    };
+
+    // Use supported_os if available
+    if (plugin.supported_os && plugin.supported_os.length > 0) {
+      plugin.supported_os.forEach(os => {
+        if (os !== 'all' && platformIcons[os]) {
+          const displayName = platformNames[os] || os;
+          const archInfo = plugin.supported_arch && plugin.supported_arch.length > 0
+            ? ` (${plugin.supported_arch.filter(a => a !== 'all').join(', ')})`
+            : '';
+          badges.push(`<span class="badge bg-secondary me-1" title="${displayName}${archInfo}">${platformIcons[os]} ${displayName}</span>`);
         }
-        this.viewMode = mode;
-        localStorage.setItem('marketplaceViewMode', mode);
-        this.updateViewToggleButtons();
-        this.render();
+      });
     }
 
-    updateViewToggleButtons() {
-        const gridBtn = document.getElementById('gridViewBtn');
-        const listBtn = document.getElementById('listViewBtn');
-        if (!gridBtn || !listBtn) return;
-
-        if (this.viewMode === 'list') {
-            gridBtn.classList.remove('active', 'btn-primary');
-            gridBtn.classList.add('btn-outline-secondary');
-            listBtn.classList.add('active', 'btn-primary');
-            listBtn.classList.remove('btn-outline-secondary');
-        } else {
-            listBtn.classList.remove('active', 'btn-primary');
-            listBtn.classList.add('btn-outline-secondary');
-            gridBtn.classList.add('active', 'btn-primary');
-            gridBtn.classList.remove('btn-outline-secondary');
-        }
+    // If "all" OS or no OS specified, show "All Platforms"
+    if (!plugin.supported_os || plugin.supported_os.length === 0 || plugin.supported_os.includes('all')) {
+      badges.push('<span class="badge bg-secondary me-1">All Platforms</span>');
     }
 
-    // Get platform icon badges for a plugin
-    getPlatformBadges(plugin) {
-        const badges = [];
-        const platformIcons = {
-            'darwin': '🍎',
-            'linux': '🐧',
-            'windows': '🪟',
-            'freebsd': '🐡'
-        };
-        const platformNames = {
-            'darwin': 'macOS',
-            'linux': 'Linux',
-            'windows': 'Windows',
-            'freebsd': 'FreeBSD'
-        };
+    return badges.join('');
+  }
 
-        // Use supported_os if available
-        if (plugin.supported_os && plugin.supported_os.length > 0) {
-            plugin.supported_os.forEach(os => {
-                if (os !== 'all' && platformIcons[os]) {
-                    const displayName = platformNames[os] || os;
-                    const archInfo = plugin.supported_arch && plugin.supported_arch.length > 0
-                        ? ` (${plugin.supported_arch.filter(a => a !== 'all').join(', ')})`
-                        : '';
-                    badges.push(`<span class="badge bg-secondary me-1" title="${displayName}${archInfo}">${platformIcons[os]} ${displayName}</span>`);
-                }
-            });
-        }
+  // Get compatibility indicator for a plugin
+  getCompatibilityIndicator(plugin) {
+    const compatible = this.isPluginCompatible(plugin);
 
-        // If "all" OS or no OS specified, show "All Platforms"
-        if (!plugin.supported_os || plugin.supported_os.length === 0 || plugin.supported_os.includes('all')) {
-            badges.push('<span class="badge bg-secondary me-1">All Platforms</span>');
-        }
-
-        return badges.join('');
+    if (compatible) {
+      return {
+        compatible: true,
+        badge: '<span class="badge bg-success-subtle text-success me-1" title="Compatible with your platform">✅ Compatible</span>',
+        cssClass: 'compatible'
+      };
+    } else {
+      return {
+        compatible: false,
+        badge: '<span class="badge bg-warning-subtle text-warning me-1" title="Not available for your platform">⚠️ Not Available</span>',
+        cssClass: 'incompatible'
+      };
     }
+  }
 
-    // Get compatibility indicator for a plugin
-    getCompatibilityIndicator(plugin) {
-        const compatible = this.isPluginCompatible(plugin);
+  // Get marketplace name from ID
+  getMarketplaceName(marketplaceId) {
+    if (!marketplaceId) return null;
+    return this.marketplaces.get(marketplaceId) || null;
+  }
 
-        if (compatible) {
-            return {
-                compatible: true,
-                badge: '<span class="badge bg-success-subtle text-success me-1" title="Compatible with your platform">✅ Compatible</span>',
-                cssClass: 'compatible'
-            };
-        } else {
-            return {
-                compatible: false,
-                badge: '<span class="badge bg-warning-subtle text-warning me-1" title="Not available for your platform">⚠️ Not Available</span>',
-                cssClass: 'incompatible'
-            };
-        }
-    }
+  // Get source marketplace badges for a plugin (supports multiple marketplaces)
+  getSourceBadge(plugin) {
+    // Use backend-provided source_marketplaces array, fall back to single source_marketplace
+    const marketplaceIds = plugin.source_marketplaces && plugin.source_marketplaces.length > 0
+      ? plugin.source_marketplaces
+      : (plugin.source_marketplace ? [plugin.source_marketplace] : []);
+    if (marketplaceIds.length === 0) return '';
 
-    // Get marketplace name from ID
-    getMarketplaceName(marketplaceId) {
-        if (!marketplaceId) return null;
-        return this.marketplaces.get(marketplaceId) || null;
-    }
+    return marketplaceIds.map(marketplaceId => {
+      const marketplaceName = this.getMarketplaceName(marketplaceId);
+      // Use marketplace name if available, otherwise show the ID
+      const displayName = marketplaceName || marketplaceId;
 
-    // Get source marketplace badges for a plugin (supports multiple marketplaces)
-    getSourceBadge(plugin) {
-        // Use backend-provided source_marketplaces array, fall back to single source_marketplace
-        const marketplaceIds = plugin.source_marketplaces && plugin.source_marketplaces.length > 0
-            ? plugin.source_marketplaces
-            : (plugin.source_marketplace ? [plugin.source_marketplace] : []);
-        if (marketplaceIds.length === 0) return '';
+      // Use different colors for official vs custom marketplaces
+      const isOfficial = marketplaceId === 'official';
+      const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
+      const icon = isOfficial ? '🏠' : '📦';
 
-        return marketplaceIds.map(marketplaceId => {
-            const marketplaceName = this.getMarketplaceName(marketplaceId);
-            // Use marketplace name if available, otherwise show the ID
-            const displayName = marketplaceName || marketplaceId;
+      return `<span class="badge ${badgeClass} me-1" title="Source marketplace: ${displayName}">${icon} ${displayName}</span>`;
+    }).join('');
+  }
 
-            // Use different colors for official vs custom marketplaces
-            const isOfficial = marketplaceId === 'official';
-            const badgeClass = isOfficial ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info';
-            const icon = isOfficial ? '🏠' : '📦';
+  render() {
+    const grid = document.getElementById('pluginGrid');
+    if (!grid) return;
+    grid.classList.toggle('list-view', this.viewMode === 'list');
 
-            return `<span class="badge ${badgeClass} me-1" title="Source marketplace: ${displayName}">${icon} ${displayName}</span>`;
-        }).join('');
-    }
-
-    render() {
-        const grid = document.getElementById('pluginGrid');
-        if (!grid) return;
-        grid.classList.toggle('list-view', this.viewMode === 'list');
-
-        // Filter plugins
-        let filteredPlugins = this.plugins.filter(plugin => {
-            // Search filter
-            if (this.searchTerm) {
-                const matchesSearch = plugin.name.toLowerCase().includes(this.searchTerm) ||
+    // Filter plugins
+    const filteredPlugins = this.plugins.filter(plugin => {
+      // Search filter
+      if (this.searchTerm) {
+        const matchesSearch = plugin.name.toLowerCase().includes(this.searchTerm) ||
                     (plugin.description && plugin.description.toLowerCase().includes(this.searchTerm));
-                if (!matchesSearch) return false;
-            }
+        if (!matchesSearch) return false;
+      }
 
-            // Platform compatibility filter
-            if (!this.showIncompatible && !this.isPluginCompatible(plugin)) {
-                return false;
-            }
+      // Platform compatibility filter
+      if (!this.showIncompatible && !this.isPluginCompatible(plugin)) {
+        return false;
+      }
 
-            // Category filter
-            switch (this.filter) {
-                case 'installed':
-                    return this.isPluginInstalled(plugin);
-                case 'available':
-                    return !this.isPluginInstalled(plugin);
-                case 'updates':
-                    return this.updates.some(u => u.plugin_name === plugin.name);
-                default:
-                    return true;
-            }
-        });
+      // Category filter
+      switch (this.filter) {
+        case 'installed':
+          return this.isPluginInstalled(plugin);
+        case 'available':
+          return !this.isPluginInstalled(plugin);
+        case 'updates':
+          return this.updates.some(u => u.plugin_name === plugin.name);
+        default:
+          return true;
+      }
+    });
 
-        if (filteredPlugins.length === 0) {
-            grid.innerHTML = `
+    if (filteredPlugins.length === 0) {
+      grid.innerHTML = `
                 <div class="col-12 text-center py-5">
                     <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
                         <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
@@ -484,40 +484,40 @@ class PluginMarketplace {
                     <p class="mt-3 text-muted">No plugins found</p>
                 </div>
             `;
-            this.updateViewToggleButtons();
-            return;
-        }
-
-        let html = '';
-        filteredPlugins.forEach(plugin => {
-            const isInstalled = this.isPluginInstalled(plugin);
-            const updateInfo = this.updates.find(u => u.plugin_name === plugin.name);
-            const compatibility = this.getCompatibilityIndicator(plugin);
-            const platformBadges = this.getPlatformBadges(plugin);
-            const sourceBadge = this.getSourceBadge(plugin);
-
-            if (this.viewMode === 'list') {
-                html += this.renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
-            } else {
-                html += this.renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
-            }
-        });
-
-        grid.innerHTML = html;
-        this.updateViewToggleButtons();
-
+      this.updateViewToggleButtons();
+      return;
     }
 
-    showPluginDetails(pluginName) {
-        const plugin = this.plugins.find(p => p.name === pluginName);
-        if (!plugin) return;
+    let html = '';
+    filteredPlugins.forEach(plugin => {
+      const isInstalled = this.isPluginInstalled(plugin);
+      const updateInfo = this.updates.find(u => u.plugin_name === plugin.name);
+      const compatibility = this.getCompatibilityIndicator(plugin);
+      const platformBadges = this.getPlatformBadges(plugin);
+      const sourceBadge = this.getSourceBadge(plugin);
 
-        const modal = new bootstrap.Modal(document.getElementById('pluginDetailsModal'));
-        const isInstalled = this.isPluginInstalled(plugin);
-        const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
+      if (this.viewMode === 'list') {
+        html += this.renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
+      } else {
+        html += this.renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge);
+      }
+    });
 
-        document.getElementById('pluginDetailsTitle').textContent = plugin.name;
-        document.getElementById('pluginDetailsBody').innerHTML = `
+    grid.innerHTML = html;
+    this.updateViewToggleButtons();
+
+  }
+
+  showPluginDetails(pluginName) {
+    const plugin = this.plugins.find(p => p.name === pluginName);
+    if (!plugin) return;
+
+    const modal = new bootstrap.Modal(document.getElementById('pluginDetailsModal'));
+    const isInstalled = this.isPluginInstalled(plugin);
+    const hasUpdate = this.updates.find(u => u.plugin_name === plugin.name);
+
+    document.getElementById('pluginDetailsTitle').textContent = plugin.name;
+    document.getElementById('pluginDetailsBody').innerHTML = `
             <div class="mb-3">
                 <h6>Description</h6>
                 <p>${plugin.description || 'No description available'}</p>
@@ -609,87 +609,87 @@ class PluginMarketplace {
             ` : ''}
         `;
 
-        // Show appropriate action button
-        document.getElementById('installPluginBtn').style.display = !isInstalled ? 'inline-block' : 'none';
-        document.getElementById('updatePluginBtn').style.display = hasUpdate ? 'inline-block' : 'none';
+    // Show appropriate action button
+    document.getElementById('installPluginBtn').style.display = !isInstalled ? 'inline-block' : 'none';
+    document.getElementById('updatePluginBtn').style.display = hasUpdate ? 'inline-block' : 'none';
 
-        document.getElementById('installPluginBtn').onclick = () => {
-            modal.hide();
-            this.installPlugin(plugin.name);
-        };
+    document.getElementById('installPluginBtn').onclick = () => {
+      modal.hide();
+      this.installPlugin(plugin.name);
+    };
 
-        document.getElementById('updatePluginBtn').onclick = () => {
-            modal.hide();
-            this.updatePlugin(plugin.name);
-        };
+    document.getElementById('updatePluginBtn').onclick = () => {
+      modal.hide();
+      this.updatePlugin(plugin.name);
+    };
 
-        modal.show();
+    modal.show();
+  }
+
+  async installPlugin(pluginName) {
+    console.log('Installing plugin:', pluginName);
+
+    // Check compatibility before installation
+    const plugin = this.plugins.find(p => p.name === pluginName);
+    if (plugin && !this.isPluginCompatible(plugin)) {
+      this.showPlatformIncompatibleModal(plugin);
+      return;
     }
 
-    async installPlugin(pluginName) {
-        console.log('Installing plugin:', pluginName);
-
-        // Check compatibility before installation
-        const plugin = this.plugins.find(p => p.name === pluginName);
-        if (plugin && !this.isPluginCompatible(plugin)) {
-            this.showPlatformIncompatibleModal(plugin);
-            return;
-        }
-
-        // Show confirmation dialog
-        if (!confirm(`Download and install ${pluginName}?`)) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/plugins/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: pluginName })
-            });
-
-            const result = await response.json();
-
-            // Handle platform incompatibility error from backend
-            if (!response.ok && result.error === 'platform_incompatible') {
-                this.showPlatformIncompatibleModal(plugin, result);
-                return;
-            }
-
-            if (result.success) {
-                if (window.Toast) {
-                    Toast.success(`Plugin "${pluginName}" installed successfully`);
-                }
-
-                // Reload marketplace data to show the plugin as installed
-                await this.loadMarketplaceData();
-                this.render();
-            } else {
-                if (window.Toast) {
-                    Toast.error(`Failed to install ${pluginName}: ${result.message}`);
-                }
-            }
-        } catch (error) {
-            console.error('Error installing plugin:', error);
-            if (window.Toast) {
-                Toast.error(`Error installing ${pluginName}: ${error.message}`);
-            }
-        }
+    // Show confirmation dialog
+    if (!confirm(`Download and install ${pluginName}?`)) {
+      return;
     }
 
-    // Show platform incompatibility modal (Task 6)
-    showPlatformIncompatibleModal(plugin, errorData = null) {
-        const modal = new bootstrap.Modal(document.getElementById('platformIncompatibleModal') || this.createPlatformIncompatibleModal());
+    try {
+      const response = await fetch('/api/plugins/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: pluginName })
+      });
 
-        const supportedPlatforms = errorData?.supported_platforms || plugin.platforms || [];
-        const supportedOS = errorData?.supported_os || plugin.supported_os || [];
-        const userPlatform = errorData?.user_platform || this.currentPlatform;
+      const result = await response.json();
 
-        const platformList = supportedPlatforms.length > 0
-            ? supportedPlatforms.map(p => `<li>${this.formatPlatformName(p)}</li>`).join('')
-            : supportedOS.map(os => `<li>${os}</li>`).join('');
+      // Handle platform incompatibility error from backend
+      if (!response.ok && result.error === 'platform_incompatible') {
+        this.showPlatformIncompatibleModal(plugin, result);
+        return;
+      }
 
-        document.getElementById('platformIncompatibleModalBody').innerHTML = `
+      if (result.success) {
+        if (window.Toast) {
+          Toast.success(`Plugin "${pluginName}" installed successfully`);
+        }
+
+        // Reload marketplace data to show the plugin as installed
+        await this.loadMarketplaceData();
+        this.render();
+      } else {
+        if (window.Toast) {
+          Toast.error(`Failed to install ${pluginName}: ${result.message}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error installing plugin:', error);
+      if (window.Toast) {
+        Toast.error(`Error installing ${pluginName}: ${error.message}`);
+      }
+    }
+  }
+
+  // Show platform incompatibility modal (Task 6)
+  showPlatformIncompatibleModal(plugin, errorData = null) {
+    const modal = new bootstrap.Modal(document.getElementById('platformIncompatibleModal') || this.createPlatformIncompatibleModal());
+
+    const supportedPlatforms = errorData?.supported_platforms || plugin.platforms || [];
+    const supportedOS = errorData?.supported_os || plugin.supported_os || [];
+    const userPlatform = errorData?.user_platform || this.currentPlatform;
+
+    const platformList = supportedPlatforms.length > 0
+      ? supportedPlatforms.map(p => `<li>${this.formatPlatformName(p)}</li>`).join('')
+      : supportedOS.map(os => `<li>${os}</li>`).join('');
+
+    document.getElementById('platformIncompatibleModalBody').innerHTML = `
             <div class="alert alert-warning">
                 <h6>Plugin Not Available for Your Platform</h6>
                 <p class="mb-0">This plugin is not compatible with <strong>${this.currentPlatformDisplay}</strong> (${userPlatform}).</p>
@@ -708,12 +708,12 @@ class PluginMarketplace {
             </ul>
         `;
 
-        modal.show();
-    }
+    modal.show();
+  }
 
-    // Helper to create platform incompatibility modal if it doesn't exist
-    createPlatformIncompatibleModal() {
-        const modalHtml = `
+  // Helper to create platform incompatibility modal if it doesn't exist
+  createPlatformIncompatibleModal() {
+    const modalHtml = `
             <div class="modal fade" id="platformIncompatibleModal" tabindex="-1">
                 <div class="modal-dialog">
                     <div class="modal-content">
@@ -731,199 +731,199 @@ class PluginMarketplace {
                 </div>
             </div>
         `;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-        return document.getElementById('platformIncompatibleModal');
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    return document.getElementById('platformIncompatibleModal');
+  }
+
+  // Helper to format platform names for display
+  formatPlatformName(platform) {
+    const names = {
+      'darwin-amd64': 'macOS (Intel)',
+      'darwin-arm64': 'macOS (Apple Silicon)',
+      'linux-amd64': 'Linux (x86_64)',
+      'linux-arm64': 'Linux (ARM64)',
+      'windows-amd64': 'Windows (x86_64)',
+      'windows-arm64': 'Windows (ARM64)',
+      'freebsd-amd64': 'FreeBSD (x86_64)',
+      'freebsd-arm64': 'FreeBSD (ARM64)'
+    };
+    return names[platform] || platform;
+  }
+
+  async updatePlugin(pluginName) {
+    try {
+      const response = await fetch(`/api/plugins/${pluginName}/update`, {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          if (window.Toast) {
+            Toast.success(`Updated ${pluginName} to v${result.new_version}`);
+          }
+          await this.loadMarketplaceData();
+          this.render();
+        } else {
+          if (window.Toast) {
+            Toast.error(`Failed to update ${pluginName}: ${result.error}`);
+          }
+        }
+      } else {
+        if (window.Toast) {
+          Toast.error(`Failed to update ${pluginName}: ${response.statusText}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating plugin:', error);
+      if (window.Toast) {
+        Toast.error(`Error updating ${pluginName}: ${error.message}`);
+      }
+    }
+  }
+
+  normalizePluginList(plugins) {
+    // Backend now provides source_marketplaces array for each plugin
+    // Just deduplicate by canonical key, keeping the better plugin data
+    const map = new Map();
+    plugins.forEach(plugin => {
+      const key = this.getCanonicalPluginKey(plugin);
+      if (!key) {
+        return;
+      }
+      const existing = map.get(key);
+      if (!existing || this.shouldPreferPlugin(plugin, existing)) {
+        map.set(key, plugin);
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  getCanonicalPluginKey(plugin) {
+    const candidates = [
+      this.extractRepoSlug(plugin.metadata?.repository),
+      this.extractRepoSlug(plugin.github_repo),
+      plugin.metadata?.name,
+      plugin.name,
+      plugin.definition?.name
+    ];
+
+    const normalizedVariants = [];
+    const seen = new Set();
+    const addVariant = (value) => {
+      if (!value || seen.has(value)) {
+        return;
+      }
+      seen.add(value);
+      normalizedVariants.push(value);
+    };
+
+    for (const candidate of candidates) {
+      const normalized = this.normalizeName(candidate);
+      if (!normalized) {
+        continue;
+      }
+      addVariant(normalized);
+      const base = this.stripVersionSuffix(normalized);
+      if (base) {
+        addVariant(base);
+      }
     }
 
-    // Helper to format platform names for display
-    formatPlatformName(platform) {
-        const names = {
-            'darwin-amd64': 'macOS (Intel)',
-            'darwin-arm64': 'macOS (Apple Silicon)',
-            'linux-amd64': 'Linux (x86_64)',
-            'linux-arm64': 'Linux (ARM64)',
-            'windows-amd64': 'Windows (x86_64)',
-            'windows-arm64': 'Windows (ARM64)',
-            'freebsd-amd64': 'FreeBSD (x86_64)',
-            'freebsd-arm64': 'FreeBSD (ARM64)'
-        };
-        return names[platform] || platform;
+    if (normalizedVariants.length === 0) {
+      const variants = this.getPluginNameVariants(plugin);
+      return variants.length > 0 ? variants[0] : null;
     }
 
-    async updatePlugin(pluginName) {
-        try {
-            const response = await fetch(`/api/plugins/${pluginName}/update`, {
-                method: 'POST',
-            });
+    return normalizedVariants[0];
+  }
 
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success) {
-                    if (window.Toast) {
-                        Toast.success(`Updated ${pluginName} to v${result.new_version}`);
-                    }
-                    await this.loadMarketplaceData();
-                    this.render();
-                } else {
-                    if (window.Toast) {
-                        Toast.error(`Failed to update ${pluginName}: ${result.error}`);
-                    }
-                }
-            } else {
-                if (window.Toast) {
-                    Toast.error(`Failed to update ${pluginName}: ${response.statusText}`);
-                }
-            }
-        } catch (error) {
-            console.error('Error updating plugin:', error);
-            if (window.Toast) {
-                Toast.error(`Error updating ${pluginName}: ${error.message}`);
-            }
-        }
+  shouldPreferPlugin(candidate, existing) {
+    return this.scorePlugin(candidate) >= this.scorePlugin(existing);
+  }
+
+  scorePlugin(plugin) {
+    let score = 0;
+    if (plugin.metadata?.name) {
+      score += 3;
+    }
+    const normalizedName = this.normalizeName(plugin.name);
+    const baseName = this.stripVersionSuffix(normalizedName);
+    if (plugin.metadata?.name && baseName && plugin.metadata.name.toLowerCase() === baseName) {
+      score += 2;
+    } else if (normalizedName && normalizedName === baseName) {
+      score += 1;
+    }
+    if (plugin.version) {
+      score += 1;
+    }
+    if (plugin.platforms && plugin.platforms.length > 0) {
+      score += 1;
+    }
+    return score;
+  }
+
+  // Get possible name variants for matching installed plugins (handles -0.0.x suffixes)
+  getPluginNameVariants(plugin) {
+    const variants = new Set();
+    const addVariant = (name) => {
+      const normalized = this.normalizeName(name);
+      if (!normalized) {
+        return;
+      }
+      variants.add(normalized);
+
+      const versionStripped = this.stripVersionSuffix(normalized);
+      if (versionStripped && versionStripped !== normalized) {
+        variants.add(versionStripped);
+      }
+    };
+
+    addVariant(plugin.name);
+    if (plugin.metadata?.name) {
+      addVariant(plugin.metadata.name);
+    }
+    if (plugin.definition?.name) {
+      addVariant(plugin.definition.name);
     }
 
-    normalizePluginList(plugins) {
-        // Backend now provides source_marketplaces array for each plugin
-        // Just deduplicate by canonical key, keeping the better plugin data
-        const map = new Map();
-        plugins.forEach(plugin => {
-            const key = this.getCanonicalPluginKey(plugin);
-            if (!key) {
-                return;
-            }
-            const existing = map.get(key);
-            if (!existing || this.shouldPreferPlugin(plugin, existing)) {
-                map.set(key, plugin);
-            }
-        });
-        return Array.from(map.values());
+    return Array.from(variants);
+  }
+
+  normalizeName(name) {
+    if (!name || typeof name !== 'string') {
+      return '';
     }
+    return name.trim().toLowerCase().replace(/_/g, '-');
+  }
 
-    getCanonicalPluginKey(plugin) {
-        const candidates = [
-            this.extractRepoSlug(plugin.metadata?.repository),
-            this.extractRepoSlug(plugin.github_repo),
-            plugin.metadata?.name,
-            plugin.name,
-            plugin.definition?.name,
-        ];
-
-        const normalizedVariants = [];
-        const seen = new Set();
-        const addVariant = (value) => {
-            if (!value || seen.has(value)) {
-                return;
-            }
-            seen.add(value);
-            normalizedVariants.push(value);
-        };
-
-        for (const candidate of candidates) {
-            const normalized = this.normalizeName(candidate);
-            if (!normalized) {
-                continue;
-            }
-            addVariant(normalized);
-            const base = this.stripVersionSuffix(normalized);
-            if (base) {
-                addVariant(base);
-            }
-        }
-
-        if (normalizedVariants.length === 0) {
-            const variants = this.getPluginNameVariants(plugin);
-            return variants.length > 0 ? variants[0] : null;
-        }
-
-        return normalizedVariants[0];
+  stripVersionSuffix(name) {
+    if (!name) {
+      return '';
     }
+    const stripped = name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
+    return stripped;
+  }
 
-    shouldPreferPlugin(candidate, existing) {
-        return this.scorePlugin(candidate) >= this.scorePlugin(existing);
+  extractRepoSlug(repoUrl) {
+    if (!repoUrl || typeof repoUrl !== 'string') {
+      return '';
     }
-
-    scorePlugin(plugin) {
-        let score = 0;
-        if (plugin.metadata?.name) {
-            score += 3;
-        }
-        const normalizedName = this.normalizeName(plugin.name);
-        const baseName = this.stripVersionSuffix(normalizedName);
-        if (plugin.metadata?.name && baseName && plugin.metadata.name.toLowerCase() === baseName) {
-            score += 2;
-        } else if (normalizedName && normalizedName === baseName) {
-            score += 1;
-        }
-        if (plugin.version) {
-            score += 1;
-        }
-        if (plugin.platforms && plugin.platforms.length > 0) {
-            score += 1;
-        }
-        return score;
+    try {
+      const parts = repoUrl.split('/');
+      const slug = parts.filter(Boolean).pop();
+      return slug ? slug.replace(/\.git$/, '') : '';
+    } catch (err) {
+      return '';
     }
+  }
 
-    // Get possible name variants for matching installed plugins (handles -0.0.x suffixes)
-    getPluginNameVariants(plugin) {
-        const variants = new Set();
-        const addVariant = (name) => {
-            const normalized = this.normalizeName(name);
-            if (!normalized) {
-                return;
-            }
-            variants.add(normalized);
+  isPluginInstalled(plugin) {
+    return this.getPluginNameVariants(plugin).some(variant => this.installedPlugins.has(variant));
+  }
 
-            const versionStripped = this.stripVersionSuffix(normalized);
-            if (versionStripped && versionStripped !== normalized) {
-                variants.add(versionStripped);
-            }
-        };
-
-        addVariant(plugin.name);
-        if (plugin.metadata?.name) {
-            addVariant(plugin.metadata.name);
-        }
-        if (plugin.definition?.name) {
-            addVariant(plugin.definition.name);
-        }
-
-        return Array.from(variants);
-    }
-
-    normalizeName(name) {
-        if (!name || typeof name !== 'string') {
-            return '';
-        }
-        return name.trim().toLowerCase().replace(/_/g, '-');
-    }
-
-    stripVersionSuffix(name) {
-        if (!name) {
-            return '';
-        }
-        const stripped = name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '');
-        return stripped;
-    }
-
-    extractRepoSlug(repoUrl) {
-        if (!repoUrl || typeof repoUrl !== 'string') {
-            return '';
-        }
-        try {
-            const parts = repoUrl.split('/');
-            const slug = parts.filter(Boolean).pop();
-            return slug ? slug.replace(/\.git$/, '') : '';
-        } catch (err) {
-            return '';
-        }
-    }
-
-    isPluginInstalled(plugin) {
-        return this.getPluginNameVariants(plugin).some(variant => this.installedPlugins.has(variant));
-    }
-
-    renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
-        return `
+  renderGridCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
+    return `
             <div class="col-md-6 col-lg-4 mb-4" data-compatible="${compatibility.compatible}">
                 <div class="card h-100 plugin-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity: 0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
                     <div class="card-body">
@@ -969,10 +969,10 @@ class PluginMarketplace {
                 </div>
             </div>
         `;
-    }
+  }
 
-    renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
-        return `
+  renderListCard(plugin, isInstalled, updateInfo, compatibility, platformBadges, sourceBadge) {
+    return `
             <div class="col-12 mb-3" data-compatible="${compatibility.compatible}">
                 <div class="card plugin-card list-view-card ${compatibility.cssClass}" style="cursor: pointer; ${!compatibility.compatible ? 'opacity:0.7;' : ''}" onclick="marketplace.showPluginDetails('${plugin.name}')">
                     <div class="card-body">
@@ -1004,11 +1004,11 @@ class PluginMarketplace {
                 </div>
             </div>
         `;
-    }
+  }
 
-    renderActionButton(plugin, isInstalled, updateInfo, compatibility) {
-        if (!isInstalled && !compatibility.compatible) {
-            return `
+  renderActionButton(plugin, isInstalled, updateInfo, compatibility) {
+    if (!isInstalled && !compatibility.compatible) {
+      return `
                 <button class="btn btn-sm btn-outline-secondary w-100" disabled title="Not compatible with ${this.currentPlatformDisplay}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
@@ -1016,10 +1016,10 @@ class PluginMarketplace {
                     Not Available
                 </button>
             `;
-        }
+    }
 
-        if (!isInstalled) {
-            return `
+    if (!isInstalled) {
+      return `
                 <button class="btn btn-sm btn-primary w-100" onclick="event.stopPropagation(); marketplace.installPlugin('${plugin.name}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
@@ -1027,10 +1027,10 @@ class PluginMarketplace {
                     Install
                 </button>
             `;
-        }
+    }
 
-        if (updateInfo) {
-            return `
+    if (updateInfo) {
+      return `
                 <button class="btn btn-sm btn-warning w-100" onclick="event.stopPropagation(); marketplace.updatePlugin('${plugin.name}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M12,18.17L8.83,15L7.42,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z"/>
@@ -1038,9 +1038,9 @@ class PluginMarketplace {
                     Update
                 </button>
             `;
-        }
+    }
 
-        return `
+    return `
             <button class="btn btn-sm btn-outline-secondary w-100" disabled>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
@@ -1048,11 +1048,11 @@ class PluginMarketplace {
                 Installed
             </button>
         `;
-    }
+  }
 }
 
 const marketplace = new PluginMarketplace();
 
 document.addEventListener('DOMContentLoaded', () => {
-    marketplace.init();
+  marketplace.init();
 });

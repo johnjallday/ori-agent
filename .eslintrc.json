@@ -1,0 +1,58 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "script"
+  },
+  "globals": {
+    "API": "readonly",
+    "Logger": "readonly",
+    "EventBus": "readonly",
+    "Toast": "readonly",
+    "bootstrap": "readonly",
+    "marked": "readonly",
+    "hljs": "readonly",
+    "mermaid": "readonly",
+    "FormValidation": "readonly"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", {
+      "argsIgnorePattern": "^_",
+      "varsIgnorePattern": "^_"
+    }],
+    "no-console": "off",
+    "no-debugger": "warn",
+    "eqeqeq": ["warn", "always", { "null": "ignore" }],
+    "curly": ["warn", "multi-line"],
+    "no-var": "warn",
+    "prefer-const": "warn",
+    "no-multiple-empty-lines": ["warn", { "max": 2 }],
+    "no-trailing-spaces": "warn",
+    "semi": ["warn", "always"],
+    "quotes": ["warn", "single", { "avoidEscape": true, "allowTemplateLiterals": true }],
+    "indent": ["warn", 2, { "SwitchCase": 1 }],
+    "comma-dangle": ["warn", "never"],
+    "no-prototype-builtins": "off",
+    "no-async-promise-executor": "warn",
+    "no-return-await": "warn",
+    "require-await": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["internal/web/static/js/utils/*.js"],
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/",
+    "vendor/",
+    "*.min.js",
+    "dist/"
+  ]
+}

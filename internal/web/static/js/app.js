@@ -1,11 +1,13 @@
 // Ori Agent Application JavaScript
 
+const log = Logger.withContext('App');
+
 let currentAgent = '';
 let isComposing = false; // IME safety
 // Note: Chat state is now managed by chatStateMachine (see modules/chat-state.js)
 
 // Prompt history for up/down arrow navigation
-let promptHistory = [];
+const promptHistory = [];
 let historyIndex = -1;
 
 // Chat messages storage
@@ -66,7 +68,7 @@ function saveChatToLocalStorage() {
     const sanitized = sanitizeHistory(chatMessages);
     localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
-    console.error('Failed to save chat history:', error);
+    log.error('Failed to save chat history:', error);
     // Silent fail - don't show toast for localStorage issues
   }
 }
@@ -87,7 +89,7 @@ function loadChatFromLocalStorage() {
       restoreChatMessages();
     }
   } catch (error) {
-    console.error('Failed to load chat history:', error);
+    log.error('Failed to load chat history:', error);
     chatMessages = [];
     // Silent fail - don't show toast for localStorage issues
   }
@@ -122,12 +124,13 @@ function clearChatHistory() {
       chatArea.innerHTML = '';
     }
 
-    console.log('Chat history cleared');
+    log.info('Chat history cleared');
+    EventBus.emit('chat:cleared', { agent: currentAgent });
     if (window.Toast) {
       Toast.success('Chat history cleared');
     }
   } catch (error) {
-    console.error('Failed to clear chat history:', error);
+    log.error('Failed to clear chat history:', error);
     if (window.Toast) {
       Toast.error('Failed to clear chat history');
     }
@@ -158,26 +161,24 @@ function setupAgentDisplayClick() {
 // Refresh agent display in navbar
 async function refreshAgentDisplay() {
   try {
-    const response = await fetch('/api/agents');
-    if (response.ok) {
-      const data = await response.json();
-      const currentAgentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
+    const data = await API.get('/api/agents');
+    const currentAgentElement = document.querySelector('#currentAgentDisplay span.fw-medium');
 
-      if (currentAgentElement && data.current) {
-        currentAgentElement.textContent = data.current;
+    if (currentAgentElement && data.current) {
+      currentAgentElement.textContent = data.current;
 
-        // Update current agent and load chat history when agent changes
-        const previousAgent = currentAgent;
-        currentAgent = data.current;
+      // Update current agent and load chat history when agent changes
+      const previousAgent = currentAgent;
+      currentAgent = data.current;
 
-        // Load chat history if agent changed
-        if (previousAgent !== currentAgent) {
-          loadChatFromLocalStorage();
-        }
+      // Load chat history if agent changed
+      if (previousAgent !== currentAgent) {
+        loadChatFromLocalStorage();
+        EventBus.emit('agent:display:changed', { from: previousAgent, to: currentAgent });
       }
     }
   } catch (error) {
-    console.error('Failed to refresh agent display:', error);
+    log.error('Failed to refresh agent display:', error);
     if (window.Toast) {
       Toast.error('Failed to load agent information');
     }
@@ -277,10 +278,8 @@ function renderModal(data, metadata) {
 
   const modalId = 'modal-' + Date.now();
   const buttonLabel = metadata?.buttonLabel || 'Select';
-  const operation = metadata?.operation || '';
-  const action = metadata?.action || '';
 
-  let html = `
+  const html = `
     <div class="modal-script-selector" id="${modalId}">
       <div class="list-group mb-3" style="max-height: 400px; overflow-y: auto;">
         ${data.map((item, index) => `
@@ -374,25 +373,13 @@ function renderModal(data, metadata) {
           // Download each script sequentially using direct API call
           for (const filename of filenames) {
             try {
-              const response = await fetch('/api/plugins/tool-call', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  plugin_name: "ori-reaper",
-                  operation: "download_script",
-                  args: {
-                    filename: filename
-                  }
-                })
+              const result = await API.post('/api/plugins/tool-call', {
+                plugin_name: 'ori-reaper',
+                operation: 'download_script',
+                args: {
+                  filename: filename
+                }
               });
-
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-              }
-
-              const result = await response.json();
 
               if (result.success) {
                 successCount++;
@@ -402,7 +389,7 @@ function renderModal(data, metadata) {
                 addMessageToChat(`Error downloading ${filename}: ${result.error}`, false, true);
               }
             } catch (error) {
-              console.error(`Error downloading ${filename}:`, error);
+              log.error(`Error downloading ${filename}:`, error);
               errorCount++;
               addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
               if (window.Toast) {
@@ -427,7 +414,7 @@ function renderModal(data, metadata) {
           }, 2000);
 
         } catch (error) {
-          console.error('Download error:', error);
+          log.error('Download error:', error);
           addMessageToChat(`Error: ${error.message}`, false, true);
           downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
           downloadBtn.disabled = false;
@@ -633,27 +620,18 @@ function formatToolCallsForChat(toolCalls) {
       const args = typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}, null, 2);
       const result = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result ?? '', null, 2);
       return [
-        `<details>`,
+        '<details>',
         `<summary>Tool: <code>${functionName}</code></summary>`,
-        `<div style="margin-top:8px">`,
-        `<div><strong>Args</strong></div>`,
+        '<div style="margin-top:8px">',
+        '<div><strong>Args</strong></div>',
         `<pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(args)}</pre>`,
-        `<div><strong>Result</strong></div>`,
+        '<div><strong>Result</strong></div>',
         `<pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(result)}</pre>`,
-        `</div>`,
-        `</details>`
+        '</div>',
+        '</details>'
       ].join('\n');
     })
     .join('\n\n');
-}
-
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
 }
 
 // Chat state machine reference (initialized in initializeApp)
@@ -688,17 +666,8 @@ async function handleTaskCommand(message) {
   addMessageToChat(`/task ${args}`, true, false, false, true);
 
   try {
-    const response = await fetch(`/api/sessions/${sessionId}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: args })
-    });
+    const task = await API.post(`/api/sessions/${sessionId}/tasks`, { description: args });
 
-    if (!response.ok) {
-      throw new Error('Failed to create task');
-    }
-
-    const task = await response.json();
     addMessageToChat(`✓ Task created: "${task.description}"`, false, false);
 
     // Refresh session tasks
@@ -706,7 +675,7 @@ async function handleTaskCommand(message) {
       await window.sessionManager.loadSessionTasks();
     }
   } catch (error) {
-    console.error('Failed to create task:', error);
+    log.error('Failed to create task:', error);
     addMessageToChat(`✗ Failed to create task: ${error.message}`, false, true);
   }
 }
@@ -714,10 +683,7 @@ async function handleTaskCommand(message) {
 // Display task list inline in chat
 async function displayTaskList(sessionId) {
   try {
-    const response = await fetch(`/api/sessions/${sessionId}/tasks`);
-    if (!response.ok) throw new Error('Failed to load tasks');
-
-    const data = await response.json();
+    const data = await API.get(`/api/sessions/${sessionId}/tasks`);
     const tasks = data.tasks || [];
 
     if (tasks.length === 0) {
@@ -745,7 +711,7 @@ async function displayTaskList(sessionId) {
 
     addMessageToChat(message, false, false);
   } catch (error) {
-    console.error('Failed to load tasks:', error);
+    log.error('Failed to load tasks:', error);
     addMessageToChat(`✗ Failed to load tasks: ${error.message}`, false, true);
   }
 }
@@ -817,7 +783,7 @@ async function sendMessage(message) {
 
     // Build headers with session ID for multi-tab support
     const chatHeaders = {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     };
     if (window.sessionManager && window.sessionManager.getActiveSessionId()) {
       chatHeaders['X-Session-ID'] = window.sessionManager.getActiveSessionId();
@@ -848,9 +814,7 @@ async function sendMessage(message) {
 
     const data = await response.json();
 
-    console.log('Received data:', data);
-    console.log('data.response:', data.response);
-    console.log('typeof data.response:', typeof data.response);
+    log.debug('Received chat response:', data);
 
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
@@ -878,7 +842,7 @@ async function sendMessage(message) {
       }
 
       // Check if this was a successful /switch command and refresh agent display and sidebar
-      console.log('Checking for switch command:', {
+      log.debug('Checking for switch command:', {
         message: trimmedMessage,
         startsWithSwitch: trimmedMessage.startsWith('/switch'),
         hasCheckmark: responseText.includes('✅'),
@@ -887,7 +851,7 @@ async function sendMessage(message) {
       });
 
       if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
-        console.log('Successful agent switch detected, refreshing agent display and sidebar');
+        log.debug('Successful agent switch detected, refreshing agent display and sidebar');
         setTimeout(() => {
           refreshAgentDisplay();
           // Refresh sidebar agents list if the function exists
@@ -901,8 +865,10 @@ async function sendMessage(message) {
       if (window.sessionManager && window.sessionManager.onMessageSent) {
         window.sessionManager.onMessageSent();
       }
+
+      EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
     } else {
-      console.error('No response field found. Available fields:', Object.keys(data));
+      log.error('No response field found. Available fields:', Object.keys(data));
       const details = escapeHtml(JSON.stringify(data, null, 2));
       addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
       if (window.Toast) {
@@ -913,11 +879,11 @@ async function sendMessage(message) {
   } catch (error) {
     // Handle user cancellation gracefully
     if (error.name === 'AbortError') {
-      console.log('Request cancelled by user');
+      log.debug('Request cancelled by user');
       return;
     }
 
-    console.error('Chat error:', error);
+    log.error('Chat error:', error);
     addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
     if (window.Toast) {
       Toast.error('Failed to send message');
@@ -959,7 +925,7 @@ function setupChat() {
   const enterToSend = document.getElementById('enterToSend');
 
   if (!input || !sendBtn) {
-    console.warn('Chat elements not found');
+    log.warn('Chat elements not found');
     return;
   }
 
@@ -989,7 +955,7 @@ function setupChat() {
         }
       }
     }
-    
+
     // Handle history navigation
     if (e.key === 'ArrowUp' && !e.shiftKey && promptHistory.length > 0) {
       e.preventDefault();
@@ -998,7 +964,7 @@ function setupChat() {
         input.value = promptHistory[historyIndex];
       }
     }
-    
+
     if (e.key === 'ArrowDown' && !e.shiftKey) {
       e.preventDefault();
       if (historyIndex > 0) {
@@ -1049,13 +1015,13 @@ function setupChat() {
     });
   }
 
-  console.log('Chat functionality initialized');
+  log.debug('Chat functionality initialized');
 }
 
 // ---- Sidebar Functionality ----
 // Sidebar functionality has been moved to modular files:
 // - js/modules/agents.js - Agent management
-// - js/modules/plugins.js - Plugin management  
+// - js/modules/plugins.js - Plugin management
 // - js/modules/settings.js - Settings management
 // - js/modules/sidebar.js - Main sidebar controller
 
@@ -1072,9 +1038,8 @@ function setupSidebarToggle() {
     };
 
     sidebarToggle.addEventListener('click', function(event) {
-      console.log('[SIDEBAR TOGGLE] Click detected');
-      console.log('[SIDEBAR TOGGLE] Event target:', event.target);
-      console.log('[SIDEBAR TOGGLE] Current sidebar classes:', sidebar.className);
+      log.debug('[SIDEBAR TOGGLE] Click detected');
+      log.debug('[SIDEBAR TOGGLE] Current sidebar classes:', sidebar.className);
 
       // Prevent event propagation to avoid interference with other handlers
       event.stopPropagation();
@@ -1100,8 +1065,7 @@ function setupSidebarToggle() {
         sidebarToggle.setAttribute('aria-expanded', 'true');
       }
 
-      console.log('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
-      console.log('[SIDEBAR TOGGLE] Sidebar hidden?', sidebar.classList.contains('d-none'));
+      log.debug('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
 
       // Handle sidebar width
       if (isHidden) {
@@ -1112,6 +1076,8 @@ function setupSidebarToggle() {
         const savedWidth = localStorage.getItem('sidebarWidth') || '300';
         document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
       }
+
+      EventBus.emit('sidebar:toggled', { hidden: isHidden });
     });
 
     document.addEventListener('keydown', (event) => {
@@ -1192,9 +1158,9 @@ async function initializeApp() {
       chatStateUIModule.cleanupChatStateUI();
     });
 
-    console.log('Chat state machine initialized');
+    log.debug('Chat state machine initialized');
   } catch (error) {
-    console.error('Failed to initialize chat state machine:', error);
+    log.error('Failed to initialize chat state machine:', error);
     // Fall back to simple behavior without state machine
   }
 
@@ -1202,9 +1168,9 @@ async function initializeApp() {
   try {
     const pluginBannerModule = await import('./modules/plugin-init-banner.js');
     await pluginBannerModule.initPluginBanner();
-    console.log('Plugin init banner initialized');
+    log.debug('Plugin init banner initialized');
   } catch (error) {
-    console.error('Failed to initialize plugin banner:', error);
+    log.error('Failed to initialize plugin banner:', error);
   }
 
   // Initialize chat auto-scroll
@@ -1217,9 +1183,9 @@ async function initializeApp() {
       autoScrollModule.cleanupChatAutoScroll();
     });
 
-    console.log('Chat auto-scroll initialized');
+    log.debug('Chat auto-scroll initialized');
   } catch (error) {
-    console.error('Failed to initialize auto-scroll:', error);
+    log.error('Failed to initialize auto-scroll:', error);
   }
 
   // Set up chat functionality
@@ -1239,13 +1205,14 @@ async function initializeApp() {
     const { onboardingManager } = await import('./modules/onboarding.js');
     await onboardingManager.init();
   } catch (error) {
-    console.error('Failed to initialize onboarding:', error);
+    log.error('Failed to initialize onboarding:', error);
     // Silent fail - onboarding is optional
   }
 
   // Sidebar functionality is now handled by modular files
 
-  console.log('App initialized successfully');
+  log.info('App initialized successfully');
+  EventBus.emit('app:initialized');
 }
 
 // Initialize when DOM is ready

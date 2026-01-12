@@ -1,0 +1,34 @@
+# Build outputs
+bin/
+dist/
+*.min.js
+*.min.css
+
+# Go files (handled by gofmt)
+*.go
+
+# Dependencies
+node_modules/
+vendor/
+
+# Generated files
+plugin_registry_cache.json
+local_plugin_registry.json
+
+# Binary and data files
+*.exe
+*.dll
+*.so
+*.dylib
+*.db
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

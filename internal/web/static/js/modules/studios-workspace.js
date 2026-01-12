@@ -5,7 +5,7 @@
 
 // Global state
 let availableAgents = [];
-let selectedAgents = new Set();
+const selectedAgents = new Set();
 let workspaceRefreshInterval = null;
 let hasLoadedWorkspaces = false;
 
@@ -18,88 +18,88 @@ const MAX_CONSECUTIVE_FAILURES = 3; // After 3 failures, show offline notificati
 let serverOfflineNotification = null;
 
 // Studios-specific state for agent management
-let studiosSystemAgents = [];
+const studiosSystemAgents = [];
 // studiosAvailableProviders is declared in studios-agent-modals.js
 
 /**
  * Initialize the studios page
  */
 function initializeStudiosPage() {
-    loadWorkspaces({ showLoading: true });
-    loadWorkspaceAgents();
+  loadWorkspaces({ showLoading: true });
+  loadWorkspaceAgents();
 
-    // Check URL parameters for view and workspace
-    const urlParams = new URLSearchParams(window.location.search);
-    const view = urlParams.get('view');
-    const workspaceId = urlParams.get('workspace');
+  // Check URL parameters for view and workspace
+  const urlParams = new URLSearchParams(window.location.search);
+  const view = urlParams.get('view');
+  const workspaceId = urlParams.get('workspace');
 
-    if (view === 'canvas') {
-        // Switch to canvas view
-        switchView('canvas');
+  if (view === 'canvas') {
+    // Switch to canvas view
+    switchView('canvas');
 
-        // If workspace ID is provided, select it after studios are loaded
-        if (workspaceId) {
-            // Hide the "Select Studio:" label since studio is already selected
-            const label = document.getElementById('canvas-studio-label');
-            if (label) {
-                label.style.display = 'none';
-            }
+    // If workspace ID is provided, select it after studios are loaded
+    if (workspaceId) {
+      // Hide the "Select Studio:" label since studio is already selected
+      const label = document.getElementById('canvas-studio-label');
+      if (label) {
+        label.style.display = 'none';
+      }
 
-            // Wait a bit for the select to be populated
-            setTimeout(() => {
-                const select = document.getElementById('canvas-studio-select');
-                if (select) {
-                    select.value = workspaceId;
-                    loadCanvasStudio(workspaceId);
-                }
-            }, 500);
+      // Wait a bit for the select to be populated
+      setTimeout(() => {
+        const select = document.getElementById('canvas-studio-select');
+        if (select) {
+          select.value = workspaceId;
+          loadCanvasStudio(workspaceId);
         }
+      }, 500);
     }
+  }
 
-    // Enable auto-refresh
-    startWorkspacePolling();
+  // Enable auto-refresh
+  startWorkspacePolling();
 }
 
 /**
  * Cleanup on page unload
  */
 function cleanupStudiosPage() {
-    stopWorkspacePolling();
+  stopWorkspacePolling();
 }
 
 /**
  * Start automatic workspace polling
  */
 function startWorkspacePolling() {
-    if (workspaceRefreshInterval) {
-        clearInterval(workspaceRefreshInterval);
-    }
-    workspaceRefreshInterval = setInterval(() => {
-        loadWorkspaces();
-    }, 10000); // Refresh every 10 seconds
+  if (workspaceRefreshInterval) {
+    clearInterval(workspaceRefreshInterval);
+  }
+  workspaceRefreshInterval = setInterval(() => {
+    loadWorkspaces();
+  }, 10000); // Refresh every 10 seconds
 }
 
 /**
  * Stop automatic workspace polling
  */
 function stopWorkspacePolling() {
-    if (workspaceRefreshInterval) {
-        clearInterval(workspaceRefreshInterval);
-        workspaceRefreshInterval = null;
-    }
+  if (workspaceRefreshInterval) {
+    clearInterval(workspaceRefreshInterval);
+    workspaceRefreshInterval = null;
+  }
 }
 
 /**
  * Show server offline notification
  */
 function showServerOfflineNotification() {
-    // Remove existing notification if any
-    hideServerOfflineNotification();
+  // Remove existing notification if any
+  hideServerOfflineNotification();
 
-    // Create notification banner
-    const notification = document.createElement('div');
-    notification.id = 'server-offline-notification';
-    notification.style.cssText = `
+  // Create notification banner
+  const notification = document.createElement('div');
+  notification.id = 'server-offline-notification';
+  notification.style.cssText = `
         position: fixed;
         top: 70px;
         left: 50%;
@@ -116,7 +116,7 @@ function showServerOfflineNotification() {
         animation: slideDown 0.3s ease;
     `;
 
-    notification.innerHTML = `
+  notification.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12,2C17.53,2 22,6.47 22,12C22,17.53 17.53,22 12,22C6.47,22 2,17.53 2,12C2,6.47 6.47,2 12,2M15.59,7L12,10.59L8.41,7L7,8.41L10.59,12L7,15.59L8.41,17L12,13.41L15.59,17L17,15.59L13.41,12L17,8.41L15.59,7Z"/>
         </svg>
@@ -133,9 +133,9 @@ function showServerOfflineNotification() {
         ">Retry Now</button>
     `;
 
-    // Add animation
-    const style = document.createElement('style');
-    style.textContent = `
+  // Add animation
+  const style = document.createElement('style');
+  style.textContent = `
         @keyframes slideDown {
             from {
                 opacity: 0;
@@ -147,142 +147,142 @@ function showServerOfflineNotification() {
             }
         }
     `;
-    document.head.appendChild(style);
+  document.head.appendChild(style);
 
-    document.body.appendChild(notification);
-    serverOfflineNotification = notification;
+  document.body.appendChild(notification);
+  serverOfflineNotification = notification;
 }
 
 /**
  * Hide server offline notification
  */
 function hideServerOfflineNotification() {
-    if (serverOfflineNotification) {
-        serverOfflineNotification.remove();
-        serverOfflineNotification = null;
-    }
+  if (serverOfflineNotification) {
+    serverOfflineNotification.remove();
+    serverOfflineNotification = null;
+  }
 }
 
 /**
  * Handle connection failure
  */
 function handleConnectionFailure() {
-    consecutiveFailures++;
+  consecutiveFailures++;
 
-    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        // Stop regular polling
-        stopWorkspacePolling();
+  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+    // Stop regular polling
+    stopWorkspacePolling();
 
-        // Show offline notification
-        showServerOfflineNotification();
-        isServerConnected = false;
+    // Show offline notification
+    showServerOfflineNotification();
+    isServerConnected = false;
 
-        // Implement exponential backoff for retries
-        retryDelay = Math.min(retryDelay * 1.5, MAX_RETRY_DELAY);
+    // Implement exponential backoff for retries
+    retryDelay = Math.min(retryDelay * 1.5, MAX_RETRY_DELAY);
 
-        console.log(`Server appears offline. Will retry in ${retryDelay/1000} seconds...`);
+    console.log(`Server appears offline. Will retry in ${retryDelay/1000} seconds...`);
 
-        // Schedule retry with exponential backoff
-        setTimeout(() => {
-            loadWorkspaces();
-        }, retryDelay);
-    }
+    // Schedule retry with exponential backoff
+    setTimeout(() => {
+      loadWorkspaces();
+    }, retryDelay);
+  }
 }
 
 /**
  * Handle connection success
  */
 function handleConnectionSuccess() {
-    if (!isServerConnected) {
-        // Server is back online
-        console.log('Server connection restored');
-        hideServerOfflineNotification();
+  if (!isServerConnected) {
+    // Server is back online
+    console.log('Server connection restored');
+    hideServerOfflineNotification();
 
-        // Resume normal polling
-        startWorkspacePolling();
-    }
+    // Resume normal polling
+    startWorkspacePolling();
+  }
 
-    // Reset failure tracking
-    consecutiveFailures = 0;
-    retryDelay = 5000;
-    isServerConnected = true;
+  // Reset failure tracking
+  consecutiveFailures = 0;
+  retryDelay = 5000;
+  isServerConnected = true;
 }
 
 /**
  * Manual retry connection
  */
 window.manualRetryConnection = async function() {
-    console.log('Manual retry triggered');
-    hideServerOfflineNotification();
+  console.log('Manual retry triggered');
+  hideServerOfflineNotification();
 
-    await loadWorkspaces({ showLoading: true });
+  await loadWorkspaces({ showLoading: true });
 };
 
 /**
  * Load workspaces from server (unified workspace API)
  */
 async function loadWorkspaces(options = {}) {
-    const { showLoading = false } = options;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+  const { showLoading = false } = options;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    try {
-        if (showLoading || !hasLoadedWorkspaces) {
-            renderWorkspacesLoadingState();
-        }
-
-        // Use unified workspace API (same as sessions sidebar)
-        const response = await fetch('/api/workspaces?tree=true', {
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (data.error) {
-            console.error('Server error:', data.error);
-            handleConnectionFailure();
-            return;
-        }
-
-        // Connection successful
-        handleConnectionSuccess();
-        // API returns { folders: [...] } - map to workspaces for rendering
-        renderWorkspaces(data.folders || []);
-        hasLoadedWorkspaces = true;
-
-    } catch (error) {
-        clearTimeout(timeoutId);
-
-        // Silently ignore abort errors if server is connected
-        if (error.name === 'AbortError' && isServerConnected) {
-            console.warn('Request timed out, but server appears online');
-            return;
-        }
-
-        console.error('Error loading workspaces:', error);
-
-        // Check if it's a network error (server offline)
-        if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-            handleConnectionFailure();
-        } else {
-            if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
-                consecutiveFailures++;
-            }
-        }
+  try {
+    if (showLoading || !hasLoadedWorkspaces) {
+      renderWorkspacesLoadingState();
     }
+
+    // Use unified workspace API (same as sessions sidebar)
+    const response = await fetch('/api/workspaces?tree=true', {
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Server error:', data.error);
+      handleConnectionFailure();
+      return;
+    }
+
+    // Connection successful
+    handleConnectionSuccess();
+    // API returns { folders: [...] } - map to workspaces for rendering
+    renderWorkspaces(data.folders || []);
+    hasLoadedWorkspaces = true;
+
+  } catch (error) {
+    clearTimeout(timeoutId);
+
+    // Silently ignore abort errors if server is connected
+    if (error.name === 'AbortError' && isServerConnected) {
+      console.warn('Request timed out, but server appears online');
+      return;
+    }
+
+    console.error('Error loading workspaces:', error);
+
+    // Check if it's a network error (server offline)
+    if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      handleConnectionFailure();
+    } else {
+      if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+        consecutiveFailures++;
+      }
+    }
+  }
 }
 
 function renderWorkspacesLoadingState() {
-    const grid = document.getElementById('workspaces-grid');
-    if (!grid) return;
+  const grid = document.getElementById('workspaces-grid');
+  if (!grid) return;
 
-    const skeletons = Array.from({ length: 6 }).map(() => `
+  const skeletons = Array.from({ length: 6 }).map(() => `
         <div class="col-12 col-sm-6 col-lg-4">
             <div class="modern-card p-4 h-100 workspace-card workspace-card-skeleton">
                 <div class="d-flex justify-content-between align-items-start mb-3">
@@ -305,11 +305,11 @@ function renderWorkspacesLoadingState() {
         </div>
     `).join('');
 
-    grid.innerHTML = skeletons;
+  grid.innerHTML = skeletons;
 }
 
 function renderWorkspacesEmptyState() {
-    return `
+  return `
         <div class="col-12">
             <div class="workspace-empty-card modern-card">
                 <div class="workspace-empty-content">
@@ -348,88 +348,88 @@ function renderWorkspacesEmptyState() {
 }
 
 function getWorkspaceStatusMeta(status) {
-    const normalized = (status || '').toString().toLowerCase();
-    if (normalized === 'active') {
-        return { label: 'Active', badgeClass: 'badge-success', indicatorClass: 'status-online', isActive: true };
-    }
-    if (normalized === 'completed') {
-        return { label: 'Completed', badgeClass: 'badge-info', indicatorClass: '', isActive: false };
-    }
-    if (normalized === 'failed') {
-        return { label: 'Failed', badgeClass: 'badge-danger', indicatorClass: '', isActive: false };
-    }
-    if (normalized === 'paused') {
-        return { label: 'Paused', badgeClass: 'badge-warning', indicatorClass: '', isActive: false };
-    }
-    const label = normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Idle';
-    return { label, badgeClass: 'badge-secondary', indicatorClass: '', isActive: false };
+  const normalized = (status || '').toString().toLowerCase();
+  if (normalized === 'active') {
+    return { label: 'Active', badgeClass: 'badge-success', indicatorClass: 'status-online', isActive: true };
+  }
+  if (normalized === 'completed') {
+    return { label: 'Completed', badgeClass: 'badge-info', indicatorClass: '', isActive: false };
+  }
+  if (normalized === 'failed') {
+    return { label: 'Failed', badgeClass: 'badge-danger', indicatorClass: '', isActive: false };
+  }
+  if (normalized === 'paused') {
+    return { label: 'Paused', badgeClass: 'badge-warning', indicatorClass: '', isActive: false };
+  }
+  const label = normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Idle';
+  return { label, badgeClass: 'badge-secondary', indicatorClass: '', isActive: false };
 }
 
 function sanitizeWorkspaceColor(color) {
-    if (!color || typeof color !== 'string') return '';
-    const trimmed = color.trim();
-    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
-        return trimmed;
-    }
-    return '';
+  if (!color || typeof color !== 'string') return '';
+  const trimmed = color.trim();
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
+    return trimmed;
+  }
+  return '';
 }
 
 function formatRelativeTime(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return '';
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '';
 
-    const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (diffSeconds < 60) return 'just now';
-    if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
-    if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
-    if (diffSeconds < 604800) return `${Math.floor(diffSeconds / 86400)}d ago`;
-    if (diffSeconds < 2592000) return `${Math.floor(diffSeconds / 604800)}w ago`;
+  const diffSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSeconds < 60) return 'just now';
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m ago`;
+  if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
+  if (diffSeconds < 604800) return `${Math.floor(diffSeconds / 86400)}d ago`;
+  if (diffSeconds < 2592000) return `${Math.floor(diffSeconds / 604800)}w ago`;
 
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatDateTime(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return '';
-    return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-    });
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
 }
 
 /**
  * Render workspaces grid
  */
 function renderWorkspaces(workspaces) {
-    const grid = document.getElementById('workspaces-grid');
-    if (!grid) return;
+  const grid = document.getElementById('workspaces-grid');
+  if (!grid) return;
 
-    if (!Array.isArray(workspaces) || workspaces.length === 0) {
-        grid.innerHTML = renderWorkspacesEmptyState();
-        return;
-    }
+  if (!Array.isArray(workspaces) || workspaces.length === 0) {
+    grid.innerHTML = renderWorkspacesEmptyState();
+    return;
+  }
 
-    grid.innerHTML = workspaces.map(renderWorkspaceCard).join('');
+  grid.innerHTML = workspaces.map(renderWorkspaceCard).join('');
 }
 
 function renderWorkspaceCard(workspace) {
-    const statusMeta = getWorkspaceStatusMeta(workspace.status);
-    const safeColor = sanitizeWorkspaceColor(workspace.color);
-    const activityDate = workspace.updated_at || workspace.created_at;
-    const relativeActivity = activityDate ? formatRelativeTime(activityDate) : '';
-    const activityLabel = relativeActivity ? `Updated ${relativeActivity}` : 'Activity unknown';
-    const activityTitle = activityDate ? formatDateTime(activityDate) : '';
-    const description = workspace.description ? escapeHtml(workspace.description) : 'No description provided yet.';
-    const tasksCount = workspace.task_count || 0;
-    const sessionsCount = workspace.session_count || 0;
-    const notesCount = workspace.note_count || 0;
+  const statusMeta = getWorkspaceStatusMeta(workspace.status);
+  const safeColor = sanitizeWorkspaceColor(workspace.color);
+  const activityDate = workspace.updated_at || workspace.created_at;
+  const relativeActivity = activityDate ? formatRelativeTime(activityDate) : '';
+  const activityLabel = relativeActivity ? `Updated ${relativeActivity}` : 'Activity unknown';
+  const activityTitle = activityDate ? formatDateTime(activityDate) : '';
+  const description = workspace.description ? escapeHtml(workspace.description) : 'No description provided yet.';
+  const tasksCount = workspace.task_count || 0;
+  const sessionsCount = workspace.session_count || 0;
+  const notesCount = workspace.note_count || 0;
 
-    return `
+  return `
         <div class="col-12 col-sm-6 col-lg-4">
             <div class="modern-card p-4 h-100 d-flex flex-column workspace-card ${statusMeta.isActive ? 'active-workspace' : ''}" onclick="viewWorkspace('${workspace.id}')" style="cursor: pointer; transition: all 0.2s ease;">
                 <div class="workspace-card-header">
@@ -494,118 +494,118 @@ function renderWorkspaceCard(workspace) {
  * Utility function to escape HTML
  */
 function escapeHtml(text) {
-    if (text == null) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  if (text == null) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
  * Load available agents for workspace creation
  */
 async function loadWorkspaceAgents() {
-    try {
-        const response = await fetch('/api/agents');
-        const data = await response.json();
+  try {
+    const response = await fetch('/api/agents');
+    const data = await response.json();
 
-        availableAgents = data.agents || [];
-        populateAgentDropdown();
-    } catch (error) {
-        console.error('Error loading workspace agents:', error);
-    }
+    availableAgents = data.agents || [];
+    populateAgentDropdown();
+  } catch (error) {
+    console.error('Error loading workspace agents:', error);
+  }
 }
 
 /**
  * Populate agent dropdown
  */
 function populateAgentDropdown() {
-    const select = document.getElementById('parent-agent');
-    if (!select) return;
-    select.innerHTML = availableAgents.map(agent =>
-        `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
-    ).join('');
+  const select = document.getElementById('parent-agent');
+  if (!select) return;
+  select.innerHTML = availableAgents.map(agent =>
+    `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
+  ).join('');
 }
 
 /**
  * Delete a workspace
  */
 async function deleteWorkspace(workspaceId) {
-    if (!confirm('Are you sure you want to delete this workspace? This action cannot be undone.')) {
-        return;
-    }
+  if (!confirm('Are you sure you want to delete this workspace? This action cannot be undone.')) {
+    return;
+  }
 
-    try {
-        // Use unified workspace API
-        const response = await fetch(`/api/workspaces/${workspaceId}`, {
-            method: 'DELETE'
-        });
+  try {
+    // Use unified workspace API
+    const response = await fetch(`/api/workspaces/${workspaceId}`, {
+      method: 'DELETE'
+    });
 
-        if (response.ok) {
-            await loadWorkspaces();
-        } else {
-            showError('Failed to delete workspace');
-        }
-    } catch (error) {
-        console.error('Error deleting workspace:', error);
-        showError('Error deleting workspace');
+    if (response.ok) {
+      await loadWorkspaces();
+    } else {
+      showError('Failed to delete workspace');
     }
+  } catch (error) {
+    console.error('Error deleting workspace:', error);
+    showError('Error deleting workspace');
+  }
 }
 
 /**
  * Show error message
  */
 function showError(message) {
-    alert(message);
+  alert(message);
 }
 
 /**
  * Open workspace canvas view
  */
 function openWorkspaceCanvas(workspaceId) {
-    window.location.href = `/workspaces/${workspaceId}/canvas`;
+  window.location.href = `/workspaces/${workspaceId}/canvas`;
 }
 
 /**
  * Switch between grid and canvas view
  */
 function switchView(view) {
-    const gridView = document.getElementById('grid-view');
-    const canvasView = document.getElementById('canvas-view');
+  const gridView = document.getElementById('grid-view');
+  const canvasView = document.getElementById('canvas-view');
 
-    if (view === 'canvas') {
-        gridView.style.display = 'none';
-        canvasView.style.display = 'block';
-        populateCanvasStudioSelect();
-    } else {
-        gridView.style.display = 'block';
-        canvasView.style.display = 'none';
-    }
+  if (view === 'canvas') {
+    gridView.style.display = 'none';
+    canvasView.style.display = 'block';
+    populateCanvasStudioSelect();
+  } else {
+    gridView.style.display = 'block';
+    canvasView.style.display = 'none';
+  }
 }
 
 /**
  * Populate canvas studio select dropdown
  */
 function populateCanvasStudioSelect() {
-    const select = document.getElementById('canvas-studio-select');
-    if (!select) return;
+  const select = document.getElementById('canvas-studio-select');
+  if (!select) return;
 
-    // Use unified workspace API
-    fetch('/api/workspaces')
-        .then(res => res.json())
-        .then(data => {
-            // API returns { folders: [...] } - map to workspaces
-            const workspaces = data.folders || [];
-            select.innerHTML = '<option value="">Choose a studio...</option>' +
+  // Use unified workspace API
+  fetch('/api/workspaces')
+    .then(res => res.json())
+    .then(data => {
+      // API returns { folders: [...] } - map to workspaces
+      const workspaces = data.folders || [];
+      select.innerHTML = '<option value="">Choose a studio...</option>' +
                 workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
-        })
-        .catch(err => console.error('Error loading studios:', err));
+    })
+    .catch(err => console.error('Error loading studios:', err));
 }
 
 /**
  * View workspace details
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/workspaces/${workspaceId}`;
+  window.location.href = `/workspaces/${workspaceId}`;
 }
 
 // Export functions for global access

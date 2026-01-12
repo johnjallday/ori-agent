@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint fmt vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch lint lint-js lint-js-fix fmt fmt-js check-js vet clean plugins plugins-local server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
 
 # Default target
 .DEFAULT_GOAL := help
@@ -252,6 +252,42 @@ lint: ## Run linter (requires golangci-lint)
 	fi
 	golangci-lint run ./... --max-same-issues 0 --max-issues-per-linter 0
 	@echo "$(GREEN)✓ Lint passed$(NC)"
+
+lint-js: ## Run ESLint on JavaScript files (requires npm install)
+	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"
+	@if [ ! -d "node_modules" ]; then \
+		echo "$(YELLOW)Installing npm dependencies...$(NC)"; \
+		npm install; \
+	fi
+	npm run lint
+	@echo "$(GREEN)✓ ESLint passed$(NC)"
+
+lint-js-fix: ## Run ESLint and auto-fix issues
+	@echo "$(BLUE)Running ESLint with auto-fix...$(NC)"
+	@if [ ! -d "node_modules" ]; then \
+		echo "$(YELLOW)Installing npm dependencies...$(NC)"; \
+		npm install; \
+	fi
+	npm run lint:fix
+	@echo "$(GREEN)✓ ESLint auto-fix complete$(NC)"
+
+fmt-js: ## Format JavaScript files with Prettier (requires npm install)
+	@echo "$(BLUE)Formatting JavaScript with Prettier...$(NC)"
+	@if [ ! -d "node_modules" ]; then \
+		echo "$(YELLOW)Installing npm dependencies...$(NC)"; \
+		npm install; \
+	fi
+	npm run format
+	@echo "$(GREEN)✓ Prettier formatting complete$(NC)"
+
+check-js: ## Check JavaScript formatting without modifying files
+	@echo "$(BLUE)Checking JavaScript formatting...$(NC)"
+	@if [ ! -d "node_modules" ]; then \
+		echo "$(YELLOW)Installing npm dependencies...$(NC)"; \
+		npm install; \
+	fi
+	npm run format:check
+	@echo "$(GREEN)✓ JavaScript formatting check passed$(NC)"
 
 check: fmt vet test ## Run all checks (fmt, vet, test)
 	@echo "$(GREEN)✓ All checks passed$(NC)"

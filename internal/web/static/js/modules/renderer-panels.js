@@ -653,7 +653,7 @@ export class RendererPanels {
       { label: 'Current Tasks', value: this.state.expandedAgent.currentTasks?.length || 0, color: '#10b981' },
       { label: 'Queued Tasks', value: this.state.expandedAgent.queuedTasks?.length || 0, color: '#3b82f6' },
       { label: 'Completed', value: this.state.expandedAgent.completedTasks || 0, color: '#6b7280' },
-      { label: 'Failed', value: this.state.expandedAgent.failedTasks || 0, color: '#ef4444' },
+      { label: 'Failed', value: this.state.expandedAgent.failedTasks || 0, color: '#ef4444' }
     ];
 
     stats.forEach((stat, index) => {

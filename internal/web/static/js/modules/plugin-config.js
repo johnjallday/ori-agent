@@ -63,27 +63,27 @@ async function showPluginConfigModal(pluginName) {
               <form id="pluginConfigForm">
                 <p style="color: var(--text-secondary); margin-bottom: 20px;">
                   ${configData.is_initialized ?
-                    'Edit the configuration settings for this plugin:' :
-                    'This plugin requires configuration before it can be used. Please provide the following information:'}
+    'Edit the configuration settings for this plugin:' :
+    'This plugin requires configuration before it can be used. Please provide the following information:'}
                 </p>
                 ${finalConfigVars.map(configVar => {
-                  // Support both 'key' (new format) and 'name' (old format) for field identifier
-                  const fieldKey = configVar.key || configVar.name;
-                  const fieldLabel = configVar.name || configVar.key;
-                  const placeholder = configVar.placeholder || configVar.default_value || '';
-                  // Get current value, falling back to default_value if not set
-                  let currentValue = currentValues[fieldKey];
-                  if (currentValue === undefined || currentValue === null || currentValue === '') {
-                    currentValue = configVar.default_value !== undefined ? configVar.default_value : '';
-                  }
-                  // Check if this is a multiline field (contains newlines in value, placeholder, or default)
-                  const isMultiline = (typeof currentValue === 'string' && currentValue.includes('\n')) ||
+    // Support both 'key' (new format) and 'name' (old format) for field identifier
+    const fieldKey = configVar.key || configVar.name;
+    const fieldLabel = configVar.name || configVar.key;
+    const placeholder = configVar.placeholder || configVar.default_value || '';
+    // Get current value, falling back to default_value if not set
+    let currentValue = currentValues[fieldKey];
+    if (currentValue === undefined || currentValue === null || currentValue === '') {
+      currentValue = configVar.default_value !== undefined ? configVar.default_value : '';
+    }
+    // Check if this is a multiline field (contains newlines in value, placeholder, or default)
+    const isMultiline = (typeof currentValue === 'string' && currentValue.includes('\n')) ||
                                      (typeof placeholder === 'string' && placeholder.includes('\n')) ||
                                      fieldKey.includes('patterns') || fieldKey.includes('dirs');
-                  // Normalize type names (API uses 'bool'/'int', JS typically uses 'boolean'/'number')
-                  const normalizedType = configVar.type === 'bool' ? 'boolean' :
-                                        configVar.type === 'int' ? 'number' : configVar.type;
-                  return `
+    // Normalize type names (API uses 'bool'/'int', JS typically uses 'boolean'/'number')
+    const normalizedType = configVar.type === 'bool' ? 'boolean' :
+      configVar.type === 'int' ? 'number' : configVar.type;
+    return `
                   <div class="mb-3">
                     <label for="config_${fieldKey}" class="form-label" style="color: var(--text-primary);">
                       ${fieldLabel}
@@ -315,7 +315,7 @@ async function savePluginConfig(pluginName, configVars) {
       // Support both 'key' (new format) and 'name' (old format)
       const fieldKey = configVar.key || configVar.name;
       const normalizedType = configVar.type === 'bool' ? 'boolean' :
-                            configVar.type === 'int' ? 'number' : configVar.type;
+        configVar.type === 'int' ? 'number' : configVar.type;
 
       const element = document.getElementById(`config_${fieldKey}`);
       if (!element) continue;
@@ -372,8 +372,8 @@ async function constructPathFromDirHandle(dirHandle) {
     // Try to get the full path if available (newer browsers)
     if (dirHandle.getDirectoryHandle) {
       // Try to resolve the full path by traversing up to get context
-      let pathParts = [dirHandle.name];
-      let current = dirHandle;
+      const pathParts = [dirHandle.name];
+      const current = dirHandle;
 
       // This is a simplified approach - in practice, getting full paths
       // from directory handles is limited for security reasons
@@ -636,7 +636,7 @@ async function handleFileUpload(fieldName, inputField) {
         const response = await fetch('/api/plugins/upload-config', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             plugin_name: pluginName,

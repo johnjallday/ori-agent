@@ -359,13 +359,6 @@ class AgentCanvas {
   // ==================== METHODS ====================
 
 
-
-
-
-
-
-
-
   // Initialization methods delegated to initialization module
   init() { return this.initModule.init(); }
   resize() { return this.initModule.resize(); }
@@ -377,17 +370,10 @@ class AgentCanvas {
   updateChainParticles() { return this.animation.updateChainParticles(); }
 
 
-
   // Timeline methods delegated to timeline module
   addTimelineEvent(eventData) { return this.timeline.addTimelineEvent(eventData); }
   toggleTimeline() { return this.timeline.toggleTimeline(); }
   animateTimelinePanel(expanding) { return this.timeline.animateTimelinePanel(expanding); }
-
-
-
-
-
-
 
 
   // Animation methods delegated to animation module (continued)
@@ -535,27 +521,12 @@ class AgentCanvas {
    */
 
 
-
-
   // Helper function to wrap text
-
-
-
 
 
   // Helper function to draw rounded rectangle
 
   // Mouse interaction handlers
-
-
-
-
-
-
-
-
-
-
 
 
   async copyResultToClipboard() {
@@ -586,7 +557,6 @@ class AgentCanvas {
       alert('Failed to copy to clipboard. Please try selecting and copying the text manually.');
     }
   }
-
 
 
   // Layout methods delegated to layout module
@@ -1004,7 +974,6 @@ class AgentCanvas {
   async executeCombiner(combiner) {
     return combinerExecute(this, combiner);
   }
-
 
 
   destroy() {

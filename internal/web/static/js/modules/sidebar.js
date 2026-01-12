@@ -1,9 +1,11 @@
 // Sidebar Controller Module
 // Main sidebar functionality coordinator that orchestrates all sidebar modules
 
+const log = Logger.withContext('Sidebar');
+
 // Main sidebar setup function that coordinates all modules
 function setupSidebar() {
-  console.log('Setting up sidebar functionality...');
+  log.debug('Setting up sidebar functionality...');
 
   // Add hover effects to interactive items
   document.querySelectorAll('.agent-item, .plugin-item').forEach(item => {
@@ -20,13 +22,13 @@ function setupSidebar() {
     });
   });
 
-  console.log('Sidebar setup complete');
+  log.debug('Sidebar setup complete');
 }
 
 // Initialize all sidebar modules and load data
 async function initializeSidebar() {
   try {
-    console.log('Initializing sidebar modules...');
+    log.debug('Initializing sidebar modules...');
 
     // Load initial data for each module
     if (typeof loadAgentsForSidebar === 'function') {
@@ -37,9 +39,11 @@ async function initializeSidebar() {
       await loadPluginsForSidebar();
     }
 
-    console.log('All sidebar modules initialized successfully');
+    log.info('All sidebar modules initialized successfully');
+    EventBus.emit('sidebar:initialized');
   } catch (error) {
-    console.error('Error initializing sidebar modules:', error);
+    log.error('Error initializing sidebar modules:', error);
+    EventBus.emit('sidebar:error', { error: error.message });
   }
 }
 

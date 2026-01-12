@@ -3,72 +3,72 @@
  * Handles marketplace configuration in the Settings page
  */
 class MarketplaceSettings {
-    constructor() {
-        this.marketplaces = [];
-        this.editingId = null;
-        this.modal = null;
-        this.draggedItem = null;
+  constructor() {
+    this.marketplaces = [];
+    this.editingId = null;
+    this.modal = null;
+    this.draggedItem = null;
+  }
+
+  async init() {
+    await this.loadMarketplaces();
+    this.setupEventListeners();
+    this.render();
+  }
+
+  async loadMarketplaces() {
+    try {
+      const response = await fetch('/api/marketplaces');
+      if (!response.ok) {
+        throw new Error('Failed to load marketplaces');
+      }
+      const data = await response.json();
+      this.marketplaces = data.marketplaces || [];
+    } catch (error) {
+      console.error('Error loading marketplaces:', error);
+      this.showAlert('danger', 'Failed to load marketplaces: ' + error.message);
+    }
+  }
+
+  setupEventListeners() {
+    // Add Marketplace button
+    const addBtn = document.getElementById('addMarketplaceBtn');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => this.showAddModal());
     }
 
-    async init() {
-        await this.loadMarketplaces();
-        this.setupEventListeners();
-        this.render();
+    // Test Marketplace button
+    const testBtn = document.getElementById('testMarketplaceBtn');
+    if (testBtn) {
+      testBtn.addEventListener('click', () => this.testMarketplace());
     }
 
-    async loadMarketplaces() {
-        try {
-            const response = await fetch('/api/marketplaces');
-            if (!response.ok) {
-                throw new Error('Failed to load marketplaces');
-            }
-            const data = await response.json();
-            this.marketplaces = data.marketplaces || [];
-        } catch (error) {
-            console.error('Error loading marketplaces:', error);
-            this.showAlert('danger', 'Failed to load marketplaces: ' + error.message);
-        }
+    // Save Marketplace button
+    const saveBtn = document.getElementById('saveMarketplaceBtn');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => this.saveMarketplace());
     }
 
-    setupEventListeners() {
-        // Add Marketplace button
-        const addBtn = document.getElementById('addMarketplaceBtn');
-        if (addBtn) {
-            addBtn.addEventListener('click', () => this.showAddModal());
-        }
-
-        // Test Marketplace button
-        const testBtn = document.getElementById('testMarketplaceBtn');
-        if (testBtn) {
-            testBtn.addEventListener('click', () => this.testMarketplace());
-        }
-
-        // Save Marketplace button
-        const saveBtn = document.getElementById('saveMarketplaceBtn');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', () => this.saveMarketplace());
-        }
-
-        // Initialize modal
-        const modalEl = document.getElementById('marketplaceModal');
-        if (modalEl) {
-            this.modal = new bootstrap.Modal(modalEl);
-        }
+    // Initialize modal
+    const modalEl = document.getElementById('marketplaceModal');
+    if (modalEl) {
+      this.modal = new bootstrap.Modal(modalEl);
     }
+  }
 
-    render() {
-        const container = document.getElementById('marketplacesList');
-        if (!container) return;
+  render() {
+    const container = document.getElementById('marketplacesList');
+    if (!container) return;
 
-        if (this.marketplaces.length === 0) {
-            container.innerHTML = `
+    if (this.marketplaces.length === 0) {
+      container.innerHTML = `
                 <div class="text-center py-3" style="color: var(--text-secondary);">
                     No marketplaces configured.
                 </div>`;
-            return;
-        }
+      return;
+    }
 
-        container.innerHTML = this.marketplaces.map((mp, index) => `
+    container.innerHTML = this.marketplaces.map((mp, index) => `
             <div class="marketplace-item d-flex align-items-center p-3 mb-2"
                  data-id="${mp.id}"
                  draggable="${!mp.is_official}"
@@ -109,266 +109,266 @@ class MarketplaceSettings {
             </div>
         `).join('');
 
-        // Setup drag-and-drop
-        this.setupDragAndDrop();
-    }
+    // Setup drag-and-drop
+    this.setupDragAndDrop();
+  }
 
-    setupDragAndDrop() {
-        const container = document.getElementById('marketplacesList');
-        if (!container) return;
+  setupDragAndDrop() {
+    const container = document.getElementById('marketplacesList');
+    if (!container) return;
 
-        const items = container.querySelectorAll('.marketplace-item[draggable="true"]');
+    const items = container.querySelectorAll('.marketplace-item[draggable="true"]');
 
-        items.forEach(item => {
-            item.addEventListener('dragstart', (e) => {
-                this.draggedItem = item;
-                item.style.opacity = '0.5';
-                e.dataTransfer.effectAllowed = 'move';
-            });
+    items.forEach(item => {
+      item.addEventListener('dragstart', (e) => {
+        this.draggedItem = item;
+        item.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+      });
 
-            item.addEventListener('dragend', () => {
-                item.style.opacity = '1';
-                this.draggedItem = null;
-            });
+      item.addEventListener('dragend', () => {
+        item.style.opacity = '1';
+        this.draggedItem = null;
+      });
 
-            item.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-            });
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      });
 
-            item.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                if (!this.draggedItem || this.draggedItem === item) return;
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        if (!this.draggedItem || this.draggedItem === item) return;
 
-                // Reorder items in DOM
-                const allItems = [...container.querySelectorAll('.marketplace-item')];
-                const draggedIndex = allItems.indexOf(this.draggedItem);
-                const dropIndex = allItems.indexOf(item);
+        // Reorder items in DOM
+        const allItems = [...container.querySelectorAll('.marketplace-item')];
+        const draggedIndex = allItems.indexOf(this.draggedItem);
+        const dropIndex = allItems.indexOf(item);
 
-                if (draggedIndex < dropIndex) {
-                    item.parentNode.insertBefore(this.draggedItem, item.nextSibling);
-                } else {
-                    item.parentNode.insertBefore(this.draggedItem, item);
-                }
-
-                // Get new order
-                const newOrder = [...container.querySelectorAll('.marketplace-item')]
-                    .map(el => el.dataset.id);
-
-                await this.handleReorder(newOrder);
-            });
-        });
-    }
-
-    async handleReorder(ids) {
-        try {
-            const response = await fetch('/api/marketplaces/reorder', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids })
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to reorder marketplaces');
-            }
-
-            // Reload to get updated order
-            await this.loadMarketplaces();
-            this.render();
-        } catch (error) {
-            console.error('Error reordering marketplaces:', error);
-            this.showAlert('danger', 'Failed to reorder: ' + error.message);
-            // Re-render to restore original order
-            this.render();
+        if (draggedIndex < dropIndex) {
+          item.parentNode.insertBefore(this.draggedItem, item.nextSibling);
+        } else {
+          item.parentNode.insertBefore(this.draggedItem, item);
         }
+
+        // Get new order
+        const newOrder = [...container.querySelectorAll('.marketplace-item')]
+          .map(el => el.dataset.id);
+
+        await this.handleReorder(newOrder);
+      });
+    });
+  }
+
+  async handleReorder(ids) {
+    try {
+      const response = await fetch('/api/marketplaces/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reorder marketplaces');
+      }
+
+      // Reload to get updated order
+      await this.loadMarketplaces();
+      this.render();
+    } catch (error) {
+      console.error('Error reordering marketplaces:', error);
+      this.showAlert('danger', 'Failed to reorder: ' + error.message);
+      // Re-render to restore original order
+      this.render();
     }
+  }
 
-    showAddModal() {
-        this.editingId = null;
-        document.getElementById('marketplaceNameInput').value = '';
-        document.getElementById('marketplaceSourceInput').value = '';
-        document.getElementById('marketplaceTestResult').style.display = 'none';
-        document.getElementById('saveMarketplaceBtn').disabled = true;
-        document.getElementById('marketplaceModalLabel').textContent = 'Add Marketplace';
-        this.modal.show();
-    }
+  showAddModal() {
+    this.editingId = null;
+    document.getElementById('marketplaceNameInput').value = '';
+    document.getElementById('marketplaceSourceInput').value = '';
+    document.getElementById('marketplaceTestResult').style.display = 'none';
+    document.getElementById('saveMarketplaceBtn').disabled = true;
+    document.getElementById('marketplaceModalLabel').textContent = 'Add Marketplace';
+    this.modal.show();
+  }
 
-    async testMarketplace() {
-        const source = document.getElementById('marketplaceSourceInput').value.trim();
-        const resultDiv = document.getElementById('marketplaceTestResult');
-        const saveBtn = document.getElementById('saveMarketplaceBtn');
+  async testMarketplace() {
+    const source = document.getElementById('marketplaceSourceInput').value.trim();
+    const resultDiv = document.getElementById('marketplaceTestResult');
+    const saveBtn = document.getElementById('saveMarketplaceBtn');
 
-        if (!source) {
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = `
+    if (!source) {
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = `
                 <div class="alert alert-warning mb-0 mt-3">
                     Please enter a source URL or GitHub repo.
                 </div>`;
-            return;
-        }
+      return;
+    }
 
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = `
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
             <div class="d-flex align-items-center mt-3" style="color: var(--text-secondary);">
                 <div class="spinner-border spinner-border-sm me-2"></div>
                 Testing connection...
             </div>`;
 
-        try {
-            const response = await fetch('/api/marketplaces/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source })
-            });
+    try {
+      const response = await fetch('/api/marketplaces/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source })
+      });
 
-            const result = await response.json();
+      const result = await response.json();
 
-            if (result.valid) {
-                const typeLabel = result.source_type === 'github'
-                    ? 'GitHub Repository'
-                    : result.source_type === 'gitlab'
-                    ? 'GitLab URL'
-                    : result.source_type === 'bitbucket'
-                    ? 'Bitbucket URL'
-                    : result.source_type === 'file'
-                    ? 'Local File'
-                    : 'Direct URL';
-                resultDiv.innerHTML = `
+      if (result.valid) {
+        const typeLabel = result.source_type === 'github'
+          ? 'GitHub Repository'
+          : result.source_type === 'gitlab'
+            ? 'GitLab URL'
+            : result.source_type === 'bitbucket'
+              ? 'Bitbucket URL'
+              : result.source_type === 'file'
+                ? 'Local File'
+                : 'Direct URL';
+        resultDiv.innerHTML = `
                     <div class="alert alert-success mb-0 mt-3">
                         <strong>Valid marketplace!</strong><br>
                         <small>Found ${result.plugin_count} plugin(s)</small><br>
                         <small class="text-muted">Type: ${typeLabel}</small>
                     </div>`;
-                saveBtn.disabled = false;
-            } else {
-                resultDiv.innerHTML = `
+        saveBtn.disabled = false;
+      } else {
+        resultDiv.innerHTML = `
                     <div class="alert alert-danger mb-0 mt-3">
                         <strong>Invalid marketplace</strong><br>
                         <small>${this.escapeHtml(result.error)}</small>
                     </div>`;
-                saveBtn.disabled = true;
-            }
-        } catch (error) {
-            resultDiv.innerHTML = `
+        saveBtn.disabled = true;
+      }
+    } catch (error) {
+      resultDiv.innerHTML = `
                 <div class="alert alert-danger mb-0 mt-3">
                     <strong>Connection failed</strong><br>
                     <small>${this.escapeHtml(error.message)}</small>
                 </div>`;
-            saveBtn.disabled = true;
-        }
+      saveBtn.disabled = true;
+    }
+  }
+
+  async saveMarketplace() {
+    const name = document.getElementById('marketplaceNameInput').value.trim();
+    const source = document.getElementById('marketplaceSourceInput').value.trim();
+
+    if (!name || !source) {
+      this.showAlert('warning', 'Please fill in all fields');
+      return;
     }
 
-    async saveMarketplace() {
-        const name = document.getElementById('marketplaceNameInput').value.trim();
-        const source = document.getElementById('marketplaceSourceInput').value.trim();
+    try {
+      const response = await fetch('/api/marketplaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, source })
+      });
 
-        if (!name || !source) {
-            this.showAlert('warning', 'Please fill in all fields');
-            return;
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      this.modal.hide();
+      this.showAlert('success', 'Marketplace added successfully');
+      const marketplacesResp = await fetch('/api/marketplaces');
+      if (marketplacesResp.ok) {
+        const marketplacesData = await marketplacesResp.json();
+        const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
+        if (matches.length > 0) {
+          const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
+          await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
         }
+      }
+      await this.loadMarketplaces();
+      this.render();
+    } catch (error) {
+      console.error('Error saving marketplace:', error);
+      this.showAlert('danger', 'Failed to add marketplace: ' + error.message);
+    }
+  }
 
-        try {
-            const response = await fetch('/api/marketplaces', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, source })
-            });
+  async toggleEnabled(id, enabled) {
+    try {
+      const response = await fetch(`/api/marketplaces/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
 
-            if (!response.ok) {
-                const error = await response.text();
-                throw new Error(error);
-            }
+      if (!response.ok) {
+        throw new Error('Failed to update marketplace');
+      }
 
-            this.modal.hide();
-            this.showAlert('success', 'Marketplace added successfully');
-            const marketplacesResp = await fetch('/api/marketplaces');
-            if (marketplacesResp.ok) {
-                const marketplacesData = await marketplacesResp.json();
-                const matches = (marketplacesData.marketplaces || []).filter(mp => mp.name === name && mp.source === source);
-                if (matches.length > 0) {
-                    const newest = matches.reduce((latest, mp) => (mp.order > latest.order ? mp : latest), matches[0]);
-                    await fetch(`/api/marketplaces/${newest.id}/refresh`, { method: 'POST' });
-                }
-            }
-            await this.loadMarketplaces();
-            this.render();
-        } catch (error) {
-            console.error('Error saving marketplace:', error);
-            this.showAlert('danger', 'Failed to add marketplace: ' + error.message);
-        }
+      await this.loadMarketplaces();
+      this.render();
+    } catch (error) {
+      console.error('Error toggling marketplace:', error);
+      this.showAlert('danger', 'Failed to update: ' + error.message);
+      // Re-render to restore original state
+      this.render();
+    }
+  }
+
+  async deleteMarketplace(id) {
+    if (!confirm('Remove this marketplace? Plugins from this source will no longer appear in the marketplace.')) {
+      return;
     }
 
-    async toggleEnabled(id, enabled) {
-        try {
-            const response = await fetch(`/api/marketplaces/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled })
-            });
+    try {
+      const response = await fetch(`/api/marketplaces/${id}`, {
+        method: 'DELETE'
+      });
 
-            if (!response.ok) {
-                throw new Error('Failed to update marketplace');
-            }
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
 
-            await this.loadMarketplaces();
-            this.render();
-        } catch (error) {
-            console.error('Error toggling marketplace:', error);
-            this.showAlert('danger', 'Failed to update: ' + error.message);
-            // Re-render to restore original state
-            this.render();
-        }
+      this.showAlert('success', 'Marketplace removed');
+      await this.loadMarketplaces();
+      this.render();
+    } catch (error) {
+      console.error('Error deleting marketplace:', error);
+      this.showAlert('danger', 'Failed to remove: ' + error.message);
     }
+  }
 
-    async deleteMarketplace(id) {
-        if (!confirm('Remove this marketplace? Plugins from this source will no longer appear in the marketplace.')) {
-            return;
-        }
+  showAlert(type, message) {
+    const container = document.getElementById('marketplaceAlerts');
+    if (!container) return;
 
-        try {
-            const response = await fetch(`/api/marketplaces/${id}`, {
-                method: 'DELETE'
-            });
-
-            if (!response.ok) {
-                const error = await response.text();
-                throw new Error(error);
-            }
-
-            this.showAlert('success', 'Marketplace removed');
-            await this.loadMarketplaces();
-            this.render();
-        } catch (error) {
-            console.error('Error deleting marketplace:', error);
-            this.showAlert('danger', 'Failed to remove: ' + error.message);
-        }
-    }
-
-    showAlert(type, message) {
-        const container = document.getElementById('marketplaceAlerts');
-        if (!container) return;
-
-        const alertId = 'alert-' + Date.now();
-        container.innerHTML = `
+    const alertId = 'alert-' + Date.now();
+    container.innerHTML = `
             <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
                 ${this.escapeHtml(message)}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>`;
 
-        // Auto-dismiss after 5 seconds
-        setTimeout(() => {
-            const alert = document.getElementById(alertId);
-            if (alert) {
-                alert.remove();
-            }
-        }, 5000);
-    }
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      const alert = document.getElementById(alertId);
+      if (alert) {
+        alert.remove();
+      }
+    }, 5000);
+  }
 
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 }
 
 // Global instance
@@ -376,5 +376,5 @@ const marketplaceSettings = new MarketplaceSettings();
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    marketplaceSettings.init();
+  marketplaceSettings.init();
 });

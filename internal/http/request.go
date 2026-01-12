@@ -8,6 +8,110 @@ import (
 	"strings"
 )
 
+// =============================================================================
+// URL Path Parsing Helpers
+// =============================================================================
+// These helpers simplify extracting path parameters from URLs, reducing
+// boilerplate and ensuring consistent handling across all handlers.
+
+// GetPathParam extracts the first path segment after a prefix.
+// Returns empty string if no segment exists after the prefix.
+//
+// Example:
+//
+//	// URL: /api/agents/my-agent
+//	name := http.GetPathParam(r, "/api/agents/") // "my-agent"
+//
+//	// URL: /api/agents/my-agent/settings
+//	name := http.GetPathParam(r, "/api/agents/") // "my-agent"
+func GetPathParam(r *http.Request, prefix string) string {
+	path := strings.TrimPrefix(r.URL.Path, prefix)
+	if path == "" || path == r.URL.Path {
+		return ""
+	}
+	// Return only the first segment (before any slash)
+	if idx := strings.Index(path, "/"); idx != -1 {
+		return path[:idx]
+	}
+	return path
+}
+
+// GetPathParts splits the path after a prefix into segments.
+// Returns nil if the path doesn't start with the prefix or has no segments.
+//
+// Example:
+//
+//	// URL: /api/orchestration/tasks/123/steps/456
+//	parts := http.GetPathParts(r, "/api/orchestration/tasks/") // ["123", "steps", "456"]
+func GetPathParts(r *http.Request, prefix string) []string {
+	path := strings.TrimPrefix(r.URL.Path, prefix)
+	if path == "" || path == r.URL.Path {
+		return nil
+	}
+	// Filter out empty parts
+	parts := strings.Split(path, "/")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// GetPathParamOrQuery extracts a path parameter after the prefix, falling back to a query parameter.
+// This is useful for APIs that support both /api/resource/{name} and /api/resource?name=value.
+//
+// Example:
+//
+//	// URL: /api/agents/my-agent OR /api/agents?name=my-agent
+//	name := http.GetPathParamOrQuery(r, "/api/agents/", "name") // "my-agent"
+func GetPathParamOrQuery(r *http.Request, prefix, queryKey string) string {
+	if param := GetPathParam(r, prefix); param != "" {
+		return param
+	}
+	return r.URL.Query().Get(queryKey)
+}
+
+// RequirePathParam extracts a required path parameter after the prefix.
+// If not found, sends a 400 Bad Request response and returns empty string.
+//
+// Usage:
+//
+//	name := http.RequirePathParam(w, r, "/api/agents/", "agent name")
+//	if name == "" {
+//		return // Error response already sent
+//	}
+func RequirePathParam(w http.ResponseWriter, r *http.Request, prefix, paramName string) string {
+	param := GetPathParam(r, prefix)
+	if param == "" {
+		BadRequest(w, paramName+" is required")
+		return ""
+	}
+	return param
+}
+
+// RequirePathParamOrQuery extracts a required parameter from path or query.
+// If not found in either location, sends a 400 Bad Request response and returns empty string.
+//
+// Usage:
+//
+//	name := http.RequirePathParamOrQuery(w, r, "/api/agents/", "name")
+//	if name == "" {
+//		return // Error response already sent
+//	}
+func RequirePathParamOrQuery(w http.ResponseWriter, r *http.Request, prefix, queryKey string) string {
+	param := GetPathParamOrQuery(r, prefix, queryKey)
+	if param == "" {
+		BadRequest(w, queryKey+" is required")
+		return ""
+	}
+	return param
+}
+
 // MaxJSONBodySize is the maximum allowed size for JSON request bodies (1 MB)
 const MaxJSONBodySize = 1 << 20 // 1 MB
 

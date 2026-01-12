@@ -225,7 +225,7 @@ async function readFileContent(file) {
     const reader = new FileReader();
 
     reader.onload = async (e) => {
-      let content = e.target.result;
+      const content = e.target.result;
 
       // If it's a binary file, we need to handle it specially
       if (isBinaryFile(file.name)) {
@@ -239,7 +239,7 @@ async function readFileContent(file) {
             const response = await fetch('/api/files/parse', {
               method: 'POST',
               headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
               },
               body: JSON.stringify({
                 filename: file.name,

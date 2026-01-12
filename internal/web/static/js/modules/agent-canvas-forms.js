@@ -70,7 +70,7 @@ export class AgentCanvasForms {
       studio_id: this.canvas.studioId,
       from: 'user',
       description: this.createTaskDescription.trim(),
-      priority: 0,
+      priority: 0
     };
 
     if (this.createTaskAssignToAgent && this.selectedAgentForTask) {

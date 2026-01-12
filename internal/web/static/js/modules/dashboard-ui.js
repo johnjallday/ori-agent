@@ -97,9 +97,9 @@ export class DashboardUI {
 
   getStatusIcon(status) {
     const iconColor = status === 'completed' ? 'var(--success-color)' :
-                     status === 'failed' ? 'var(--danger-color)' :
-                     status === 'in_progress' ? 'var(--info-color)' :
-                     'var(--text-muted)';
+      status === 'failed' ? 'var(--danger-color)' :
+        status === 'in_progress' ? 'var(--info-color)' :
+          'var(--text-muted)';
 
     let path = '';
     switch (status) {

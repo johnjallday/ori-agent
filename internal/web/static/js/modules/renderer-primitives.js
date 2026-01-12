@@ -138,15 +138,15 @@ export class RendererPrimitives {
     // Triangles: input points upward, output points downward
     const points = pointUp
       ? [
-          { x: x, y: y - size },      // top
-          { x: x - size, y: y + size },
-          { x: x + size, y: y + size },
-        ]
+        { x: x, y: y - size },      // top
+        { x: x - size, y: y + size },
+        { x: x + size, y: y + size }
+      ]
       : [
-          { x: x, y: y + size },      // bottom
-          { x: x - size, y: y - size },
-          { x: x + size, y: y - size },
-        ];
+        { x: x, y: y + size },      // bottom
+        { x: x - size, y: y - size },
+        { x: x + size, y: y - size }
+      ];
 
     // Outer triangle
     this.ctx.beginPath();
@@ -164,7 +164,7 @@ export class RendererPrimitives {
     const innerShrink = 4;
     const innerPoints = points.map(p => ({
       x: x + (p.x - x) * ((size - innerShrink) / size),
-      y: y + (p.y - y) * ((size - innerShrink) / size),
+      y: y + (p.y - y) * ((size - innerShrink) / size)
     }));
     this.ctx.beginPath();
     this.ctx.moveTo(innerPoints[0].x, innerPoints[0].y);

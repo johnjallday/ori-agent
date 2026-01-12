@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // ComponentData represents data that can be passed to components
@@ -59,12 +58,7 @@ func (ch *ComponentHandler) ServeComponent(w http.ResponseWriter, r *http.Reques
 		orihttp.InternalError(w, "Failed to render component: "+err.Error())
 		return
 	}
-
-	// Set content type
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, writeErr := w.Write([]byte(content)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteHTML(w, content)
 }
 
 // RenderPage renders a complete page using components
@@ -91,30 +85,5 @@ func (ch *ComponentHandler) RenderPage(data ComponentData) (string, error) {
 // ListComponents returns available component names
 func (ch *ComponentHandler) ListComponents(w http.ResponseWriter, r *http.Request) {
 	components := ch.renderer.GetComponentList()
-
-	w.Header().Set("Content-Type", "application/json")
-	// Simple JSON response
-	response := `{"components":["` +
-		joinStrings(components, `","`) +
-		`"]}`
-
-	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
-}
-
-// Helper function to join strings (avoiding external dependencies)
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	if len(strs) == 1 {
-		return strs[0]
-	}
-
-	result := strs[0]
-	for _, s := range strs[1:] {
-		result += sep + s
-	}
-	return result
+	orihttp.WriteJSON(w, map[string][]string{"components": components})
 }

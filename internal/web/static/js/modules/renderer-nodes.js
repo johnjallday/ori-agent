@@ -96,7 +96,7 @@ export class RendererNodes {
         const viewCenterY = (this.parent.height / 2 - this.state.offsetY) / this.state.scale;
 
         if (treatAsUnassigned) {
-            // Position unassigned tasks near the current viewport center
+          // Position unassigned tasks near the current viewport center
           const offsetX = (index % 2 === 0 ? -80 : 80);
           const offsetY = (Math.floor(index / 2) % 3 - 1) * 60;
           task.x = viewCenterX + offsetX;

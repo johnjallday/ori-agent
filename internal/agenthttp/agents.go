@@ -50,15 +50,8 @@ func New(state store.Store) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Check if requesting a specific agent: /api/agents/{name}
-		agentName := r.URL.Query().Get("name")
-		if agentName == "" {
-			// Try to extract from path: /api/agents/AgentName
-			path := r.URL.Path
-			if len(path) > len("/api/agents/") {
-				agentName = path[len("/api/agents/"):]
-			}
-		}
+		// Check if requesting a specific agent: /api/agents/{name} or /api/agents?name=...
+		agentName := orihttp.GetPathParamOrQuery(r, "/api/agents/", "name")
 
 		// If specific agent requested, return its details
 		if agentName != "" {
@@ -193,12 +186,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if respErr := orihttp.RespondSuccess(w, map[string]any{
+		orihttp.Success(w, map[string]any{
 			"success": true,
 			"message": "Agent '" + req.Name + "' created successfully",
-		}); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		})
 
 	case http.MethodPut:
 		name := r.URL.Query().Get("name")
@@ -214,16 +205,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPatch:
 		// PATCH /api/agents/:name - Update agent metadata
-		path := r.URL.Path
-		var agentName string
-		if len(path) > len("/api/agents/") {
-			agentName = path[len("/api/agents/"):]
-		}
+		agentName := orihttp.RequirePathParamOrQuery(w, r, "/api/agents/", "name")
 		if agentName == "" {
-			agentName = r.URL.Query().Get("name")
-		}
-		if agentName == "" {
-			orihttp.BadRequest(w, "agent name required")
 			return
 		}
 
@@ -390,13 +373,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if respErr := orihttp.RespondSuccess(w, map[string]any{
+		orihttp.Success(w, map[string]any{
 			"success": true,
 			"name":    newName,
 			"message": "Agent updated successfully",
-		}); respErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": respErr})
-		}
+		})
 
 	case http.MethodDelete:
 		name := r.URL.Query().Get("name")

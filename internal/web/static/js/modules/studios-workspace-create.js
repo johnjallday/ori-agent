@@ -11,16 +11,16 @@
  * @description Displays the modal for creating a new workspace with agent selection
  */
 function openCreateWorkspaceModal() {
-    // Populate agent selection
-    const container = document.getElementById('agents-selection');
+  // Populate agent selection
+  const container = document.getElementById('agents-selection');
 
-    // Ensure availableAgents is initialized
-    if (!window.availableAgents) {
-        window.availableAgents = [];
-    }
+  // Ensure availableAgents is initialized
+  if (!window.availableAgents) {
+    window.availableAgents = [];
+  }
 
-    if (container) {
-        container.innerHTML = window.availableAgents.map(agent => `
+  if (container) {
+    container.innerHTML = window.availableAgents.map(agent => `
             <div class="col-md-6">
                 <div class="modern-card p-3">
                     <div class="form-check">
@@ -33,18 +33,18 @@ function openCreateWorkspaceModal() {
                 </div>
             </div>
         `).join('');
-    }
+  }
 
-    // Reset selected agents
-    selectedAgents = new Set();
+  // Reset selected agents
+  selectedAgents = new Set();
 
-    const modalElement = document.getElementById('addFolderModal');
-    if (!modalElement) {
-        return;
-    }
+  const modalElement = document.getElementById('addFolderModal');
+  if (!modalElement) {
+    return;
+  }
 
-    const modal = new bootstrap.Modal(modalElement);
-    modal.show();
+  const modal = new bootstrap.Modal(modalElement);
+  modal.show();
 }
 
 /**
@@ -52,11 +52,11 @@ function openCreateWorkspaceModal() {
  * @param {string} agentName - Name of the agent to toggle
  */
 function toggleAgent(agentName) {
-    if (selectedAgents.has(agentName)) {
-        selectedAgents.delete(agentName);
-    } else {
-        selectedAgents.add(agentName);
-    }
+  if (selectedAgents.has(agentName)) {
+    selectedAgents.delete(agentName);
+  } else {
+    selectedAgents.add(agentName);
+  }
 }
 
 /**
@@ -66,72 +66,72 @@ function toggleAgent(agentName) {
  * @returns {Promise<void>}
  */
 async function createWorkspace() {
-    const nameInput = document.getElementById('folderNameInput');
-    const descriptionInput = document.getElementById('folderDescriptionInput');
-    const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
+  const nameInput = document.getElementById('folderNameInput');
+  const descriptionInput = document.getElementById('folderDescriptionInput');
+  const colorBtn = document.querySelector('#addFolderModal .folder-color-btn.active');
 
-    const name = nameInput?.value.trim();
-    const description = descriptionInput?.value.trim() || '';
-    const color = colorBtn?.dataset.color || '';
+  const name = nameInput?.value.trim();
+  const description = descriptionInput?.value.trim() || '';
+  const color = colorBtn?.dataset.color || '';
 
-    if (!name) {
-        showError('Please fill in all required fields');
-        return;
-    }
+  if (!name) {
+    showError('Please fill in all required fields');
+    return;
+  }
 
-    // Allow creating workspace without agents - they can be added later
+  // Allow creating workspace without agents - they can be added later
 
-    try {
-        // Use unified workspace API to create workspace
-        const response = await fetch('/api/workspaces', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: name,
-                description: description,
-                color: color
-            })
+  try {
+    // Use unified workspace API to create workspace
+    const response = await fetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        description: description,
+        color: color
+      })
+    });
+
+    const result = await response.json();
+
+    // Add selected agents to the workspace if any were selected
+    if (result.folder && selectedAgents.size > 0) {
+      const workspaceId = result.folder.id;
+      for (const agentName of selectedAgents) {
+        await fetch(`/api/workspaces/${workspaceId}/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: agentName })
         });
-
-        const result = await response.json();
-
-        // Add selected agents to the workspace if any were selected
-        if (result.folder && selectedAgents.size > 0) {
-            const workspaceId = result.folder.id;
-            for (const agentName of selectedAgents) {
-                await fetch(`/api/workspaces/${workspaceId}/agents`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ agent_name: agentName })
-                });
-            }
-        }
-
-        if (result.error) {
-            showError('Failed to create workspace: ' + result.error);
-            return;
-        }
-
-        // Close modal
-        const modalElement = document.getElementById('addFolderModal');
-        const modal = bootstrap.Modal.getInstance(modalElement);
-        if (modal) {
-            modal.hide();
-        }
-
-        // Clear form
-        if (nameInput) nameInput.value = '';
-        if (descriptionInput) descriptionInput.value = '';
-        selectedAgents.clear();
-
-        // Refresh workspaces list if function exists
-        if (typeof loadWorkspaces === 'function') {
-            await loadWorkspaces();
-        }
-    } catch (error) {
-        console.error('Error creating workspace:', error);
-        showError('Failed to create workspace');
+      }
     }
+
+    if (result.error) {
+      showError('Failed to create workspace: ' + result.error);
+      return;
+    }
+
+    // Close modal
+    const modalElement = document.getElementById('addFolderModal');
+    const modal = bootstrap.Modal.getInstance(modalElement);
+    if (modal) {
+      modal.hide();
+    }
+
+    // Clear form
+    if (nameInput) nameInput.value = '';
+    if (descriptionInput) descriptionInput.value = '';
+    selectedAgents.clear();
+
+    // Refresh workspaces list if function exists
+    if (typeof loadWorkspaces === 'function') {
+      await loadWorkspaces();
+    }
+  } catch (error) {
+    console.error('Error creating workspace:', error);
+    showError('Failed to create workspace');
+  }
 }
 
 /**
@@ -139,14 +139,14 @@ async function createWorkspace() {
  * @param {string} message - Error message to display
  */
 function showError(message) {
-    // Check if there's a global toast/notification system
-    if (typeof window.showToast === 'function') {
-        window.showToast(message, 'error');
-    } else {
-        // Fallback to alert
-        console.error('Workspace Creation Error:', message);
-        alert(message);
-    }
+  // Check if there's a global toast/notification system
+  if (typeof window.showToast === 'function') {
+    window.showToast(message, 'error');
+  } else {
+    // Fallback to alert
+    console.error('Workspace Creation Error:', message);
+    alert(message);
+  }
 }
 
 /**
@@ -156,10 +156,10 @@ function showError(message) {
  */
 // escapeHtml is defined in studios-workspace.js and exported to window
 function escapeHtml(text) {
-    if (text == null) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  if (text == null) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
@@ -167,7 +167,7 @@ function escapeHtml(text) {
  * @param {Array<Object>} agents - Array of agent objects with name property
  */
 function setAvailableAgents(agents) {
-    availableAgents = agents;
+  availableAgents = agents;
 }
 
 /**
@@ -175,19 +175,19 @@ function setAvailableAgents(agents) {
  * @description Sets up click handler for create workspace button
  */
 function initializeWorkspaceCreationListeners() {
-    const createBtn = document.getElementById('createFolderBtn');
-    if (createBtn) {
-        createBtn.addEventListener('click', createWorkspace);
-    }
+  const createBtn = document.getElementById('createFolderBtn');
+  if (createBtn) {
+    createBtn.addEventListener('click', createWorkspace);
+  }
 
-    document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(btn => {
-        btn.addEventListener('click', (event) => {
-            document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(colorBtn => {
-                colorBtn.classList.remove('active');
-            });
-            event.currentTarget.classList.add('active');
-        });
+  document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+      document.querySelectorAll('#addFolderModal .folder-color-btn').forEach(colorBtn => {
+        colorBtn.classList.remove('active');
+      });
+      event.currentTarget.classList.add('active');
     });
+  });
 }
 
 // Export functions for global access

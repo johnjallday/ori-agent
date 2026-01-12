@@ -3,8 +3,8 @@
 
 const Toast = (function() {
   let container = null;
-  let toastQueue = [];
-  let maxToasts = 5;
+  const toastQueue = [];
+  const maxToasts = 5;
 
   // Initialize toast container
   function init() {

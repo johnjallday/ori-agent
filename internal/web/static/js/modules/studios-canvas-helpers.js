@@ -4,7 +4,7 @@
  */
 
 let currentStudioId = null;
-let currentWorkspaceDashboard = null;
+const currentWorkspaceDashboard = null;
 
 /**
  * Hide agent details panel
@@ -46,11 +46,11 @@ function showTaskDetails(task) {
     console.log('[SIDEBAR] Closing canvas panels');
     window.agentCanvas.state.expandedPanelWidth = 0;
     window.agentCanvas.state.expandedTask = null;
-  window.agentCanvas.state.expandedAgentPanelWidth = 0;
-  window.agentCanvas.state.expandedAgent = null;
-  window.agentCanvas.state.expandedCombinerPanelWidth = 0;
-  window.agentCanvas.state.expandedCombiner = null;
-  if (window.agentCanvas.draw) window.agentCanvas.draw();
+    window.agentCanvas.state.expandedAgentPanelWidth = 0;
+    window.agentCanvas.state.expandedAgent = null;
+    window.agentCanvas.state.expandedCombinerPanelWidth = 0;
+    window.agentCanvas.state.expandedCombiner = null;
+    if (window.agentCanvas.draw) window.agentCanvas.draw();
   }
 
   const panel = document.getElementById('task-details-panel');
@@ -109,8 +109,8 @@ function showTaskDetails(task) {
           <strong style="color: var(--text-primary);">Input Tasks:</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
             ${task.input_task_ids.map((id, idx) => {
-              const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
-              return `
+    const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+    return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
                   <span>🔗 Input ${idx + 1}: ${inputTask ? inputTask.description.substring(0, 30) : id.substring(0, 8)}...</span>
                   <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
@@ -121,7 +121,7 @@ function showTaskDetails(task) {
                   </button>
                 </div>
               `;
-            }).join('')}
+  }).join('')}
           </div>
         </div>
       ` : ''}
@@ -201,8 +201,8 @@ function showTaskDetails(task) {
           <strong style="color: var(--text-primary);">Input Tasks (${task.input_task_ids.length}):</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
             ${task.input_task_ids.map((id, idx) => {
-              const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
-              return `
+    const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+    return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
                   <span>🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</span>
                   <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
@@ -213,7 +213,7 @@ function showTaskDetails(task) {
                   </button>
                 </div>
               `;
-            }).join('')}
+  }).join('')}
           </div>
           <button class="btn btn-sm btn-outline-primary mt-2 w-100" onclick="addTaskInput('${task.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -236,85 +236,85 @@ function showTaskDetails(task) {
       `}
       ${combinerAssignment}
       ${(() => {
-        // Determine what to show for "Assigned To"
-        let assignedTo = null;
+    // Determine what to show for "Assigned To"
+    let assignedTo = null;
 
-        // Priority 1: If task has a regular agent assignment (not "unassigned")
-        if (task.to && task.to !== 'unassigned') {
-          // Try to find the specific agent node instance
-          const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+    // Priority 1: If task has a regular agent assignment (not "unassigned")
+    if (task.to && task.to !== 'unassigned') {
+      // Try to find the specific agent node instance
+      const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
 
-          if (window.agentCanvas && window.agentCanvas.agents) {
-            let agentNode = null;
+      if (window.agentCanvas && window.agentCanvas.agents) {
+        let agentNode = null;
 
-            // First, try to find by nodeId (for tasks assigned after nodeId feature)
-            if (assignedNodeId) {
-              agentNode = window.agentCanvas.agents.find(a => a.nodeId === assignedNodeId);
-            }
+        // First, try to find by nodeId (for tasks assigned after nodeId feature)
+        if (assignedNodeId) {
+          agentNode = window.agentCanvas.agents.find(a => a.nodeId === assignedNodeId);
+        }
 
-            // If no nodeId or not found, try to match by agent name (for old tasks)
-            if (!agentNode) {
-              // Find all agents with matching name
-              const matchingAgents = window.agentCanvas.agents.filter(a => a.name === task.to);
-              if (matchingAgents.length > 0) {
-                // Use the first matching agent (by instance number)
-                matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
-                agentNode = matchingAgents[0];
-              }
-            }
-
-            if (agentNode && agentNode.instanceNumber) {
-              // Show agent name with instance number (e.g., "default #1")
-              assignedTo = `${agentNode.name} #${agentNode.instanceNumber}`;
-            } else if (agentNode) {
-              // Agent found but no instance number
-              assignedTo = agentNode.name;
-            } else {
-              // No matching agent node found, show agent name
-              assignedTo = task.to;
-            }
-          } else {
-            // Canvas not available, just show agent name
-            assignedTo = task.to;
+        // If no nodeId or not found, try to match by agent name (for old tasks)
+        if (!agentNode) {
+          // Find all agents with matching name
+          const matchingAgents = window.agentCanvas.agents.filter(a => a.name === task.to);
+          if (matchingAgents.length > 0) {
+            // Use the first matching agent (by instance number)
+            matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
+            agentNode = matchingAgents[0];
           }
         }
-        // Priority 2: If task is feeding into a combiner, show combiner name
-        else if (combinersUsingThisTask.length > 0) {
-          const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
-          assignedTo = `<span style="color: #8b5cf6;">🔀 ${combinerNames}</span>`;
-        }
 
-        // Only show "Assigned To" if we have something to show
-        return assignedTo ? `
+        if (agentNode && agentNode.instanceNumber) {
+          // Show agent name with instance number (e.g., "default #1")
+          assignedTo = `${agentNode.name} #${agentNode.instanceNumber}`;
+        } else if (agentNode) {
+          // Agent found but no instance number
+          assignedTo = agentNode.name;
+        } else {
+          // No matching agent node found, show agent name
+          assignedTo = task.to;
+        }
+      } else {
+        // Canvas not available, just show agent name
+        assignedTo = task.to;
+      }
+    }
+    // Priority 2: If task is feeding into a combiner, show combiner name
+    else if (combinersUsingThisTask.length > 0) {
+      const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
+      assignedTo = `<span style="color: #8b5cf6;">🔀 ${combinerNames}</span>`;
+    }
+
+    // Only show "Assigned To" if we have something to show
+    return assignedTo ? `
           <div class="mb-3">
             <strong style="color: var(--text-primary);">Assigned To:</strong>
             <div style="color: var(--text-secondary);">${assignedTo}</div>
           </div>
         ` : '';
-      })()}
+  })()}
       ${(() => {
-        // Show schedule info if task has a schedule
-        if (!task.schedule) return '';
+    // Show schedule info if task has a schedule
+    if (!task.schedule) return '';
 
-        const schedule = task.schedule;
-        const scheduleType = schedule.type || 'unknown';
-        let scheduleDesc = '';
-        if (scheduleType === 'interval' && schedule.interval) {
-          const mins = Math.floor(schedule.interval / 60000000000);
-          scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
-        } else if (scheduleType === 'cron' && schedule.cron_expression) {
-          scheduleDesc = `Cron: ${schedule.cron_expression}`;
-        } else if (scheduleType === 'daily') {
-          scheduleDesc = `Daily at ${schedule.time_of_day || '00:00'}`;
-        } else if (scheduleType === 'weekly') {
-          scheduleDesc = `Weekly on ${schedule.day_of_week || 'Monday'}`;
-        } else if (scheduleType === 'once') {
-          scheduleDesc = `Once at ${schedule.run_at ? new Date(schedule.run_at).toLocaleString() : 'N/A'}`;
-        }
-        const nextRun = task.next_run ? new Date(task.next_run).toLocaleString() : 'N/A';
-        const lastRun = task.last_scheduled_run ? new Date(task.last_scheduled_run).toLocaleString() : 'Never';
+    const schedule = task.schedule;
+    const scheduleType = schedule.type || 'unknown';
+    let scheduleDesc = '';
+    if (scheduleType === 'interval' && schedule.interval) {
+      const mins = Math.floor(schedule.interval / 60000000000);
+      scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
+    } else if (scheduleType === 'cron' && schedule.cron_expression) {
+      scheduleDesc = `Cron: ${schedule.cron_expression}`;
+    } else if (scheduleType === 'daily') {
+      scheduleDesc = `Daily at ${schedule.time_of_day || '00:00'}`;
+    } else if (scheduleType === 'weekly') {
+      scheduleDesc = `Weekly on ${schedule.day_of_week || 'Monday'}`;
+    } else if (scheduleType === 'once') {
+      scheduleDesc = `Once at ${schedule.run_at ? new Date(schedule.run_at).toLocaleString() : 'N/A'}`;
+    }
+    const nextRun = task.next_run ? new Date(task.next_run).toLocaleString() : 'N/A';
+    const lastRun = task.last_scheduled_run ? new Date(task.last_scheduled_run).toLocaleString() : 'Never';
 
-        return `
+    return `
           <div class="mb-3">
             <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
               <span style="color: #8b5cf6; font-weight: 600;">
@@ -341,21 +341,21 @@ function showTaskDetails(task) {
             .expanded .collapse-icon { transform: rotate(180deg); }
           </style>
         `;
-      })()}
+  })()}
       ${(() => {
-        // Find store node connected to this task's agent
-        const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
-        if (!assignedNodeId) return '';
+    // Find store node connected to this task's agent
+    const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+    if (!assignedNodeId) return '';
 
-        const storeNodes = window.agentCanvas?.state?.storeNodes || [];
-        const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
-        if (!store) return '';
+    const storeNodes = window.agentCanvas?.state?.storeNodes || [];
+    const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
+    if (!store) return '';
 
-        const lastWrite = store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
-          ? new Date(store.last_write_time).toLocaleString()
-          : 'Never';
+    const lastWrite = store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
+      ? new Date(store.last_write_time).toLocaleString()
+      : 'Never';
 
-        return `
+    return `
           <div class="mb-3">
             <div class="collapsible-header-store" onclick="this.parentElement.classList.toggle('expanded-store')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(20, 184, 166, 0.1); border-radius: 6px; border: 1px solid rgba(20, 184, 166, 0.3);">
               <span style="color: #14b8a6; font-weight: 600;">
@@ -384,7 +384,7 @@ function showTaskDetails(task) {
             .expanded-store .collapse-icon-store { transform: rotate(180deg); }
           </style>
         `;
-      })()}
+  })()}
       ${task.result ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Result:</strong>
@@ -1343,8 +1343,8 @@ window.applyCustomColor = applyCustomColor;
 window.hideTaskDetails = hideTaskDetails;
 window.showCombinerDetails = showCombinerDetails;
 window.hideCombinerDetails = hideCombinerDetails;
-  window.showAddTaskModal = showAddTaskModal;
-  window.showAddAttachmentModal = showAddAttachmentModal;
+window.showAddTaskModal = showAddTaskModal;
+window.showAddAttachmentModal = showAddAttachmentModal;
 window.editCurrentTask = editCurrentTask;
 window.deleteCurrentTask = deleteCurrentTask;
 window.unassignCurrentTask = unassignCurrentTask;
@@ -1711,274 +1711,274 @@ window.executeCombinerTask = executeCombinerTask;
  * View workspace (redirect to workspace dashboard)
  */
 async function viewWorkspace(workspaceId) {
-    window.location.href = `/workspaces/${workspaceId}`;
+  window.location.href = `/workspaces/${workspaceId}`;
 }
 
 /**
  * Open workspace in canvas mode
  */
 function openWorkspaceCanvas(workspaceId) {
-    // Switch to canvas view and load the specific workspace
-    if (typeof switchView === 'function') {
-        switchView('canvas');
-    }
+  // Switch to canvas view and load the specific workspace
+  if (typeof switchView === 'function') {
+    switchView('canvas');
+  }
 
-    // Wait a bit for the select to be populated, then select and load the workspace
-    setTimeout(() => {
-        const select = document.getElementById('canvas-studio-select');
-        if (select) {
-            select.value = workspaceId;
-            loadCanvasStudio(workspaceId);
-        }
-    }, 100);
+  // Wait a bit for the select to be populated, then select and load the workspace
+  setTimeout(() => {
+    const select = document.getElementById('canvas-studio-select');
+    if (select) {
+      select.value = workspaceId;
+      loadCanvasStudio(workspaceId);
+    }
+  }, 100);
 }
 
 /**
  * View switching between grid and canvas
  */
 function switchView(view) {
-    const gridView = document.getElementById('grid-view');
-    const canvasView = document.getElementById('canvas-view');
+  const gridView = document.getElementById('grid-view');
+  const canvasView = document.getElementById('canvas-view');
 
-    if (view === 'canvas') {
-        gridView.style.display = 'none';
-        canvasView.style.display = 'block';
-        populateCanvasStudioSelect();
-    } else {
-        gridView.style.display = 'block';
-        canvasView.style.display = 'none';
-    }
+  if (view === 'canvas') {
+    gridView.style.display = 'none';
+    canvasView.style.display = 'block';
+    populateCanvasStudioSelect();
+  } else {
+    gridView.style.display = 'block';
+    canvasView.style.display = 'none';
+  }
 }
 
 /**
  * Populate canvas studio select dropdown
  */
 function populateCanvasStudioSelect() {
-    const select = document.getElementById('canvas-studio-select');
-    if (!select) return;
+  const select = document.getElementById('canvas-studio-select');
+  if (!select) return;
 
-    fetch('/api/orchestration/workspace')
-        .then(res => res.json())
-        .then(data => {
-            const workspaces = data.workspaces || [];
-            select.innerHTML = '<option value="">Choose a studio...</option>' +
+  fetch('/api/orchestration/workspace')
+    .then(res => res.json())
+    .then(data => {
+      const workspaces = data.workspaces || [];
+      select.innerHTML = '<option value="">Choose a studio...</option>' +
                 workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
-        })
-        .catch(err => console.error('Error loading studios:', err));
+    })
+    .catch(err => console.error('Error loading studios:', err));
 }
 
 /**
  * Load a canvas studio
  */
 function loadCanvasStudio(studioId) {
-    if (!studioId) {
-        document.getElementById('canvas-info').textContent = 'No studio selected';
-        // Show the label when no studio is selected
-        const label = document.getElementById('canvas-studio-label');
-        if (label) {
-            label.style.display = '';
-        }
-        return;
-    }
-
-    // Hide the "Select Studio:" label once a studio is loaded
+  if (!studioId) {
+    document.getElementById('canvas-info').textContent = 'No studio selected';
+    // Show the label when no studio is selected
     const label = document.getElementById('canvas-studio-label');
     if (label) {
-        label.style.display = 'none';
+      label.style.display = '';
     }
+    return;
+  }
 
-    currentStudioId = studioId;
+  // Hide the "Select Studio:" label once a studio is loaded
+  const label = document.getElementById('canvas-studio-label');
+  if (label) {
+    label.style.display = 'none';
+  }
 
-    // Initialize canvas visualization
-    if (window.agentCanvas) {
-        window.agentCanvas.destroy();
-    }
+  currentStudioId = studioId;
 
-    if (typeof AgentCanvas !== 'undefined') {
-        window.agentCanvas = new AgentCanvas('agent-canvas', studioId);
-        window.agentCanvas.init();
+  // Initialize canvas visualization
+  if (window.agentCanvas) {
+    window.agentCanvas.destroy();
+  }
 
-        // Load saved background color
-        loadCanvasBackground();
+  if (typeof AgentCanvas !== 'undefined') {
+    window.agentCanvas = new AgentCanvas('agent-canvas', studioId);
+    window.agentCanvas.init();
 
-        // Set up event listeners for canvas clicks
-        window.agentCanvas.onAgentClick = showAgentDetails;
-        window.agentCanvas.onTaskClick = showTaskDetails;
-        window.agentCanvas.onCombinerClick = showCombinerDetails;
-        window.agentCanvas.onTimelineEvent = addTimelineEvent;
+    // Load saved background color
+    loadCanvasBackground();
 
-        // Load available agents and update current list
-        setTimeout(() => {
-            loadAvailableAgents();
-            updateCurrentAgentsList();
-            updateTaskAgentSelectors();
-        }, 500);
-    }
+    // Set up event listeners for canvas clicks
+    window.agentCanvas.onAgentClick = showAgentDetails;
+    window.agentCanvas.onTaskClick = showTaskDetails;
+    window.agentCanvas.onCombinerClick = showCombinerDetails;
+    window.agentCanvas.onTimelineEvent = addTimelineEvent;
+
+    // Load available agents and update current list
+    setTimeout(() => {
+      loadAvailableAgents();
+      updateCurrentAgentsList();
+      updateTaskAgentSelectors();
+    }, 500);
+  }
 }
 
 /**
  * Execute mission
  */
 async function executeMission() {
-    if (!currentStudioId) {
-        alert('Please select a studio first');
-        return;
+  if (!currentStudioId) {
+    alert('Please select a studio first');
+    return;
+  }
+
+  const mission = document.getElementById('mission-input').value.trim();
+  if (!mission) {
+    alert('Please enter a mission description');
+    return;
+  }
+
+  const btn = document.getElementById('execute-mission-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
+
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/mission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mission })
+    });
+
+    const result = await response.json();
+
+    if (result.message) {
+      // Add to timeline
+      addTimelineEvent({
+        type: 'mission_started',
+        data: { mission }
+      });
+
+      // Set mission on canvas directly
+      if (window.agentCanvas) {
+        window.agentCanvas.setMission(mission);
+      }
+
+      document.getElementById('mission-input').value = '';
     }
-
-    const mission = document.getElementById('mission-input').value.trim();
-    if (!mission) {
-        alert('Please enter a mission description');
-        return;
-    }
-
-    const btn = document.getElementById('execute-mission-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Executing...';
-
-    try {
-        const response = await fetch(`/api/studios/${currentStudioId}/mission`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mission })
-        });
-
-        const result = await response.json();
-
-        if (result.message) {
-            // Add to timeline
-            addTimelineEvent({
-                type: 'mission_started',
-                data: { mission }
-            });
-
-            // Set mission on canvas directly
-            if (window.agentCanvas) {
-                window.agentCanvas.setMission(mission);
-            }
-
-            document.getElementById('mission-input').value = '';
-        }
-    } catch (error) {
-        console.error('Failed to execute mission:', error);
-        alert('Failed to execute mission');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
-    }
+  } catch (error) {
+    console.error('Failed to execute mission:', error);
+    alert('Failed to execute mission');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
+  }
 }
 
 /**
  * Load available agents
  */
 async function loadAvailableAgents() {
-    try {
-        const select = document.getElementById('available-agents');
+  try {
+    const select = document.getElementById('available-agents');
 
-        // Element doesn't exist in canvas view, skip update
-        if (!select) {
-            return;
-        }
-
-        const response = await fetch('/api/agents');
-        const data = await response.json();
-
-        // Show all available agents (allow adding same agent multiple times for multiple instances)
-        select.innerHTML = '<option value="">Select agent to add...</option>' +
-            (data.agents || []).map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
-    } catch (error) {
-        console.error('Failed to load agents:', error);
+    // Element doesn't exist in canvas view, skip update
+    if (!select) {
+      return;
     }
+
+    const response = await fetch('/api/agents');
+    const data = await response.json();
+
+    // Show all available agents (allow adding same agent multiple times for multiple instances)
+    select.innerHTML = '<option value="">Select agent to add...</option>' +
+            (data.agents || []).map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
+  } catch (error) {
+    console.error('Failed to load agents:', error);
+  }
 }
 
 /**
  * Add agent to canvas
  */
 async function addAgentToCanvas() {
-    const select = document.getElementById('available-agents');
-    const agentName = select.value;
+  const select = document.getElementById('available-agents');
+  const agentName = select.value;
 
-    if (!agentName) {
-        alert('Please select an agent to add');
-        return;
+  if (!agentName) {
+    alert('Please select an agent to add');
+    return;
+  }
+
+  if (!currentStudioId) {
+    alert('Please select a studio first');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: agentName })
+    });
+
+    if (response.ok) {
+      // Reload the canvas to show new agent
+      loadCanvasStudio(currentStudioId);
+      select.value = '';
+    } else {
+      alert('Failed to add agent');
     }
-
-    if (!currentStudioId) {
-        alert('Please select a studio first');
-        return;
-    }
-
-    try {
-        const response = await fetch(`/api/studios/${currentStudioId}/agents`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agent_name: agentName })
-        });
-
-        if (response.ok) {
-            // Reload the canvas to show new agent
-            loadCanvasStudio(currentStudioId);
-            select.value = '';
-        } else {
-            alert('Failed to add agent');
-        }
-    } catch (error) {
-        console.error('Failed to add agent:', error);
-        alert('Failed to add agent');
-    }
+  } catch (error) {
+    console.error('Failed to add agent:', error);
+    alert('Failed to add agent');
+  }
 }
 
 /**
  * Remove agent from canvas
  */
 async function removeAgentFromCanvas(agentName) {
-    if (!confirm(`Remove agent "${agentName}" from this workspace?`)) {
-        return;
-    }
+  if (!confirm(`Remove agent "${agentName}" from this workspace?`)) {
+    return;
+  }
 
-    if (!currentStudioId) {
-        return;
-    }
+  if (!currentStudioId) {
+    return;
+  }
 
-    try {
-        const response = await fetch(`/api/studios/${currentStudioId}/agents/${agentName}`, {
-            method: 'DELETE'
-        });
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/agents/${agentName}`, {
+      method: 'DELETE'
+    });
 
-        if (response.ok) {
-            // Reload the canvas to update
-            loadCanvasStudio(currentStudioId);
-        } else {
-            alert('Failed to remove agent');
-        }
-    } catch (error) {
-        console.error('Failed to remove agent:', error);
-        alert('Failed to remove agent');
+    if (response.ok) {
+      // Reload the canvas to update
+      loadCanvasStudio(currentStudioId);
+    } else {
+      alert('Failed to remove agent');
     }
+  } catch (error) {
+    console.error('Failed to remove agent:', error);
+    alert('Failed to remove agent');
+  }
 }
 
 /**
  * Update current agents list
  */
 function updateCurrentAgentsList() {
-    const listDiv = document.getElementById('current-agents-list');
+  const listDiv = document.getElementById('current-agents-list');
 
-    // Element doesn't exist in canvas view, skip update
-    if (!listDiv) {
-        return;
-    }
+  // Element doesn't exist in canvas view, skip update
+  if (!listDiv) {
+    return;
+  }
 
-    if (!window.agentCanvas || !window.agentCanvas.agents) {
-        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
-        return;
-    }
+  if (!window.agentCanvas || !window.agentCanvas.agents) {
+    listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+    return;
+  }
 
-    const agents = window.agentCanvas.agents;
-    if (agents.length === 0) {
-        listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
-        return;
-    }
+  const agents = window.agentCanvas.agents;
+  if (agents.length === 0) {
+    listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+    return;
+  }
 
-    listDiv.innerHTML = `
+  listDiv.innerHTML = `
         <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.5rem;">
             <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Current Agents:</small>
             <div class="mt-2">
@@ -2004,74 +2004,74 @@ function updateCurrentAgentsList() {
  * Update task agent selectors
  */
 function updateTaskAgentSelectors() {
-    const toSelect = document.getElementById('task-to-agent');
+  const toSelect = document.getElementById('task-to-agent');
 
-    // Element doesn't exist in canvas view, skip update
-    if (!toSelect) {
-        return;
-    }
+  // Element doesn't exist in canvas view, skip update
+  if (!toSelect) {
+    return;
+  }
 
-    if (!window.agentCanvas || !window.agentCanvas.agents) {
-        toSelect.innerHTML = '<option value="">Select agent...</option>';
-        return;
-    }
+  if (!window.agentCanvas || !window.agentCanvas.agents) {
+    toSelect.innerHTML = '<option value="">Select agent...</option>';
+    return;
+  }
 
-    const agents = window.agentCanvas.agents;
-    const options = '<option value="">Select agent...</option>' +
+  const agents = window.agentCanvas.agents;
+  const options = '<option value="">Select agent...</option>' +
         agents.map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`).join('');
 
-    toSelect.innerHTML = options;
+  toSelect.innerHTML = options;
 }
 
 /**
  * Create task
  */
 async function createTask() {
-    const description = document.getElementById('task-description').value.trim();
-    const toAgent = document.getElementById('task-to-agent').value;
+  const description = document.getElementById('task-description').value.trim();
+  const toAgent = document.getElementById('task-to-agent').value;
 
-    if (!description) {
-        alert('Please enter a task description');
-        return;
+  if (!description) {
+    alert('Please enter a task description');
+    return;
+  }
+
+  if (!toAgent) {
+    alert('Please select an agent to assign the task to');
+    return;
+  }
+
+  if (!currentStudioId) {
+    alert('Please select a studio first');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: description,
+        from: 'system',
+        to: toAgent,
+        priority: 1
+      })
+    });
+
+    if (response.ok) {
+      // Clear form
+      document.getElementById('task-description').value = '';
+      document.getElementById('task-to-agent').value = '';
+
+      // Reload canvas to show new task
+      loadCanvasStudio(currentStudioId);
+    } else {
+      const error = await response.text();
+      alert('Failed to create task: ' + error);
     }
-
-    if (!toAgent) {
-        alert('Please select an agent to assign the task to');
-        return;
-    }
-
-    if (!currentStudioId) {
-        alert('Please select a studio first');
-        return;
-    }
-
-    try {
-        const response = await fetch(`/api/studios/${currentStudioId}/tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                description: description,
-                from: 'system',
-                to: toAgent,
-                priority: 1
-            })
-        });
-
-        if (response.ok) {
-            // Clear form
-            document.getElementById('task-description').value = '';
-            document.getElementById('task-to-agent').value = '';
-
-            // Reload canvas to show new task
-            loadCanvasStudio(currentStudioId);
-        } else {
-            const error = await response.text();
-            alert('Failed to create task: ' + error);
-        }
-    } catch (error) {
-        console.error('Failed to create task:', error);
-        alert('Failed to create task');
-    }
+  } catch (error) {
+    console.error('Failed to create task:', error);
+    alert('Failed to create task');
+  }
 }
 
 /**
@@ -2080,24 +2080,24 @@ async function createTask() {
 async function showAgentDetails(agent) {
   console.log('[SIDEBAR] showAgentDetails (async) called for:', agent.name);
 
-    // Hide task details if showing
-    hideTaskDetails();
-    hideAttachmentDetails();
+  // Hide task details if showing
+  hideTaskDetails();
+  hideAttachmentDetails();
 
-    // Hide combiner details if showing
-    if (typeof hideCombinerDetails === 'function') {
-        hideCombinerDetails();
-    }
+  // Hide combiner details if showing
+  if (typeof hideCombinerDetails === 'function') {
+    hideCombinerDetails();
+  }
 
-    const panel = document.getElementById('agent-details-panel');
-    const content = document.getElementById('agent-details-content');
+  const panel = document.getElementById('agent-details-panel');
+  const content = document.getElementById('agent-details-content');
 
-    if (!panel || !content) return;
+  if (!panel || !content) return;
 
-    panel.style.display = 'block';
+  panel.style.display = 'block';
 
-    const statusBadge = agent.status === 'active' ? 'badge-success' :
-                       agent.status === 'busy' ? 'badge-warning' : 'badge-secondary';
+  const statusBadge = agent.status === 'active' ? 'badge-success' :
+    agent.status === 'busy' ? 'badge-warning' : 'badge-secondary';
 
   // Show loading state
   content.innerHTML = `
@@ -2281,38 +2281,38 @@ window.openPluginConfigForAgent = openPluginConfigForAgent;
  * Add timeline event (placeholder)
  */
 function addTimelineEvent(event) {
-    console.log('Add timeline event:', event);
-    // Implementation depends on timeline structure
+  console.log('Add timeline event:', event);
+  // Implementation depends on timeline structure
 }
 
 /**
  * Load canvas background color from localStorage
  */
 function loadCanvasBackground() {
-    const savedColor = localStorage.getItem('canvas-bg-color');
-    if (!savedColor) return;
+  const savedColor = localStorage.getItem('canvas-bg-color');
+  if (!savedColor) return;
 
-    // Use backgroundColor property directly
-    if (window.agentCanvas) {
-        window.agentCanvas.backgroundColor = savedColor;
-        window.agentCanvas.draw();
-    }
+  // Use backgroundColor property directly
+  if (window.agentCanvas) {
+    window.agentCanvas.backgroundColor = savedColor;
+    window.agentCanvas.draw();
+  }
 
-    const colorPicker = document.getElementById('canvas-bg-color');
-    if (colorPicker) {
-        colorPicker.value = savedColor;
-    }
+  const colorPicker = document.getElementById('canvas-bg-color');
+  if (colorPicker) {
+    colorPicker.value = savedColor;
+  }
 }
 
 /**
  * Change canvas background color
  */
 function changeCanvasBackground(color) {
-    if (window.agentCanvas) {
-        window.agentCanvas.backgroundColor = color;
-        window.agentCanvas.draw();
-        localStorage.setItem('canvas-bg-color', color);
-    }
+  if (window.agentCanvas) {
+    window.agentCanvas.backgroundColor = color;
+    window.agentCanvas.draw();
+    localStorage.setItem('canvas-bg-color', color);
+  }
 }
 
 /**
@@ -2399,96 +2399,96 @@ async function toggleCanvasAnimation() {
  * Utility function to escape HTML (uses global from studios-workspace.js)
  */
 function escapeHtml(text) {
-    if (text == null) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  if (text == null) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 /**
  * Connect current selection to merge node
  */
 function connectToMerge() {
-    if (!window.agentCanvas) {
-        alert('Please select a workspace first!');
-        return;
-    }
+  if (!window.agentCanvas) {
+    alert('Please select a workspace first!');
+    return;
+  }
 
-    const canvas = window.agentCanvas;
+  const canvas = window.agentCanvas;
 
-    // Find the merge node
-    const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
-    if (!mergeNode) {
-        alert('No MERGE node found! Please add a MERGE combiner node first using the palette on the left.');
-        return;
-    }
+  // Find the merge node
+  const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
+  if (!mergeNode) {
+    alert('No MERGE node found! Please add a MERGE combiner node first using the palette on the left.');
+    return;
+  }
 
-    // Find the selected agent
-    const selectedAgent = canvas.selectedAgent || canvas.agents[0];
-    if (!selectedAgent) {
-        alert('No agent available! Please add an agent first.');
-        return;
-    }
+  // Find the selected agent
+  const selectedAgent = canvas.selectedAgent || canvas.agents[0];
+  if (!selectedAgent) {
+    alert('No agent available! Please add an agent first.');
+    return;
+  }
 
-    // Determine next available input port
-    const existingInputs = canvas.connections.filter(c => c.to === mergeNode.id);
-    const nextInputPort = `input-${existingInputs.length}`;
+  // Determine next available input port
+  const existingInputs = canvas.connections.filter(c => c.to === mergeNode.id);
+  const nextInputPort = `input-${existingInputs.length}`;
 
-    // Create connection
-    canvas.createConnection(selectedAgent.name, 'output', mergeNode.id, nextInputPort);
-    canvas.draw();
+  // Create connection
+  canvas.createConnection(selectedAgent.name, 'output', mergeNode.id, nextInputPort);
+  canvas.draw();
 
-    canvas.showNotification(`✅ Connected ${selectedAgent.name} to MERGE node (${nextInputPort})`, 'success');
+  canvas.showNotification(`✅ Connected ${selectedAgent.name} to MERGE node (${nextInputPort})`, 'success');
 }
 
 /**
  * Create workflow using merge combiner
  */
 async function createMergeWorkflowTasks() {
-    if (!window.agentCanvas) {
-        alert('Please select a workspace first!');
-        return;
-    }
+  if (!window.agentCanvas) {
+    alert('Please select a workspace first!');
+    return;
+  }
 
-    const canvas = window.agentCanvas;
+  const canvas = window.agentCanvas;
 
-    // Find the merge node and connected agents
-    const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
-    if (!mergeNode) {
-        alert('No MERGE node found! Click "Setup Merge" first to create the workflow structure.');
-        return;
-    }
+  // Find the merge node and connected agents
+  const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
+  if (!mergeNode) {
+    alert('No MERGE node found! Click "Setup Merge" first to create the workflow structure.');
+    return;
+  }
 
-    // Find input connections to merge node
-    const inputConnections = canvas.connections.filter(c => c.to === mergeNode.id);
-    if (inputConnections.length === 0) {
-        alert('No agents connected to MERGE node! Connect agents first.');
-        return;
-    }
+  // Find input connections to merge node
+  const inputConnections = canvas.connections.filter(c => c.to === mergeNode.id);
+  if (inputConnections.length === 0) {
+    alert('No agents connected to MERGE node! Connect agents first.');
+    return;
+  }
 
-    // Find output connection from merge node
-    const outputConnection = canvas.connections.find(c => c.from === mergeNode.id);
-    if (!outputConnection) {
-        alert('MERGE node has no output connection! Connect it to a target agent.');
-        return;
-    }
+  // Find output connection from merge node
+  const outputConnection = canvas.connections.find(c => c.from === mergeNode.id);
+  if (!outputConnection) {
+    alert('MERGE node has no output connection! Connect it to a target agent.');
+    return;
+  }
 
-    const targetAgentName = outputConnection.to;
+  const targetAgentName = outputConnection.to;
 
-    console.log('📊 Creating merge workflow tasks...');
-    console.log('   Input agents:', inputConnections.map(c => c.from).join(', '));
-    console.log('   Target agent:', targetAgentName);
-    console.log('');
-    console.log('💡 Instructions:');
-    console.log('   1. Create tasks for the input agents (e.g., "1+3")');
-    console.log('   2. After those tasks complete, their results are stored');
-    console.log('   3. Create a task for the target agent that references those results');
-    console.log('   4. The task description can say: "Use the results from previous tasks"');
-    console.log('');
-    console.log('   The MERGE node visually shows how data flows,');
-    console.log('   but execution happens on the agents themselves.');
+  console.log('📊 Creating merge workflow tasks...');
+  console.log('   Input agents:', inputConnections.map(c => c.from).join(', '));
+  console.log('   Target agent:', targetAgentName);
+  console.log('');
+  console.log('💡 Instructions:');
+  console.log('   1. Create tasks for the input agents (e.g., "1+3")');
+  console.log('   2. After those tasks complete, their results are stored');
+  console.log('   3. Create a task for the target agent that references those results');
+  console.log('   4. The task description can say: "Use the results from previous tasks"');
+  console.log('');
+  console.log('   The MERGE node visually shows how data flows,');
+  console.log('   but execution happens on the agents themselves.');
 
-    alert(`✅ Merge Workflow Ready!\n\n` +
+  alert(`✅ Merge Workflow Ready!\n\n` +
           `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
           `Target Agent: ${targetAgentName}\n\n` +
           `Next Steps:\n` +
@@ -2504,23 +2504,23 @@ async function createMergeWorkflowTasks() {
  * @param {string} type - Type of combiner (merge, vote, etc.)
  */
 async function addCombinerNode(type) {
-    const canvas = window.agentCanvas;
-    if (!canvas) {
-        alert('Canvas not initialized. Please open a workspace first.');
-        return;
-    }
+  const canvas = window.agentCanvas;
+  if (!canvas) {
+    alert('Canvas not initialized. Please open a workspace first.');
+    return;
+  }
 
-    // Calculate center position on canvas (accounting for offset and scale)
-    const centerX = (window.innerWidth / 2 - canvas.offsetX) / canvas.scale;
-    const centerY = (window.innerHeight / 2 - canvas.offsetY) / canvas.scale;
+  // Calculate center position on canvas (accounting for offset and scale)
+  const centerX = (window.innerWidth / 2 - canvas.offsetX) / canvas.scale;
+  const centerY = (window.innerHeight / 2 - canvas.offsetY) / canvas.scale;
 
-    try {
-        await canvas.createCombinerNode(type, centerX, centerY);
-        console.log(`✨ Added ${type.toUpperCase()} combiner node to canvas`);
-    } catch (error) {
-        console.error('Error adding combiner node:', error);
-        alert(`Failed to add ${type} combiner node: ${error.message}`);
-    }
+  try {
+    await canvas.createCombinerNode(type, centerX, centerY);
+    console.log(`✨ Added ${type.toUpperCase()} combiner node to canvas`);
+  } catch (error) {
+    console.error('Error adding combiner node:', error);
+    alert(`Failed to add ${type} combiner node: ${error.message}`);
+  }
 }
 
 /**
@@ -2590,101 +2590,101 @@ window.switchView = switchView;
  * Edit agent settings
  */
 function editAgentSettings(agentName, currentType, currentModel, currentTemp) {
-    console.log('Editing agent settings:', agentName);
-    const displayDiv = document.getElementById('agent-config-display');
-    const editDiv = document.getElementById('agent-config-edit');
+  console.log('Editing agent settings:', agentName);
+  const displayDiv = document.getElementById('agent-config-display');
+  const editDiv = document.getElementById('agent-config-edit');
 
-    if (displayDiv && editDiv) {
-        displayDiv.style.display = 'none';
-        editDiv.style.display = 'block';
-    }
+  if (displayDiv && editDiv) {
+    displayDiv.style.display = 'none';
+    editDiv.style.display = 'block';
+  }
 }
 
 /**
  * Cancel editing agent settings
  */
 function cancelEditAgentSettings() {
-    const displayDiv = document.getElementById('agent-config-display');
-    const editDiv = document.getElementById('agent-config-edit');
+  const displayDiv = document.getElementById('agent-config-display');
+  const editDiv = document.getElementById('agent-config-edit');
 
-    if (displayDiv && editDiv) {
-        displayDiv.style.display = 'block';
-        editDiv.style.display = 'none';
-    }
+  if (displayDiv && editDiv) {
+    displayDiv.style.display = 'block';
+    editDiv.style.display = 'none';
+  }
 }
 
 /**
  * Save agent settings
  */
 async function saveAgentSettings(agentName) {
-    const typeInput = document.getElementById('edit-agent-type');
-    const modelInput = document.getElementById('edit-agent-model');
-    const tempInput = document.getElementById('edit-agent-temperature');
+  const typeInput = document.getElementById('edit-agent-type');
+  const modelInput = document.getElementById('edit-agent-model');
+  const tempInput = document.getElementById('edit-agent-temperature');
 
-    if (!typeInput || !modelInput || !tempInput) {
-        alert('Error: Could not find input fields');
-        return;
-    }
+  if (!typeInput || !modelInput || !tempInput) {
+    alert('Error: Could not find input fields');
+    return;
+  }
 
-    const newType = typeInput.value;
-    const newModel = modelInput.value.trim();
-    const newTemp = parseFloat(tempInput.value);
+  const newType = typeInput.value;
+  const newModel = modelInput.value.trim();
+  const newTemp = parseFloat(tempInput.value);
 
-    // Validate inputs
-    if (!newModel) {
-        alert('Model cannot be empty');
-        return;
-    }
+  // Validate inputs
+  if (!newModel) {
+    alert('Model cannot be empty');
+    return;
+  }
 
-    if (isNaN(newTemp) || newTemp < 0 || newTemp > 2) {
-        alert('Temperature must be between 0 and 2');
-        return;
-    }
+  if (isNaN(newTemp) || newTemp < 0 || newTemp > 2) {
+    alert('Temperature must be between 0 and 2');
+    return;
+  }
 
-    try {
-        // Update agent via API
-        const response = await fetch('/api/agents', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: agentName,
-                type: newType,
-                settings: {
-                    model: newModel,
-                    temperature: newTemp
-                }
-            })
-        });
-
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(error);
+  try {
+    // Update agent via API
+    const response = await fetch('/api/agents', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: agentName,
+        type: newType,
+        settings: {
+          model: newModel,
+          temperature: newTemp
         }
+      })
+    });
 
-        // Success - update the display
-        const displayDiv = document.getElementById('agent-config-display');
-        if (displayDiv) {
-            displayDiv.innerHTML = `
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error);
+    }
+
+    // Success - update the display
+    const displayDiv = document.getElementById('agent-config-display');
+    if (displayDiv) {
+      displayDiv.innerHTML = `
                 <div class="mb-1"><strong>Type:</strong> ${escapeHtml(newType)}</div>
                 <div class="mb-1"><strong>Model:</strong> ${escapeHtml(newModel)}</div>
                 <div class="mb-1"><strong>Temperature:</strong> ${newTemp}</div>
             `;
-        }
-
-        // Hide edit form, show display
-        cancelEditAgentSettings();
-
-        // Show success notification if canvas is available
-        if (window.agentCanvas && window.agentCanvas.showNotification) {
-            window.agentCanvas.showNotification(`✅ Updated ${agentName} settings`, 'success');
-        } else {
-            alert(`Successfully updated ${agentName} settings`);
-        }
-
-    } catch (error) {
-        console.error('Failed to update agent settings:', error);
-        alert(`Failed to update agent: ${error.message}`);
     }
+
+    // Hide edit form, show display
+    cancelEditAgentSettings();
+
+    // Show success notification if canvas is available
+    if (window.agentCanvas && window.agentCanvas.showNotification) {
+      window.agentCanvas.showNotification(`✅ Updated ${agentName} settings`, 'success');
+    } else {
+      alert(`Successfully updated ${agentName} settings`);
+    }
+
+  } catch (error) {
+    console.error('Failed to update agent settings:', error);
+    alert(`Failed to update agent: ${error.message}`);
+  }
 }
 
 window.loadCanvasStudio = loadCanvasStudio;
@@ -2704,96 +2704,6 @@ window.resetCanvasView = resetCanvasView;
 window.editAgentSettings = editAgentSettings;
 window.cancelEditAgentSettings = cancelEditAgentSettings;
 window.saveAgentSettings = saveAgentSettings;
-
-// ==================== STORE NODE FUNCTIONS ====================
-
-/**
- * Show the Add Store Node modal
- */
-async function showAddStoreNodeModal() {
-  const modal = new bootstrap.Modal(document.getElementById('addStoreNodeModal'));
-  modal.show();
-}
-
-/**
- * Submit the Store Node creation form
- */
-async function submitStoreNode() {
-  try {
-    // Get form values
-    const name = document.getElementById('store-name').value.trim();
-    const baseDir = document.getElementById('store-base-dir').value.trim();
-    const format = document.getElementById('store-format').value;
-    const writeMode = document.getElementById('store-write-mode').value;
-    const autoCreate = document.getElementById('store-auto-create').checked;
-
-    // Validate required fields
-    if (!name) {
-      alert('Please enter a node name');
-      return;
-    }
-
-    if (!baseDir) {
-      alert('Please enter a base directory');
-      return;
-    }
-
-    // Get studio ID from global variable (set by template)
-    const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
-
-    if (!studioId) {
-      alert('Error: Workspace ID not found. Please refresh the page.');
-      console.error('Cannot create store node: studioId is missing');
-      return;
-    }
-
-    console.log('Using studioId:', studioId);
-
-    // Calculate position (center of viewport)
-    // Note: This will be replaced with proper canvas position calculation
-    const x = 400;
-    const y = 400;
-
-    // Create store node object
-    const storeNode = {
-      name: name,
-      base_dir: baseDir,
-      format: format,
-      write_mode: writeMode,
-      auto_create_dir: autoCreate,
-      x: x,
-      y: y
-    };
-
-    console.log('Creating store node:', storeNode);
-
-    const response = await fetch(`/api/studios/${studioId}/store-nodes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(storeNode)
-    });
-
-    if (response.ok) {
-      console.log('Store node created successfully');
-
-      // Close modal
-      const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
-      modal.hide();
-
-      // Reset form
-      document.getElementById('storeNodeForm').reset();
-
-      // Reload page to show new store node
-      window.location.reload();
-    } else {
-      const error = await response.text();
-      alert(`Failed to create store node: ${error}`);
-    }
-  } catch (error) {
-    console.error('Error creating store node:', error);
-    alert(`Error creating store node: ${error.message}`);
-  }
-}
 
 /**
  * Set a cron preset value
@@ -2931,7 +2841,7 @@ function parseCronExpression(cronExpr) {
 
   if (month !== '*') {
     const months = ['', 'January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
+      'July', 'August', 'September', 'October', 'November', 'December'];
     const monthNames = month.split(',').map(m => months[parseInt(m)] || `month ${m}`);
     constraints.push(`in ${monthNames.join(', ')}`);
   }

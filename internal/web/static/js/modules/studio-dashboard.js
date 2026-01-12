@@ -22,7 +22,7 @@ class WorkspaceDashboard {
       tasks: [],
       agents: [],
       messages: [],
-      events: [],
+      events: []
     };
     this.unsubscribe = null;
     this.refreshInterval = null;

@@ -86,19 +86,19 @@ function displayOnlinePlugins(onlinePlugins, installedPluginNames = new Set()) {
           </div>
           <div class="ms-3">
             ${isInstalled ?
-              `<button class="modern-btn modern-btn-secondary" disabled>
+    `<button class="modern-btn modern-btn-secondary" disabled>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
                 </svg>
                 Installed
               </button>` :
-              `<button class="modern-btn modern-btn-primary" onclick="installOnlinePlugin('${plugin.name}', '${plugin.download_url}')">
+    `<button class="modern-btn modern-btn-primary" onclick="installOnlinePlugin('${plugin.name}', '${plugin.download_url}')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
                 </svg>
                 Install
               </button>`
-            }
+}
           </div>
         </div>
       </div>

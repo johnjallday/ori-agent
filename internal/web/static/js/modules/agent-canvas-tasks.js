@@ -12,7 +12,7 @@ export async function executeTask(canvas, task) {
       alert('No agents available. Please add agents to the workspace first.');
       return;
     }
-    let agentOptions = canvas.agents.map((a, i) => {
+    const agentOptions = canvas.agents.map((a, i) => {
       const displayName = a.instanceNumber ? `${a.name} #${a.instanceNumber}` : a.name;
       return `${i + 1}. ${displayName}`;
     }).join('\n');

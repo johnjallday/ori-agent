@@ -180,7 +180,7 @@ export class OnboardingManager {
       await fetch('/api/onboarding/skip-step', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ step_name: stepName }),
+        body: JSON.stringify({ step_name: stepName })
       });
     } catch (error) {
       console.error('Error skipping step:', error);
@@ -396,9 +396,9 @@ export class OnboardingManager {
       const response = await fetch('/api/device/type', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ device_type: newType }),
+        body: JSON.stringify({ device_type: newType })
       });
 
       if (!response.ok) {
@@ -455,12 +455,12 @@ export class OnboardingManager {
       const response = await fetch('/api/api-key', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           openai_api_key: openaiKey || undefined,
-          anthropic_api_key: anthropicKey || undefined,
-        }),
+          anthropic_api_key: anthropicKey || undefined
+        })
       });
 
       if (!response.ok) {
@@ -847,9 +847,9 @@ export class OnboardingManager {
       const response = await fetch('/api/onboarding/step', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ step_name: stepName }),
+        body: JSON.stringify({ step_name: stepName })
       });
 
       if (!response.ok) {
@@ -870,8 +870,8 @@ export class OnboardingManager {
       const response = await fetch('/api/onboarding/skip', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-        },
+          'Content-Type': 'application/json'
+        }
       });
 
       console.log(`📊 Skip response: status=${response.status}, ok=${response.ok}`);
@@ -907,8 +907,8 @@ export class OnboardingManager {
       const response = await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-        },
+          'Content-Type': 'application/json'
+        }
       });
 
       if (!response.ok) {
@@ -932,8 +932,8 @@ export class OnboardingManager {
       const response = await fetch('/api/onboarding/reset', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-        },
+          'Content-Type': 'application/json'
+        }
       });
 
       if (!response.ok) {

@@ -4,7 +4,7 @@
  * Handles all connection and flow rendering:
  * - Agent connections
  * - Result connections
- * - Chain connections  
+ * - Chain connections
  * - Workflow connections
  * - Dragging connections
  * - Particle effects

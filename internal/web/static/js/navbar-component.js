@@ -4,11 +4,11 @@
  */
 
 function createNavbar(activePage = '') {
-    const navbar = document.createElement('nav');
-    navbar.className = 'navbar navbar-expand-lg glassmorphism';
-    navbar.style.cssText = 'z-index: 1030; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color);';
+  const navbar = document.createElement('nav');
+  navbar.className = 'navbar navbar-expand-lg glassmorphism';
+  navbar.style.cssText = 'z-index: 1030; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color);';
 
-    navbar.innerHTML = `
+  navbar.innerHTML = `
         <div class="container-fluid px-4">
             <div class="d-flex align-items-center w-100">
                 <button id="sidebarToggle" class="modern-btn modern-btn-secondary me-3" title="Toggle Sidebar">
@@ -43,25 +43,25 @@ function createNavbar(activePage = '') {
             </div>
         </div>
     `;
-    return navbar;
+  return navbar;
 }
 
 /**
  * Auto-detect active page and create navbar
  */
 function initNavbar() {
-    const path = window.location.pathname;
-    let activePage = '';
+  const path = window.location.pathname;
+  let activePage = '';
 
-    if (path.includes('/agents')) {
-        activePage = 'agents';
-    } else if (path.includes('/marketplace')) {
-        activePage = 'marketplace';
-    } else if (path.includes('/workspaces') || path.includes('/studios')) {
-        activePage = 'workspaces';
-    }
+  if (path.includes('/agents')) {
+    activePage = 'agents';
+  } else if (path.includes('/marketplace')) {
+    activePage = 'marketplace';
+  } else if (path.includes('/workspaces') || path.includes('/studios')) {
+    activePage = 'workspaces';
+  }
 
-    return createNavbar(activePage);
+  return createNavbar(activePage);
 }
 
 /**
@@ -69,20 +69,20 @@ function initNavbar() {
  * Call this with a CSS selector where the navbar should be inserted
  */
 function insertNavbar(targetSelector) {
-    const target = document.querySelector(targetSelector);
-    if (target) {
-        const navbar = initNavbar();
-        target.appendChild(navbar);
-    } else {
-        console.error('Navbar target not found:', targetSelector);
-    }
+  const target = document.querySelector(targetSelector);
+  if (target) {
+    const navbar = initNavbar();
+    target.appendChild(navbar);
+  } else {
+    console.error('Navbar target not found:', targetSelector);
+  }
 }
 
 // Auto-insert if there's a #navbar-container element
 document.addEventListener('DOMContentLoaded', function() {
-    const container = document.getElementById('navbar-container');
-    if (container) {
-        const navbar = initNavbar();
-        container.appendChild(navbar);
-    }
+  const container = document.getElementById('navbar-container');
+  if (container) {
+    const navbar = initNavbar();
+    container.appendChild(navbar);
+  }
 });
