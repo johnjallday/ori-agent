@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -13,6 +14,32 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
+
+// classifyContextError returns a user-friendly error message based on the context error type
+func classifyContextError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// Check for context errors
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "task timed out - the operation took too long to complete. Consider breaking the task into smaller parts or increasing the timeout."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "task was canceled - this may happen if the server was restarted or the task was manually stopped."
+	}
+
+	// Check for wrapped context errors in the error chain
+	errStr := err.Error()
+	if strings.Contains(errStr, "context deadline exceeded") {
+		return "task timed out - the operation took too long to complete. Consider breaking the task into smaller parts or increasing the timeout."
+	}
+	if strings.Contains(errStr, "context canceled") {
+		return "task was canceled - this may happen if the server was restarted or the task was manually stopped."
+	}
+
+	return ""
+}
 
 // LLMTaskHandler executes tasks using the LLM system
 type LLMTaskHandler struct {
@@ -90,6 +117,10 @@ func (h *LLMTaskHandler) ExecuteTask(ctx context.Context, agentName string, task
 	})
 
 	if err != nil {
+		// Provide user-friendly error messages for context-related errors
+		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
+			return "", fmt.Errorf("%s", friendlyMsg)
+		}
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
 

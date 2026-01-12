@@ -121,6 +121,9 @@ Return your response as a JSON array of tasks in this format:
 	// Call LLM to analyze mission
 	completion, err := o.llmProvider.ChatCompletion(ctx, messages, nil)
 	if err != nil {
+		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
+			return nil, fmt.Errorf("%s", friendlyMsg)
+		}
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
@@ -416,6 +419,9 @@ func (o *Orchestrator) executeTaskWithLLM(ctx context.Context, task Task) (strin
 
 	resp, err := o.llmProvider.ChatWithTools(llmCtx, systemPrompt, taskPrompt, tools)
 	if err != nil {
+		if friendlyMsg := classifyContextError(err); friendlyMsg != "" {
+			return "", fmt.Errorf("%s", friendlyMsg)
+		}
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
 
