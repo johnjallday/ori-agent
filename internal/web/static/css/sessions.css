@@ -1690,6 +1690,12 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   cursor: not-allowed;
 }
 
+.scheduled-task-actions .scheduled-task-delete:hover:not(:disabled) {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
 .scheduled-tasks-empty {
   display: flex;
   flex-direction: column;

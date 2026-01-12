@@ -4731,6 +4731,9 @@ const sessionManager = {
           <button class="scheduled-task-trigger" title="Trigger Now" ${!st.enabled ? 'disabled' : ''}>
             ⚡
           </button>
+          <button class="scheduled-task-delete" title="Delete Schedule">
+            🗑
+          </button>
         </div>
       `;
 
@@ -4751,6 +4754,12 @@ const sessionManager = {
       itemEl.querySelector('.scheduled-task-trigger')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.triggerScheduledTask(st.id);
+      });
+
+      // Delete button
+      itemEl.querySelector('.scheduled-task-delete')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteScheduledTask(st.id);
       });
 
       listContainer.appendChild(itemEl);
