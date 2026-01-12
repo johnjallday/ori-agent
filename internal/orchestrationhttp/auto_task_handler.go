@@ -3,6 +3,7 @@ package orchestrationhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,6 +16,30 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// classifyAutoTaskError returns a user-friendly error message for context errors
+func classifyAutoTaskError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "request timed out - the AI took too long to respond. Please try again or simplify your task description."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "request was canceled - please try again."
+	}
+
+	errStr := err.Error()
+	if strings.Contains(errStr, "context deadline exceeded") {
+		return "request timed out - the AI took too long to respond. Please try again or simplify your task description."
+	}
+	if strings.Contains(errStr, "context canceled") {
+		return "request was canceled - please try again."
+	}
+
+	return ""
+}
 
 // AutoTaskHandler handles auto-creation of tasks from natural language
 type AutoTaskHandler struct {
@@ -169,8 +194,8 @@ Agent assignment: Match task type to available agent names. Leave empty if no cl
 
 	userMessage := description
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Create a context with timeout (60s to handle slow LLM responses)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	logger.Info("Auto-task parsing request", logger.Fields{
@@ -212,6 +237,9 @@ func (h *AutoTaskHandler) parseWithStructuredOutput(
 	})
 
 	if err != nil {
+		if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
+			return nil, fmt.Errorf("%s", friendlyMsg)
+		}
 		return nil, fmt.Errorf("structured output request failed: %w", err)
 	}
 
@@ -255,6 +283,9 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 	})
 
 	if err != nil {
+		if friendlyMsg := classifyAutoTaskError(err); friendlyMsg != "" {
+			return nil, fmt.Errorf("%s", friendlyMsg)
+		}
 		return nil, fmt.Errorf("LLM request failed: %w", err)
 	}
 
