@@ -100,6 +100,75 @@ func WriteJSON(w http.ResponseWriter, data interface{}) {
 	}
 }
 
+// =============================================================================
+// Fire-and-forget success response functions
+// =============================================================================
+// These functions handle logging internally, eliminating boilerplate in handlers.
+// Use these when you cannot meaningfully handle response write errors.
+//
+// Instead of:
+//
+//	if respErr := orihttp.RespondSuccess(w, data); respErr != nil {
+//		logger.Error("Failed to write response", logger.Fields{"error": respErr})
+//	}
+//
+// Use:
+//
+//	orihttp.Success(w, data)
+
+// Success writes a 200 OK JSON response and logs any errors internally.
+func Success(w http.ResponseWriter, data interface{}) {
+	if err := RespondSuccess(w, data); err != nil {
+		logger.Error("Failed to write success response", logger.Fields{"error": err})
+	}
+}
+
+// Created writes a 201 Created JSON response and logs any errors internally.
+func Created(w http.ResponseWriter, data interface{}) {
+	if err := RespondCreated(w, data); err != nil {
+		logger.Error("Failed to write created response", logger.Fields{"error": err})
+	}
+}
+
+// WriteContent writes raw content with the specified content type and logs any errors internally.
+// Use this for non-JSON responses like HTML, plain text, or binary data.
+//
+// Usage:
+//
+//	orihttp.WriteContent(w, "text/html; charset=utf-8", []byte(html))
+func WriteContent(w http.ResponseWriter, contentType string, content []byte) {
+	w.Header().Set("Content-Type", contentType)
+	if _, err := w.Write(content); err != nil {
+		logger.Error("Failed to write response content", logger.Fields{"error": err})
+	}
+}
+
+// WriteHTML writes HTML content and logs any errors internally.
+func WriteHTML(w http.ResponseWriter, html string) {
+	WriteContent(w, "text/html; charset=utf-8", []byte(html))
+}
+
+// WriteText writes plain text content and logs any errors internally.
+func WriteText(w http.ResponseWriter, text string) {
+	WriteContent(w, "text/plain; charset=utf-8", []byte(text))
+}
+
+// WriteBytes writes raw bytes to the response and logs any errors internally.
+// Unlike WriteContent, this does NOT set Content-Type header, allowing the caller
+// to set custom headers before writing. Use this when you need custom caching
+// headers or other response customizations.
+//
+// Usage:
+//
+//	w.Header().Set("Content-Type", "image/svg+xml")
+//	w.Header().Set("Cache-Control", "public, max-age=86400")
+//	orihttp.WriteBytes(w, content)
+func WriteBytes(w http.ResponseWriter, content []byte) {
+	if _, err := w.Write(content); err != nil {
+		logger.Error("Failed to write response", logger.Fields{"error": err})
+	}
+}
+
 // RespondErrorWithErr sends a standardized JSON error response.
 // It automatically sets Content-Type and status code.
 // If err is not nil, it will be appended to the message.

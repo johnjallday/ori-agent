@@ -373,7 +373,7 @@ export class AgentCanvasLayoutManager {
         workflow_connections: workflowConnections,
         scale: this.state.scale,
         offset_x: this.state.offsetX,
-        offset_y: this.state.offsetY,
+        offset_y: this.state.offsetY
       });
 
       console.log('✅ Layout saved successfully');

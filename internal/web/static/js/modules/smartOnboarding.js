@@ -757,7 +757,7 @@ export class SmartOnboardingManager {
   renderPluginItem(plugin, index, isRecommended) {
     const aiRec = this.getAIRecommendation(plugin.name);
     const relevanceBadgeColor = aiRec?.relevance === 'high' ? 'bg-success' :
-                                aiRec?.relevance === 'medium' ? 'bg-info' : 'bg-secondary';
+      aiRec?.relevance === 'medium' ? 'bg-info' : 'bg-secondary';
 
     let reasonHtml = '';
     if (aiRec?.reason) {

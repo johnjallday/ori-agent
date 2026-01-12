@@ -101,8 +101,8 @@ async function loadMcpServers() {
       const statusBadge = status === 'running'
         ? '<span class="badge bg-success">Running</span>'
         : status === 'error'
-        ? '<span class="badge bg-danger">Error</span>'
-        : '<span class="badge bg-secondary">Stopped</span>';
+          ? '<span class="badge bg-danger">Error</span>'
+          : '<span class="badge bg-secondary">Stopped</span>';
 
       html += `
         <div class="card mb-2" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">

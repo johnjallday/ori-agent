@@ -410,6 +410,10 @@
       themeManager.initialize();
     });
   </script>
+  <!-- DX Utilities - must load before modules that use them -->
+  <script src="js/utils/logger.js"></script>
+  <script src="js/utils/event-bus.js"></script>
+  <script src="js/utils/api-client.js"></script>
   <!-- Sidebar modules - loaded before main app -->
   <script src="js/modules/resizer.js"></script>
   <script src="js/modules/settings.js"></script>

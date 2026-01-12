@@ -29,7 +29,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
     const response = await fetch('/api/api-key', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ api_key: apiKey })
     });
@@ -67,7 +67,7 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
     const response = await fetch('/api/settings', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         anthropic_api_key: apiKey
@@ -93,7 +93,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     const response = await fetch('/api/updates/version');
     const data = await response.json();
 
-    let diagnosticsInfo = `
+    const diagnosticsInfo = `
 System Diagnostics
 ==================
 Version: ${data.version || 'Unknown'}

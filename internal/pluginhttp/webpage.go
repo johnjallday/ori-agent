@@ -92,11 +92,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.shouldWrapPage(r, pagePath, webProvider) {
 		wrapped, err := h.renderPluginWrapper(r, pluginName, pagePath)
 		if err == nil {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			if _, writeErr := w.Write([]byte(wrapped)); writeErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-			}
+			orihttp.WriteHTML(w, wrapped)
 			return
 		}
 		logger.Warn("Failed to render plugin page wrapper", logger.Fields{"error": err, "plugin": pluginName, "page": pagePath})
@@ -124,13 +120,7 @@ func (h *WebPageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "text/html; charset=utf-8"
 	}
-	w.Header().Set("Content-Type", contentType)
-
-	// Write content
-	w.WriteHeader(http.StatusOK)
-	if _, writeErr := w.Write([]byte(content)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteContent(w, contentType, []byte(content))
 }
 
 func (h *WebPageHandler) shouldWrapPage(r *http.Request, pagePath string, webProvider pluginapi.WebPageProvider) bool {
@@ -202,30 +192,21 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 		loadedTool, err := h.ensurePluginLoaded(current, pluginName, loadedPlugin)
 		if err != nil {
 			// Plugin couldn't be loaded, return empty list
-			w.Header().Set("Content-Type", "application/json")
-			if _, writeErr := w.Write([]byte(`{"pages":[]}`)); writeErr != nil {
-				logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-			}
+			orihttp.WriteJSON(w, map[string][]string{"pages": {}})
 			return
 		}
 		tool = loadedTool
 	}
 
 	if tool == nil {
-		w.Header().Set("Content-Type", "application/json")
-		if _, writeErr := w.Write([]byte(`{"pages":[]}`)); writeErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-		}
+		orihttp.WriteJSON(w, map[string][]string{"pages": {}})
 		return
 	}
 
 	webProvider, ok := tool.(pluginapi.WebPageProvider)
 	if !ok {
 		// Plugin doesn't provide web pages, return empty list
-		w.Header().Set("Content-Type", "application/json")
-		if _, writeErr := w.Write([]byte(`{"pages":[]}`)); writeErr != nil {
-			logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-		}
+		orihttp.WriteJSON(w, map[string][]string{"pages": {}})
 		return
 	}
 
@@ -233,11 +214,7 @@ func (h *WebPageHandler) ListPages(w http.ResponseWriter, r *http.Request) {
 	pages := webProvider.GetWebPages()
 
 	// Return as JSON
-	w.Header().Set("Content-Type", "application/json")
-	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(quoteStrings(pages), ","))
-	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteJSON(w, map[string][]string{"pages": pages})
 }
 
 // ListAllPages returns all available web pages from all loaded plugins
@@ -296,18 +273,7 @@ func (h *WebPageHandler) ListAllPages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return as JSON
-	w.Header().Set("Content-Type", "application/json")
-
-	// Build JSON manually to avoid import
-	var pagesJSON []string
-	for _, p := range allPages {
-		pagesJSON = append(pagesJSON, fmt.Sprintf(`{"plugin":"%s","page":"%s","url":"%s"}`, p.Plugin, p.Page, p.URL))
-	}
-	response := fmt.Sprintf(`{"pages":[%s]}`, strings.Join(pagesJSON, ","))
-
-	if _, writeErr := w.Write([]byte(response)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteJSON(w, map[string][]PluginPage{"pages": allPages})
 }
 
 // ensurePluginLoaded lazy loads a plugin if not already loaded
@@ -363,13 +329,4 @@ func (h *WebPageHandler) ensurePluginLoaded(agentName, pluginName string, lp typ
 	}
 
 	return tool, nil
-}
-
-// Helper function to quote strings for JSON
-func quoteStrings(strs []string) []string {
-	quoted := make([]string, len(strs))
-	for i, s := range strs {
-		quoted[i] = fmt.Sprintf(`"%s"`, s)
-	}
-	return quoted
 }

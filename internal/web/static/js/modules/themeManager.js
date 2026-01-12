@@ -12,30 +12,30 @@ class ThemeManager {
 
   initialize() {
     console.log('ThemeManager.initialize() called');
-    
+
     // Load saved theme or detect system preference
     this.loadTheme();
-    
+
     // Setup theme toggle button
     this.setupThemeToggle();
-    
+
     // Listen for system theme changes
     this.setupSystemThemeListener();
-    
+
     console.log('Theme manager initialized with theme:', this.currentTheme);
   }
 
   loadTheme() {
     // Check localStorage first
     const savedTheme = localStorage.getItem(this.storageKey);
-    
+
     if (savedTheme) {
       this.currentTheme = savedTheme;
     } else {
       // Detect system preference
       this.currentTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
-    
+
     this.applyTheme(this.currentTheme);
   }
 
@@ -78,23 +78,23 @@ class ThemeManager {
     }
 
     this.currentTheme = theme;
-    
+
     // Save to localStorage
     localStorage.setItem(this.storageKey, theme);
-    
+
     // Apply theme
     this.applyTheme(theme);
-    
+
     // Notify observers
     this.notifyObservers(theme);
-    
+
     console.log('Theme changed to:', theme);
   }
 
   applyTheme(theme) {
     const html = document.documentElement;
     const body = document.body;
-    
+
     if (theme === 'dark') {
       html.setAttribute('data-bs-theme', 'dark');
       body.classList.add('dark-mode');
@@ -118,7 +118,7 @@ class ThemeManager {
       if (span) {
         span.textContent = theme === 'dark' ? 'Light' : 'Dark';
       }
-      
+
       // Update SVG icon
       const svg = toggleButton.querySelector('svg');
       if (svg) {

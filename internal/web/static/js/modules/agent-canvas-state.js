@@ -126,7 +126,7 @@ export const EVENT_TYPES = {
 
   // Multi-selection events
   SELECTION_CHANGED: 'selection.changed',
-  SELECTION_CLEARED: 'selection.cleared',
+  SELECTION_CLEARED: 'selection.cleared'
 };
 
 /**

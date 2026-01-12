@@ -94,8 +94,8 @@ class MessageTimeline {
               <select id="agent-filter" class="form-control form-control-sm">
                 <option value="all">All Agents</option>
                 ${this.getUniqueAgents().map(agent =>
-                  `<option value="${this.escapeHtml(agent)}" ${this.filters.agent === agent ? 'selected' : ''}>${this.escapeHtml(agent)}</option>`
-                ).join('')}
+    `<option value="${this.escapeHtml(agent)}" ${this.filters.agent === agent ? 'selected' : ''}>${this.escapeHtml(agent)}</option>`
+  ).join('')}
               </select>
             </div>
             <div class="col-md-4">

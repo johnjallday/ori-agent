@@ -1,6 +1,9 @@
 // Agent Management Module
 // Handles all agent-related functionality including CRUD operations and UI management
 
+// Create a contextual logger for this module
+const log = Logger.withContext('Agents');
+
 // Agent state management
 let allAgents = [];
 let currentAgentName = '';
@@ -10,12 +13,11 @@ let availableProviders = []; // Cache for available providers and models
 // Fetch available providers and models from API
 async function loadAvailableProviders() {
   try {
-    const response = await fetch('/api/providers');
-    const data = await response.json();
+    const data = await API.get('/api/providers');
     availableProviders = data.providers || [];
     return availableProviders;
   } catch (error) {
-    console.error('Failed to load providers:', error);
+    log.error('Failed to load providers', error);
     return [];
   }
 }
@@ -116,7 +118,7 @@ if (document.readyState === 'loading') {
 
 // Agent Management Functions
 function selectAgent(agentName) {
-  console.log('Selecting agent:', agentName);
+  log.debug('Selecting agent', { agent: agentName });
   currentAgent = agentName;
   // Update UI to reflect selected agent
   document.querySelectorAll('.agent-item').forEach(item => {
@@ -222,17 +224,7 @@ async function createNewAgent() {
       requestBody.system_prompt = agentSystemPromptInput.value.trim();
     }
 
-    const response = await fetch('/api/agents', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
+    await API.post('/api/agents', requestBody);
 
     // Success - close modal and refresh agent list
     const modal = bootstrap.Modal.getInstance(document.getElementById('addAgentModal'));
@@ -257,22 +249,24 @@ async function createNewAgent() {
     }
 
     // Show success message
-    console.log('✅ Agent created successfully:', agentName);
+    log.info('Agent created successfully', { agent: agentName });
     if (window.Toast) {
       Toast.success(`Agent "${agentName}" created successfully`);
     }
 
+    // Emit event for other modules
+    EventBus.emit('agent:created', { name: agentName, type: requestBody.type });
+
     // Refresh the agent list
-    console.log('🔄 Refreshing agent list...');
+    log.debug('Refreshing agent list...');
     await refreshAgentList();
-    console.log('✅ Agent list refreshed');
 
     // Force page reload to ensure UI updates
-    console.log('🔄 Reloading page to show new agent...');
+    log.debug('Reloading page to show new agent...');
     window.location.reload();
 
   } catch (error) {
-    console.error('Error creating agent:', error);
+    log.error('Error creating agent', error);
     if (window.Toast) {
       Toast.error(`Failed to create agent: ${error.message}`);
     }
@@ -285,22 +279,14 @@ async function createNewAgent() {
 
 // Load and display agents for sidebar
 async function loadAgentsForSidebar() {
-  console.log('📡 Loading agents from /api/agents...');
+  log.debug('Loading agents from /api/agents...');
   try {
-    const response = await fetch('/api/agents');
-    console.log(`📊 Response: status=${response.status}, ok=${response.ok}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    console.log(`📦 Received agents:`, data);
-    console.log(`👥 Agent count: ${data.agents?.length || 0}, Current: ${data.current}`);
+    const data = await API.get('/api/agents');
+    log.debug('Received agents', { count: data.agents?.length || 0, current: data.current });
     displayAgents(data.agents, resolveSidebarCurrentAgent(data.current));
-    console.log('✅ Agents displayed');
 
   } catch (error) {
-    console.error('❌ Error loading agents:', error);
+    log.error('Error loading agents', error);
     const agentsList = document.getElementById('agentsList');
     if (agentsList) {
       agentsList.innerHTML = '<div class="text-muted small p-2">Failed to load agents</div>';
@@ -310,10 +296,10 @@ async function loadAgentsForSidebar() {
 
 // Display agents in the sidebar with pagination
 function displayAgents(agents, currentAgent) {
-  console.log(`🎨 displayAgents called with ${agents?.length || 0} agents`);
+  log.debug('Displaying agents', { count: agents?.length || 0 });
   const agentsList = document.getElementById('agentsList');
   if (!agentsList) {
-    console.warn('⚠️ agentsList element not found!');
+    log.warn('agentsList element not found');
     return;
   }
 
@@ -333,7 +319,6 @@ function displayAgents(agents, currentAgent) {
   // Store the data for pagination
   allAgents = sortedAgents;
   currentAgentName = currentAgent;
-  console.log(`📋 Stored agents: ${allAgents?.length || 0}, current: ${currentAgentName}`);
 
   renderAgents();
 }
@@ -344,27 +329,24 @@ function resolveSidebarCurrentAgent(fallbackAgent) {
 }
 
 function renderAgents() {
-  console.log(`🖼️ renderAgents called, total agents: ${allAgents?.length || 0}, visible count: ${visibleAgentCount}`);
+  log.debug('Rendering agents', { total: allAgents?.length || 0, visible: visibleAgentCount });
   const agentsList = document.getElementById('agentsList');
   if (!agentsList) {
-    console.warn('⚠️ agentsList element not found in renderAgents!');
+    log.warn('agentsList element not found in renderAgents');
     return;
   }
 
   // Clear existing agents
-  console.log('🗑️ Clearing existing agents...');
   agentsList.innerHTML = '';
 
   // Show only the first 'visibleAgentCount' agents
   const agentsToShow = allAgents.slice(0, visibleAgentCount);
-  console.log(`📋 Rendering ${agentsToShow.length} agents:`, agentsToShow);
 
   // Add each visible agent
   agentsToShow.forEach(agent => {
     // Handle both old format (string) and new format (object with name and type)
     const agentName = typeof agent === 'string' ? agent : agent.name;
     const agentType = typeof agent === 'string' ? 'tool-calling' : (agent.type || 'tool-calling');
-    console.log(`➕ Adding agent: ${agentName} (type: ${agentType})`);
     const agentItem = createAgentElement(agentName, agentType, currentAgentName);
     agentsList.appendChild(agentItem);
   });
@@ -566,39 +548,36 @@ async function switchToAgent(agentName) {
     if (activeSession && window.sessionManager?.changeSessionAgent) {
       await window.sessionManager.changeSessionAgent(activeSession.id, agentName);
     } else {
-      const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-        method: 'PUT'
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      await API.put(`/api/agents?name=${encodeURIComponent(agentName)}`);
     }
-    
+
     // Show success notification
     if (typeof showNotification === 'function') {
       showNotification(`Switched to agent: ${agentName}`, 'success');
     }
-    
+
+    // Emit event for other modules
+    EventBus.emit('agent:switched', { name: agentName });
+
     // Refresh the agent list to update current agent
     await loadAgentsForSidebar();
-    
+
     // Reload plugins for the new agent
     if (typeof loadPlugins === 'function') {
       await loadPlugins();
     } else if (typeof loadPluginsForSidebar === 'function') {
       await loadPluginsForSidebar();
     }
-    
+
     // Reload settings for the new agent
     if (typeof loadSettings === 'function') {
       await loadSettings();
     }
-    
-    console.log('Switched to agent:', agentName);
-    
+
+    log.info('Switched to agent', { agent: agentName });
+
   } catch (error) {
-    console.error('Error switching agent:', error);
+    log.error('Error switching agent', error);
     if (typeof showNotification === 'function') {
       showNotification(`Failed to switch to agent: ${agentName}`, 'error');
     }
@@ -610,26 +589,23 @@ async function deleteAgent(agentName) {
   if (!confirm(`Are you sure you want to delete agent "${agentName}"?`)) {
     return;
   }
-  
+
   try {
-    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-      method: 'DELETE'
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
+    await API.delete(`/api/agents?name=${encodeURIComponent(agentName)}`);
+
+    // Emit event for other modules
+    EventBus.emit('agent:deleted', { name: agentName });
+
     // Refresh the agent list
     await loadAgentsForSidebar();
 
-    console.log('Deleted agent:', agentName);
+    log.info('Deleted agent', { agent: agentName });
     if (window.Toast) {
       Toast.success(`Agent "${agentName}" deleted`);
     }
 
   } catch (error) {
-    console.error('Error deleting agent:', error);
+    log.error('Error deleting agent', error);
     if (window.Toast) {
       Toast.error(`Failed to delete agent: ${error.message}`);
     }
@@ -647,7 +623,7 @@ function setupAgentManagement() {
   const addAgentBtn = document.getElementById('addAgentBtn');
   if (addAgentBtn) {
     addAgentBtn.addEventListener('click', () => {
-      console.log('Add agent clicked');
+      log.debug('Add agent clicked');
       showAddAgentModal();
     });
   }
@@ -672,7 +648,7 @@ function setupAgentManagement() {
   const loadMoreAgentsBtn = document.getElementById('loadMoreAgentsBtn');
   if (loadMoreAgentsBtn) {
     loadMoreAgentsBtn.addEventListener('click', () => {
-      console.log('Load more agents clicked');
+      log.debug('Load more agents clicked');
       loadAgentsForSidebar(); // Reload all agents (for now, until pagination is implemented)
     });
   }
@@ -698,7 +674,7 @@ function setupAgentManagement() {
   // Auto-config mode toggle listeners
   setupAutoConfigListeners();
 
-  console.log('Agent management setup complete');
+  log.debug('Agent management setup complete');
 }
 
 // State for auto-config
@@ -740,13 +716,12 @@ function setupAutoConfigListeners() {
 // Check if any LLM provider is available
 async function checkBaseLLMAvailability() {
   try {
-    const response = await fetch('/api/agents/auto-config/availability');
-    const data = await response.json();
+    const data = await API.get('/api/agents/auto-config/availability');
     baseLLMAvailable = data.available;
     baseSystemModelConfigured = data.system_model_configured || false;
     return data;
   } catch (error) {
-    console.error('Failed to check LLM availability:', error);
+    log.error('Failed to check LLM availability', error);
     baseLLMAvailable = false;
     baseSystemModelConfigured = false;
     return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
@@ -815,18 +790,7 @@ async function generateBaseAutoConfig() {
   }
 
   try {
-    const response = await fetch('/api/agents/auto-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to generate configuration');
-    }
-
-    const config = await response.json();
+    const config = await API.post('/api/agents/auto-config', { description });
 
     // Apply the configuration to form fields
     applyBaseAutoConfig(config);
@@ -845,14 +809,14 @@ async function generateBaseAutoConfig() {
     baseAutoConfigApplied = true;
 
     if (config.reasoning) {
-      console.log('Auto-config reasoning:', config.reasoning);
+      log.debug('Auto-config reasoning', { reasoning: config.reasoning });
     }
     if (fallback && window.Toast) {
       Toast.warning('Auto-config failed, using defaults. Review the settings before saving.');
     }
 
   } catch (error) {
-    console.error('Auto-config error:', error);
+    log.error('Auto-config error', error);
     if (autoConfigStatus) {
       autoConfigStatus.textContent = 'Failed';
       autoConfigStatus.classList.remove('bg-secondary');
@@ -964,7 +928,7 @@ async function updateAgentSettings(agentName, accordionId) {
     const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
 
     if (!modelSelect || !temperatureSlider) {
-      console.error('Settings elements not found for agent:', agentName);
+      log.error('Settings elements not found for agent', { agent: agentName });
       return;
     }
 
@@ -973,22 +937,10 @@ async function updateAgentSettings(agentName, accordionId) {
 
     // If agent name changed, we need to rename the agent first
     if (newAgentName !== agentName) {
-      const renameResponse = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          new_name: newAgentName,
-          type: newAgentType
-        })
+      await API.put(`/api/agents/${encodeURIComponent(agentName)}`, {
+        new_name: newAgentName,
+        type: newAgentType
       });
-
-      if (!renameResponse.ok) {
-        console.error('Failed to rename agent:', renameResponse.status);
-        if (typeof showNotification === 'function') {
-          showNotification('Failed to rename agent', 'error');
-        }
-        return;
-      }
     }
 
     const settingsData = {
@@ -1002,36 +954,29 @@ async function updateAgentSettings(agentName, accordionId) {
       settingsData.system_prompt = systemPromptInput.value;
     }
 
-    const response = await fetch(`/api/settings?agent=${encodeURIComponent(newAgentName)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settingsData)
-    });
+    await API.post(`/api/settings?agent=${encodeURIComponent(newAgentName)}`, settingsData);
 
-    if (response.ok) {
-      console.log('Settings updated for agent:', newAgentName, settingsData);
+    log.info('Settings updated for agent', { agent: newAgentName, settings: settingsData });
 
-      // Show success notification
-      if (typeof showNotification === 'function') {
-        showNotification(`Settings updated for ${newAgentName}!`, 'success');
-      }
+    // Show success notification
+    if (typeof showNotification === 'function') {
+      showNotification(`Settings updated for ${newAgentName}!`, 'success');
+    }
 
-      // If name changed, reload agents list to reflect the change
-      if (newAgentName !== agentName) {
-        await loadAgentsForSidebar();
-        // If this was the current agent, switch to the new name
-        if (currentAgentName === agentName) {
-          switchToAgent(newAgentName);
-        }
-      }
-    } else {
-      console.error('Failed to save settings:', response.status);
-      if (typeof showNotification === 'function') {
-        showNotification('Failed to save settings', 'error');
+    // Emit event for other modules
+    EventBus.emit('agent:settings:updated', { name: newAgentName, settings: settingsData });
+
+    // If name changed, reload agents list to reflect the change
+    if (newAgentName !== agentName) {
+      await loadAgentsForSidebar();
+      // If this was the current agent, switch to the new name
+      if (currentAgentName === agentName) {
+        switchToAgent(newAgentName);
       }
     }
+
   } catch (error) {
-    console.error('Error saving settings:', error);
+    log.error('Error saving settings', error);
     if (typeof showNotification === 'function') {
       showNotification('Error saving settings', 'error');
     }
@@ -1123,51 +1068,48 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
       });
     }
 
-    const response = await fetch(`/api/settings?agent=${encodeURIComponent(agentName)}`);
-    if (response.ok) {
-      const settings = await response.json();
+    const settings = await API.get(`/api/settings?agent=${encodeURIComponent(agentName)}`);
 
-      // Update model dropdown with current value
-      const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
-      if (modelSelect && modelValue) {
-        modelSelect.value = modelValue;
+    // Update model dropdown with current value
+    const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
+    if (modelSelect && modelValue) {
+      modelSelect.value = modelValue;
+    }
+
+    // Update temperature slider
+    const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
+    const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
+    let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
+      ? settings.Settings.temperature
+      : settings.temperature;
+
+    // Force temperature to 1.0 for GPT-5 models
+    if (modelValue && modelValue.includes('gpt-5')) {
+      temperatureValueData = 1.0;
+      if (temperatureSlider) temperatureSlider.disabled = true;
+    } else {
+      if (temperatureSlider) temperatureSlider.disabled = false;
+    }
+
+    if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
+      temperatureSlider.value = temperatureValueData;
+      if (temperatureValue) {
+        temperatureValue.textContent = temperatureValueData.toFixed(1);
       }
+    }
 
-      // Update temperature slider
-      const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
-      const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
-      let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
-        ? settings.Settings.temperature
-        : settings.temperature;
-
-      // Force temperature to 1.0 for GPT-5 models
-      if (modelValue && modelValue.includes('gpt-5')) {
-        temperatureValueData = 1.0;
-        if (temperatureSlider) temperatureSlider.disabled = true;
-      } else {
-        if (temperatureSlider) temperatureSlider.disabled = false;
-      }
-
-      if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
-        temperatureSlider.value = temperatureValueData;
-        if (temperatureValue) {
-          temperatureValue.textContent = temperatureValueData.toFixed(1);
-        }
-      }
-
-      // Update system prompt
-      const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
-      const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
-      if (systemPromptInput) {
-        systemPromptInput.value = systemPromptValue;
-      }
+    // Update system prompt
+    const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
+    const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
+    if (systemPromptInput) {
+      systemPromptInput.value = systemPromptValue;
     }
 
     // Load MCP servers for this agent
     await loadAgentMCPServers(agentName, accordionId);
 
   } catch (error) {
-    console.error('Error loading settings for agent:', agentName, error);
+    log.error('Error loading settings for agent', { agent: agentName, error });
   }
 }
 
@@ -1177,12 +1119,7 @@ async function loadAgentMCPServers(agentName, accordionId) {
   if (!mcpServersList) return;
 
   try {
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    const data = await API.get(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers`);
     const servers = data.servers || [];
 
     if (servers.length === 0) {
@@ -1194,7 +1131,7 @@ async function loadAgentMCPServers(agentName, accordionId) {
     let html = '';
     servers.forEach(server => {
       const statusColor = server.status === 'running' ? 'success' :
-                         server.status === 'error' ? 'danger' : 'secondary';
+        server.status === 'error' ? 'danger' : 'secondary';
       const statusIcon = server.status === 'running' ? '●' : '○';
 
       html += `
@@ -1222,7 +1159,7 @@ async function loadAgentMCPServers(agentName, accordionId) {
     mcpServersList.innerHTML = html;
 
   } catch (error) {
-    console.error('Error loading MCP servers for agent:', agentName, error);
+    log.error('Error loading MCP servers for agent', { agent: agentName, error });
     mcpServersList.innerHTML = '<div class="text-danger small">Failed to load MCP servers</div>';
   }
 }
@@ -1234,15 +1171,7 @@ async function toggleMCPServer(agentName, serverName, enabled, accordionId) {
 
   try {
     const endpoint = enabled ? 'enable' : 'disable';
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${serverName}/${endpoint}`, {
-      method: 'POST'
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
+    const data = await API.post(`/api/agents/${encodeURIComponent(agentName)}/mcp-servers/${serverName}/${endpoint}`);
 
     // Show success notification
     if (typeof showNotification === 'function') {
@@ -1253,7 +1182,7 @@ async function toggleMCPServer(agentName, serverName, enabled, accordionId) {
     await loadAgentMCPServers(agentName, accordionId);
 
   } catch (error) {
-    console.error('Error toggling MCP server:', error);
+    log.error('Error toggling MCP server', error);
 
     // Rollback checkbox state on error
     if (checkbox) {

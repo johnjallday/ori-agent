@@ -1,6 +1,8 @@
 // Settings Management Module
 // Handles all settings-related functionality including loading, saving, and UI management
 
+const log = Logger.withContext('Settings');
+
 // Settings Management Functions
 
 // Show notification function
@@ -22,16 +24,16 @@ function showNotification(message, type = 'info') {
       <button type="button" class="btn-close ms-2" aria-label="Close"></button>
     </div>
   `;
-  
+
   // Add to body
   document.body.appendChild(notification);
-  
+
   // Add close functionality
   const closeBtn = notification.querySelector('.btn-close');
   closeBtn.addEventListener('click', () => {
     notification.remove();
   });
-  
+
   // Auto-remove after 3 seconds
   setTimeout(() => {
     if (document.body.contains(notification)) {
@@ -43,55 +45,53 @@ function showNotification(message, type = 'info') {
 // Load current settings
 async function loadSettings() {
   try {
-    const response = await fetch('/api/settings');
-    if (response.ok) {
-      const settings = await response.json();
+    const settings = await API.get('/api/settings');
 
-      // Update model dropdown
-      const modelSelect = document.getElementById('gptModelSelect');
-      // Handle both nested (settings.Settings.model) and flat (settings.model) formats
-      const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
-      if (modelSelect && modelValue) {
-        modelSelect.value = modelValue;
-      }
-
-      // Update temperature slider
-      const temperatureSlider = document.getElementById('temperatureSlider');
-      const temperatureValue = document.getElementById('temperatureValue');
-      // Handle both nested (settings.Settings.temperature) and flat (settings.temperature) formats
-      let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
-        ? settings.Settings.temperature
-        : settings.temperature;
-
-      // Force temperature to 1.0 for GPT-5 models
-      const gpt5Notice = document.getElementById('gpt5TempNotice');
-      if (modelValue && modelValue.includes('gpt-5')) {
-        temperatureValueData = 1.0;
-        if (temperatureSlider) temperatureSlider.disabled = true;
-        if (gpt5Notice) gpt5Notice.style.display = 'block';
-      } else {
-        if (temperatureSlider) temperatureSlider.disabled = false;
-        if (gpt5Notice) gpt5Notice.style.display = 'none';
-      }
-
-      if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
-        temperatureSlider.value = temperatureValueData;
-        if (temperatureValue) {
-          temperatureValue.textContent = temperatureValueData.toFixed(1);
-        }
-      }
-
-      // Update system prompt
-      const systemPromptInput = document.getElementById('systemPromptInput');
-      const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
-      if (systemPromptInput) {
-        systemPromptInput.value = systemPromptValue;
-      }
-    } else {
-      console.error('Failed to load settings:', response.status);
+    // Update model dropdown
+    const modelSelect = document.getElementById('gptModelSelect');
+    // Handle both nested (settings.Settings.model) and flat (settings.model) formats
+    const modelValue = (settings.Settings && settings.Settings.model) || settings.model;
+    if (modelSelect && modelValue) {
+      modelSelect.value = modelValue;
     }
+
+    // Update temperature slider
+    const temperatureSlider = document.getElementById('temperatureSlider');
+    const temperatureValue = document.getElementById('temperatureValue');
+    // Handle both nested (settings.Settings.temperature) and flat (settings.temperature) formats
+    let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
+      ? settings.Settings.temperature
+      : settings.temperature;
+
+    // Force temperature to 1.0 for GPT-5 models
+    const gpt5Notice = document.getElementById('gpt5TempNotice');
+    if (modelValue && modelValue.includes('gpt-5')) {
+      temperatureValueData = 1.0;
+      if (temperatureSlider) temperatureSlider.disabled = true;
+      if (gpt5Notice) gpt5Notice.style.display = 'block';
+    } else {
+      if (temperatureSlider) temperatureSlider.disabled = false;
+      if (gpt5Notice) gpt5Notice.style.display = 'none';
+    }
+
+    if (temperatureSlider && typeof temperatureValueData !== 'undefined') {
+      temperatureSlider.value = temperatureValueData;
+      if (temperatureValue) {
+        temperatureValue.textContent = temperatureValueData.toFixed(1);
+      }
+    }
+
+    // Update system prompt
+    const systemPromptInput = document.getElementById('systemPromptInput');
+    const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
+    if (systemPromptInput) {
+      systemPromptInput.value = systemPromptValue;
+    }
+
+    log.debug('Settings loaded successfully');
+    EventBus.emit('settings:loaded', settings);
   } catch (error) {
-    console.error('Error loading settings:', error);
+    log.error('Error loading settings:', error);
     // Fallback to defaults
     const modelSelect = document.getElementById('gptModelSelect');
     const temperatureSlider = document.getElementById('temperatureSlider');
@@ -111,7 +111,7 @@ async function saveSettings() {
     const systemPromptInput = document.getElementById('systemPromptInput');
 
     if (!modelSelect || !temperatureSlider) {
-      console.error('Settings elements not found');
+      log.error('Settings elements not found');
       return;
     }
 
@@ -125,32 +125,25 @@ async function saveSettings() {
       settingsData.system_prompt = systemPromptInput.value;
     }
 
-    const response = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settingsData)
-    });
+    await API.post('/api/settings', settingsData);
 
-    if (response.ok) {
-      console.log('Settings updated:', settingsData);
+    log.info('Settings updated:', settingsData);
+    EventBus.emit('settings:updated', settingsData);
 
-      // Show success notification
-      showNotification('Settings updated successfully!', 'success');
-    } else {
-      console.error('Failed to save settings:', response.status);
-      showNotification('Failed to save settings', 'error');
-    }
+    // Show success notification
+    showNotification('Settings updated successfully!', 'success');
   } catch (error) {
-    console.error('Error saving settings:', error);
-    showNotification('Error saving settings', 'error');
+    log.error('Error saving settings:', error);
+    showNotification('Failed to save settings', 'error');
   }
 }
 
 // Settings Management
 function toggleSetting(settingName, enabled) {
-  console.log('Toggling setting:', settingName, 'enabled:', enabled);
+  log.debug('Toggling setting:', settingName, 'enabled:', enabled);
   // Save setting to localStorage or send to server
   localStorage.setItem(settingName, String(enabled));
+  EventBus.emit('settings:toggled', { name: settingName, enabled });
 }
 
 // Setup settings event listeners
@@ -176,7 +169,7 @@ function setupSettings() {
       }
     });
   }
-  
+
   if (temperatureSlider && temperatureValue) {
     temperatureSlider.addEventListener('input', function(e) {
       const modelSelect = document.getElementById('gptModelSelect');
@@ -193,7 +186,7 @@ function setupSettings() {
       }
     });
   }
-  
+
   // Temperature click-to-edit functionality
   if (temperatureValue && temperatureInput && temperatureSlider) {
     // Click on value to edit
@@ -212,7 +205,7 @@ function setupSettings() {
       temperatureInput.focus();
       temperatureInput.select();
     });
-    
+
     // Handle input changes
     function updateTemperatureFromInput() {
       const value = parseFloat(temperatureInput.value);
@@ -223,7 +216,7 @@ function setupSettings() {
       temperatureInput.style.display = 'none';
       temperatureValue.style.display = 'inline-block';
     }
-    
+
     // Save on Enter or blur
     temperatureInput.addEventListener('blur', updateTemperatureFromInput);
     temperatureInput.addEventListener('keydown', function(e) {
@@ -235,19 +228,19 @@ function setupSettings() {
       }
     });
   }
-  
+
   if (updateBtn) {
     updateBtn.addEventListener('click', function() {
       saveSettings();
-      console.log('Settings saved to config.json');
+      log.debug('Settings saved to config.json');
     });
   }
-  
+
   // Settings buttons
   const advancedSettingsBtn = document.getElementById('advancedSettingsBtn');
   if (advancedSettingsBtn) {
     advancedSettingsBtn.addEventListener('click', () => {
-      console.log('Advanced settings clicked');
+      log.debug('Advanced settings clicked');
       // Show advanced settings modal
     });
   }
@@ -256,7 +249,7 @@ function setupSettings() {
   const systemDiagnosticsBtn = document.getElementById('systemDiagnosticsBtn');
   if (systemDiagnosticsBtn) {
     systemDiagnosticsBtn.addEventListener('click', () => {
-      console.log('System diagnostics clicked');
+      log.debug('System diagnostics clicked');
       // Show system diagnostics panel
     });
   }
@@ -268,11 +261,11 @@ function setupSettings() {
       toggleSetting(settingName, e.target.checked);
     });
   });
-  
+
   // Load current settings
   loadSettings();
-  
-  console.log('Settings management setup complete');
+
+  log.debug('Settings management setup complete');
 }
 
 // Initialize settings management when DOM is ready

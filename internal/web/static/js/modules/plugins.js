@@ -1,6 +1,8 @@
 // Plugin Management Module
 // Handles all plugin-related functionality including loading, toggling, upload, and online installation
 
+const log = Logger.withContext('Plugins');
+
 // Plugin upload state management
 let uploadListenersSetup = false;
 
@@ -24,25 +26,20 @@ async function checkPluginConfigurationStatus(activePluginNames) {
 
     try {
       // Check the /config endpoint to see if plugin supports initialization with required config
-      const response = await fetch(`/api/plugins/${pluginName}/config`);
+      const data = await API.get(`/api/plugins/${pluginName}/config`);
 
-      if (response.ok) {
-        const data = await response.json();
-        // Plugin has config only if it supports initialization AND has required config variables
-        if (data.supports_initialization && data.required_config && data.required_config.length > 0) {
-          hasConfig = true;
-          configVars = data.required_config;
-          // Needs init if not already initialized
-          needsInit = !data.is_initialized;
-          console.log(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
-        } else {
-          console.log(`Plugin ${pluginName} does not require configuration`);
-        }
+      // Plugin has config only if it supports initialization AND has required config variables
+      if (data.supports_initialization && data.required_config && data.required_config.length > 0) {
+        hasConfig = true;
+        configVars = data.required_config;
+        // Needs init if not already initialized
+        needsInit = !data.is_initialized;
+        log.debug(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
       } else {
-        console.log(`Plugin ${pluginName} config check returned ${response.status}`);
+        log.debug(`Plugin ${pluginName} does not require configuration`);
       }
     } catch (error) {
-      console.log(`Plugin ${pluginName} configuration check failed:`, error);
+      log.debug(`Plugin ${pluginName} configuration check failed:`, error);
       hasConfig = false;
     }
 
@@ -61,18 +58,10 @@ async function checkPluginConfigurationStatus(activePluginNames) {
 async function loadPluginsForSidebar() {
   try {
     // Fetch all available plugins from registry
-    const registryResponse = await fetch('/api/plugin-registry');
-    if (!registryResponse.ok) {
-      throw new Error('Failed to fetch plugin registry');
-    }
-    const registry = await registryResponse.json();
+    const registry = await API.get('/api/plugin-registry');
 
     // Fetch currently loaded plugins for this agent
-    const activeResponse = await fetch('/api/plugins');
-    if (!activeResponse.ok) {
-      throw new Error('Failed to fetch active plugins');
-    }
-    const activePlugins = await activeResponse.json();
+    const activePlugins = await API.get('/api/plugins');
 
     // Create a set of active plugin names for quick lookup (only enabled ones)
     const activePluginNames = new Set(
@@ -90,23 +79,25 @@ async function loadPluginsForSidebar() {
       }));
 
     // Fetch plugin configuration status for active plugins
-    console.log('About to call checkPluginConfigurationStatus with:', activePluginNames);
+    log.debug('About to call checkPluginConfigurationStatus with:', activePluginNames);
     let pluginConfigStatus;
     try {
       pluginConfigStatus = await checkPluginConfigurationStatus(activePluginNames);
-      console.log('checkPluginConfigurationStatus returned:', pluginConfigStatus);
+      log.debug('checkPluginConfigurationStatus returned:', pluginConfigStatus);
     } catch (error) {
-      console.error('Error in checkPluginConfigurationStatus:', error);
+      log.error('Error in checkPluginConfigurationStatus:', error);
       pluginConfigStatus = new Map(); // fallback to empty map
     }
 
     displayPlugins(localPlugins, activePluginNames, pluginConfigStatus);
+    EventBus.emit('plugins:loaded', { count: localPlugins.length, active: activePluginNames.size });
   } catch (error) {
-    console.error('Error loading plugins:', error);
+    log.error('Error loading plugins:', error);
     const pluginsList = document.getElementById('pluginsList');
     if (pluginsList) {
       pluginsList.innerHTML = '<div class="text-danger small">Failed to load plugins</div>';
     }
+    EventBus.emit('plugins:error', { error: error.message });
   }
 }
 
@@ -156,12 +147,12 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
 
     // Debug logging for config button visibility
     if (isActive) {
-      console.log(`Plugin: ${plugin.name}`);
-      console.log(`  - isActive: ${isActive}`);
-      console.log(`  - configStatus:`, configStatus);
-      console.log(`  - needsConfig: ${needsConfig}`);
-      console.log(`  - hasConfig: ${hasConfig}`);
-      console.log(`  - Will show config button: ${hasConfig}`);
+      log.debug(`Plugin: ${plugin.name}`);
+      log.debug(`  - isActive: ${isActive}`);
+      log.debug(`  - configStatus:`, configStatus);
+      log.debug(`  - needsConfig: ${needsConfig}`);
+      log.debug(`  - hasConfig: ${hasConfig}`);
+      log.debug(`  - Will show config button: ${hasConfig}`);
     }
 
 
@@ -254,7 +245,7 @@ function setupPluginToggles() {
       const pluginPath = e.target.dataset.pluginPath;
       const isEnabled = e.target.checked;
 
-      console.log(`Toggle event: ${pluginName}, isEnabled: ${isEnabled}`);
+      log.debug(`Toggle event: ${pluginName}, isEnabled: ${isEnabled}`);
 
       try {
         await togglePlugin(pluginName, pluginPath, isEnabled);
@@ -265,8 +256,9 @@ function setupPluginToggles() {
         if (window.refreshPluginPages) {
           window.refreshPluginPages();
         }
+        EventBus.emit('plugin:toggled', { name: pluginName, enabled: isEnabled });
       } catch (error) {
-        console.error('Failed to toggle plugin:', error);
+        log.error('Failed to toggle plugin:', error);
         // Revert the toggle state
         e.target.checked = !isEnabled;
         if (window.Toast) {
@@ -277,16 +269,15 @@ function setupPluginToggles() {
   });
 
   // Setup plugin configuration buttons
-  console.log('Setting up plugin config buttons');
+  log.debug('Setting up plugin config buttons');
   const configButtons = document.querySelectorAll('.plugin-config-btn');
-  console.log(`Found ${configButtons.length} config buttons to set up`);
+  log.debug(`Found ${configButtons.length} config buttons to set up`);
   configButtons.forEach(button => {
     button.addEventListener('click', async (e) => {
       const button = e.target.closest('button');
       const pluginName = button.dataset.pluginName;
-      const pluginPath = button.dataset.pluginPath;
 
-      console.log(`Config button clicked for plugin: ${pluginName}`);
+      log.debug(`Config button clicked for plugin: ${pluginName}`);
 
       // All configurable plugins use the same modal
       // The modal will fetch settings from /api/plugins/{name}/default-settings
@@ -310,8 +301,9 @@ function setupPluginToggles() {
         await removePlugin(pluginName, pluginPath);
         // Refresh plugins list
         await loadPluginsForSidebar();
+        EventBus.emit('plugin:removed', { name: pluginName });
       } catch (error) {
-        console.error('Failed to remove plugin:', error);
+        log.error('Failed to remove plugin:', error);
         alert(`Failed to remove plugin: ${error.message}`);
       }
     });
@@ -320,81 +312,72 @@ function setupPluginToggles() {
 
 // Toggle plugin on/off
 async function togglePlugin(pluginName, pluginPath, enable) {
-  console.log(`togglePlugin called: ${pluginName}, enable: ${enable}`);
+  log.debug(`togglePlugin called: ${pluginName}, enable: ${enable}`);
 
   if (enable) {
     // For enabling, check if the file needs to be renamed back from .disabled
-    const disabledPath = pluginPath + '.disabled';
+    const formData = new FormData();
+    formData.append('name', pluginName);
+    formData.append('path', pluginPath);
 
     // Try to enable the plugin first
-    const enableResponse = await fetch('/api/plugins', {
-      method: 'POST',
-      body: (() => {
-        const formData = new FormData();
-        formData.append('name', pluginName);
-        formData.append('path', pluginPath);
-        return formData;
-      })()
-    });
-
     let enableResponseData = null;
 
-    if (!enableResponse.ok) {
-      const errorText = await enableResponse.text();
-      // If it failed because the file doesn't exist, try to restore from .disabled
-      if (errorText.includes('realpath failed') || errorText.includes('no such file')) {
-        console.log('Plugin file not found, attempting to restore from .disabled version');
-        // Call a new API endpoint to restore the plugin file
-        const restoreResponse = await fetch('/api/plugins/restore', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: pluginName, path: pluginPath })
-        });
+    try {
+      const enableResponse = await fetch('/api/plugins', {
+        method: 'POST',
+        body: formData
+      });
 
-        if (!restoreResponse.ok) {
-          const restoreError = await restoreResponse.text();
-          throw new Error(`Failed to restore plugin file: ${restoreError}`);
-        }
+      if (!enableResponse.ok) {
+        const errorText = await enableResponse.text();
+        // If it failed because the file doesn't exist, try to restore from .disabled
+        if (errorText.includes('realpath failed') || errorText.includes('no such file')) {
+          log.info('Plugin file not found, attempting to restore from .disabled version');
+          // Call a new API endpoint to restore the plugin file
+          await API.post('/api/plugins/restore', { name: pluginName, path: pluginPath });
 
-        // Now try to enable again
-        const retryResponse = await fetch('/api/plugins', {
-          method: 'POST',
-          body: (() => {
-            const formData = new FormData();
-            formData.append('name', pluginName);
-            formData.append('path', pluginPath);
-            return formData;
-          })()
-        });
+          // Now try to enable again
+          const retryFormData = new FormData();
+          retryFormData.append('name', pluginName);
+          retryFormData.append('path', pluginPath);
 
-        if (!retryResponse.ok) {
-          const retryError = await retryResponse.text();
-          throw new Error(`Failed to enable plugin after restore: ${retryError}`);
-        }
+          const retryResponse = await fetch('/api/plugins', {
+            method: 'POST',
+            body: retryFormData
+          });
 
-        // Get response data from retry
-        try {
-          enableResponseData = await retryResponse.json();
-        } catch (e) {
-          console.log('Failed to parse retry response as JSON');
+          if (!retryResponse.ok) {
+            const retryError = await retryResponse.text();
+            throw new Error(`Failed to enable plugin after restore: ${retryError}`);
+          }
+
+          // Get response data from retry
+          try {
+            enableResponseData = await retryResponse.json();
+          } catch (e) {
+            log.debug('Failed to parse retry response as JSON');
+          }
+        } else {
+          throw new Error(errorText || 'Failed to enable plugin');
         }
       } else {
-        throw new Error(errorText || 'Failed to enable plugin');
+        // Get response data from successful enable
+        try {
+          enableResponseData = await enableResponse.json();
+        } catch (e) {
+          log.debug('Failed to parse enable response as JSON');
+        }
       }
-    } else {
-      // Get response data from successful enable
-      try {
-        enableResponseData = await enableResponse.json();
-      } catch (e) {
-        console.log('Failed to parse enable response as JSON');
-      }
+    } catch (error) {
+      throw error;
     }
 
-    console.log(`Plugin ${pluginName} enabled successfully`);
+    log.info(`Plugin ${pluginName} enabled successfully`);
 
     // Check if plugin needs configuration modal
     if (enableResponseData && enableResponseData.show_config_modal === true) {
-      console.log(`Plugin ${pluginName} requires configuration, showing modal...`);
+      log.info(`Plugin ${pluginName} requires configuration, showing modal...`);
       // Refresh plugins list first
       await loadPluginsForSidebar();
       // Show configuration modal
@@ -407,16 +390,9 @@ async function togglePlugin(pluginName, pluginPath, enable) {
 
   } else {
     // For disabling, unload from cache
-    const unloadResponse = await fetch(`/api/plugins?name=${encodeURIComponent(pluginName)}`, {
-      method: 'DELETE'
-    });
+    await API.delete(`/api/plugins?name=${encodeURIComponent(pluginName)}`);
 
-    if (!unloadResponse.ok) {
-      const errorText = await unloadResponse.text();
-      throw new Error(`Failed to unload plugin: ${errorText}`);
-    }
-
-    console.log(`Plugin ${pluginName} disabled successfully`);
+    log.info(`Plugin ${pluginName} disabled successfully`);
 
     // Refresh the plugins list to show the updated state
     await loadPluginsForSidebar();
@@ -425,16 +401,8 @@ async function togglePlugin(pluginName, pluginPath, enable) {
 
 // Remove uploaded plugin
 async function removePlugin(pluginName, pluginPath) {
-  const response = await fetch(`/api/plugin-registry?name=${encodeURIComponent(pluginName)}`, {
-    method: 'DELETE'
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || 'Failed to remove plugin');
-  }
-
-  console.log(`Plugin ${pluginName} removed successfully from registry and filesystem`);
+  await API.delete(`/api/plugin-registry?name=${encodeURIComponent(pluginName)}`);
+  log.info(`Plugin ${pluginName} removed successfully from registry and filesystem`);
 }
 
 
@@ -507,7 +475,7 @@ function handleFileInputChange(e) {
 }
 
 function handlePluginFile(file) {
-  console.log('File selected:', file.name);
+  log.debug('File selected:', file.name);
 
   // Validate file size (e.g., max 50MB)
   const maxSize = 50 * 1024 * 1024; // 50MB
@@ -556,6 +524,8 @@ async function uploadPluginFile(file) {
 
       if (xhr.status === 200) {
         showUploadResult('success', 'Plugin uploaded successfully!');
+        log.info('Plugin uploaded successfully');
+        EventBus.emit('plugin:uploaded', { filename: file.name });
 
         // Refresh plugins in sidebar
         setTimeout(() => {
@@ -574,12 +544,14 @@ async function uploadPluginFile(file) {
           errorMessage = xhr.responseText || errorMessage;
         }
         showUploadResult('error', errorMessage);
+        log.error('Plugin upload failed:', errorMessage);
       }
     });
 
     xhr.addEventListener('error', () => {
       progressDiv.classList.add('d-none');
       showUploadResult('error', 'Network error occurred during upload');
+      log.error('Network error during plugin upload');
     });
 
     // Start upload
@@ -589,6 +561,7 @@ async function uploadPluginFile(file) {
   } catch (error) {
     progressDiv.classList.add('d-none');
     showUploadResult('error', 'Upload failed: ' + error.message);
+    log.error('Plugin upload exception:', error);
   }
 }
 
@@ -619,7 +592,7 @@ function setupPluginManagement() {
   const browsePluginsBtn = document.getElementById('browsePluginsBtn');
   if (browsePluginsBtn) {
     browsePluginsBtn.addEventListener('click', () => {
-      console.log('Browse plugins clicked');
+      log.debug('Browse plugins clicked');
       showPluginUploadModal();
     });
   }
@@ -627,12 +600,12 @@ function setupPluginManagement() {
   const pluginStoreBtn = document.getElementById('pluginStoreBtn');
   if (pluginStoreBtn) {
     pluginStoreBtn.addEventListener('click', () => {
-      console.log('Plugin store clicked');
+      log.debug('Plugin store clicked');
       showPluginStoreModal();
     });
   }
 
-  console.log('Plugin management setup complete');
+  log.debug('Plugin management setup complete');
 }
 
 // Initialize plugin management when DOM is ready

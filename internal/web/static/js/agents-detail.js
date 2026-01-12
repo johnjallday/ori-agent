@@ -8,600 +8,600 @@ let availableProviders = []; // Cache for available providers and models from AP
 
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
 function getAgentNameFromURL() {
-    // First try path-based URL: /agents/{agent-name}
-    const pathMatch = window.location.pathname.match(/^\/agents\/([^\/]+)$/);
-    if (pathMatch) {
-        return decodeURIComponent(pathMatch[1]);
-    }
-    // Fall back to query parameter for backward compatibility
-    const params = new URLSearchParams(window.location.search);
-    return params.get('name');
+  // First try path-based URL: /agents/{agent-name}
+  const pathMatch = window.location.pathname.match(/^\/agents\/([^\/]+)$/);
+  if (pathMatch) {
+    return decodeURIComponent(pathMatch[1]);
+  }
+  // Fall back to query parameter for backward compatibility
+  const params = new URLSearchParams(window.location.search);
+  return params.get('name');
 }
 
 // Fetch available providers and models from API
 async function loadAvailableProviders() {
-    try {
-        const response = await fetch('/api/providers');
-        if (!response.ok) {
-            throw new Error('Failed to load providers');
-        }
-        const data = await response.json();
-        availableProviders = data.providers || [];
-        return availableProviders;
-    } catch (error) {
-        console.error('Failed to load providers:', error);
-        return [];
+  try {
+    const response = await fetch('/api/providers');
+    if (!response.ok) {
+      throw new Error('Failed to load providers');
     }
+    const data = await response.json();
+    availableProviders = data.providers || [];
+    return availableProviders;
+  } catch (error) {
+    console.error('Failed to load providers:', error);
+    return [];
+  }
 }
 
 // Populate model select with options from available providers
 function populateEditModelOptions() {
-    const modelSelect = document.getElementById('editModel');
-    const providerFilter = document.getElementById('editProviderFilter');
-    const typeSelect = document.getElementById('editType');
+  const modelSelect = document.getElementById('editModel');
+  const providerFilter = document.getElementById('editProviderFilter');
+  const typeSelect = document.getElementById('editType');
 
-    if (!modelSelect || availableProviders.length === 0) {
-        return;
+  if (!modelSelect || availableProviders.length === 0) {
+    return;
+  }
+
+  const selectedProvider = providerFilter ? providerFilter.value : '';
+  const selectedAgentType = typeSelect ? typeSelect.value : (currentAgent?.type || 'tool-calling');
+
+  // Store current value to re-select it after populating
+  const currentModelValue = currentAgent?.model || '';
+
+  // Clear existing options
+  modelSelect.innerHTML = '';
+
+  // Map provider display names to our filter values
+  const providerNameMap = {
+    'OpenAI': 'openai',
+    'Anthropic': 'claude',
+    'Ollama': 'ollama'
+  };
+
+  // Find models from the API data
+  availableProviders.forEach(provider => {
+    const providerKey = providerNameMap[provider.display_name] || provider.name;
+
+    // If a specific provider is selected, only show models from that provider
+    if (selectedProvider && providerKey !== selectedProvider) {
+      return;
     }
 
-    const selectedProvider = providerFilter ? providerFilter.value : '';
-    const selectedAgentType = typeSelect ? typeSelect.value : (currentAgent?.type || 'tool-calling');
+    // Create optgroup for this provider
+    const providerGroup = document.createElement('optgroup');
+    providerGroup.label = provider.display_name;
+    let hasMatchingModels = false;
 
-    // Store current value to re-select it after populating
-    const currentModelValue = currentAgent?.model || '';
+    provider.models.forEach(model => {
+      // Filter by agent type if the model has a type specified
+      if (model.type && model.type !== selectedAgentType) {
+        return;
+      }
 
-    // Clear existing options
-    modelSelect.innerHTML = '';
-
-    // Map provider display names to our filter values
-    const providerNameMap = {
-        'OpenAI': 'openai',
-        'Anthropic': 'claude',
-        'Ollama': 'ollama'
-    };
-
-    // Find models from the API data
-    availableProviders.forEach(provider => {
-        const providerKey = providerNameMap[provider.display_name] || provider.name;
-
-        // If a specific provider is selected, only show models from that provider
-        if (selectedProvider && providerKey !== selectedProvider) {
-            return;
-        }
-
-        // Create optgroup for this provider
-        const providerGroup = document.createElement('optgroup');
-        providerGroup.label = provider.display_name;
-        let hasMatchingModels = false;
-
-        provider.models.forEach(model => {
-            // Filter by agent type if the model has a type specified
-            if (model.type && model.type !== selectedAgentType) {
-                return;
-            }
-
-            const option = document.createElement('option');
-            option.value = model.value;
-            option.textContent = model.label;
-            option.setAttribute('data-provider', providerKey);
-            if (model.type) {
-                option.setAttribute('data-type', model.type);
-            }
-            providerGroup.appendChild(option);
-            hasMatchingModels = true;
-        });
-
-        // Only add the provider group if it has matching models
-        if (hasMatchingModels) {
-            modelSelect.appendChild(providerGroup);
-        }
+      const option = document.createElement('option');
+      option.value = model.value;
+      option.textContent = model.label;
+      option.setAttribute('data-provider', providerKey);
+      if (model.type) {
+        option.setAttribute('data-type', model.type);
+      }
+      providerGroup.appendChild(option);
+      hasMatchingModels = true;
     });
 
-    // If no models found, show a message
-    if (modelSelect.options.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No models available for this configuration';
-        modelSelect.appendChild(option);
+    // Only add the provider group if it has matching models
+    if (hasMatchingModels) {
+      modelSelect.appendChild(providerGroup);
     }
+  });
 
-    // Try to select the current model
-    if (currentModelValue) {
-        for (let i = 0; i < modelSelect.options.length; i++) {
-            if (modelSelect.options[i].value === currentModelValue) {
-                modelSelect.selectedIndex = i;
-                break;
-            }
-        }
+  // If no models found, show a message
+  if (modelSelect.options.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No models available for this configuration';
+    modelSelect.appendChild(option);
+  }
+
+  // Try to select the current model
+  if (currentModelValue) {
+    for (let i = 0; i < modelSelect.options.length; i++) {
+      if (modelSelect.options[i].value === currentModelValue) {
+        modelSelect.selectedIndex = i;
+        break;
+      }
     }
+  }
 }
 
 // Filter models by provider (called when provider filter changes)
 function filterEditModelOptions() {
-    populateEditModelOptions();
+  populateEditModelOptions();
 }
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', async () => {
-    // Get agent name from URL
-    agentName = getAgentNameFromURL();
+  // Get agent name from URL
+  agentName = getAgentNameFromURL();
 
-    if (!agentName) {
-        showError('No agent specified');
-        setTimeout(() => {
-            window.location.href = '/agents';
-        }, 2000);
-        return;
-    }
+  if (!agentName) {
+    showError('No agent specified');
+    setTimeout(() => {
+      window.location.href = '/agents';
+    }, 2000);
+    return;
+  }
 
-    // Load providers in parallel with agent details
-    await Promise.all([
-        loadAvailableProviders(),
-        loadAgentDetails()
-    ]);
+  // Load providers in parallel with agent details
+  await Promise.all([
+    loadAvailableProviders(),
+    loadAgentDetails()
+  ]);
 });
 
 async function fetchAgentDetail() {
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);
+  const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/detail`);
 
-    if (!response.ok) {
-        if (response.status === 404) {
-            throw new Error('Agent not found');
-        }
-        throw new Error('Failed to load agent details');
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Agent not found');
     }
+    throw new Error('Failed to load agent details');
+  }
 
-    return response.json();
+  return response.json();
 }
 
 // Load agent details from API
 async function loadAgentDetails() {
-    try {
-        showLoading(true);
-        currentAgent = await fetchAgentDetail();
-        renderAgentDetails();
-    } catch (error) {
-        console.error('Error loading agent details:', error);
-        showError(error.message || 'Failed to load agent details');
-        setTimeout(() => {
-            window.location.href = '/agents';
-        }, 3000);
-    } finally {
-        showLoading(false);
-    }
+  try {
+    showLoading(true);
+    currentAgent = await fetchAgentDetail();
+    renderAgentDetails();
+  } catch (error) {
+    console.error('Error loading agent details:', error);
+    showError(error.message || 'Failed to load agent details');
+    setTimeout(() => {
+      window.location.href = '/agents';
+    }, 3000);
+  } finally {
+    showLoading(false);
+  }
 }
 
 async function refreshAgentDetails() {
-    try {
-        currentAgent = await fetchAgentDetail();
-        renderAgentDetails();
-    } catch (error) {
-        console.error('Error refreshing agent details:', error);
-        setConfigStatus(error.message || 'Failed to refresh agent details', 'error');
-    }
+  try {
+    currentAgent = await fetchAgentDetail();
+    renderAgentDetails();
+  } catch (error) {
+    console.error('Error refreshing agent details:', error);
+    setConfigStatus(error.message || 'Failed to refresh agent details', 'error');
+  }
 }
 
 // Render agent details on page
 function renderAgentDetails() {
-    if (!currentAgent) return;
+  if (!currentAgent) return;
 
-    // Header
-    const avatar = document.getElementById('agentAvatar');
-    if (avatar) {
-        avatar.style.background = getAgentColor(currentAgent);
-        avatar.textContent = getAgentInitials(currentAgent.name);
-    }
+  // Header
+  const avatar = document.getElementById('agentAvatar');
+  if (avatar) {
+    avatar.style.background = getAgentColor(currentAgent);
+    avatar.textContent = getAgentInitials(currentAgent.name);
+  }
 
-    const nameEl = document.getElementById('agentName');
-    if (nameEl) nameEl.textContent = currentAgent.name;
+  const nameEl = document.getElementById('agentName');
+  if (nameEl) nameEl.textContent = currentAgent.name;
 
-    const description = currentAgent.metadata?.description || 'No description provided';
-    const descEl = document.getElementById('agentDescription');
-    if (descEl) descEl.textContent = description;
+  const description = currentAgent.metadata?.description || 'No description provided';
+  const descEl = document.getElementById('agentDescription');
+  if (descEl) descEl.textContent = description;
 
-    const typeEl = document.getElementById('agentType');
-    if (typeEl) typeEl.textContent = capitalize(currentAgent.type || 'tool-calling');
+  const typeEl = document.getElementById('agentType');
+  if (typeEl) typeEl.textContent = capitalize(currentAgent.type || 'tool-calling');
 
-    const modelEl = document.getElementById('agentModel');
-    if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
+  const modelEl = document.getElementById('agentModel');
+  if (modelEl) modelEl.textContent = currentAgent.model || 'Not set';
 
-    const providerEl = document.getElementById('agentProvider');
-    const provider = currentAgent.provider || currentAgent.llm_provider || '';
-    if (providerEl) providerEl.textContent = provider || 'Not set';
+  const providerEl = document.getElementById('agentProvider');
+  const provider = currentAgent.provider || currentAgent.llm_provider || '';
+  if (providerEl) providerEl.textContent = provider || 'Not set';
 
-    const tempEl = document.getElementById('agentTemperature');
-    if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
+  const tempEl = document.getElementById('agentTemperature');
+  if (tempEl) tempEl.textContent = currentAgent.temperature ?? 'Not set';
 
-    const maxTokensEl = document.getElementById('agentMaxTokens');
-    if (maxTokensEl) maxTokensEl.textContent = formatMaxTokens(currentAgent.max_output_tokens);
+  const maxTokensEl = document.getElementById('agentMaxTokens');
+  if (maxTokensEl) maxTokensEl.textContent = formatMaxTokens(currentAgent.max_output_tokens);
 
-    const pluginCountEl = document.getElementById('pluginCount');
-    if (pluginCountEl) pluginCountEl.textContent = currentAgent.enabled_plugins?.length || 0;
+  const pluginCountEl = document.getElementById('pluginCount');
+  if (pluginCountEl) pluginCountEl.textContent = currentAgent.enabled_plugins?.length || 0;
 
-    // Statistics
-    const stats = currentAgent.statistics || {};
-    const statMessages = document.getElementById('statMessages');
-    if (statMessages) statMessages.textContent = formatNumber(stats.message_count || 0);
-    const statTokens = document.getElementById('statTokens');
-    if (statTokens) statTokens.textContent = formatNumber(stats.token_usage || 0);
-    const statCost = document.getElementById('statCost');
-    if (statCost) statCost.textContent = '$' + (stats.total_cost || 0).toFixed(4);
+  // Statistics
+  const stats = currentAgent.statistics || {};
+  const statMessages = document.getElementById('statMessages');
+  if (statMessages) statMessages.textContent = formatNumber(stats.message_count || 0);
+  const statTokens = document.getElementById('statTokens');
+  if (statTokens) statTokens.textContent = formatNumber(stats.token_usage || 0);
+  const statCost = document.getElementById('statCost');
+  if (statCost) statCost.textContent = '$' + (stats.total_cost || 0).toFixed(4);
 
-    const avgTokens = stats.message_count > 0
-        ? Math.round(stats.token_usage / stats.message_count)
-        : 0;
-    const statAvgTokens = document.getElementById('statAvgTokens');
-    if (statAvgTokens) statAvgTokens.textContent = formatNumber(avgTokens);
+  const avgTokens = stats.message_count > 0
+    ? Math.round(stats.token_usage / stats.message_count)
+    : 0;
+  const statAvgTokens = document.getElementById('statAvgTokens');
+  if (statAvgTokens) statAvgTokens.textContent = formatNumber(avgTokens);
 
-    const createdAt = document.getElementById('createdAt');
-    if (createdAt) createdAt.textContent = formatFullDate(stats.created_at);
-    const updatedAt = document.getElementById('updatedAt');
-    if (updatedAt) updatedAt.textContent = formatFullDate(stats.updated_at);
+  const createdAt = document.getElementById('createdAt');
+  if (createdAt) createdAt.textContent = formatFullDate(stats.created_at);
+  const updatedAt = document.getElementById('updatedAt');
+  if (updatedAt) updatedAt.textContent = formatFullDate(stats.updated_at);
 
-    // Configuration
-    const configModel = document.getElementById('configModel');
-    if (configModel) configModel.textContent = currentAgent.model || 'Not set';
-    const configTemp = document.getElementById('configTemp');
-    if (configTemp) configTemp.textContent = currentAgent.temperature ?? 1.0;
-    const configType = document.getElementById('configType');
-    if (configType) configType.textContent = capitalize(currentAgent.type || 'tool-calling');
-    const configRole = document.getElementById('configRole');
-    if (configRole) configRole.textContent = capitalize(currentAgent.role || 'general');
+  // Configuration
+  const configModel = document.getElementById('configModel');
+  if (configModel) configModel.textContent = currentAgent.model || 'Not set';
+  const configTemp = document.getElementById('configTemp');
+  if (configTemp) configTemp.textContent = currentAgent.temperature ?? 1.0;
+  const configType = document.getElementById('configType');
+  if (configType) configType.textContent = capitalize(currentAgent.type || 'tool-calling');
+  const configRole = document.getElementById('configRole');
+  if (configRole) configRole.textContent = capitalize(currentAgent.role || 'general');
 
-    const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
-    const promptEl = document.getElementById('configPrompt');
-    if (promptEl) {
-        promptEl.textContent = systemPrompt || 'No system prompt set';
-    }
-    const promptDisplay = document.getElementById('promptDisplay');
-    if (promptDisplay) {
-        promptDisplay.textContent = systemPrompt || 'No system prompt set';
-    }
+  const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
+  const promptEl = document.getElementById('configPrompt');
+  if (promptEl) {
+    promptEl.textContent = systemPrompt || 'No system prompt set';
+  }
+  const promptDisplay = document.getElementById('promptDisplay');
+  if (promptDisplay) {
+    promptDisplay.textContent = systemPrompt || 'No system prompt set';
+  }
 
-    // Plugins
-    renderPlugins();
+  // Plugins
+  renderPlugins();
 
-    // Tags
-    renderTags();
+  // Tags
+  renderTags();
 
-    // MCP Servers
-    renderMCPServers();
+  // MCP Servers
+  renderMCPServers();
 
-    // Show content
-    const header = document.getElementById('agentHeader');
-    if (header) header.style.display = 'flex';
-    const grid = document.getElementById('contentGrid');
-    if (grid) grid.style.display = 'grid';
+  // Show content
+  const header = document.getElementById('agentHeader');
+  if (header) header.style.display = 'flex';
+  const grid = document.getElementById('contentGrid');
+  if (grid) grid.style.display = 'grid';
 
-    // Keep edit form in sync with latest data
-    populateConfigForm();
-    setConfigEditMode(isEditingConfig);
-    populatePromptForm();
-    setPromptEditMode(isEditingPrompt);
+  // Keep edit form in sync with latest data
+  populateConfigForm();
+  setConfigEditMode(isEditingConfig);
+  populatePromptForm();
+  setPromptEditMode(isEditingPrompt);
 }
 
 function setConfigEditMode(enabled) {
-    const display = document.getElementById('configDisplay');
-    const form = document.getElementById('configEditForm');
-    const editBtn = document.getElementById('editConfigBtn');
-    const actions = document.getElementById('configEditActions');
-    const saveBtn = document.getElementById('saveConfigBtn');
+  const display = document.getElementById('configDisplay');
+  const form = document.getElementById('configEditForm');
+  const editBtn = document.getElementById('editConfigBtn');
+  const actions = document.getElementById('configEditActions');
+  const saveBtn = document.getElementById('saveConfigBtn');
 
-    isEditingConfig = enabled;
+  isEditingConfig = enabled;
 
-    if (display) display.style.display = enabled ? 'none' : 'block';
-    if (form) form.style.display = enabled ? 'block' : 'none';
-    if (actions) actions.style.display = enabled ? 'flex' : 'none';
-    if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
-    if (editBtn) {
-        editBtn.textContent = enabled ? 'Cancel' : 'Edit';
-    }
+  if (display) display.style.display = enabled ? 'none' : 'block';
+  if (form) form.style.display = enabled ? 'block' : 'none';
+  if (actions) actions.style.display = enabled ? 'flex' : 'none';
+  if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
+  if (editBtn) {
+    editBtn.textContent = enabled ? 'Cancel' : 'Edit';
+  }
 
-    if (enabled) {
-        populateConfigForm();
-        setConfigStatus('');
-    }
+  if (enabled) {
+    populateConfigForm();
+    setConfigStatus('');
+  }
 }
 
 function toggleConfigEditMode() {
-    if (isEditingConfig) {
-        setConfigEditMode(false);
-        setConfigStatus('');
-        populateConfigForm(); // reset any unsaved edits
-    } else {
-        setConfigEditMode(true);
-    }
+  if (isEditingConfig) {
+    setConfigEditMode(false);
+    setConfigStatus('');
+    populateConfigForm(); // reset any unsaved edits
+  } else {
+    setConfigEditMode(true);
+  }
 }
 
 function populateConfigForm() {
-    if (!currentAgent) return;
-    const modelSelect = document.getElementById('editModel');
-    const providerFilter = document.getElementById('editProviderFilter');
-    const tempInput = document.getElementById('editTemperature');
-    const maxTokensInput = document.getElementById('editMaxTokens');
-    const typeSelect = document.getElementById('editType');
-    const roleSelect = document.getElementById('editRole');
+  if (!currentAgent) return;
+  const modelSelect = document.getElementById('editModel');
+  const providerFilter = document.getElementById('editProviderFilter');
+  const tempInput = document.getElementById('editTemperature');
+  const maxTokensInput = document.getElementById('editMaxTokens');
+  const typeSelect = document.getElementById('editType');
+  const roleSelect = document.getElementById('editRole');
 
-    // Set type and role first as they affect model filtering
-    if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
-    if (roleSelect) roleSelect.value = currentAgent.role || 'general';
-    if (tempInput) tempInput.value = currentAgent.temperature ?? '';
-    if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
+  // Set type and role first as they affect model filtering
+  if (typeSelect) typeSelect.value = currentAgent.type || 'tool-calling';
+  if (roleSelect) roleSelect.value = currentAgent.role || 'general';
+  if (tempInput) tempInput.value = currentAgent.temperature ?? '';
+  if (maxTokensInput) maxTokensInput.value = currentAgent.max_output_tokens || '';
 
-    // Reset provider filter and populate models
-    if (providerFilter) providerFilter.value = '';
+  // Reset provider filter and populate models
+  if (providerFilter) providerFilter.value = '';
 
-    // Populate the model dropdown and select current model
-    populateEditModelOptions();
+  // Populate the model dropdown and select current model
+  populateEditModelOptions();
 
-    // Select the current model if available
-    if (modelSelect && currentAgent.model) {
-        for (let i = 0; i < modelSelect.options.length; i++) {
-            if (modelSelect.options[i].value === currentAgent.model) {
-                modelSelect.selectedIndex = i;
-                break;
-            }
-        }
+  // Select the current model if available
+  if (modelSelect && currentAgent.model) {
+    for (let i = 0; i < modelSelect.options.length; i++) {
+      if (modelSelect.options[i].value === currentAgent.model) {
+        modelSelect.selectedIndex = i;
+        break;
+      }
     }
+  }
 }
 
 async function saveConfigChanges() {
-    if (!currentAgent) return;
+  if (!currentAgent) return;
 
-    const modelSelect = document.getElementById('editModel');
-    const model = modelSelect?.value || '';
-    const tempRaw = document.getElementById('editTemperature')?.value;
-    const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
-    const type = document.getElementById('editType')?.value || 'tool-calling';
-    const role = document.getElementById('editRole')?.value || 'general';
+  const modelSelect = document.getElementById('editModel');
+  const model = modelSelect?.value || '';
+  const tempRaw = document.getElementById('editTemperature')?.value;
+  const maxTokensRaw = document.getElementById('editMaxTokens')?.value;
+  const type = document.getElementById('editType')?.value || 'tool-calling';
+  const role = document.getElementById('editRole')?.value || 'general';
 
-    if (!model) {
-        setConfigStatus('Model is required to save configuration.', 'error');
-        return;
+  if (!model) {
+    setConfigStatus('Model is required to save configuration.', 'error');
+    return;
+  }
+
+  // Get provider from the selected model's data attribute
+  const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
+  const provider = selectedOption?.getAttribute('data-provider') || '';
+
+  const payload = {
+    model,
+    type,
+    role
+  };
+
+  const temp = parseFloat(tempRaw);
+  if (!Number.isNaN(temp)) {
+    payload.temperature = temp;
+  }
+
+  const maxTokens = parseInt(maxTokensRaw, 10);
+  if (!Number.isNaN(maxTokens)) {
+    payload.max_output_tokens = maxTokens;
+  }
+
+  if (provider) {
+    payload.llm_provider = provider;
+  }
+
+  try {
+    setConfigSavingState(true);
+    setConfigStatus('Saving changes...');
+
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save changes');
     }
 
-    // Get provider from the selected model's data attribute
-    const selectedOption = modelSelect?.options[modelSelect.selectedIndex];
-    const provider = selectedOption?.getAttribute('data-provider') || '';
-
-    const payload = {
-        model,
-        type,
-        role,
-    };
-
-    const temp = parseFloat(tempRaw);
-    if (!Number.isNaN(temp)) {
-        payload.temperature = temp;
-    }
-
-    const maxTokens = parseInt(maxTokensRaw, 10);
-    if (!Number.isNaN(maxTokens)) {
-        payload.max_output_tokens = maxTokens;
-    }
-
-    if (provider) {
-        payload.llm_provider = provider;
-    }
-
-    try {
-        setConfigSavingState(true);
-        setConfigStatus('Saving changes...');
-
-        const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Failed to save changes');
-        }
-
-        await refreshAgentDetails();
-        setConfigStatus('Configuration updated successfully.', 'success');
-        setConfigEditMode(false);
-    } catch (error) {
-        console.error('Failed to save configuration:', error);
-        setConfigStatus(error.message || 'Failed to save configuration', 'error');
-    } finally {
-        setConfigSavingState(false);
-    }
+    await refreshAgentDetails();
+    setConfigStatus('Configuration updated successfully.', 'success');
+    setConfigEditMode(false);
+  } catch (error) {
+    console.error('Failed to save configuration:', error);
+    setConfigStatus(error.message || 'Failed to save configuration', 'error');
+  } finally {
+    setConfigSavingState(false);
+  }
 }
 
 function setConfigSavingState(isSaving) {
-    const saveBtn = document.getElementById('saveConfigBtn');
-    const editBtn = document.getElementById('editConfigBtn');
-    if (saveBtn) {
-        saveBtn.disabled = isSaving;
-        if (isSaving) {
-            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
-        } else {
-            saveBtn.innerHTML = 'Save';
-        }
+  const saveBtn = document.getElementById('saveConfigBtn');
+  const editBtn = document.getElementById('editConfigBtn');
+  if (saveBtn) {
+    saveBtn.disabled = isSaving;
+    if (isSaving) {
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+    } else {
+      saveBtn.innerHTML = 'Save';
     }
-    if (editBtn) {
-        editBtn.disabled = isSaving;
-    }
+  }
+  if (editBtn) {
+    editBtn.disabled = isSaving;
+  }
 }
 
 function setConfigStatus(message, type = 'info') {
-    const statusEl = document.getElementById('configEditStatus');
-    if (!statusEl) return;
-    statusEl.textContent = message || '';
-    if (!message) return;
+  const statusEl = document.getElementById('configEditStatus');
+  if (!statusEl) return;
+  statusEl.textContent = message || '';
+  if (!message) return;
 
-    if (type === 'error') {
-        statusEl.style.color = 'var(--danger-color)';
-    } else if (type === 'success') {
-        statusEl.style.color = 'var(--success-color, #22c55e)';
-    } else {
-        statusEl.style.color = 'var(--text-secondary)';
-    }
+  if (type === 'error') {
+    statusEl.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    statusEl.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    statusEl.style.color = 'var(--text-secondary)';
+  }
 }
 
 function setPromptEditMode(enabled) {
-    const display = document.getElementById('promptDisplay');
-    const form = document.getElementById('promptEditForm');
-    const editBtn = document.getElementById('editPromptBtn');
-    const actions = document.getElementById('promptEditActions');
-    const saveBtn = document.getElementById('savePromptBtn');
+  const display = document.getElementById('promptDisplay');
+  const form = document.getElementById('promptEditForm');
+  const editBtn = document.getElementById('editPromptBtn');
+  const actions = document.getElementById('promptEditActions');
+  const saveBtn = document.getElementById('savePromptBtn');
 
-    isEditingPrompt = enabled;
+  isEditingPrompt = enabled;
 
-    if (display) display.style.display = enabled ? 'none' : 'block';
-    if (form) form.style.display = enabled ? 'block' : 'none';
-    if (actions) actions.style.display = enabled ? 'flex' : 'none';
-    if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
-    if (editBtn) {
-        editBtn.textContent = enabled ? 'Cancel' : 'Edit';
-    }
+  if (display) display.style.display = enabled ? 'none' : 'block';
+  if (form) form.style.display = enabled ? 'block' : 'none';
+  if (actions) actions.style.display = enabled ? 'flex' : 'none';
+  if (saveBtn) saveBtn.style.display = enabled ? 'inline-flex' : 'none';
+  if (editBtn) {
+    editBtn.textContent = enabled ? 'Cancel' : 'Edit';
+  }
 
-    if (enabled) {
-        populatePromptForm();
-        setPromptStatus('');
-    }
+  if (enabled) {
+    populatePromptForm();
+    setPromptStatus('');
+  }
 }
 
 function togglePromptEditMode() {
-    if (isEditingPrompt) {
-        setPromptEditMode(false);
-        setPromptStatus('');
-        populatePromptForm(); // reset unsaved edits
-    } else {
-        setPromptEditMode(true);
-    }
+  if (isEditingPrompt) {
+    setPromptEditMode(false);
+    setPromptStatus('');
+    populatePromptForm(); // reset unsaved edits
+  } else {
+    setPromptEditMode(true);
+  }
 }
 
 function populatePromptForm() {
-    if (!currentAgent) return;
-    const promptInput = document.getElementById('editSystemPrompt');
-    if (promptInput) promptInput.value = currentAgent.system_prompt || '';
+  if (!currentAgent) return;
+  const promptInput = document.getElementById('editSystemPrompt');
+  if (promptInput) promptInput.value = currentAgent.system_prompt || '';
 }
 
 async function savePromptChanges() {
-    if (!currentAgent) return;
-    const promptInput = document.getElementById('editSystemPrompt');
-    const systemPrompt = promptInput ? promptInput.value.trim() : '';
+  if (!currentAgent) return;
+  const promptInput = document.getElementById('editSystemPrompt');
+  const systemPrompt = promptInput ? promptInput.value.trim() : '';
 
-    try {
-        setPromptSavingState(true);
-        setPromptStatus('Saving system prompt...');
+  try {
+    setPromptSavingState(true);
+    setPromptStatus('Saving system prompt...');
 
-        const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ system_prompt: systemPrompt })
-        });
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ system_prompt: systemPrompt })
+    });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Failed to save system prompt');
-        }
-
-        await refreshAgentDetails();
-        setPromptStatus('System prompt updated successfully.', 'success');
-        setPromptEditMode(false);
-    } catch (error) {
-        console.error('Failed to save system prompt:', error);
-        setPromptStatus(error.message || 'Failed to save system prompt', 'error');
-    } finally {
-        setPromptSavingState(false);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save system prompt');
     }
+
+    await refreshAgentDetails();
+    setPromptStatus('System prompt updated successfully.', 'success');
+    setPromptEditMode(false);
+  } catch (error) {
+    console.error('Failed to save system prompt:', error);
+    setPromptStatus(error.message || 'Failed to save system prompt', 'error');
+  } finally {
+    setPromptSavingState(false);
+  }
 }
 
 function setPromptSavingState(isSaving) {
-    const saveBtn = document.getElementById('savePromptBtn');
-    const editBtn = document.getElementById('editPromptBtn');
-    if (saveBtn) {
-        saveBtn.disabled = isSaving;
-        if (isSaving) {
-            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
-        } else {
-            saveBtn.innerHTML = 'Save';
-        }
+  const saveBtn = document.getElementById('savePromptBtn');
+  const editBtn = document.getElementById('editPromptBtn');
+  if (saveBtn) {
+    saveBtn.disabled = isSaving;
+    if (isSaving) {
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+    } else {
+      saveBtn.innerHTML = 'Save';
     }
-    if (editBtn) {
-        editBtn.disabled = isSaving;
-    }
+  }
+  if (editBtn) {
+    editBtn.disabled = isSaving;
+  }
 }
 
 function setPromptStatus(message, type = 'info') {
-    const statusEl = document.getElementById('promptEditStatus');
-    if (!statusEl) return;
-    statusEl.textContent = message || '';
-    if (!message) return;
+  const statusEl = document.getElementById('promptEditStatus');
+  if (!statusEl) return;
+  statusEl.textContent = message || '';
+  if (!message) return;
 
-    if (type === 'error') {
-        statusEl.style.color = 'var(--danger-color)';
-    } else if (type === 'success') {
-        statusEl.style.color = 'var(--success-color, #22c55e)';
-    } else {
-        statusEl.style.color = 'var(--text-secondary)';
-    }
+  if (type === 'error') {
+    statusEl.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    statusEl.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    statusEl.style.color = 'var(--text-secondary)';
+  }
 }
 
 function formatMaxTokens(value) {
-    if (!value || value <= 0) return 'Not set';
-    return value.toLocaleString();
+  if (!value || value <= 0) return 'Not set';
+  return value.toLocaleString();
 }
 
 // Check if a plugin has configuration by checking the default-settings endpoint
 async function checkPluginHasConfig(pluginName) {
-    try {
-        const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/default-settings`);
-        return response.ok;
-    } catch (error) {
-        console.log(`Plugin ${pluginName} configuration check failed:`, error);
-        return false;
-    }
+  try {
+    const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/default-settings`);
+    return response.ok;
+  } catch (error) {
+    console.log(`Plugin ${pluginName} configuration check failed:`, error);
+    return false;
+  }
 }
 
 // Render plugins list
 async function renderPlugins() {
-    const container = document.getElementById('enabledPluginsList');
-    if (!container) return;
+  const container = document.getElementById('enabledPluginsList');
+  if (!container) return;
 
-    const pluginsRaw = currentAgent?.enabled_plugins;
-    const plugins = Array.isArray(pluginsRaw) ? pluginsRaw : (pluginsRaw ? [pluginsRaw] : []);
+  const pluginsRaw = currentAgent?.enabled_plugins;
+  const plugins = Array.isArray(pluginsRaw) ? pluginsRaw : (pluginsRaw ? [pluginsRaw] : []);
 
-    if (plugins.length === 0) {
-        container.innerHTML = '<div class="empty-message">No plugins enabled</div>';
-        return;
-    }
+  if (plugins.length === 0) {
+    container.innerHTML = '<div class="empty-message">No plugins enabled</div>';
+    return;
+  }
 
-    // Show loading while checking config status
-    container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
+  // Show loading while checking config status
+  container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
 
-    // Check configuration status for all plugins in parallel
-    const pluginNames = plugins.map(plugin =>
-        typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '')
-    );
+  // Check configuration status for all plugins in parallel
+  const pluginNames = plugins.map(plugin =>
+    typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '')
+  );
 
-    const configChecks = await Promise.all(
-        pluginNames.map(name => checkPluginHasConfig(name))
-    );
+  const configChecks = await Promise.all(
+    pluginNames.map(name => checkPluginHasConfig(name))
+  );
 
-    const configStatus = new Map();
-    pluginNames.forEach((name, index) => {
-        configStatus.set(name, configChecks[index]);
-    });
+  const configStatus = new Map();
+  pluginNames.forEach((name, index) => {
+    configStatus.set(name, configChecks[index]);
+  });
 
-    container.innerHTML = '';
-    plugins.forEach(plugin => {
-        const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
-        const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
-        const hasConfig = configStatus.get(name) || false;
+  container.innerHTML = '';
+  plugins.forEach(plugin => {
+    const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
+    const hasConfig = configStatus.get(name) || false;
 
-        const item = document.createElement('div');
-        item.className = 'plugin-item';
-        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-        item.innerHTML = `
+    const item = document.createElement('div');
+    item.className = 'plugin-item';
+    item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+    item.innerHTML = `
             <div>
                 <div class="plugin-name">${escapeHtml(name || '(unknown plugin)')}</div>
                 ${version ? `<div class="plugin-version">v${escapeHtml(version)}</div>` : ''}
@@ -618,46 +618,46 @@ async function renderPlugins() {
                 </button>
             ` : ''}
         `;
-        container.appendChild(item);
-    });
+    container.appendChild(item);
+  });
 
-    // Setup click handlers for configure buttons
-    setupPluginConfigButtons();
+  // Setup click handlers for configure buttons
+  setupPluginConfigButtons();
 }
 
 // Setup event listeners for plugin configure buttons
 function setupPluginConfigButtons() {
-    const configButtons = document.querySelectorAll('#enabledPluginsList .plugin-config-btn');
-    configButtons.forEach(button => {
-        button.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const pluginName = button.dataset.pluginName;
-            if (pluginName && typeof showPluginConfigModal === 'function') {
-                await showPluginConfigModal(pluginName);
-            } else {
-                console.error('showPluginConfigModal is not available or plugin name is missing');
-            }
-        });
+  const configButtons = document.querySelectorAll('#enabledPluginsList .plugin-config-btn');
+  configButtons.forEach(button => {
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pluginName = button.dataset.pluginName;
+      if (pluginName && typeof showPluginConfigModal === 'function') {
+        await showPluginConfigModal(pluginName);
+      } else {
+        console.error('showPluginConfigModal is not available or plugin name is missing');
+      }
     });
+  });
 }
 
 // Render tags
 function renderTags() {
-    const container = document.getElementById('tagsList');
-    const tags = currentAgent.metadata?.tags || [];
+  const container = document.getElementById('tagsList');
+  const tags = currentAgent.metadata?.tags || [];
 
-    if (tags.length === 0) {
-        document.getElementById('tagsSection').style.display = 'none';
-        return;
-    }
+  if (tags.length === 0) {
+    document.getElementById('tagsSection').style.display = 'none';
+    return;
+  }
 
-    container.innerHTML = '';
-    tags.forEach(tag => {
-        const tagEl = document.createElement('span');
-        tagEl.className = 'tag';
-        tagEl.textContent = tag;
-        container.appendChild(tagEl);
-    });
+  container.innerHTML = '';
+  tags.forEach(tag => {
+    const tagEl = document.createElement('span');
+    tagEl.className = 'tag';
+    tagEl.textContent = tag;
+    container.appendChild(tagEl);
+  });
 }
 
 // ============================================
@@ -669,58 +669,58 @@ let allAvailablePlugins = [];
 
 // Toggle plugin manager panel
 async function togglePluginManager() {
-    const panel = document.getElementById('pluginManagerPanel');
-    pluginManagerVisible = !pluginManagerVisible;
+  const panel = document.getElementById('pluginManagerPanel');
+  pluginManagerVisible = !pluginManagerVisible;
 
-    if (pluginManagerVisible) {
-        panel.style.display = 'block';
-        await loadAvailablePlugins();
-    } else {
-        panel.style.display = 'none';
-    }
+  if (pluginManagerVisible) {
+    panel.style.display = 'block';
+    await loadAvailablePlugins();
+  } else {
+    panel.style.display = 'none';
+  }
 }
 
 // Load all available plugins from registry
 async function loadAvailablePlugins() {
-    const container = document.getElementById('availablePluginsList');
-    container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading plugins...</div>';
+  const container = document.getElementById('availablePluginsList');
+  container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading plugins...</div>';
 
-    try {
-        const response = await fetch('/api/plugins');
-        if (!response.ok) throw new Error('Failed to load plugins');
+  try {
+    const response = await fetch('/api/plugins');
+    if (!response.ok) throw new Error('Failed to load plugins');
 
-        const data = await response.json();
-        allAvailablePlugins = data.plugins || [];
+    const data = await response.json();
+    allAvailablePlugins = data.plugins || [];
 
-        renderAvailablePlugins();
-    } catch (error) {
-        console.error('Error loading plugins:', error);
-        container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load plugins</div>';
-    }
+    renderAvailablePlugins();
+  } catch (error) {
+    console.error('Error loading plugins:', error);
+    container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load plugins</div>';
+  }
 }
 
 // Render available plugins with toggle switches
 function renderAvailablePlugins() {
-    const container = document.getElementById('availablePluginsList');
-    const enabledPlugins = currentAgent?.enabled_plugins || [];
-    // enabled_plugins can be an array of strings or objects with 'name' property
-    const enabledNames = enabledPlugins.map(p => typeof p === 'string' ? p : (p?.name || p));
-    const enabledSet = new Set(enabledNames);
+  const container = document.getElementById('availablePluginsList');
+  const enabledPlugins = currentAgent?.enabled_plugins || [];
+  // enabled_plugins can be an array of strings or objects with 'name' property
+  const enabledNames = enabledPlugins.map(p => typeof p === 'string' ? p : (p?.name || p));
+  const enabledSet = new Set(enabledNames);
 
-    if (allAvailablePlugins.length === 0) {
-        container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No plugins available. Upload plugins from the Plugins page.</div>';
-        return;
-    }
+  if (allAvailablePlugins.length === 0) {
+    container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No plugins available. Upload plugins from the Plugins page.</div>';
+    return;
+  }
 
-    container.innerHTML = '';
-    allAvailablePlugins.forEach(plugin => {
-        const pluginName = plugin.name || plugin;
-        const isEnabled = enabledSet.has(pluginName);
+  container.innerHTML = '';
+  allAvailablePlugins.forEach(plugin => {
+    const pluginName = plugin.name || plugin;
+    const isEnabled = enabledSet.has(pluginName);
 
-        const item = document.createElement('div');
-        item.className = 'plugin-item';
-        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
-        item.innerHTML = `
+    const item = document.createElement('div');
+    item.className = 'plugin-item';
+    item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
+    item.innerHTML = `
             <div style="flex: 1;">
                 <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(pluginName)}</div>
                 ${plugin.description ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${escapeHtml(plugin.description)}</div>` : ''}
@@ -730,99 +730,99 @@ function renderAvailablePlugins() {
                 <span class="toggle-slider"></span>
             </label>
         `;
-        container.appendChild(item);
-    });
+    container.appendChild(item);
+  });
 }
 
 // Toggle plugin for this agent
 async function togglePlugin(pluginName, enabled) {
-    const checkbox = document.getElementById(`plugin_${pluginName}`);
+  const checkbox = document.getElementById(`plugin_${pluginName}`);
 
-    try {
-        // First, switch to this agent
-        const switchResponse = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-            method: 'PUT'
-        });
+  try {
+    // First, switch to this agent
+    const switchResponse = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+      method: 'PUT'
+    });
 
-        if (!switchResponse.ok) {
-            throw new Error('Failed to switch to agent');
-        }
-
-        // Then enable/disable the plugin
-        const endpoint = `/api/plugins/${encodeURIComponent(pluginName)}/${enabled ? 'enable' : 'disable'}`;
-        const response = await fetch(endpoint, {
-            method: 'POST'
-        });
-
-        if (response.ok) {
-            showToast(`${pluginName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
-            // Reload agent details to refresh the enabled plugins list
-            await loadAgentDetails();
-            if (pluginManagerVisible) {
-                renderAvailablePlugins();
-            }
-            // Refresh plugin pages dropdown
-            if (window.refreshPluginPages) {
-                window.refreshPluginPages();
-            }
-        } else {
-            const error = await response.text();
-            showToast(`Failed: ${error}`, 'error');
-            if (checkbox) checkbox.checked = !enabled;
-        }
-    } catch (error) {
-        console.error('Toggle plugin error:', error);
-        showToast(`Failed to ${enabled ? 'enable' : 'disable'} plugin`, 'error');
-        if (checkbox) checkbox.checked = !enabled;
+    if (!switchResponse.ok) {
+      throw new Error('Failed to switch to agent');
     }
+
+    // Then enable/disable the plugin
+    const endpoint = `/api/plugins/${encodeURIComponent(pluginName)}/${enabled ? 'enable' : 'disable'}`;
+    const response = await fetch(endpoint, {
+      method: 'POST'
+    });
+
+    if (response.ok) {
+      showToast(`${pluginName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+      // Reload agent details to refresh the enabled plugins list
+      await loadAgentDetails();
+      if (pluginManagerVisible) {
+        renderAvailablePlugins();
+      }
+      // Refresh plugin pages dropdown
+      if (window.refreshPluginPages) {
+        window.refreshPluginPages();
+      }
+    } else {
+      const error = await response.text();
+      showToast(`Failed: ${error}`, 'error');
+      if (checkbox) checkbox.checked = !enabled;
+    }
+  } catch (error) {
+    console.error('Toggle plugin error:', error);
+    showToast(`Failed to ${enabled ? 'enable' : 'disable'} plugin`, 'error');
+    if (checkbox) checkbox.checked = !enabled;
+  }
 }
 
 // Render MCP servers
 function renderMCPServers() {
-    const container = document.getElementById('mcpList');
-    const servers = currentAgent.mcp_servers || [];
+  const container = document.getElementById('mcpList');
+  const servers = currentAgent.mcp_servers || [];
 
-    document.getElementById('mcpSection').style.display = 'block';
+  document.getElementById('mcpSection').style.display = 'block';
 
-    if (servers.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-secondary); font-size: 14px;">No MCP servers enabled for this agent. Click "Configure" to enable MCP servers.</p>';
-        return;
-    }
+  if (servers.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-secondary); font-size: 14px;">No MCP servers enabled for this agent. Click "Configure" to enable MCP servers.</p>';
+    return;
+  }
 
-    container.innerHTML = '';
-    servers.forEach(server => {
-        const item = document.createElement('div');
-        item.className = 'plugin-item';
-        item.innerHTML = `
+  container.innerHTML = '';
+  servers.forEach(server => {
+    const item = document.createElement('div');
+    item.className = 'plugin-item';
+    item.innerHTML = `
             <div class="plugin-name">${escapeHtml(server)}</div>
         `;
-        container.appendChild(item);
-    });
+    container.appendChild(item);
+  });
 }
 
 // Toggle MCP configuration panel
 async function toggleMCPConfig() {
-    const panel = document.getElementById('mcpConfigPanel');
-    if (panel.style.display === 'none') {
-        panel.style.display = 'block';
-        await loadMCPConfigPanel();
-    } else {
-        panel.style.display = 'none';
-    }
+  const panel = document.getElementById('mcpConfigPanel');
+  if (panel.style.display === 'none') {
+    panel.style.display = 'block';
+    await loadMCPConfigPanel();
+  } else {
+    panel.style.display = 'none';
+  }
 }
 
 // Load MCP configuration panel
 async function loadMCPConfigPanel() {
-    const panel = document.getElementById('mcpConfigPanel');
+  const panel = document.getElementById('mcpConfigPanel');
 
-    try {
-        // Fetch all available MCP servers
-        const response = await fetch('/api/mcp/servers');
-        const data = await response.json();
-        const allServers = data.servers || [];
-        const enabledServers = currentAgent.mcp_servers || [];
+  try {
+    // Fetch all available MCP servers
+    const response = await fetch('/api/mcp/servers');
+    const data = await response.json();
+    const allServers = data.servers || [];
+    const enabledServers = currentAgent.mcp_servers || [];
 
-        panel.innerHTML = `
+    panel.innerHTML = `
             <h3 style="font-size: 16px; margin-bottom: 16px; color: var(--text-primary);">Available MCP Servers</h3>
             <div id="mcpServersList">
                 ${allServers.map(server => `
@@ -846,18 +846,18 @@ async function loadMCPConfigPanel() {
                 `).join('')}
             </div>
         `;
-    } catch (error) {
-        console.error('Failed to load MCP config:', error);
-        panel.innerHTML = '<p style="color: var(--text-secondary);">Failed to load MCP configuration</p>';
-    }
+  } catch (error) {
+    console.error('Failed to load MCP config:', error);
+    panel.innerHTML = '<p style="color: var(--text-secondary);">Failed to load MCP configuration</p>';
+  }
 }
 
 // Get configuration UI for specific MCP server
 function getMCPServerConfigUI(server) {
-    // Special handling for filesystem server
-    if (server.name === 'filesystem') {
-        const currentPath = server.args && server.args.length > 2 ? server.args[2] : '/path/to/directory';
-        return `
+  // Special handling for filesystem server
+  if (server.name === 'filesystem') {
+    const currentPath = server.args && server.args.length > 2 ? server.args[2] : '/path/to/directory';
+    return `
             <div class="mb-2">
                 <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 4px;">
                     Allowed Directory Path:
@@ -871,10 +871,10 @@ function getMCPServerConfigUI(server) {
                 <small style="color: var(--text-secondary); font-size: 12px;">The directory this agent can access via the filesystem MCP server</small>
             </div>
         `;
-    }
+  }
 
-    // Default: show command and args
-    return `
+  // Default: show command and args
+  return `
         <div style="font-size: 13px; color: var(--text-secondary);">
             <div><strong>Command:</strong> ${server.command}</div>
             <div><strong>Args:</strong> ${server.args ? server.args.join(' ') : 'none'}</div>
@@ -884,158 +884,158 @@ function getMCPServerConfigUI(server) {
 
 // Toggle MCP server for this agent
 async function toggleMCPServer(serverName, enabled) {
-    const configDiv = document.getElementById(`mcpConfig_${serverName}`);
-    if (configDiv) {
-        configDiv.style.display = enabled ? 'block' : 'none';
-    }
+  const configDiv = document.getElementById(`mcpConfig_${serverName}`);
+  if (configDiv) {
+    configDiv.style.display = enabled ? 'block' : 'none';
+  }
 
-    try {
-        const endpoint = enabled ? `/api/mcp/servers/${serverName}/enable` : `/api/mcp/servers/${serverName}/disable`;
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ agent_name: agentName })
-        });
+  try {
+    const endpoint = enabled ? `/api/mcp/servers/${serverName}/enable` : `/api/mcp/servers/${serverName}/disable`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ agent_name: agentName })
+    });
 
-        if (response.ok) {
-            showToast(`${serverName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
-            await loadAgent();
-        } else {
-            const error = await response.text();
-            showToast(`Failed: ${error}`, 'error');
-            document.getElementById(`mcp_${serverName}`).checked = !enabled;
-        }
-    } catch (error) {
-        console.error('Toggle MCP server error:', error);
-        showToast('Failed to update MCP server', 'error');
-        document.getElementById(`mcp_${serverName}`).checked = !enabled;
+    if (response.ok) {
+      showToast(`${serverName} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+      await loadAgent();
+    } else {
+      const error = await response.text();
+      showToast(`Failed: ${error}`, 'error');
+      document.getElementById(`mcp_${serverName}`).checked = !enabled;
     }
+  } catch (error) {
+    console.error('Toggle MCP server error:', error);
+    showToast('Failed to update MCP server', 'error');
+    document.getElementById(`mcp_${serverName}`).checked = !enabled;
+  }
 }
 
 // Update MCP server configuration
 async function updateMCPServerConfig(serverName, configKey, value) {
-    // For now, just store the value - you can expand this to save to backend
-    console.log(`Update ${serverName} config: ${configKey} = ${value}`);
-    showToast(`${serverName} path updated`, 'info');
+  // For now, just store the value - you can expand this to save to backend
+  console.log(`Update ${serverName} config: ${configKey} = ${value}`);
+  showToast(`${serverName} path updated`, 'info');
 
-    // TODO: Add API call to save per-agent MCP server config
+  // TODO: Add API call to save per-agent MCP server config
 }
 
 // Show toast notification
 function showToast(message, type = 'info') {
-    // Simple toast implementation - you can enhance this
-    console.log(`[${type.toUpperCase()}] ${message}`);
+  // Simple toast implementation - you can enhance this
+  console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
 // Actions
 function chatWithAgent() {
-    // Switch to this agent and go to chat
-    fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-        method: 'PUT'
-    })
+  // Switch to this agent and go to chat
+  fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+    method: 'PUT'
+  })
     .then(response => {
-        if (response.ok) {
-            window.location.href = '/';
-        }
+      if (response.ok) {
+        window.location.href = '/';
+      }
     })
     .catch(error => {
-        console.error('Error switching agent:', error);
-        showError('Failed to switch to agent');
+      console.error('Error switching agent:', error);
+      showError('Failed to switch to agent');
     });
 }
 
 async function confirmDelete() {
-    if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
-        return;
+  if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
+      method: 'DELETE'
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to delete agent');
     }
 
-    try {
-        const response = await fetch(`/api/agents?name=${encodeURIComponent(agentName)}`, {
-            method: 'DELETE'
-        });
+    alert(`Agent "${agentName}" deleted successfully`);
+    window.location.href = '/agents';
 
-        if (!response.ok) {
-            throw new Error('Failed to delete agent');
-        }
-
-        alert(`Agent "${agentName}" deleted successfully`);
-        window.location.href = '/agents';
-
-    } catch (error) {
-        console.error('Error deleting agent:', error);
-        showError('Failed to delete agent');
-    }
+  } catch (error) {
+    console.error('Error deleting agent:', error);
+    showError('Failed to delete agent');
+  }
 }
 
 // Helper functions
 function getAgentColor(agent) {
-    if (agent.metadata?.avatar_color) {
-        return agent.metadata.avatar_color;
-    }
-    // Generate color from name
-    const hash = agent.name.split('').reduce((acc, char) => {
-        return char.charCodeAt(0) + ((acc << 5) - acc);
-    }, 0);
-    const hue = hash % 360;
-    return `hsl(${hue}, 60%, 50%)`;
+  if (agent.metadata?.avatar_color) {
+    return agent.metadata.avatar_color;
+  }
+  // Generate color from name
+  const hash = agent.name.split('').reduce((acc, char) => {
+    return char.charCodeAt(0) + ((acc << 5) - acc);
+  }, 0);
+  const hue = hash % 360;
+  return `hsl(${hue}, 60%, 50%)`;
 }
 
 function getAgentInitials(name) {
-    const words = name.split(/[\s_-]+/);
-    if (words.length >= 2) {
-        return (words[0][0] + words[1][0]).toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
+  const words = name.split(/[\s_-]+/);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+  return name.substring(0, 2).toUpperCase();
 }
 
 function capitalize(str) {
-    if (!str) return '';
-    return str.charAt(0).toUpperCase() + str.slice(1);
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 function formatNumber(num) {
-    if (num >= 1000000) {
-        return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1) + 'M';
+  } else if (num >= 1000) {
+    return (num / 1000).toFixed(1) + 'K';
+  }
+  return num.toString();
 }
 
 function formatFullDate(dateString) {
-    if (!dateString) return 'Never';
+  if (!dateString) return 'Never';
 
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now - date;
+  const date = new Date(dateString);
+  const now = new Date();
+  const diff = now - date;
 
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes} minutes ago`;
-    if (hours < 24) return `${hours} hours ago`;
-    if (days < 7) return `${days} days ago`;
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  if (hours < 24) return `${hours} hours ago`;
+  if (days < 7) return `${days} days ago`;
 
-    return date.toLocaleString();
+  return date.toLocaleString();
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text == null ? '' : String(text);
-    return div.innerHTML;
+  const div = document.createElement('div');
+  div.textContent = text == null ? '' : String(text);
+  return div.innerHTML;
 }
 
 function showLoading(show) {
-    const loading = document.getElementById('loadingState');
-    const content = document.getElementById('content');
-    if (loading) loading.style.display = show ? 'flex' : 'none';
-    if (content) content.style.display = show ? 'none' : 'block';
+  const loading = document.getElementById('loadingState');
+  const content = document.getElementById('content');
+  if (loading) loading.style.display = show ? 'flex' : 'none';
+  if (content) content.style.display = show ? 'none' : 'block';
 }
 
 function showError(message) {
-    alert('Error: ' + message);
+  alert('Error: ' + message);
 }

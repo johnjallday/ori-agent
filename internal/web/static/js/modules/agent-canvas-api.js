@@ -26,7 +26,7 @@ export async function apiPost(url, body) {
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
   return handleResponse(resp);
 }
@@ -35,7 +35,7 @@ export async function apiPut(url, body) {
   const resp = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
   return handleResponse(resp);
 }
@@ -44,7 +44,7 @@ export async function apiPatch(url, body) {
   const resp = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
   return handleResponse(resp);
 }

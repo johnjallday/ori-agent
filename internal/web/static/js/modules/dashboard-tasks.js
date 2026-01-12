@@ -229,7 +229,7 @@ export class DashboardTasks {
     const requestBody = {
       workspace_id: this.workspaceId,
       description: description,
-      priority: priority,
+      priority: priority
     };
 
     // Add schedule if enabled
@@ -293,9 +293,9 @@ export class DashboardTasks {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -327,11 +327,11 @@ export class DashboardTasks {
       const response = await fetch('/api/orchestration/tasks/execute', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          task_id: taskId,
-        }),
+          task_id: taskId
+        })
       });
 
       if (!response.ok) {
@@ -365,7 +365,7 @@ export class DashboardTasks {
       }
 
       const response = await fetch(`/api/orchestration/tasks?${params.toString()}`, {
-        method: 'DELETE',
+        method: 'DELETE'
       });
 
       if (!response.ok) {
@@ -392,8 +392,8 @@ export class DashboardTasks {
         const response = await fetch(`/api/orchestration/tasks/${taskId}/complete`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-          },
+            'Content-Type': 'application/json'
+          }
         });
 
         if (!response.ok) {
@@ -405,12 +405,12 @@ export class DashboardTasks {
         const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
           method: 'PUT',
           headers: {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             task_id: taskId,
-            status: 'pending',
-          }),
+            status: 'pending'
+          })
         });
 
         if (!response.ok) {
@@ -647,7 +647,7 @@ export class DashboardTasks {
       const inputTasksSelect = document.getElementById('task-input-tasks');
       if (inputTasksSelect) {
         // Find and select the option with matching task ID
-        for (let option of inputTasksSelect.options) {
+        for (const option of inputTasksSelect.options) {
           if (option.value === taskId) {
             option.selected = true;
             break;
@@ -818,7 +818,7 @@ export class DashboardTasks {
     // Build update request
     const updateData = {
       task_id: taskId,
-      schedule_enabled: scheduleEnabled,
+      schedule_enabled: scheduleEnabled
     };
 
     if (scheduleName) {
@@ -861,7 +861,7 @@ export class DashboardTasks {
       const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updateData),
+        body: JSON.stringify(updateData)
       });
 
       if (!response.ok) {

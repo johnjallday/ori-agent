@@ -101,12 +101,12 @@ export class DashboardAgents {
       const response = await fetch('/api/orchestration/workspace/agents', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           workspace_id: this.workspaceId,
-          agent_name: agentName,
-        }),
+          agent_name: agentName
+        })
       });
 
       if (!response.ok) {
@@ -141,7 +141,7 @@ export class DashboardAgents {
 
     try {
       const response = await fetch(`/api/orchestration/workspace/agents?workspace_id=${this.workspaceId}&agent_name=${encodeURIComponent(agentName)}`, {
-        method: 'DELETE',
+        method: 'DELETE'
       });
 
       if (!response.ok) {

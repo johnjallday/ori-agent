@@ -272,11 +272,7 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, writeErr := w.Write([]byte(html)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteHTML(w, html)
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
@@ -374,11 +370,7 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, "Internal Server Error")
 		return
 	}
-
-	w.Header().Set("Content-Type", "text/html")
-	if _, writeErr := w.Write([]byte(html)); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteHTML(w, html)
 }
 
 // handleWorkspacesRoutes handles all /workspaces/* routes
@@ -469,10 +461,7 @@ func (s *Server) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
-
-	if _, writeErr := w.Write(content); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteBytes(w, content)
 }
 
 func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
@@ -495,10 +484,7 @@ func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400") // Cache for 1 day
-
-	if _, writeErr := w.Write(content); writeErr != nil {
-		logger.Error("Failed to write favicon response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteBytes(w, content)
 }
 
 func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
@@ -572,10 +558,7 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
-
-	if _, writeErr := w.Write(content); writeErr != nil {
-		logger.Error("Failed to write response", logger.Fields{"error": writeErr})
-	}
+	orihttp.WriteBytes(w, content)
 }
 
 // HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities

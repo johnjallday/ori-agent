@@ -1,0 +1,19 @@
+{
+  "name": "ori-agent-web",
+  "version": "1.0.0",
+  "description": "Web frontend linting and formatting tools for Ori Agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint internal/web/static/js/",
+    "lint:fix": "eslint internal/web/static/js/ --fix",
+    "format": "prettier --write 'internal/web/static/**/*.{js,css,html}'",
+    "format:check": "prettier --check 'internal/web/static/**/*.{js,css,html}'"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
+    "prettier": "^3.0.0"
+  }
+}

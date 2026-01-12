@@ -3,76 +3,76 @@
 // Additional functionality in: workspace-dashboard-modals.js, workspace-dashboard-agents.js
 
 (function() {
-    'use strict';
+  'use strict';
 
-    const workspaceId = document.body.dataset.workspaceId;
+  const workspaceId = document.body.dataset.workspaceId;
 
-    // Initialize shared state object
-    window.wsDashboard = {
-        workspaceId: workspaceId,
-        currentWorkspace: null,
-        workspaceLayout: null,
-        storeNodes: [],
-        workspaceConnections: [],
-        workspaceAttachments: [],
-        workspaceAttachmentsById: new Map(),
-        tasksById: new Map()
-    };
+  // Initialize shared state object
+  window.wsDashboard = {
+    workspaceId: workspaceId,
+    currentWorkspace: null,
+    workspaceLayout: null,
+    storeNodes: [],
+    workspaceConnections: [],
+    workspaceAttachments: [],
+    workspaceAttachmentsById: new Map(),
+    tasksById: new Map()
+  };
 
-    const state = window.wsDashboard;
+  const state = window.wsDashboard;
 
-    // Load workspace data on page load
-    async function loadWorkspaceData() {
-        try {
-            const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
-            if (!response.ok) throw new Error('Failed to load workspace');
+  // Load workspace data on page load
+  async function loadWorkspaceData() {
+    try {
+      const response = await fetch(`/api/orchestration/workspace?id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load workspace');
 
-            const workspace = await response.json();
-            state.currentWorkspace = workspace;
-            state.workspaceLayout = workspace.layout;
-            state.storeNodes = workspace.store_nodes || workspace.layout?.store_nodes || [];
-            state.workspaceConnections = workspace.layout?.workflow_connections || [];
-            state.workspaceAttachments = workspace.attachments || [];
-            state.workspaceAttachmentsById = new Map((state.workspaceAttachments || []).map(a => [a.id, a]));
+      const workspace = await response.json();
+      state.currentWorkspace = workspace;
+      state.workspaceLayout = workspace.layout;
+      state.storeNodes = workspace.store_nodes || workspace.layout?.store_nodes || [];
+      state.workspaceConnections = workspace.layout?.workflow_connections || [];
+      state.workspaceAttachments = workspace.attachments || [];
+      state.workspaceAttachmentsById = new Map((state.workspaceAttachments || []).map(a => [a.id, a]));
 
-            // Update workspace details
-            document.getElementById('workspace-name').textContent = workspace.name || 'Unnamed Workspace';
-            document.getElementById('workspace-created').textContent = `Created: ${new Date(workspace.created_at).toLocaleString()}`;
-            document.getElementById('workspace-updated').textContent = workspace.updated_at ? `Updated: ${new Date(workspace.updated_at).toLocaleString()}` : 'Updated: --';
-            document.getElementById('workspace-description').textContent = workspace.description || 'No description';
+      // Update workspace details
+      document.getElementById('workspace-name').textContent = workspace.name || 'Unnamed Workspace';
+      document.getElementById('workspace-created').textContent = `Created: ${new Date(workspace.created_at).toLocaleString()}`;
+      document.getElementById('workspace-updated').textContent = workspace.updated_at ? `Updated: ${new Date(workspace.updated_at).toLocaleString()}` : 'Updated: --';
+      document.getElementById('workspace-description').textContent = workspace.description || 'No description';
 
-            // Update status badge
-            const statusBadge = document.getElementById('workspace-status-badge');
-            const statusClass = workspace.status || 'active';
-            statusBadge.innerHTML = `<span class="workspace-status ${statusClass}">${statusClass}</span>`;
+      // Update status badge
+      const statusBadge = document.getElementById('workspace-status-badge');
+      const statusClass = workspace.status || 'active';
+      statusBadge.innerHTML = `<span class="workspace-status ${statusClass}">${statusClass}</span>`;
 
-            // Load tasks
-            await loadTasks();
+      // Load tasks
+      await loadTasks();
 
-            // Render sessions list (from session store)
-            renderSessions(workspace.sessions || []);
+      // Render sessions list (from session store)
+      renderSessions(workspace.sessions || []);
 
-            // Render notes list (from session store)
-            renderNotes(workspace.notes || []);
+      // Render notes list (from session store)
+      renderNotes(workspace.notes || []);
 
-            // Render attachments list (from workspace)
-            renderAttachments(workspace.attachments || []);
+      // Render attachments list (from workspace)
+      renderAttachments(workspace.attachments || []);
 
-        } catch (error) {
-            console.error('Error loading workspace:', error);
-            alert('Failed to load workspace data');
-        }
+    } catch (error) {
+      console.error('Error loading workspace:', error);
+      alert('Failed to load workspace data');
+    }
+  }
+
+  // Render sessions list
+  function renderSessions(sessions) {
+    const sessionsList = document.getElementById('sessions-list');
+    if (!sessions || sessions.length === 0) {
+      sessionsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No sessions in this workspace</p>';
+      return;
     }
 
-    // Render sessions list
-    function renderSessions(sessions) {
-        const sessionsList = document.getElementById('sessions-list');
-        if (!sessions || sessions.length === 0) {
-            sessionsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No sessions in this workspace</p>';
-            return;
-        }
-
-        sessionsList.innerHTML = sessions.map(session => `
+    sessionsList.innerHTML = sessions.map(session => `
             <a href="/chat?session=${encodeURIComponent(session.id)}" class="d-block text-decoration-none mb-2">
                 <div class="session-item p-2" style="border: 1px solid var(--border-color); border-radius: 6px; transition: all 0.2s ease; cursor: pointer;">
                     <div class="d-flex justify-content-between align-items-start">
@@ -92,17 +92,17 @@
                 </div>
             </a>
         `).join('');
+  }
+
+  // Render notes list
+  function renderNotes(notes) {
+    const notesList = document.getElementById('notes-list');
+    if (!notes || notes.length === 0) {
+      notesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No notes in this workspace</p>';
+      return;
     }
 
-    // Render notes list
-    function renderNotes(notes) {
-        const notesList = document.getElementById('notes-list');
-        if (!notes || notes.length === 0) {
-            notesList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No notes in this workspace</p>';
-            return;
-        }
-
-        notesList.innerHTML = notes.map(note => `
+    notesList.innerHTML = notes.map(note => `
             <div class="note-item p-2 mb-2" style="border: 1px solid var(--border-color); border-radius: 6px; border-left: 3px solid var(--primary-color);">
                 <div class="d-flex justify-content-between align-items-start">
                     <div style="flex: 1; min-width: 0;">
@@ -128,19 +128,19 @@
                 </div>
             </div>
         `).join('');
+  }
+
+  // Render attachments list
+  function renderAttachments(attachments) {
+    const attachmentsList = document.getElementById('attachments-list');
+    if (!attachments || attachments.length === 0) {
+      attachmentsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No attachments in this workspace</p>';
+      return;
     }
 
-    // Render attachments list
-    function renderAttachments(attachments) {
-        const attachmentsList = document.getElementById('attachments-list');
-        if (!attachments || attachments.length === 0) {
-            attachmentsList.innerHTML = '<p style="color: var(--text-muted); font-size: 0.875rem; text-align: center; padding: 1rem;">No attachments in this workspace</p>';
-            return;
-        }
-
-        attachmentsList.innerHTML = attachments.map(att => {
-            const typeIcon = getAttachmentTypeIcon(att.type);
-            return `
+    attachmentsList.innerHTML = attachments.map(att => {
+      const typeIcon = getAttachmentTypeIcon(att.type);
+      return `
                 <div class="attachment-item p-2 mb-2" style="border: 1px solid var(--border-color); border-radius: 6px;">
                     <div class="d-flex justify-content-between align-items-start">
                         <div class="d-flex align-items-start gap-2" style="flex: 1; min-width: 0;">
@@ -169,62 +169,62 @@
                     </div>
                 </div>
             `;
-        }).join('');
+    }).join('');
+  }
+
+  function getAttachmentTypeIcon(type) {
+    switch (type) {
+      case 'doc':
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
+      case 'link':
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24V16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/></svg>';
+      case 'file':
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
+      default:
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5,6V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V5A3.5,3.5 0 0,1 11,1.5A3.5,3.5 0 0,1 14.5,5V15.5A2.5,2.5 0 0,1 12,18A2.5,2.5 0 0,1 9.5,15.5V6H11V15.5A1,1 0 0,0 12,16.5A1,1 0 0,0 13,15.5V5A2,2 0 0,0 11,3A2,2 0 0,0 9,5V17.5A3,3 0 0,0 12,20.5A3,3 0 0,0 15,17.5V6H16.5Z"/></svg>';
     }
+  }
 
-    function getAttachmentTypeIcon(type) {
-        switch (type) {
-            case 'doc':
-                return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
-            case 'link':
-                return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24V16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/></svg>';
-            case 'file':
-                return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/></svg>';
-            default:
-                return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5,6V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V5A3.5,3.5 0 0,1 11,1.5A3.5,3.5 0 0,1 14.5,5V15.5A2.5,2.5 0 0,1 12,18A2.5,2.5 0 0,1 9.5,15.5V6H11V15.5A1,1 0 0,0 12,16.5A1,1 0 0,0 13,15.5V5A2,2 0 0,0 11,3A2,2 0 0,0 9,5V17.5A3,3 0 0,0 12,20.5A3,3 0 0,0 15,17.5V6H16.5Z"/></svg>';
-        }
+  // Load tasks
+  async function loadTasks() {
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
+      if (!response.ok) throw new Error('Failed to load tasks');
+
+      const data = await response.json();
+      const tasks = data.tasks || [];
+      const stats = data.stats || {};
+      state.tasksById = new Map(tasks.map(t => [t.id, t]));
+
+      // Update stats
+      document.getElementById('tasks-completed').textContent = stats.completed || 0;
+      document.getElementById('tasks-in-progress').textContent = stats.in_progress || 0;
+      document.getElementById('tasks-failed').textContent = stats.failed || 0;
+      const scheduledCount = stats.scheduled || tasks.filter(t => t.schedule_enabled).length;
+      document.getElementById('tasks-scheduled').textContent = scheduledCount;
+
+      // Render tasks list
+      const tasksList = document.getElementById('tasks-list');
+      if (tasks.length === 0) {
+        tasksList.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No tasks yet</p>';
+      } else {
+        tasksList.innerHTML = tasks.map(task => renderTaskItem(task)).join('');
+      }
+
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      document.getElementById('tasks-list').innerHTML = '<p style="color: var(--danger-color); text-align: center; padding: 2rem;">Failed to load tasks</p>';
     }
+  }
 
-    // Load tasks
-    async function loadTasks() {
-        try {
-            const response = await fetch(`/api/orchestration/tasks?studio_id=${workspaceId}`);
-            if (!response.ok) throw new Error('Failed to load tasks');
+  function renderTaskItem(task) {
+    const assignedTo = getFormattedAgentAssignment(task);
+    const assignedNodeId = task.assigned_node_id || null;
+    const taskId = `task-${task.id}`;
+    const store = assignedNodeId ? state.storeNodes.find(s => s.agent_node_id === assignedNodeId) : null;
+    const attachments = getTaskAttachments(task.id);
 
-            const data = await response.json();
-            const tasks = data.tasks || [];
-            const stats = data.stats || {};
-            state.tasksById = new Map(tasks.map(t => [t.id, t]));
-
-            // Update stats
-            document.getElementById('tasks-completed').textContent = stats.completed || 0;
-            document.getElementById('tasks-in-progress').textContent = stats.in_progress || 0;
-            document.getElementById('tasks-failed').textContent = stats.failed || 0;
-            const scheduledCount = stats.scheduled || tasks.filter(t => t.schedule_enabled).length;
-            document.getElementById('tasks-scheduled').textContent = scheduledCount;
-
-            // Render tasks list
-            const tasksList = document.getElementById('tasks-list');
-            if (tasks.length === 0) {
-                tasksList.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No tasks yet</p>';
-            } else {
-                tasksList.innerHTML = tasks.map(task => renderTaskItem(task)).join('');
-            }
-
-        } catch (error) {
-            console.error('Error loading tasks:', error);
-            document.getElementById('tasks-list').innerHTML = '<p style="color: var(--danger-color); text-align: center; padding: 2rem;">Failed to load tasks</p>';
-        }
-    }
-
-    function renderTaskItem(task) {
-        const assignedTo = getFormattedAgentAssignment(task);
-        const assignedNodeId = task.assigned_node_id || null;
-        const taskId = `task-${task.id}`;
-        const store = assignedNodeId ? state.storeNodes.find(s => s.agent_node_id === assignedNodeId) : null;
-        const attachments = getTaskAttachments(task.id);
-
-        return `
+    return `
             <div class="task-item">
                 <div class="task-header">
                     <div class="task-title">${escapeHtml(task.name || task.id)}</div>
@@ -283,14 +283,14 @@
                 ${renderTaskCollapsibles(task, taskId, store, attachments)}
             </div>
         `;
-    }
+  }
 
-    function renderTaskCollapsibles(task, taskId, store, attachments) {
-        let html = '';
+  function renderTaskCollapsibles(task, taskId, store, attachments) {
+    let html = '';
 
-        // Result section
-        if (task.status === 'completed' && task.result) {
-            html += `
+    // Result section
+    if (task.status === 'completed' && task.result) {
+      html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-result')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -339,11 +339,11 @@
                     </div>
                 </div>
             `;
-        }
+    }
 
-        // Error section
-        if (task.error) {
-            html += `
+    // Error section
+    if (task.error) {
+      html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-error')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -359,13 +359,13 @@
                     </div>
                 </div>
             `;
-        }
+    }
 
-        // Schedule section (show if task has a schedule)
-        if (task.schedule) {
-            const schedule = task.schedule;
-            const scheduleType = schedule.type || 'interval';
-            html += `
+    // Schedule section (show if task has a schedule)
+    if (task.schedule) {
+      const schedule = task.schedule;
+      const scheduleType = schedule.type || 'interval';
+      html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-schedule')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -425,11 +425,11 @@
                     </div>
                 </div>
             `;
-        }
+    }
 
-        // Storage section
-        if (store) {
-            html += `
+    // Storage section
+    if (store) {
+      html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-store')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -459,11 +459,11 @@
                     </div>
                 </div>
             `;
-        }
+    }
 
-        // Attachments section
-        if (attachments.length > 0) {
-            html += `
+    // Attachments section
+    if (attachments.length > 0) {
+      html += `
                 <div class="task-collapsible">
                     <div class="task-collapsible-header" onclick="toggleTaskCollapsible('${taskId}-attachments')">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -492,47 +492,47 @@
                     </div>
                 </div>
             `;
-        }
-
-        return html;
     }
 
-    // Refresh tasks
-    function refreshTasks() {
-        loadTasks();
+    return html;
+  }
+
+  // Refresh tasks
+  function refreshTasks() {
+    loadTasks();
+  }
+
+  async function copyTaskResult(taskId) {
+    const task = state.tasksById.get(taskId);
+    const result = task?.result || '';
+    if (!result) {
+      alert('No task result to copy');
+      return;
     }
 
-    async function copyTaskResult(taskId) {
-        const task = state.tasksById.get(taskId);
-        const result = task?.result || '';
-        if (!result) {
-            alert('No task result to copy');
-            return;
-        }
+    try {
+      await navigator.clipboard.writeText(result);
+    } catch (err) {
+      console.warn('Clipboard API failed; falling back to legacy copy', err);
+      const el = document.createElement('textarea');
+      el.value = result;
+      el.setAttribute('readonly', '');
+      el.style.position = 'absolute';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+  }
 
-        try {
-            await navigator.clipboard.writeText(result);
-        } catch (err) {
-            console.warn('Clipboard API failed; falling back to legacy copy', err);
-            const el = document.createElement('textarea');
-            el.value = result;
-            el.setAttribute('readonly', '');
-            el.style.position = 'absolute';
-            el.style.left = '-9999px';
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-        }
+  // Render store node options for the save dropdown
+  function renderStoreNodeOptions(taskId, store) {
+    if (!store || !store.store_nodes || store.store_nodes.length === 0) {
+      return '<li><span class="dropdown-item text-muted disabled">No store nodes configured</span></li>';
     }
 
-    // Render store node options for the save dropdown
-    function renderStoreNodeOptions(taskId, store) {
-        if (!store || !store.store_nodes || store.store_nodes.length === 0) {
-            return '<li><span class="dropdown-item text-muted disabled">No store nodes configured</span></li>';
-        }
-
-        return store.store_nodes.map(node => `
+    return store.store_nodes.map(node => `
             <li><a class="dropdown-item" href="#" onclick="event.preventDefault(); event.stopPropagation(); saveTaskResultToStore('${escapeHtml(taskId)}', '${escapeHtml(node.id)}', '${escapeHtml(node.name)}');">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2">
                     <path d="M6,2C4.89,2 4,2.9 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6M13,3.5L18.5,9H13V3.5M8,12H16V14H8V12M8,16H13V18H8V16Z"/>
@@ -540,412 +540,412 @@
                 ${escapeHtml(node.name)}
             </a></li>
         `).join('');
+  }
+
+  // Quick save to workspace output folder
+  async function quickSaveTaskResult(taskId) {
+    const task = state.tasksById.get(taskId);
+    if (!task || !task.result) {
+      alert('No task result to save');
+      return;
     }
 
-    // Quick save to workspace output folder
-    async function quickSaveTaskResult(taskId) {
-        const task = state.tasksById.get(taskId);
-        if (!task || !task.result) {
-            alert('No task result to save');
-            return;
-        }
+    try {
+      // Get workspace output directory
+      const outputResp = await fetch(`/api/workspaces/${workspaceId}/output-dir`);
+      if (!outputResp.ok) {
+        throw new Error('Failed to get output directory');
+      }
+      const outputData = await outputResp.json();
+      const outputDir = outputData.output_dir || `outputs/${workspaceId}`;
 
-        try {
-            // Get workspace output directory
-            const outputResp = await fetch(`/api/workspaces/${workspaceId}/output-dir`);
-            if (!outputResp.ok) {
-                throw new Error('Failed to get output directory');
-            }
-            const outputData = await outputResp.json();
-            const outputDir = outputData.output_dir || `outputs/${workspaceId}`;
+      // Generate filename based on task name and timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+      const filename = `${taskName}_${timestamp}.txt`;
+      const filePath = `${outputDir}/${filename}`;
 
-            // Generate filename based on task name and timestamp
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
-            const filename = `${taskName}_${timestamp}.txt`;
-            const filePath = `${outputDir}/${filename}`;
+      const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          file_path: filePath,
+          format: 'text'
+        })
+      });
 
-            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: taskId,
-                    file_path: filePath,
-                    format: 'text'
-                })
-            });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to save result');
+      }
 
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to save result');
-            }
+      const data = await resp.json();
+      alert(`Result saved to: ${data.file_path}`);
+    } catch (err) {
+      console.error('Failed to quick save:', err);
+      alert(`Failed to save result: ${err.message || err}`);
+    }
+  }
 
-            const data = await resp.json();
-            alert(`Result saved to: ${data.file_path}`);
-        } catch (err) {
-            console.error('Failed to quick save:', err);
-            alert(`Failed to save result: ${err.message || err}`);
-        }
+  // Open save to file modal
+  function openSaveToFileModal(taskId) {
+    const task = state.tasksById.get(taskId);
+    if (!task || !task.result) {
+      alert('No task result to save');
+      return;
     }
 
-    // Open save to file modal
-    function openSaveToFileModal(taskId) {
-        const task = state.tasksById.get(taskId);
-        if (!task || !task.result) {
-            alert('No task result to save');
-            return;
-        }
+    state.currentSaveTaskId = taskId;
 
-        state.currentSaveTaskId = taskId;
+    // Generate suggested filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+    const suggestedFilename = `${taskName}_${timestamp}.txt`;
 
-        // Generate suggested filename
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
-        const suggestedFilename = `${taskName}_${timestamp}.txt`;
+    document.getElementById('save-file-path').value = suggestedFilename;
+    document.getElementById('save-file-format').value = 'text';
 
-        document.getElementById('save-file-path').value = suggestedFilename;
-        document.getElementById('save-file-format').value = 'text';
+    const modal = new bootstrap.Modal(document.getElementById('saveToFileModal'));
+    modal.show();
+  }
 
-        const modal = new bootstrap.Modal(document.getElementById('saveToFileModal'));
-        modal.show();
+  // Save task result to file
+  async function saveTaskResultToFile() {
+    const taskId = state.currentSaveTaskId;
+    if (!taskId) {
+      alert('No task selected');
+      return;
     }
 
-    // Save task result to file
-    async function saveTaskResultToFile() {
-        const taskId = state.currentSaveTaskId;
-        if (!taskId) {
-            alert('No task selected');
-            return;
-        }
+    const filePath = document.getElementById('save-file-path').value.trim();
+    const format = document.getElementById('save-file-format').value;
 
-        const filePath = document.getElementById('save-file-path').value.trim();
-        const format = document.getElementById('save-file-format').value;
-
-        if (!filePath) {
-            alert('Please enter a file path');
-            return;
-        }
-
-        try {
-            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: taskId,
-                    file_path: filePath,
-                    format: format
-                })
-            });
-
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to save result');
-            }
-
-            const data = await resp.json();
-            alert(`Result saved to: ${data.file_path}`);
-
-            // Close modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('saveToFileModal'));
-            if (modal) modal.hide();
-        } catch (err) {
-            console.error('Failed to save to file:', err);
-            alert(`Failed to save result: ${err.message || err}`);
-        }
+    if (!filePath) {
+      alert('Please enter a file path');
+      return;
     }
 
-    // Save task result to store node
-    async function saveTaskResultToStore(taskId, storeNodeId, storeName) {
-        const task = state.tasksById.get(taskId);
-        if (!task || !task.result) {
-            alert('No task result to save');
-            return;
-        }
+    try {
+      const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          file_path: filePath,
+          format: format
+        })
+      });
 
-        // Generate filename
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
-        const filename = `${taskName}_${timestamp}.txt`;
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to save result');
+      }
 
-        try {
-            const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    task_id: taskId,
-                    store_node_id: storeNodeId,
-                    file_path: filename,
-                    format: 'text'
-                })
-            });
+      const data = await resp.json();
+      alert(`Result saved to: ${data.file_path}`);
 
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to save result');
-            }
+      // Close modal
+      const modal = bootstrap.Modal.getInstance(document.getElementById('saveToFileModal'));
+      if (modal) modal.hide();
+    } catch (err) {
+      console.error('Failed to save to file:', err);
+      alert(`Failed to save result: ${err.message || err}`);
+    }
+  }
 
-            const data = await resp.json();
-            alert(`Result saved to ${storeName}: ${data.file_path}`);
-        } catch (err) {
-            console.error('Failed to save to store:', err);
-            alert(`Failed to save result: ${err.message || err}`);
-        }
+  // Save task result to store node
+  async function saveTaskResultToStore(taskId, storeNodeId, storeName) {
+    const task = state.tasksById.get(taskId);
+    if (!task || !task.result) {
+      alert('No task result to save');
+      return;
     }
 
-    function saveTaskAsWorkflow(taskId) {
-        if (!taskId) return;
-        window.location.href = `/studios/${workspaceId}/canvas?save_workflow_task=${encodeURIComponent(taskId)}`;
+    // Generate filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const taskName = (task.name || 'task').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+    const filename = `${taskName}_${timestamp}.txt`;
+
+    try {
+      const resp = await fetch(`/api/orchestration/tasks/${taskId}/save-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          store_node_id: storeNodeId,
+          file_path: filename,
+          format: 'text'
+        })
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to save result');
+      }
+
+      const data = await resp.json();
+      alert(`Result saved to ${storeName}: ${data.file_path}`);
+    } catch (err) {
+      console.error('Failed to save to store:', err);
+      alert(`Failed to save result: ${err.message || err}`);
     }
+  }
 
-    // Execute task
-    async function executeTask(taskId) {
-        if (!confirm('Execute this task now?')) return;
+  function saveTaskAsWorkflow(taskId) {
+    if (!taskId) return;
+    window.location.href = `/studios/${workspaceId}/canvas?save_workflow_task=${encodeURIComponent(taskId)}`;
+  }
 
-        try {
-            const resp = await fetch('/api/orchestration/tasks/execute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task_id: taskId })
-            });
+  // Execute task
+  async function executeTask(taskId) {
+    if (!confirm('Execute this task now?')) return;
 
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to execute task');
-            }
+    try {
+      const resp = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
 
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+
+      await loadTasks();
+      pollTaskCompletion(taskId);
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to execute task: ${err.message || err}`);
+    }
+  }
+
+  async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        console.log('Task polling timed out');
+        return;
+      }
+
+      try {
+        const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (resp.ok) {
+          const task = await resp.json();
+          const status = task.status;
+
+          if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
             await loadTasks();
-            pollTaskCompletion(taskId);
-        } catch (err) {
-            console.error(err);
-            alert(`Failed to execute task: ${err.message || err}`);
+            return;
+          }
+
+          setTimeout(poll, intervalMs);
         }
-    }
-
-    async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
-        let attempts = 0;
-
-        const poll = async () => {
-            attempts++;
-            if (attempts > maxAttempts) {
-                console.log('Task polling timed out');
-                return;
-            }
-
-            try {
-                const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
-                if (resp.ok) {
-                    const task = await resp.json();
-                    const status = task.status;
-
-                    if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
-                        await loadTasks();
-                        return;
-                    }
-
-                    setTimeout(poll, intervalMs);
-                }
-            } catch (err) {
-                console.error('Error polling task status:', err);
-                setTimeout(poll, intervalMs);
-            }
-        };
-
+      } catch (err) {
+        console.error('Error polling task status:', err);
         setTimeout(poll, intervalMs);
+      }
+    };
+
+    setTimeout(poll, intervalMs);
+  }
+
+  // Delete functions
+  async function deleteTask(taskId) {
+    if (!confirm('Are you sure you want to delete this task?')) return;
+
+    try {
+      const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to delete task');
+      }
+
+      await loadTasks();
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to delete task: ${err.message || err}`);
+    }
+  }
+
+  async function deleteNote(noteId) {
+    if (!confirm('Are you sure you want to delete this note?')) return;
+
+    try {
+      const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to delete note');
+      }
+
+      await loadWorkspaceData();
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to delete note: ${err.message || err}`);
+    }
+  }
+
+  async function deleteAttachment(attachmentId) {
+    if (!confirm('Are you sure you want to delete this attachment?')) return;
+
+    try {
+      const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(attachmentId)}`, {
+        method: 'DELETE'
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to delete attachment');
+      }
+
+      await loadWorkspaceData();
+      await loadTasks();
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to delete attachment: ${err.message || err}`);
+    }
+  }
+
+  // View canvas
+  function viewCanvas() {
+    window.location.href = `/studios/${workspaceId}/canvas`;
+  }
+
+  // HTML escape function
+  function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Get attachments connected to a task via layout workflow_connections
+  function getTaskAttachments(taskId) {
+    if (!taskId) return [];
+    if (!Array.isArray(state.workspaceConnections) || state.workspaceConnections.length === 0) return [];
+    if (!state.workspaceAttachmentsById || state.workspaceAttachmentsById.size === 0) return [];
+
+    const attachmentIds = new Set();
+    for (const conn of state.workspaceConnections) {
+      if (!conn) continue;
+      if (conn.to === taskId && state.workspaceAttachmentsById.has(conn.from)) {
+        attachmentIds.add(conn.from);
+      }
+      if (conn.from === taskId && state.workspaceAttachmentsById.has(conn.to)) {
+        attachmentIds.add(conn.to);
+      }
     }
 
-    // Delete functions
-    async function deleteTask(taskId) {
-        if (!confirm('Are you sure you want to delete this task?')) return;
+    return Array.from(attachmentIds)
+      .map(id => state.workspaceAttachmentsById.get(id))
+      .filter(Boolean);
+  }
 
-        try {
-            const resp = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
-                method: 'DELETE'
-            });
+  // Get formatted agent assignment with instance number
+  function getFormattedAgentAssignment(task) {
+    if (!task.to || task.to === 'unassigned') {
+      return 'Unassigned';
+    }
 
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to delete task');
-            }
+    if (task.assigned_node_id) {
+      const match = task.assigned_node_id.match(/^(.+)-node-(\d+)$/);
+      if (match) {
+        const agentName = match[1];
+        const instanceNumber = match[2];
+        return `${agentName} #${instanceNumber}`;
+      }
+    }
 
-            await loadTasks();
-        } catch (err) {
-            console.error(err);
-            alert(`Failed to delete task: ${err.message || err}`);
+    if (state.workspaceLayout && state.workspaceLayout.agent_positions) {
+      const agentPositionKeys = Object.keys(state.workspaceLayout.agent_positions);
+      const matchingKeys = agentPositionKeys.filter(key => key.startsWith(task.to + '-node-'));
+
+      if (matchingKeys.length > 0) {
+        matchingKeys.sort((a, b) => {
+          const aMatch = a.match(/-node-(\d+)$/);
+          const bMatch = b.match(/-node-(\d+)$/);
+          const aNum = aMatch ? parseInt(aMatch[1]) : 0;
+          const bNum = bMatch ? parseInt(bMatch[1]) : 0;
+          return aNum - bNum;
+        });
+
+        const firstKey = matchingKeys[0];
+        const match = firstKey.match(/^(.+)-node-(\d+)$/);
+        if (match) {
+          return `${match[1]} #${match[2]}`;
         }
+      }
     }
 
-    async function deleteNote(noteId) {
-        if (!confirm('Are you sure you want to delete this note?')) return;
+    return task.to;
+  }
 
-        try {
-            const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
-                method: 'DELETE'
-            });
-
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to delete note');
-            }
-
-            await loadWorkspaceData();
-        } catch (err) {
-            console.error(err);
-            alert(`Failed to delete note: ${err.message || err}`);
-        }
+  // Toggle task collapsible section
+  function toggleTaskCollapsible(contentId) {
+    const content = document.getElementById(contentId);
+    const header = content?.previousElementSibling;
+    if (content && header) {
+      content.classList.toggle('expanded');
+      header.classList.toggle('expanded');
     }
+  }
 
-    async function deleteAttachment(attachmentId) {
-        if (!confirm('Are you sure you want to delete this attachment?')) return;
+  // Export core functions to global state and window
+  Object.assign(state, {
+    loadWorkspaceData,
+    loadTasks,
+    escapeHtml,
+    getTaskAttachments,
+    getFormattedAgentAssignment
+  });
 
-        try {
-            const resp = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(attachmentId)}`, {
-                method: 'DELETE'
-            });
+  // Export global functions for onclick handlers
+  window.openEditTaskModal = function(taskId) { state.openEditTaskModal(taskId); };
+  window.openCreateTaskModal = function() { state.openCreateTaskModal(); };
+  window.submitEditTask = function() { state.submitEditTask(); };
+  window.openCreateNoteModal = function() { state.openCreateNoteModal(); };
+  window.submitCreateNote = function() { state.submitCreateNote(); };
+  window.openEditNoteModal = function(noteId) { state.openEditNoteModal(noteId); };
+  window.submitEditNote = function() { state.submitEditNote(); };
+  window.openEditDescriptionModal = function() { state.openEditDescriptionModal(); };
+  window.submitEditDescription = function() { state.submitEditDescription(); };
+  window.openEditStorageModal = function(taskId) { state.openEditStorageModal(taskId); };
+  window.submitEditStorage = function() { state.submitEditStorage(); };
+  window.openEditAttachmentModal = function(attachmentId) { state.openEditAttachmentModal(attachmentId); };
+  window.submitEditAttachment = function() { state.submitEditAttachment(); };
+  window.openCreateAttachmentModal = function() { state.openCreateAttachmentModal(); };
+  window.submitCreateAttachment = function() { state.submitCreateAttachment(); };
+  window.openManageAgentsModal = function() { state.openManageAgentsModal(); };
+  window.deleteTask = deleteTask;
+  window.deleteNote = deleteNote;
+  window.deleteAttachment = deleteAttachment;
+  window.executeTask = executeTask;
+  window.copyTaskResult = copyTaskResult;
+  window.saveTaskAsWorkflow = saveTaskAsWorkflow;
+  window.viewCanvas = viewCanvas;
+  window.refreshTasks = refreshTasks;
+  window.toggleTaskCollapsible = toggleTaskCollapsible;
+  window.toggleEditTaskScheduleFields = function() { state.toggleEditTaskScheduleFields(); };
+  window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
+  window.toggleEditTaskAutoSaveFields = function() { state.toggleEditTaskAutoSaveFields(); };
+  window.updateEditTaskAutoSaveTargetFields = function() { state.updateEditTaskAutoSaveTargetFields(); };
+  window.quickSaveTaskResult = quickSaveTaskResult;
+  window.openSaveToFileModal = openSaveToFileModal;
+  window.saveTaskResultToFile = saveTaskResultToFile;
+  window.saveTaskResultToStore = saveTaskResultToStore;
 
-            if (!resp.ok) {
-                const text = await resp.text();
-                throw new Error(text || 'Failed to delete attachment');
-            }
-
-            await loadWorkspaceData();
-            await loadTasks();
-        } catch (err) {
-            console.error(err);
-            alert(`Failed to delete attachment: ${err.message || err}`);
-        }
-    }
-
-    // View canvas
-    function viewCanvas() {
-        window.location.href = `/studios/${workspaceId}/canvas`;
-    }
-
-    // HTML escape function
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    // Get attachments connected to a task via layout workflow_connections
-    function getTaskAttachments(taskId) {
-        if (!taskId) return [];
-        if (!Array.isArray(state.workspaceConnections) || state.workspaceConnections.length === 0) return [];
-        if (!state.workspaceAttachmentsById || state.workspaceAttachmentsById.size === 0) return [];
-
-        const attachmentIds = new Set();
-        for (const conn of state.workspaceConnections) {
-            if (!conn) continue;
-            if (conn.to === taskId && state.workspaceAttachmentsById.has(conn.from)) {
-                attachmentIds.add(conn.from);
-            }
-            if (conn.from === taskId && state.workspaceAttachmentsById.has(conn.to)) {
-                attachmentIds.add(conn.to);
-            }
-        }
-
-        return Array.from(attachmentIds)
-            .map(id => state.workspaceAttachmentsById.get(id))
-            .filter(Boolean);
-    }
-
-    // Get formatted agent assignment with instance number
-    function getFormattedAgentAssignment(task) {
-        if (!task.to || task.to === 'unassigned') {
-            return 'Unassigned';
-        }
-
-        if (task.assigned_node_id) {
-            const match = task.assigned_node_id.match(/^(.+)-node-(\d+)$/);
-            if (match) {
-                const agentName = match[1];
-                const instanceNumber = match[2];
-                return `${agentName} #${instanceNumber}`;
-            }
-        }
-
-        if (state.workspaceLayout && state.workspaceLayout.agent_positions) {
-            const agentPositionKeys = Object.keys(state.workspaceLayout.agent_positions);
-            const matchingKeys = agentPositionKeys.filter(key => key.startsWith(task.to + '-node-'));
-
-            if (matchingKeys.length > 0) {
-                matchingKeys.sort((a, b) => {
-                    const aMatch = a.match(/-node-(\d+)$/);
-                    const bMatch = b.match(/-node-(\d+)$/);
-                    const aNum = aMatch ? parseInt(aMatch[1]) : 0;
-                    const bNum = bMatch ? parseInt(bMatch[1]) : 0;
-                    return aNum - bNum;
-                });
-
-                const firstKey = matchingKeys[0];
-                const match = firstKey.match(/^(.+)-node-(\d+)$/);
-                if (match) {
-                    return `${match[1]} #${match[2]}`;
-                }
-            }
-        }
-
-        return task.to;
-    }
-
-    // Toggle task collapsible section
-    function toggleTaskCollapsible(contentId) {
-        const content = document.getElementById(contentId);
-        const header = content?.previousElementSibling;
-        if (content && header) {
-            content.classList.toggle('expanded');
-            header.classList.toggle('expanded');
-        }
-    }
-
-    // Export core functions to global state and window
-    Object.assign(state, {
-        loadWorkspaceData,
-        loadTasks,
-        escapeHtml,
-        getTaskAttachments,
-        getFormattedAgentAssignment
-    });
-
-    // Export global functions for onclick handlers
-    window.openEditTaskModal = function(taskId) { state.openEditTaskModal(taskId); };
-    window.openCreateTaskModal = function() { state.openCreateTaskModal(); };
-    window.submitEditTask = function() { state.submitEditTask(); };
-    window.openCreateNoteModal = function() { state.openCreateNoteModal(); };
-    window.submitCreateNote = function() { state.submitCreateNote(); };
-    window.openEditNoteModal = function(noteId) { state.openEditNoteModal(noteId); };
-    window.submitEditNote = function() { state.submitEditNote(); };
-    window.openEditDescriptionModal = function() { state.openEditDescriptionModal(); };
-    window.submitEditDescription = function() { state.submitEditDescription(); };
-    window.openEditStorageModal = function(taskId) { state.openEditStorageModal(taskId); };
-    window.submitEditStorage = function() { state.submitEditStorage(); };
-    window.openEditAttachmentModal = function(attachmentId) { state.openEditAttachmentModal(attachmentId); };
-    window.submitEditAttachment = function() { state.submitEditAttachment(); };
-    window.openCreateAttachmentModal = function() { state.openCreateAttachmentModal(); };
-    window.submitCreateAttachment = function() { state.submitCreateAttachment(); };
-    window.openManageAgentsModal = function() { state.openManageAgentsModal(); };
-    window.deleteTask = deleteTask;
-    window.deleteNote = deleteNote;
-    window.deleteAttachment = deleteAttachment;
-    window.executeTask = executeTask;
-    window.copyTaskResult = copyTaskResult;
-    window.saveTaskAsWorkflow = saveTaskAsWorkflow;
-    window.viewCanvas = viewCanvas;
-    window.refreshTasks = refreshTasks;
-    window.toggleTaskCollapsible = toggleTaskCollapsible;
-    window.toggleEditTaskScheduleFields = function() { state.toggleEditTaskScheduleFields(); };
-    window.updateEditTaskScheduleTypeFields = function() { state.updateEditTaskScheduleTypeFields(); };
-    window.toggleEditTaskAutoSaveFields = function() { state.toggleEditTaskAutoSaveFields(); };
-    window.updateEditTaskAutoSaveTargetFields = function() { state.updateEditTaskAutoSaveTargetFields(); };
-    window.quickSaveTaskResult = quickSaveTaskResult;
-    window.openSaveToFileModal = openSaveToFileModal;
-    window.saveTaskResultToFile = saveTaskResultToFile;
-    window.saveTaskResultToStore = saveTaskResultToStore;
-
-    // Load data when page loads
-    document.addEventListener('DOMContentLoaded', () => {
-        loadWorkspaceData();
-    });
+  // Load data when page loads
+  document.addEventListener('DOMContentLoaded', () => {
+    loadWorkspaceData();
+  });
 
 })();

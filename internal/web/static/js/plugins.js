@@ -5,7 +5,7 @@ let allPlugins = [];
 let filteredPlugins = [];
 let paginatedPlugins = [];
 let notifications = [];
-let selectedPlugins = new Set();
+const selectedPlugins = new Set();
 
 // Pagination state
 let currentPage = 1;
@@ -18,287 +18,287 @@ let sortDirection = 'asc';
 
 // Initialize page
 document.addEventListener('DOMContentLoaded', () => {
-    initializeEventListeners();
-    loadPlugins();
-    loadNotifications();
-    startNotificationPolling();
+  initializeEventListeners();
+  loadPlugins();
+  loadNotifications();
+  startNotificationPolling();
 });
 
 // Event Listeners
 function initializeEventListeners() {
-    // Header actions
-    document.getElementById('uploadBtn').addEventListener('click', () => {
-        if (typeof showPluginUploadModal === 'function') {
-            showPluginUploadModal();
-        }
-    });
-    document.getElementById('notificationBadge').addEventListener('click', toggleNotificationDrawer);
-    document.getElementById('closeDrawer').addEventListener('click', toggleNotificationDrawer);
+  // Header actions
+  document.getElementById('uploadBtn').addEventListener('click', () => {
+    if (typeof showPluginUploadModal === 'function') {
+      showPluginUploadModal();
+    }
+  });
+  document.getElementById('notificationBadge').addEventListener('click', toggleNotificationDrawer);
+  document.getElementById('closeDrawer').addEventListener('click', toggleNotificationDrawer);
 
-    // Filters
-    document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
-    document.getElementById('statusFilter').addEventListener('change', applyFilters);
-    document.getElementById('categoryFilter').addEventListener('change', applyFilters);
+  // Filters
+  document.getElementById('searchInput').addEventListener('input', debounce(applyFilters, 300));
+  document.getElementById('statusFilter').addEventListener('change', applyFilters);
+  document.getElementById('categoryFilter').addEventListener('change', applyFilters);
 
-    // Select all checkbox
-    document.getElementById('selectAll').addEventListener('change', handleSelectAll);
+  // Select all checkbox
+  document.getElementById('selectAll').addEventListener('change', handleSelectAll);
 
-    // Sortable headers
-    document.querySelectorAll('.sortable').forEach(header => {
-        header.addEventListener('click', () => handleSort(header.dataset.sort));
-    });
+  // Sortable headers
+  document.querySelectorAll('.sortable').forEach(header => {
+    header.addEventListener('click', () => handleSort(header.dataset.sort));
+  });
 }
 
 // API calls
 async function loadPlugins() {
-    showLoading(true);
-    try {
-        const response = await fetch('/api/plugins?management=true');
-        const data = await response.json();
+  showLoading(true);
+  try {
+    const response = await fetch('/api/plugins?management=true');
+    const data = await response.json();
 
-        if (data.plugins) {
-            allPlugins = data.plugins;
-            filteredPlugins = sortPlugins([...allPlugins]);
-            updatePagination();
-            renderPluginsTable();
-            renderMobileCards();
-        }
-    } catch (error) {
-        console.error('Failed to load plugins:', error);
-        showToast('Failed to load plugins', 'error');
-    } finally {
-        showLoading(false);
+    if (data.plugins) {
+      allPlugins = data.plugins;
+      filteredPlugins = sortPlugins([...allPlugins]);
+      updatePagination();
+      renderPluginsTable();
+      renderMobileCards();
     }
+  } catch (error) {
+    console.error('Failed to load plugins:', error);
+    showToast('Failed to load plugins', 'error');
+  } finally {
+    showLoading(false);
+  }
 }
 
 async function loadNotifications() {
-    try {
-        const response = await fetch('/api/plugins/notifications');
-        const data = await response.json();
+  try {
+    const response = await fetch('/api/plugins/notifications');
+    const data = await response.json();
 
-        if (data.notifications) {
-            notifications = data.notifications;
-            updateNotificationBadge();
-            renderNotifications();
-        }
-    } catch (error) {
-        console.error('Failed to load notifications:', error);
+    if (data.notifications) {
+      notifications = data.notifications;
+      updateNotificationBadge();
+      renderNotifications();
     }
+  } catch (error) {
+    console.error('Failed to load notifications:', error);
+  }
 }
 
 async function deletePlugin(pluginName) {
-    if (!confirm(`Are you sure you want to delete ${pluginName}? This action cannot be undone.`)) {
-        return;
-    }
+  if (!confirm(`Are you sure you want to delete ${pluginName}? This action cannot be undone.`)) {
+    return;
+  }
 
-    try {
-        const response = await fetch(`/api/plugins/${pluginName}`, {
-            method: 'DELETE'
-        });
-        const data = await response.json();
+  try {
+    const response = await fetch(`/api/plugins/${pluginName}`, {
+      method: 'DELETE'
+    });
+    const data = await response.json();
 
-        if (data.success) {
-            showToast(`Plugin ${pluginName} deleted`, 'success');
-            await loadPlugins();
-        } else {
-            showToast(data.message || 'Failed to delete plugin', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to delete plugin:', error);
-        showToast('Failed to delete plugin', 'error');
+    if (data.success) {
+      showToast(`Plugin ${pluginName} deleted`, 'success');
+      await loadPlugins();
+    } else {
+      showToast(data.message || 'Failed to delete plugin', 'error');
     }
+  } catch (error) {
+    console.error('Failed to delete plugin:', error);
+    showToast('Failed to delete plugin', 'error');
+  }
 }
 
 async function testPlugin(pluginName) {
-    const modal = createTestModal(pluginName);
-    document.body.appendChild(modal);
-    showModal(modal);
+  const modal = createTestModal(pluginName);
+  document.body.appendChild(modal);
+  showModal(modal);
 }
 
 async function showPluginDetails(pluginName) {
-    try {
-        const response = await fetch(`/api/plugins/${pluginName}`);
-        const plugin = await response.json();
+  try {
+    const response = await fetch(`/api/plugins/${pluginName}`);
+    const plugin = await response.json();
 
-        const modal = createDetailsModal(plugin);
-        document.body.appendChild(modal);
-        showModal(modal);
-    } catch (error) {
-        console.error('Failed to load plugin details:', error);
-        showToast('Failed to load plugin details', 'error');
-    }
+    const modal = createDetailsModal(plugin);
+    document.body.appendChild(modal);
+    showModal(modal);
+  } catch (error) {
+    console.error('Failed to load plugin details:', error);
+    showToast('Failed to load plugin details', 'error');
+  }
 }
 
 async function dismissNotification(notificationId) {
-    try {
-        await fetch(`/api/plugins/notifications/${notificationId}/dismiss`, {
-            method: 'POST'
-        });
-        await loadNotifications();
-    } catch (error) {
-        console.error('Failed to dismiss notification:', error);
-    }
+  try {
+    await fetch(`/api/plugins/notifications/${notificationId}/dismiss`, {
+      method: 'POST'
+    });
+    await loadNotifications();
+  } catch (error) {
+    console.error('Failed to dismiss notification:', error);
+  }
 }
 
 // Sorting function
 function handleSort(column) {
-    // Toggle direction if same column, otherwise default to asc
-    if (sortColumn === column) {
-        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-        sortColumn = column;
-        sortDirection = 'asc';
-    }
+  // Toggle direction if same column, otherwise default to asc
+  if (sortColumn === column) {
+    sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortColumn = column;
+    sortDirection = 'asc';
+  }
 
-    // Update header UI
-    document.querySelectorAll('.sortable').forEach(h => {
-        h.classList.remove('active', 'desc');
-    });
-    const activeHeader = document.querySelector(`.sortable[data-sort="${column}"]`);
-    if (activeHeader) {
-        activeHeader.classList.add('active');
-        if (sortDirection === 'desc') {
-            activeHeader.classList.add('desc');
-        }
+  // Update header UI
+  document.querySelectorAll('.sortable').forEach(h => {
+    h.classList.remove('active', 'desc');
+  });
+  const activeHeader = document.querySelector(`.sortable[data-sort="${column}"]`);
+  if (activeHeader) {
+    activeHeader.classList.add('active');
+    if (sortDirection === 'desc') {
+      activeHeader.classList.add('desc');
     }
+  }
 
-    applyFilters();
+  applyFilters();
 }
 
 // Sort plugins
 function sortPlugins(plugins) {
-    return [...plugins].sort((a, b) => {
-        let aVal, bVal;
+  return [...plugins].sort((a, b) => {
+    let aVal, bVal;
 
-        switch (sortColumn) {
-            case 'name':
-                aVal = (a.name || '').toLowerCase();
-                bVal = (b.name || '').toLowerCase();
-                break;
-            case 'version':
-                aVal = a.version || '';
-                bVal = b.version || '';
-                break;
-            case 'status':
-                aVal = getPluginStatusPriority(a);
-                bVal = getPluginStatusPriority(b);
-                break;
-            case 'category':
-                aVal = (a.category || '').toLowerCase();
-                bVal = (b.category || '').toLowerCase();
-                break;
-            default:
-                return 0;
-        }
-
-        if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-        if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    switch (sortColumn) {
+      case 'name':
+        aVal = (a.name || '').toLowerCase();
+        bVal = (b.name || '').toLowerCase();
+        break;
+      case 'version':
+        aVal = a.version || '';
+        bVal = b.version || '';
+        break;
+      case 'status':
+        aVal = getPluginStatusPriority(a);
+        bVal = getPluginStatusPriority(b);
+        break;
+      case 'category':
+        aVal = (a.category || '').toLowerCase();
+        bVal = (b.category || '').toLowerCase();
+        break;
+      default:
         return 0;
-    });
+    }
+
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
 }
 
 // Get status priority for sorting (errors first)
 function getPluginStatusPriority(plugin) {
-    if (plugin.health_status === 'error') return 0;
-    if (plugin.needs_update) return 1;
-    if (!plugin.is_configured) return 2;
-    return 3;
+  if (plugin.health_status === 'error') return 0;
+  if (plugin.needs_update) return 1;
+  if (!plugin.is_configured) return 2;
+  return 3;
 }
 
 // Pagination functions
 function updatePagination() {
-    totalPages = Math.ceil(filteredPlugins.length / pageSize);
-    if (currentPage > totalPages) currentPage = totalPages || 1;
+  totalPages = Math.ceil(filteredPlugins.length / pageSize);
+  if (currentPage > totalPages) currentPage = totalPages || 1;
 
-    const start = (currentPage - 1) * pageSize;
-    const end = Math.min(start + pageSize, filteredPlugins.length);
-    paginatedPlugins = filteredPlugins.slice(start, end);
+  const start = (currentPage - 1) * pageSize;
+  const end = Math.min(start + pageSize, filteredPlugins.length);
+  paginatedPlugins = filteredPlugins.slice(start, end);
 
-    // Update pagination info
-    document.getElementById('paginationStart').textContent = filteredPlugins.length > 0 ? start + 1 : 0;
-    document.getElementById('paginationEnd').textContent = end;
-    document.getElementById('paginationTotal').textContent = filteredPlugins.length;
+  // Update pagination info
+  document.getElementById('paginationStart').textContent = filteredPlugins.length > 0 ? start + 1 : 0;
+  document.getElementById('paginationEnd').textContent = end;
+  document.getElementById('paginationTotal').textContent = filteredPlugins.length;
 
-    // Update buttons
-    document.getElementById('prevPage').disabled = currentPage <= 1;
-    document.getElementById('nextPage').disabled = currentPage >= totalPages;
+  // Update buttons
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
 
-    // Render page numbers
-    renderPageNumbers();
+  // Render page numbers
+  renderPageNumbers();
 }
 
 function renderPageNumbers() {
-    const container = document.getElementById('pageNumbers');
-    if (!container) return;
+  const container = document.getElementById('pageNumbers');
+  if (!container) return;
 
-    let html = '';
-    const maxVisible = 5;
-    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+  let html = '';
+  const maxVisible = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+  const endPage = Math.min(totalPages, startPage + maxVisible - 1);
 
-    if (endPage - startPage < maxVisible - 1) {
-        startPage = Math.max(1, endPage - maxVisible + 1);
-    }
+  if (endPage - startPage < maxVisible - 1) {
+    startPage = Math.max(1, endPage - maxVisible + 1);
+  }
 
-    if (startPage > 1) {
-        html += `<button class="pagination-btn" onclick="goToPage(1)">1</button>`;
-        if (startPage > 2) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
-    }
+  if (startPage > 1) {
+    html += `<button class="pagination-btn" onclick="goToPage(1)">1</button>`;
+    if (startPage > 2) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+  }
 
-    for (let i = startPage; i <= endPage; i++) {
-        html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
-    }
+  for (let i = startPage; i <= endPage; i++) {
+    html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+  }
 
-    if (endPage < totalPages) {
-        if (endPage < totalPages - 1) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
-        html += `<button class="pagination-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
-    }
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) html += `<span style="padding: 0 0.5rem; color: var(--text-muted);">...</span>`;
+    html += `<button class="pagination-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+  }
 
-    container.innerHTML = html;
+  container.innerHTML = html;
 }
 
 function changePage(delta) {
-    goToPage(currentPage + delta);
+  goToPage(currentPage + delta);
 }
 
 function goToPage(page) {
-    currentPage = Math.max(1, Math.min(page, totalPages));
-    updatePagination();
-    renderPluginsTable();
-    renderMobileCards();
+  currentPage = Math.max(1, Math.min(page, totalPages));
+  updatePagination();
+  renderPluginsTable();
+  renderMobileCards();
 }
 
 function changePageSize(size) {
-    pageSize = parseInt(size, 10);
-    currentPage = 1;
-    updatePagination();
-    renderPluginsTable();
-    renderMobileCards();
+  pageSize = parseInt(size, 10);
+  currentPage = 1;
+  updatePagination();
+  renderPluginsTable();
+  renderMobileCards();
 }
 
 // Rendering functions
 function renderPluginsTable() {
-    const tbody = document.getElementById('pluginsTableBody');
-    const emptyState = document.getElementById('emptyState');
-    const tableContainer = document.querySelector('.plugins-table-container');
-    const paginationContainer = document.getElementById('paginationContainer');
+  const tbody = document.getElementById('pluginsTableBody');
+  const emptyState = document.getElementById('emptyState');
+  const tableContainer = document.querySelector('.plugins-table-container');
+  const paginationContainer = document.getElementById('paginationContainer');
 
-    if (filteredPlugins.length === 0) {
-        tbody.innerHTML = '';
-        emptyState.style.display = 'block';
-        if (tableContainer) tableContainer.style.display = 'none';
-        return;
-    }
+  if (filteredPlugins.length === 0) {
+    tbody.innerHTML = '';
+    emptyState.style.display = 'block';
+    if (tableContainer) tableContainer.style.display = 'none';
+    return;
+  }
 
-    emptyState.style.display = 'none';
-    if (tableContainer) tableContainer.style.display = 'block';
+  emptyState.style.display = 'none';
+  if (tableContainer) tableContainer.style.display = 'block';
 
-    // Show/hide pagination based on total items
-    if (paginationContainer) {
-        paginationContainer.style.display = filteredPlugins.length > 10 ? 'flex' : 'none';
-    }
+  // Show/hide pagination based on total items
+  if (paginationContainer) {
+    paginationContainer.style.display = filteredPlugins.length > 10 ? 'flex' : 'none';
+  }
 
-    tbody.innerHTML = paginatedPlugins.map(plugin => `
+  tbody.innerHTML = paginatedPlugins.map(plugin => `
         <tr data-plugin="${plugin.name}">
             <td>
                 <input type="checkbox" class="plugin-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
@@ -325,26 +325,26 @@ function renderPluginsTable() {
         </tr>
     `).join('');
 
-    // Add checkbox event listeners
-    document.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', handlePluginCheckbox);
-    });
+  // Add checkbox event listeners
+  document.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', handlePluginCheckbox);
+  });
 
-    // Update select all state
-    updateSelectAllState();
+  // Update select all state
+  updateSelectAllState();
 }
 
 // Render mobile card view
 function renderMobileCards() {
-    const container = document.getElementById('pluginsCardsContainer');
-    if (!container) return;
+  const container = document.getElementById('pluginsCardsContainer');
+  if (!container) return;
 
-    if (paginatedPlugins.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
+  if (paginatedPlugins.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
 
-    container.innerHTML = paginatedPlugins.map(plugin => `
+  container.innerHTML = paginatedPlugins.map(plugin => `
         <div class="plugin-card" data-plugin="${plugin.name}">
             <div class="plugin-card-header">
                 <input type="checkbox" class="plugin-checkbox plugin-card-checkbox" data-plugin="${plugin.name}" ${selectedPlugins.has(plugin.name) ? 'checked' : ''} aria-label="Select ${plugin.name}">
@@ -367,26 +367,26 @@ function renderMobileCards() {
         </div>
     `).join('');
 
-    // Add checkbox event listeners for cards
-    container.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', handlePluginCheckbox);
-    });
+  // Add checkbox event listeners for cards
+  container.querySelectorAll('.plugin-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', handlePluginCheckbox);
+  });
 }
 
 // HTML escape helper
 function escapeHtml(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 function renderTagBadges(tags) {
-    if (!Array.isArray(tags) || tags.length === 0) {
-        return '';
-    }
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return '';
+  }
 
-    return `
+  return `
         <div class="plugin-tags">
             ${tags.map(t => `<span class="tag-badge">${t}</span>`).join('')}
         </div>
@@ -394,32 +394,32 @@ function renderTagBadges(tags) {
 }
 
 function renderStatusBadge(plugin) {
-    // Show status badge based on plugin health
-    if (plugin.health_status === 'error') {
-        return `
+  // Show status badge based on plugin health
+  if (plugin.health_status === 'error') {
+    return `
             <span class="status-badge status-error">
                 <span class="status-dot"></span>
                 Error
             </span>
         `;
-    } else if (plugin.needs_update) {
-        return `
+  } else if (plugin.needs_update) {
+    return `
             <span class="status-badge status-update">
                 <span class="status-dot"></span>
                 Needs Update
             </span>
         `;
-    } else if (plugin.is_configured === false) {
-        return `
+  } else if (plugin.is_configured === false) {
+    return `
             <span class="status-badge status-not-configured">
                 <span class="status-dot"></span>
                 Not Configured
             </span>
         `;
-    }
+  }
 
-    // Show "Healthy" for plugins with no issues
-    return `
+  // Show "Healthy" for plugins with no issues
+  return `
         <span class="status-badge status-active">
             <span class="status-dot"></span>
             Healthy
@@ -428,14 +428,14 @@ function renderStatusBadge(plugin) {
 }
 
 function renderNotifications() {
-    const list = document.getElementById('notificationsList');
+  const list = document.getElementById('notificationsList');
 
-    if (notifications.length === 0) {
-        list.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-muted);">No notifications</div>';
-        return;
-    }
+  if (notifications.length === 0) {
+    list.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-muted);">No notifications</div>';
+    return;
+  }
 
-    list.innerHTML = notifications.map(notif => `
+  list.innerHTML = notifications.map(notif => `
         <div class="notification-item ${notif.read ? '' : 'unread'}">
             <div class="notification-header">
                 <span class="notification-type">${notif.type}</span>
@@ -451,9 +451,9 @@ function renderNotifications() {
 
 // Modal creation functions
 function createDetailsModal(plugin) {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title">${plugin.name}</h2>
@@ -494,13 +494,13 @@ function createDetailsModal(plugin) {
             </div>
         </div>
     `;
-    return modal;
+  return modal;
 }
 
 function createTestModal(pluginName) {
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title">Test Plugin: ${pluginName}</h2>
@@ -522,308 +522,308 @@ function createTestModal(pluginName) {
             </div>
         </div>
     `;
-    return modal;
+  return modal;
 }
 
 // Modal actions
 async function executeTest(pluginName) {
-    const argsInput = document.getElementById('testArgs');
-    const resultDiv = document.getElementById('testResult');
-    const resultContent = document.getElementById('testResultContent');
+  const argsInput = document.getElementById('testArgs');
+  const resultDiv = document.getElementById('testResult');
+  const resultContent = document.getElementById('testResultContent');
 
-    try {
-        const response = await fetch(`/api/plugins/${pluginName}/test`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ args: argsInput.value || '{}' })
-        });
-        const data = await response.json();
+  try {
+    const response = await fetch(`/api/plugins/${pluginName}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args: argsInput.value || '{}' })
+    });
+    const data = await response.json();
 
-        resultDiv.style.display = 'block';
-        resultContent.textContent = JSON.stringify(data, null, 2);
+    resultDiv.style.display = 'block';
+    resultContent.textContent = JSON.stringify(data, null, 2);
 
-        if (data.success) {
-            showToast('Test completed successfully', 'success');
-        } else {
-            showToast('Test failed', 'error');
-        }
-    } catch (error) {
-        console.error('Test failed:', error);
-        resultDiv.style.display = 'block';
-        resultContent.textContent = `Error: ${error.message}`;
-        showToast('Test execution failed', 'error');
+    if (data.success) {
+      showToast('Test completed successfully', 'success');
+    } else {
+      showToast('Test failed', 'error');
     }
+  } catch (error) {
+    console.error('Test failed:', error);
+    resultDiv.style.display = 'block';
+    resultContent.textContent = `Error: ${error.message}`;
+    showToast('Test execution failed', 'error');
+  }
 }
 
 // Utility functions
 function applyFilters() {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
-    const categoryFilter = document.getElementById('categoryFilter').value;
+  const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+  const statusFilter = document.getElementById('statusFilter').value;
+  const categoryFilter = document.getElementById('categoryFilter').value;
 
-    filteredPlugins = allPlugins.filter(plugin => {
-        // Search filter
-        const matchesSearch = !searchTerm ||
+  filteredPlugins = allPlugins.filter(plugin => {
+    // Search filter
+    const matchesSearch = !searchTerm ||
             plugin.name.toLowerCase().includes(searchTerm) ||
             (plugin.description && plugin.description.toLowerCase().includes(searchTerm));
 
-        // Status filter
-        const pluginStatus = getPluginStatus(plugin);
-        const matchesStatus = !statusFilter || pluginStatus === statusFilter;
+    // Status filter
+    const pluginStatus = getPluginStatus(plugin);
+    const matchesStatus = !statusFilter || pluginStatus === statusFilter;
 
-        // Category filter
-        const matchesCategory = !categoryFilter || plugin.category === categoryFilter;
+    // Category filter
+    const matchesCategory = !categoryFilter || plugin.category === categoryFilter;
 
-        return matchesSearch && matchesStatus && matchesCategory;
-    });
+    return matchesSearch && matchesStatus && matchesCategory;
+  });
 
-    // Apply sorting
-    filteredPlugins = sortPlugins(filteredPlugins);
+  // Apply sorting
+  filteredPlugins = sortPlugins(filteredPlugins);
 
-    // Reset to first page when filtering
-    currentPage = 1;
+  // Reset to first page when filtering
+  currentPage = 1;
 
-    // Update pagination and render
-    updatePagination();
-    renderPluginsTable();
-    renderMobileCards();
+  // Update pagination and render
+  updatePagination();
+  renderPluginsTable();
+  renderMobileCards();
 }
 
 function getPluginStatus(plugin) {
-    if (plugin.health_status === 'error') return 'error';
-    if (plugin.needs_update) return 'update';
-    if (plugin.is_configured === false) return 'not-configured';
-    return 'healthy';
+  if (plugin.health_status === 'error') return 'error';
+  if (plugin.needs_update) return 'update';
+  if (plugin.is_configured === false) return 'not-configured';
+  return 'healthy';
 }
 
 function handleSelectAll(e) {
-    const checkboxes = document.querySelectorAll('.plugin-checkbox');
-    checkboxes.forEach(cb => {
-        cb.checked = e.target.checked;
-        const pluginName = cb.dataset.plugin;
-        if (e.target.checked) {
-            selectedPlugins.add(pluginName);
-        } else {
-            selectedPlugins.delete(pluginName);
-        }
-    });
-    updateBulkActionsBar();
+  const checkboxes = document.querySelectorAll('.plugin-checkbox');
+  checkboxes.forEach(cb => {
+    cb.checked = e.target.checked;
+    const pluginName = cb.dataset.plugin;
+    if (e.target.checked) {
+      selectedPlugins.add(pluginName);
+    } else {
+      selectedPlugins.delete(pluginName);
+    }
+  });
+  updateBulkActionsBar();
 }
 
 function handlePluginCheckbox(e) {
-    const pluginName = e.target.dataset.plugin;
-    if (e.target.checked) {
-        selectedPlugins.add(pluginName);
-    } else {
-        selectedPlugins.delete(pluginName);
-    }
-    updateSelectAllState();
-    updateBulkActionsBar();
+  const pluginName = e.target.dataset.plugin;
+  if (e.target.checked) {
+    selectedPlugins.add(pluginName);
+  } else {
+    selectedPlugins.delete(pluginName);
+  }
+  updateSelectAllState();
+  updateBulkActionsBar();
 }
 
 function updateSelectAllState() {
-    const selectAll = document.getElementById('selectAll');
-    const checkboxes = document.querySelectorAll('.plugin-checkbox');
-    const checkedCount = document.querySelectorAll('.plugin-checkbox:checked').length;
+  const selectAll = document.getElementById('selectAll');
+  const checkboxes = document.querySelectorAll('.plugin-checkbox');
+  const checkedCount = document.querySelectorAll('.plugin-checkbox:checked').length;
 
-    if (checkboxes.length === 0) {
-        selectAll.checked = false;
-        selectAll.indeterminate = false;
-    } else if (checkedCount === 0) {
-        selectAll.checked = false;
-        selectAll.indeterminate = false;
-    } else if (checkedCount === checkboxes.length) {
-        selectAll.checked = true;
-        selectAll.indeterminate = false;
-    } else {
-        selectAll.checked = false;
-        selectAll.indeterminate = true;
-    }
+  if (checkboxes.length === 0) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+  } else if (checkedCount === 0) {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+  } else if (checkedCount === checkboxes.length) {
+    selectAll.checked = true;
+    selectAll.indeterminate = false;
+  } else {
+    selectAll.checked = false;
+    selectAll.indeterminate = true;
+  }
 }
 
 function updateBulkActionsBar() {
-    const bar = document.getElementById('bulkActionsBar');
-    const countSpan = document.getElementById('selectedCount');
+  const bar = document.getElementById('bulkActionsBar');
+  const countSpan = document.getElementById('selectedCount');
 
-    if (selectedPlugins.size > 0) {
-        bar.classList.add('active');
-        countSpan.textContent = selectedPlugins.size;
-    } else {
-        bar.classList.remove('active');
-    }
+  if (selectedPlugins.size > 0) {
+    bar.classList.add('active');
+    countSpan.textContent = selectedPlugins.size;
+  } else {
+    bar.classList.remove('active');
+  }
 }
 
 // Bulk action functions
 async function bulkDeletePlugins() {
-    if (selectedPlugins.size === 0) {
-        showToast('No plugins selected', 'warning');
-        return;
+  if (selectedPlugins.size === 0) {
+    showToast('No plugins selected', 'warning');
+    return;
+  }
+
+  const count = selectedPlugins.size;
+  if (!confirm(`Are you sure you want to delete ${count} plugin${count > 1 ? 's' : ''}? This action cannot be undone.`)) {
+    return;
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const pluginName of selectedPlugins) {
+    try {
+      const response = await fetch(`/api/plugins/${pluginName}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (error) {
+      console.error(`Failed to delete plugin ${pluginName}:`, error);
+      failCount++;
     }
+  }
 
-    const count = selectedPlugins.size;
-    if (!confirm(`Are you sure you want to delete ${count} plugin${count > 1 ? 's' : ''}? This action cannot be undone.`)) {
-        return;
-    }
+  selectedPlugins.clear();
+  updateBulkActionsBar();
 
-    let successCount = 0;
-    let failCount = 0;
+  if (successCount > 0) {
+    showToast(`Deleted ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
+  }
+  if (failCount > 0) {
+    showToast(`Failed to delete ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
+  }
 
-    for (const pluginName of selectedPlugins) {
-        try {
-            const response = await fetch(`/api/plugins/${pluginName}`, {
-                method: 'DELETE'
-            });
-            const data = await response.json();
-
-            if (data.success) {
-                successCount++;
-            } else {
-                failCount++;
-            }
-        } catch (error) {
-            console.error(`Failed to delete plugin ${pluginName}:`, error);
-            failCount++;
-        }
-    }
-
-    selectedPlugins.clear();
-    updateBulkActionsBar();
-
-    if (successCount > 0) {
-        showToast(`Deleted ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
-    }
-    if (failCount > 0) {
-        showToast(`Failed to delete ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
-    }
-
-    await loadPlugins();
+  await loadPlugins();
 }
 
 async function bulkUpdatePlugins() {
-    if (selectedPlugins.size === 0) {
-        showToast('No plugins selected', 'warning');
-        return;
+  if (selectedPlugins.size === 0) {
+    showToast('No plugins selected', 'warning');
+    return;
+  }
+
+  // Filter to only plugins that need updates
+  const pluginsToUpdate = [...selectedPlugins].filter(name => {
+    const plugin = allPlugins.find(p => p.name === name);
+    return plugin && plugin.needs_update;
+  });
+
+  if (pluginsToUpdate.length === 0) {
+    showToast('No selected plugins need updates', 'info');
+    return;
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const pluginName of pluginsToUpdate) {
+    try {
+      const response = await fetch(`/api/plugins/${pluginName}/update`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (error) {
+      console.error(`Failed to update plugin ${pluginName}:`, error);
+      failCount++;
     }
+  }
 
-    // Filter to only plugins that need updates
-    const pluginsToUpdate = [...selectedPlugins].filter(name => {
-        const plugin = allPlugins.find(p => p.name === name);
-        return plugin && plugin.needs_update;
-    });
+  selectedPlugins.clear();
+  updateBulkActionsBar();
 
-    if (pluginsToUpdate.length === 0) {
-        showToast('No selected plugins need updates', 'info');
-        return;
-    }
+  if (successCount > 0) {
+    showToast(`Updated ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
+  }
+  if (failCount > 0) {
+    showToast(`Failed to update ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
+  }
 
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const pluginName of pluginsToUpdate) {
-        try {
-            const response = await fetch(`/api/plugins/${pluginName}/update`, {
-                method: 'POST'
-            });
-            const data = await response.json();
-
-            if (data.success) {
-                successCount++;
-            } else {
-                failCount++;
-            }
-        } catch (error) {
-            console.error(`Failed to update plugin ${pluginName}:`, error);
-            failCount++;
-        }
-    }
-
-    selectedPlugins.clear();
-    updateBulkActionsBar();
-
-    if (successCount > 0) {
-        showToast(`Updated ${successCount} plugin${successCount > 1 ? 's' : ''}`, 'success');
-    }
-    if (failCount > 0) {
-        showToast(`Failed to update ${failCount} plugin${failCount > 1 ? 's' : ''}`, 'error');
-    }
-
-    await loadPlugins();
+  await loadPlugins();
 }
 
 function toggleNotificationDrawer() {
-    const drawer = document.getElementById('notificationDrawer');
-    drawer.classList.toggle('active');
+  const drawer = document.getElementById('notificationDrawer');
+  drawer.classList.toggle('active');
 }
 
 function updateNotificationBadge() {
-    const badge = document.getElementById('notificationCount');
-    const unreadCount = notifications.filter(n => !n.read).length;
+  const badge = document.getElementById('notificationCount');
+  const unreadCount = notifications.filter(n => !n.read).length;
 
-    if (unreadCount > 0) {
-        badge.textContent = unreadCount;
-        badge.style.display = 'block';
-    } else {
-        badge.style.display = 'none';
-    }
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount;
+    badge.style.display = 'block';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 function startNotificationPolling() {
-    setInterval(loadNotifications, 30000); // Poll every 30 seconds
+  setInterval(loadNotifications, 30000); // Poll every 30 seconds
 }
 
 function showModal(modal) {
-    setTimeout(() => modal.classList.add('active'), 10);
+  setTimeout(() => modal.classList.add('active'), 10);
 }
 
 function closeModal(closeBtn) {
-    const modal = closeBtn.closest('.modal-overlay');
-    modal.classList.remove('active');
-    setTimeout(() => modal.remove(), 300);
+  const modal = closeBtn.closest('.modal-overlay');
+  modal.classList.remove('active');
+  setTimeout(() => modal.remove(), 300);
 }
 
 function showToast(message, type = 'info') {
-    const container = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             ${type === 'success' ? '<path d="M12 2C6.5 2 2 6.5 2 12S6.5 22 12 22 22 17.5 22 12 17.5 2 12 2M10 17L5 12L6.41 10.59L10 14.17L17.59 6.58L19 8L10 17Z"/>' :
-              type === 'error' ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>' :
-              type === 'warning' ? '<path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>' :
-              '<path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'}
+    type === 'error' ? '<path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>' :
+      type === 'warning' ? '<path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>' :
+        '<path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>'}
         </svg>
         <span>${message}</span>
     `;
 
-    container.appendChild(toast);
+  container.appendChild(toast);
 
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 function showLoading(show) {
-    const loading = document.getElementById('loadingState');
-    const table = document.querySelector('.plugins-table-container');
+  const loading = document.getElementById('loadingState');
+  const table = document.querySelector('.plugins-table-container');
 
-    if (show) {
-        loading.style.display = 'flex';
-        table.style.display = 'none';
-    } else {
-        loading.style.display = 'none';
-        table.style.display = 'block';
-    }
+  if (show) {
+    loading.style.display = 'flex';
+    table.style.display = 'none';
+  } else {
+    loading.style.display = 'none';
+    table.style.display = 'block';
+  }
 }
 
 function formatTime(timestamp) {
-    if (!timestamp) return 'N/A';
-    const date = new Date(timestamp);
-    return date.toLocaleString();
+  if (!timestamp) return 'N/A';
+  const date = new Date(timestamp);
+  return date.toLocaleString();
 }
 
 function renderPermissions(permissions) {
-    return Object.entries(permissions).map(([key, value]) => `
+  return Object.entries(permissions).map(([key, value]) => `
         <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="color: ${value ? 'var(--success-color)' : 'var(--danger-color)'};">
                 ${value ? '✓' : '✗'}
@@ -836,13 +836,13 @@ function renderPermissions(permissions) {
 }
 
 function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
     };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
 }
