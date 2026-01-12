@@ -647,6 +647,11 @@ Status: Online
       const data = await response.json();
       updateStatusIndicator(data.configured, data.provider, data.model);
       showSystemModelAlert('System model saved successfully!', 'success');
+
+      // Notify navbar to update system model display
+      if (typeof EventBus !== 'undefined') {
+        EventBus.emit('systemModel:changed', { provider, model });
+      }
     } catch (error) {
       console.error('Error saving system model:', error);
       showSystemModelAlert('Error saving system model: ' + error.message, 'danger');
@@ -692,6 +697,11 @@ Status: Online
       updateStatusIndicator(false);
       updateSaveButtonState();
       showSystemModelAlert('System model cleared.', 'info');
+
+      // Notify navbar to update system model display
+      if (typeof EventBus !== 'undefined') {
+        EventBus.emit('systemModel:changed', { provider: '', model: '' });
+      }
     } catch (error) {
       console.error('Error clearing system model:', error);
       showSystemModelAlert('Error clearing system model: ' + error.message, 'danger');
