@@ -1,6 +1,6 @@
 // Ori Agent Application JavaScript
 
-const log = Logger.withContext('App');
+const appLog = Logger.withContext('App');
 
 let currentAgent = '';
 let isComposing = false; // IME safety
@@ -68,7 +68,7 @@ function saveChatToLocalStorage() {
     const sanitized = sanitizeHistory(chatMessages);
     localStorage.setItem(storageKey, JSON.stringify(sanitized));
   } catch (error) {
-    log.error('Failed to save chat history:', error);
+    appLog.error('Failed to save chat history:', error);
     // Silent fail - don't show toast for localStorage issues
   }
 }
@@ -89,7 +89,7 @@ function loadChatFromLocalStorage() {
       restoreChatMessages();
     }
   } catch (error) {
-    log.error('Failed to load chat history:', error);
+    appLog.error('Failed to load chat history:', error);
     chatMessages = [];
     // Silent fail - don't show toast for localStorage issues
   }
@@ -124,13 +124,13 @@ function clearChatHistory() {
       chatArea.innerHTML = '';
     }
 
-    log.info('Chat history cleared');
+    appLog.info('Chat history cleared');
     EventBus.emit('chat:cleared', { agent: currentAgent });
     if (window.Toast) {
       Toast.success('Chat history cleared');
     }
   } catch (error) {
-    log.error('Failed to clear chat history:', error);
+    appLog.error('Failed to clear chat history:', error);
     if (window.Toast) {
       Toast.error('Failed to clear chat history');
     }
@@ -178,7 +178,7 @@ async function refreshAgentDisplay() {
       }
     }
   } catch (error) {
-    log.error('Failed to refresh agent display:', error);
+    appLog.error('Failed to refresh agent display:', error);
     if (window.Toast) {
       Toast.error('Failed to load agent information');
     }
@@ -389,7 +389,7 @@ function renderModal(data, metadata) {
                 addMessageToChat(`Error downloading ${filename}: ${result.error}`, false, true);
               }
             } catch (error) {
-              log.error(`Error downloading ${filename}:`, error);
+              appLog.error(`Error downloading ${filename}:`, error);
               errorCount++;
               addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
               if (window.Toast) {
@@ -414,7 +414,7 @@ function renderModal(data, metadata) {
           }, 2000);
 
         } catch (error) {
-          log.error('Download error:', error);
+          appLog.error('Download error:', error);
           addMessageToChat(`Error: ${error.message}`, false, true);
           downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
           downloadBtn.disabled = false;
@@ -675,7 +675,7 @@ async function handleTaskCommand(message) {
       await window.sessionManager.loadSessionTasks();
     }
   } catch (error) {
-    log.error('Failed to create task:', error);
+    appLog.error('Failed to create task:', error);
     addMessageToChat(`✗ Failed to create task: ${error.message}`, false, true);
   }
 }
@@ -711,7 +711,7 @@ async function displayTaskList(sessionId) {
 
     addMessageToChat(message, false, false);
   } catch (error) {
-    log.error('Failed to load tasks:', error);
+    appLog.error('Failed to load tasks:', error);
     addMessageToChat(`✗ Failed to load tasks: ${error.message}`, false, true);
   }
 }
@@ -814,7 +814,7 @@ async function sendMessage(message) {
 
     const data = await response.json();
 
-    log.debug('Received chat response:', data);
+    appLog.debug('Received chat response:', data);
 
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
@@ -842,7 +842,7 @@ async function sendMessage(message) {
       }
 
       // Check if this was a successful /switch command and refresh agent display and sidebar
-      log.debug('Checking for switch command:', {
+      appLog.debug('Checking for switch command:', {
         message: trimmedMessage,
         startsWithSwitch: trimmedMessage.startsWith('/switch'),
         hasCheckmark: responseText.includes('✅'),
@@ -851,7 +851,7 @@ async function sendMessage(message) {
       });
 
       if (trimmedMessage.startsWith('/switch') && responseText.includes('✅') && responseText.includes('Switched to agent')) {
-        log.debug('Successful agent switch detected, refreshing agent display and sidebar');
+        appLog.debug('Successful agent switch detected, refreshing agent display and sidebar');
         setTimeout(() => {
           refreshAgentDisplay();
           // Refresh sidebar agents list if the function exists
@@ -868,7 +868,7 @@ async function sendMessage(message) {
 
       EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
     } else {
-      log.error('No response field found. Available fields:', Object.keys(data));
+      appLog.error('No response field found. Available fields:', Object.keys(data));
       const details = escapeHtml(JSON.stringify(data, null, 2));
       addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
       if (window.Toast) {
@@ -879,11 +879,11 @@ async function sendMessage(message) {
   } catch (error) {
     // Handle user cancellation gracefully
     if (error.name === 'AbortError') {
-      log.debug('Request cancelled by user');
+      appLog.debug('Request cancelled by user');
       return;
     }
 
-    log.error('Chat error:', error);
+    appLog.error('Chat error:', error);
     addMessageToChat(`Error: ${error.message}`, false, true, false, isSlashCommand);
     if (window.Toast) {
       Toast.error('Failed to send message');
@@ -925,7 +925,7 @@ function setupChat() {
   const enterToSend = document.getElementById('enterToSend');
 
   if (!input || !sendBtn) {
-    log.warn('Chat elements not found');
+    appLog.warn('Chat elements not found');
     return;
   }
 
@@ -1015,7 +1015,7 @@ function setupChat() {
     });
   }
 
-  log.debug('Chat functionality initialized');
+  appLog.debug('Chat functionality initialized');
 }
 
 // ---- Sidebar Functionality ----
@@ -1038,8 +1038,8 @@ function setupSidebarToggle() {
     };
 
     sidebarToggle.addEventListener('click', function(event) {
-      log.debug('[SIDEBAR TOGGLE] Click detected');
-      log.debug('[SIDEBAR TOGGLE] Current sidebar classes:', sidebar.className);
+      appLog.debug('[SIDEBAR TOGGLE] Click detected');
+      appLog.debug('[SIDEBAR TOGGLE] Current sidebar classes:', sidebar.className);
 
       // Prevent event propagation to avoid interference with other handlers
       event.stopPropagation();
@@ -1065,7 +1065,7 @@ function setupSidebarToggle() {
         sidebarToggle.setAttribute('aria-expanded', 'true');
       }
 
-      log.debug('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
+      appLog.debug('[SIDEBAR TOGGLE] New sidebar classes:', sidebar.className);
 
       // Handle sidebar width
       if (isHidden) {
@@ -1158,9 +1158,9 @@ async function initializeApp() {
       chatStateUIModule.cleanupChatStateUI();
     });
 
-    log.debug('Chat state machine initialized');
+    appLog.debug('Chat state machine initialized');
   } catch (error) {
-    log.error('Failed to initialize chat state machine:', error);
+    appLog.error('Failed to initialize chat state machine:', error);
     // Fall back to simple behavior without state machine
   }
 
@@ -1168,9 +1168,9 @@ async function initializeApp() {
   try {
     const pluginBannerModule = await import('./modules/plugin-init-banner.js');
     await pluginBannerModule.initPluginBanner();
-    log.debug('Plugin init banner initialized');
+    appLog.debug('Plugin init banner initialized');
   } catch (error) {
-    log.error('Failed to initialize plugin banner:', error);
+    appLog.error('Failed to initialize plugin banner:', error);
   }
 
   // Initialize chat auto-scroll
@@ -1183,9 +1183,9 @@ async function initializeApp() {
       autoScrollModule.cleanupChatAutoScroll();
     });
 
-    log.debug('Chat auto-scroll initialized');
+    appLog.debug('Chat auto-scroll initialized');
   } catch (error) {
-    log.error('Failed to initialize auto-scroll:', error);
+    appLog.error('Failed to initialize auto-scroll:', error);
   }
 
   // Set up chat functionality
@@ -1205,13 +1205,13 @@ async function initializeApp() {
     const { onboardingManager } = await import('./modules/onboarding.js');
     await onboardingManager.init();
   } catch (error) {
-    log.error('Failed to initialize onboarding:', error);
+    appLog.error('Failed to initialize onboarding:', error);
     // Silent fail - onboarding is optional
   }
 
   // Sidebar functionality is now handled by modular files
 
-  log.info('App initialized successfully');
+  appLog.info('App initialized successfully');
   EventBus.emit('app:initialized');
 }
 

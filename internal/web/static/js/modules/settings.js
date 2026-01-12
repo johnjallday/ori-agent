@@ -1,7 +1,7 @@
 // Settings Management Module
 // Handles all settings-related functionality including loading, saving, and UI management
 
-const log = Logger.withContext('Settings');
+const settingsLog = Logger.withContext('Settings');
 
 // Settings Management Functions
 
@@ -88,10 +88,10 @@ async function loadSettings() {
       systemPromptInput.value = systemPromptValue;
     }
 
-    log.debug('Settings loaded successfully');
+    settingsLog.debug('Settings loaded successfully');
     EventBus.emit('settings:loaded', settings);
   } catch (error) {
-    log.error('Error loading settings:', error);
+    settingsLog.error('Error loading settings:', error);
     // Fallback to defaults
     const modelSelect = document.getElementById('gptModelSelect');
     const temperatureSlider = document.getElementById('temperatureSlider');
@@ -111,7 +111,7 @@ async function saveSettings() {
     const systemPromptInput = document.getElementById('systemPromptInput');
 
     if (!modelSelect || !temperatureSlider) {
-      log.error('Settings elements not found');
+      settingsLog.error('Settings elements not found');
       return;
     }
 
@@ -127,20 +127,20 @@ async function saveSettings() {
 
     await API.post('/api/settings', settingsData);
 
-    log.info('Settings updated:', settingsData);
+    settingsLog.info('Settings updated:', settingsData);
     EventBus.emit('settings:updated', settingsData);
 
     // Show success notification
     showNotification('Settings updated successfully!', 'success');
   } catch (error) {
-    log.error('Error saving settings:', error);
+    settingsLog.error('Error saving settings:', error);
     showNotification('Failed to save settings', 'error');
   }
 }
 
 // Settings Management
 function toggleSetting(settingName, enabled) {
-  log.debug('Toggling setting:', settingName, 'enabled:', enabled);
+  settingsLog.debug('Toggling setting:', settingName, 'enabled:', enabled);
   // Save setting to localStorage or send to server
   localStorage.setItem(settingName, String(enabled));
   EventBus.emit('settings:toggled', { name: settingName, enabled });
@@ -232,7 +232,7 @@ function setupSettings() {
   if (updateBtn) {
     updateBtn.addEventListener('click', function() {
       saveSettings();
-      log.debug('Settings saved to config.json');
+      settingsLog.debug('Settings saved to config.json');
     });
   }
 
@@ -240,7 +240,7 @@ function setupSettings() {
   const advancedSettingsBtn = document.getElementById('advancedSettingsBtn');
   if (advancedSettingsBtn) {
     advancedSettingsBtn.addEventListener('click', () => {
-      log.debug('Advanced settings clicked');
+      settingsLog.debug('Advanced settings clicked');
       // Show advanced settings modal
     });
   }
@@ -249,7 +249,7 @@ function setupSettings() {
   const systemDiagnosticsBtn = document.getElementById('systemDiagnosticsBtn');
   if (systemDiagnosticsBtn) {
     systemDiagnosticsBtn.addEventListener('click', () => {
-      log.debug('System diagnostics clicked');
+      settingsLog.debug('System diagnostics clicked');
       // Show system diagnostics panel
     });
   }
@@ -265,7 +265,7 @@ function setupSettings() {
   // Load current settings
   loadSettings();
 
-  log.debug('Settings management setup complete');
+  settingsLog.debug('Settings management setup complete');
 }
 
 // Initialize settings management when DOM is ready

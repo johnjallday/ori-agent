@@ -1,7 +1,7 @@
 // Plugin Management Module
 // Handles all plugin-related functionality including loading, toggling, upload, and online installation
 
-const log = Logger.withContext('Plugins');
+const pluginsLog = Logger.withContext('Plugins');
 
 // Plugin upload state management
 let uploadListenersSetup = false;
@@ -34,12 +34,12 @@ async function checkPluginConfigurationStatus(activePluginNames) {
         configVars = data.required_config;
         // Needs init if not already initialized
         needsInit = !data.is_initialized;
-        log.debug(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
+        pluginsLog.debug(`Plugin ${pluginName} has ${configVars.length} config variable(s), initialized: ${data.is_initialized}`);
       } else {
-        log.debug(`Plugin ${pluginName} does not require configuration`);
+        pluginsLog.debug(`Plugin ${pluginName} does not require configuration`);
       }
     } catch (error) {
-      log.debug(`Plugin ${pluginName} configuration check failed:`, error);
+      pluginsLog.debug(`Plugin ${pluginName} configuration check failed:`, error);
       hasConfig = false;
     }
 
@@ -79,20 +79,20 @@ async function loadPluginsForSidebar() {
       }));
 
     // Fetch plugin configuration status for active plugins
-    log.debug('About to call checkPluginConfigurationStatus with:', activePluginNames);
+    pluginsLog.debug('About to call checkPluginConfigurationStatus with:', activePluginNames);
     let pluginConfigStatus;
     try {
       pluginConfigStatus = await checkPluginConfigurationStatus(activePluginNames);
-      log.debug('checkPluginConfigurationStatus returned:', pluginConfigStatus);
+      pluginsLog.debug('checkPluginConfigurationStatus returned:', pluginConfigStatus);
     } catch (error) {
-      log.error('Error in checkPluginConfigurationStatus:', error);
+      pluginsLog.error('Error in checkPluginConfigurationStatus:', error);
       pluginConfigStatus = new Map(); // fallback to empty map
     }
 
     displayPlugins(localPlugins, activePluginNames, pluginConfigStatus);
     EventBus.emit('plugins:loaded', { count: localPlugins.length, active: activePluginNames.size });
   } catch (error) {
-    log.error('Error loading plugins:', error);
+    pluginsLog.error('Error loading plugins:', error);
     const pluginsList = document.getElementById('pluginsList');
     if (pluginsList) {
       pluginsList.innerHTML = '<div class="text-danger small">Failed to load plugins</div>';
@@ -147,12 +147,12 @@ function displayPlugins(plugins, activePluginNames, pluginConfigStatus = new Map
 
     // Debug logging for config button visibility
     if (isActive) {
-      log.debug(`Plugin: ${plugin.name}`);
-      log.debug(`  - isActive: ${isActive}`);
-      log.debug(`  - configStatus:`, configStatus);
-      log.debug(`  - needsConfig: ${needsConfig}`);
-      log.debug(`  - hasConfig: ${hasConfig}`);
-      log.debug(`  - Will show config button: ${hasConfig}`);
+      pluginsLog.debug(`Plugin: ${plugin.name}`);
+      pluginsLog.debug(`  - isActive: ${isActive}`);
+      pluginsLog.debug(`  - configStatus:`, configStatus);
+      pluginsLog.debug(`  - needsConfig: ${needsConfig}`);
+      pluginsLog.debug(`  - hasConfig: ${hasConfig}`);
+      pluginsLog.debug(`  - Will show config button: ${hasConfig}`);
     }
 
 
@@ -245,7 +245,7 @@ function setupPluginToggles() {
       const pluginPath = e.target.dataset.pluginPath;
       const isEnabled = e.target.checked;
 
-      log.debug(`Toggle event: ${pluginName}, isEnabled: ${isEnabled}`);
+      pluginsLog.debug(`Toggle event: ${pluginName}, isEnabled: ${isEnabled}`);
 
       try {
         await togglePlugin(pluginName, pluginPath, isEnabled);
@@ -258,7 +258,7 @@ function setupPluginToggles() {
         }
         EventBus.emit('plugin:toggled', { name: pluginName, enabled: isEnabled });
       } catch (error) {
-        log.error('Failed to toggle plugin:', error);
+        pluginsLog.error('Failed to toggle plugin:', error);
         // Revert the toggle state
         e.target.checked = !isEnabled;
         if (window.Toast) {
@@ -269,15 +269,15 @@ function setupPluginToggles() {
   });
 
   // Setup plugin configuration buttons
-  log.debug('Setting up plugin config buttons');
+  pluginsLog.debug('Setting up plugin config buttons');
   const configButtons = document.querySelectorAll('.plugin-config-btn');
-  log.debug(`Found ${configButtons.length} config buttons to set up`);
+  pluginsLog.debug(`Found ${configButtons.length} config buttons to set up`);
   configButtons.forEach(button => {
     button.addEventListener('click', async (e) => {
       const button = e.target.closest('button');
       const pluginName = button.dataset.pluginName;
 
-      log.debug(`Config button clicked for plugin: ${pluginName}`);
+      pluginsLog.debug(`Config button clicked for plugin: ${pluginName}`);
 
       // All configurable plugins use the same modal
       // The modal will fetch settings from /api/plugins/{name}/default-settings
@@ -303,7 +303,7 @@ function setupPluginToggles() {
         await loadPluginsForSidebar();
         EventBus.emit('plugin:removed', { name: pluginName });
       } catch (error) {
-        log.error('Failed to remove plugin:', error);
+        pluginsLog.error('Failed to remove plugin:', error);
         alert(`Failed to remove plugin: ${error.message}`);
       }
     });
@@ -312,7 +312,7 @@ function setupPluginToggles() {
 
 // Toggle plugin on/off
 async function togglePlugin(pluginName, pluginPath, enable) {
-  log.debug(`togglePlugin called: ${pluginName}, enable: ${enable}`);
+  pluginsLog.debug(`togglePlugin called: ${pluginName}, enable: ${enable}`);
 
   if (enable) {
     // For enabling, check if the file needs to be renamed back from .disabled
@@ -333,7 +333,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
         const errorText = await enableResponse.text();
         // If it failed because the file doesn't exist, try to restore from .disabled
         if (errorText.includes('realpath failed') || errorText.includes('no such file')) {
-          log.info('Plugin file not found, attempting to restore from .disabled version');
+          pluginsLog.info('Plugin file not found, attempting to restore from .disabled version');
           // Call a new API endpoint to restore the plugin file
           await API.post('/api/plugins/restore', { name: pluginName, path: pluginPath });
 
@@ -356,7 +356,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
           try {
             enableResponseData = await retryResponse.json();
           } catch (e) {
-            log.debug('Failed to parse retry response as JSON');
+            pluginsLog.debug('Failed to parse retry response as JSON');
           }
         } else {
           throw new Error(errorText || 'Failed to enable plugin');
@@ -366,18 +366,18 @@ async function togglePlugin(pluginName, pluginPath, enable) {
         try {
           enableResponseData = await enableResponse.json();
         } catch (e) {
-          log.debug('Failed to parse enable response as JSON');
+          pluginsLog.debug('Failed to parse enable response as JSON');
         }
       }
     } catch (error) {
       throw error;
     }
 
-    log.info(`Plugin ${pluginName} enabled successfully`);
+    pluginsLog.info(`Plugin ${pluginName} enabled successfully`);
 
     // Check if plugin needs configuration modal
     if (enableResponseData && enableResponseData.show_config_modal === true) {
-      log.info(`Plugin ${pluginName} requires configuration, showing modal...`);
+      pluginsLog.info(`Plugin ${pluginName} requires configuration, showing modal...`);
       // Refresh plugins list first
       await loadPluginsForSidebar();
       // Show configuration modal
@@ -392,7 +392,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
     // For disabling, unload from cache
     await API.delete(`/api/plugins?name=${encodeURIComponent(pluginName)}`);
 
-    log.info(`Plugin ${pluginName} disabled successfully`);
+    pluginsLog.info(`Plugin ${pluginName} disabled successfully`);
 
     // Refresh the plugins list to show the updated state
     await loadPluginsForSidebar();
@@ -402,7 +402,7 @@ async function togglePlugin(pluginName, pluginPath, enable) {
 // Remove uploaded plugin
 async function removePlugin(pluginName, pluginPath) {
   await API.delete(`/api/plugin-registry?name=${encodeURIComponent(pluginName)}`);
-  log.info(`Plugin ${pluginName} removed successfully from registry and filesystem`);
+  pluginsLog.info(`Plugin ${pluginName} removed successfully from registry and filesystem`);
 }
 
 
@@ -475,7 +475,7 @@ function handleFileInputChange(e) {
 }
 
 function handlePluginFile(file) {
-  log.debug('File selected:', file.name);
+  pluginsLog.debug('File selected:', file.name);
 
   // Validate file size (e.g., max 50MB)
   const maxSize = 50 * 1024 * 1024; // 50MB
@@ -524,7 +524,7 @@ async function uploadPluginFile(file) {
 
       if (xhr.status === 200) {
         showUploadResult('success', 'Plugin uploaded successfully!');
-        log.info('Plugin uploaded successfully');
+        pluginsLog.info('Plugin uploaded successfully');
         EventBus.emit('plugin:uploaded', { filename: file.name });
 
         // Refresh plugins in sidebar
@@ -544,14 +544,14 @@ async function uploadPluginFile(file) {
           errorMessage = xhr.responseText || errorMessage;
         }
         showUploadResult('error', errorMessage);
-        log.error('Plugin upload failed:', errorMessage);
+        pluginsLog.error('Plugin upload failed:', errorMessage);
       }
     });
 
     xhr.addEventListener('error', () => {
       progressDiv.classList.add('d-none');
       showUploadResult('error', 'Network error occurred during upload');
-      log.error('Network error during plugin upload');
+      pluginsLog.error('Network error during plugin upload');
     });
 
     // Start upload
@@ -561,7 +561,7 @@ async function uploadPluginFile(file) {
   } catch (error) {
     progressDiv.classList.add('d-none');
     showUploadResult('error', 'Upload failed: ' + error.message);
-    log.error('Plugin upload exception:', error);
+    pluginsLog.error('Plugin upload exception:', error);
   }
 }
 
@@ -592,7 +592,7 @@ function setupPluginManagement() {
   const browsePluginsBtn = document.getElementById('browsePluginsBtn');
   if (browsePluginsBtn) {
     browsePluginsBtn.addEventListener('click', () => {
-      log.debug('Browse plugins clicked');
+      pluginsLog.debug('Browse plugins clicked');
       showPluginUploadModal();
     });
   }
@@ -600,12 +600,12 @@ function setupPluginManagement() {
   const pluginStoreBtn = document.getElementById('pluginStoreBtn');
   if (pluginStoreBtn) {
     pluginStoreBtn.addEventListener('click', () => {
-      log.debug('Plugin store clicked');
+      pluginsLog.debug('Plugin store clicked');
       showPluginStoreModal();
     });
   }
 
-  log.debug('Plugin management setup complete');
+  pluginsLog.debug('Plugin management setup complete');
 }
 
 // Initialize plugin management when DOM is ready
