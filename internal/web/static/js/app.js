@@ -185,6 +185,84 @@ async function refreshAgentDisplay() {
   }
 }
 
+// ---- System Model Display ----
+
+// Fetch and display system model in navbar
+async function refreshSystemModelDisplay() {
+  const modelNameEl = document.getElementById('systemModelName');
+  const providerEl = document.getElementById('systemModelProvider');
+  const indicatorEl = document.getElementById('systemModelIndicator');
+
+  if (!modelNameEl || !providerEl) return;
+
+  try {
+    const response = await fetch('/api/settings/system-model');
+    if (!response.ok) {
+      throw new Error('Failed to fetch system model');
+    }
+    const data = await response.json();
+
+    if (data.configured && data.model) {
+      // Display model name (truncate if too long)
+      const modelName = data.model.length > 20 ? data.model.substring(0, 18) + '...' : data.model;
+      modelNameEl.textContent = modelName;
+      modelNameEl.title = data.model; // Full name on hover
+
+      // Display provider badge
+      if (data.provider) {
+        providerEl.textContent = data.provider;
+        providerEl.style.display = 'inline';
+
+        // Color-code by provider
+        switch (data.provider.toLowerCase()) {
+          case 'openai':
+            providerEl.style.background = 'rgba(16, 163, 127, 0.2)';
+            providerEl.style.color = '#10a37f';
+            break;
+          case 'anthropic':
+            providerEl.style.background = 'rgba(204, 147, 102, 0.2)';
+            providerEl.style.color = '#cc9366';
+            break;
+          case 'ollama':
+            providerEl.style.background = 'rgba(59, 130, 246, 0.2)';
+            providerEl.style.color = '#3b82f6';
+            break;
+          default:
+            providerEl.style.background = 'var(--bg-tertiary)';
+            providerEl.style.color = 'var(--text-muted)';
+        }
+      } else {
+        providerEl.style.display = 'none';
+      }
+
+      if (indicatorEl) {
+        indicatorEl.title = `System Model: ${data.model} (${data.provider}) - Click to configure`;
+      }
+    } else {
+      modelNameEl.textContent = 'Not configured';
+      providerEl.style.display = 'none';
+      if (indicatorEl) {
+        indicatorEl.title = 'System Model not configured - Click to set up';
+      }
+    }
+
+    EventBus.emit('systemModel:loaded', data);
+  } catch (error) {
+    appLog.error('Failed to load system model:', error);
+    modelNameEl.textContent = 'Error';
+    providerEl.style.display = 'none';
+  }
+}
+
+// Listen for settings changes to update the model display
+EventBus.on('settings:saved', () => {
+  refreshSystemModelDisplay();
+});
+
+EventBus.on('systemModel:changed', () => {
+  refreshSystemModelDisplay();
+});
+
 // ---- Chat Functionality ----
 
 // Render structured result based on displayType
@@ -1199,6 +1277,9 @@ async function initializeApp() {
 
   // Load current agent and restore chat history
   await refreshAgentDisplay();
+
+  // Load system model display in navbar
+  await refreshSystemModelDisplay();
 
   // Initialize onboarding for first-time users
   try {
