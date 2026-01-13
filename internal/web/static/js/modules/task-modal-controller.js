@@ -195,7 +195,7 @@ class TaskModalController {
    * @param {string} prefillTitle - Optional title to prefill
    * @param {function} onSave - Optional callback after successful save
    */
-  openForCreate(workspaceId, prefillTitle = '', onSave = null) {
+  async openForCreate(workspaceId, prefillTitle = '', onSave = null) {
     this.init();
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
@@ -210,13 +210,23 @@ class TaskModalController {
       modalTitle.textContent = 'Create Task';
     }
 
-    // Reset to manual mode
-    this.autoMode = false;
+    // Check LLM availability to determine default mode
+    await this.checkLlmAvailability();
+
+    // Default to Auto mode if System Model is configured, otherwise Manual
     const manualRadio = document.getElementById('taskConfigModeManual');
     const autoRadio = document.getElementById('taskConfigModeAuto');
-    if (manualRadio) manualRadio.checked = true;
-    if (autoRadio) autoRadio.checked = false;
-    this.handleModeChange('manual');
+    if (this.systemModelConfigured && this.llmAvailable) {
+      this.autoMode = true;
+      if (autoRadio) autoRadio.checked = true;
+      if (manualRadio) manualRadio.checked = false;
+      this.handleModeChange('auto');
+    } else {
+      this.autoMode = false;
+      if (manualRadio) manualRadio.checked = true;
+      if (autoRadio) autoRadio.checked = false;
+      this.handleModeChange('manual');
+    }
 
     // Clear auto description textarea
     const autoDescription = document.getElementById('taskAutoDescription');
