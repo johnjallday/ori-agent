@@ -190,6 +190,55 @@ class TaskModalController {
   }
 
   /**
+   * Show workspace badge with workspace name
+   * @param {string} workspaceId - The workspace ID to display
+   */
+  async showWorkspaceBadge(workspaceId) {
+    const badge = document.getElementById('taskModalWorkspaceBadge');
+    const nameSpan = document.getElementById('taskModalWorkspaceName');
+
+    if (!badge || !nameSpan) return;
+
+    if (!workspaceId) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    try {
+      // Fetch workspace details
+      const response = await fetch(`/api/workspaces/${workspaceId}`);
+      if (response.ok) {
+        const workspace = await response.json();
+        nameSpan.textContent = workspace.name || 'Unknown Workspace';
+        badge.style.display = 'block';
+      } else {
+        // Fallback: try to get from sessionManager if available
+        if (window.sessionManager?.folders) {
+          const folder = window.sessionManager.folders.find(f => f.id === workspaceId);
+          if (folder) {
+            nameSpan.textContent = folder.name;
+            badge.style.display = 'block';
+            return;
+          }
+        }
+        badge.style.display = 'none';
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspace name:', err);
+      // Fallback: try to get from sessionManager if available
+      if (window.sessionManager?.folders) {
+        const folder = window.sessionManager.folders.find(f => f.id === workspaceId);
+        if (folder) {
+          nameSpan.textContent = folder.name;
+          badge.style.display = 'block';
+          return;
+        }
+      }
+      badge.style.display = 'none';
+    }
+  }
+
+  /**
    * Open the modal for creating a new task
    * @param {string} workspaceId - The workspace ID to create the task in
    * @param {string} prefillTitle - Optional title to prefill
@@ -209,6 +258,9 @@ class TaskModalController {
     if (modalTitle) {
       modalTitle.textContent = 'Create Task';
     }
+
+    // Show workspace badge
+    await this.showWorkspaceBadge(workspaceId);
 
     // Check LLM availability to determine default mode
     await this.checkLlmAvailability();
@@ -266,7 +318,7 @@ class TaskModalController {
    * @param {object} task - The task object to edit
    * @param {function} onSave - Optional callback after successful save
    */
-  openForEdit(task, onSave = null) {
+  async openForEdit(task, onSave = null) {
     this.init();
     this.editingTaskId = task.id;
     this.workspaceId = task.workspace_id || task.studio_id;
@@ -280,6 +332,9 @@ class TaskModalController {
     if (modalTitle) {
       modalTitle.textContent = 'Edit Task';
     }
+
+    // Show workspace badge
+    await this.showWorkspaceBadge(this.workspaceId);
 
     // Populate agent assignment dropdown first
     this.populateAgentDropdown(this.workspaceId, task);
