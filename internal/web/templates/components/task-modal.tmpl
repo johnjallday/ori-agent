@@ -4,7 +4,17 @@
   <div class="task-modal-backdrop"></div>
   <div class="task-modal-content">
     <div class="task-modal-header">
-      <h6 class="task-modal-title" id="taskModalTitle">Add Task</h6>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h6 class="task-modal-title" id="taskModalTitle">Add Task</h6>
+        <div id="taskModalWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
+          <span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tertiary); border-radius: 4px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            <span id="taskModalWorkspaceName"></span>
+          </span>
+        </div>
+      </div>
       <button type="button" class="task-modal-close" id="taskModalClose" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
