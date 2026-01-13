@@ -28,7 +28,7 @@ export class OnboardingManager {
   async init() {
     this.modal = document.getElementById('onboardingModal');
     if (!this.modal) {
-      console.error('Onboarding modal not found');
+      // Modal only exists on main chat page - silently return on other pages
       return;
     }
 
