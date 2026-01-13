@@ -399,10 +399,52 @@
             </svg>
             Preview
           </button>
+          <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Generate with AI">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
+            </svg>
+            Generate with AI
+          </button>
         </div>
         <div class="note-editor-container">
           <textarea id="noteContentInput" class="note-content-input" placeholder="Write your note in markdown..."></textarea>
           <div id="notePreviewContent" class="note-preview-content" style="display: none;"></div>
+        </div>
+        <!-- AI Generation Panel -->
+        <div id="noteAIGeneratePanel" class="note-ai-panel" style="display: none;">
+          <div class="note-ai-panel-header">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="text-primary">
+              <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
+            </svg>
+            <span>Generate with AI</span>
+          </div>
+          <div class="note-ai-panel-body">
+            <div class="mb-3">
+              <label for="noteAIAgentSelect" class="form-label" style="font-size: 12px; color: var(--text-secondary);">Agent</label>
+              <select id="noteAIAgentSelect" class="modern-input w-100">
+                <option value="">Select an agent...</option>
+                <!-- Agents populated dynamically -->
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="noteAIPromptInput" class="form-label" style="font-size: 12px; color: var(--text-secondary);">Prompt</label>
+              <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="Describe what you want the note to contain..."></textarea>
+            </div>
+            <div id="noteAIError" class="alert alert-danger mb-3" style="display: none; font-size: 12px;"></div>
+            <div id="noteAIGenerating" class="text-center py-3" style="display: none;">
+              <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+              <span style="font-size: 12px; color: var(--text-secondary);">Generating note content...</span>
+            </div>
+          </div>
+          <div class="note-ai-panel-footer">
+            <button type="button" id="noteAICancelBtn" class="modern-btn modern-btn-secondary btn-sm">Cancel</button>
+            <button type="button" id="noteAIGenerateBtn" class="modern-btn modern-btn-primary btn-sm">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
+              </svg>
+              Generate
+            </button>
+          </div>
         </div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
