@@ -11,8 +11,6 @@
 
 If you want to keep your information local, this is a way to go.
 
-Honestly, everybody is chasing for the AGI, and this is a budget friendly version of "smarter" - AI agent that may or may not lead to AGI.
-
 I don't plan on promoting this until Q426 or Q127 (This date may change).
 If you are here early, then welcome! Hope you enjoy this. 
 Let me know, how this is.
@@ -325,8 +323,8 @@ While this app is very functional, there will be a lot of breaking changes. Feel
 MVP = v0.1.0  => I will be releasing at least once a week until v0.0.99
 
 ## 🛣️Roadmap
-- v0.1.0 => AI Agent Functionality
-- v0.2.0 => Blockchain Integration
+v0.0.60 Python Support
+v0.0.70 
 
 
 buymeacoffee.com/johnjallday

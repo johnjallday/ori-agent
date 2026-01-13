@@ -190,7 +190,7 @@ async function refreshAgentDisplay() {
 // Fetch and display system model in navbar
 async function refreshSystemModelDisplay() {
   const modelNameEl = document.getElementById('systemModelName');
-  const providerEl = document.getElementById('systemModelProvider');
+  const providerEl = document.getElementById('navSystemModelProvider');
   const indicatorEl = document.getElementById('systemModelIndicator');
 
   if (!modelNameEl || !providerEl) return;

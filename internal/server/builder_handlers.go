@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
+	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	pluginhttp "github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
@@ -117,6 +118,8 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.sessionHandler = sessionhttp.New(sessionStore)
 		// Initialize auto-classify handler for session classification
 		s.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, s.st, s.llmFactory, s.configManager)
+		// Initialize note generation handler
+		s.noteHandler = notehttp.NewHandler(s.llmFactory, s.configManager, s.st)
 		// Wire session store to chat handler for multi-tab support
 		s.chatHandler.SetSessionStore(sessionStore)
 		// Wire tool call store for conversation review

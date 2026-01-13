@@ -649,6 +649,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 
 		// Notes search must be before the wildcard /api/notes/
 		mux.HandleFunc("/api/notes/search", s.sessionHandler.HandleNotes)
+		// Note AI generation endpoint
+		if s.noteHandler != nil {
+			mux.HandleFunc("/api/notes/generate", s.noteHandler.GenerateHandler)
+		}
 		mux.HandleFunc("/api/notes/", s.sessionHandler.HandleNotes)
 		mux.HandleFunc("/api/notes", s.sessionHandler.HandleNotes)
 

@@ -3944,6 +3944,13 @@ const sessionManager = {
     // Note preview toggle
     document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
 
+    // Note AI generation toggle
+    document.getElementById('noteGenerateAIToggle')?.addEventListener('click', () => this.toggleNoteAIPanel());
+
+    // Note AI generation buttons
+    document.getElementById('noteAIGenerateBtn')?.addEventListener('click', () => this.generateNoteWithAI());
+    document.getElementById('noteAICancelBtn')?.addEventListener('click', () => this.hideNoteAIPanel());
+
     // Note drag start
     document.addEventListener('dragstart', (e) => {
       const noteItem = e.target.closest('.folder-note-item');
@@ -4128,6 +4135,10 @@ const sessionManager = {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
     }
 
+    // Reset AI panel state
+    this.hideNoteAIPanel();
+    this.loadNoteAIAgents();
+
     const bsModal = new bootstrap.Modal(modal);
     bsModal.show();
   },
@@ -4163,6 +4174,133 @@ const sessionManager = {
       // Close the modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
       modal?.hide();
+    }
+  },
+
+  // =============================================================================
+  // Note AI Generation
+  // =============================================================================
+
+  // Toggle AI generation panel visibility
+  toggleNoteAIPanel() {
+    const panel = document.getElementById('noteAIGeneratePanel');
+    const toggle = document.getElementById('noteGenerateAIToggle');
+    if (!panel) return;
+
+    const isVisible = panel.style.display !== 'none';
+    panel.style.display = isVisible ? 'none' : 'block';
+    toggle?.classList.toggle('ai-active', !isVisible);
+  },
+
+  // Hide AI generation panel
+  hideNoteAIPanel() {
+    const panel = document.getElementById('noteAIGeneratePanel');
+    const toggle = document.getElementById('noteGenerateAIToggle');
+    const promptInput = document.getElementById('noteAIPromptInput');
+    const errorDiv = document.getElementById('noteAIError');
+    const generatingDiv = document.getElementById('noteAIGenerating');
+    const generateBtn = document.getElementById('noteAIGenerateBtn');
+
+    if (panel) panel.style.display = 'none';
+    if (toggle) toggle.classList.remove('ai-active');
+    if (promptInput) promptInput.value = '';
+    if (errorDiv) errorDiv.style.display = 'none';
+    if (generatingDiv) generatingDiv.style.display = 'none';
+    if (generateBtn) generateBtn.disabled = false;
+  },
+
+  // Load agents for AI generation dropdown
+  async loadNoteAIAgents() {
+    const select = document.getElementById('noteAIAgentSelect');
+    if (!select) return;
+
+    try {
+      const response = await fetch('/api/agents');
+      if (!response.ok) throw new Error('Failed to load agents');
+      const data = await response.json();
+
+      // Clear existing options (keep first placeholder)
+      select.innerHTML = '<option value="">Select an agent...</option>';
+
+      // Add agents
+      const agents = data.agents || [];
+      agents.forEach(agent => {
+        const option = document.createElement('option');
+        option.value = agent.name;
+        option.textContent = agent.name;
+        select.appendChild(option);
+      });
+    } catch (error) {
+      console.error('Failed to load agents for note AI:', error);
+    }
+  },
+
+  // Generate note content with AI
+  async generateNoteWithAI() {
+    const agentSelect = document.getElementById('noteAIAgentSelect');
+    const promptInput = document.getElementById('noteAIPromptInput');
+    const errorDiv = document.getElementById('noteAIError');
+    const generatingDiv = document.getElementById('noteAIGenerating');
+    const generateBtn = document.getElementById('noteAIGenerateBtn');
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+
+    const agentId = agentSelect?.value || '';
+    const prompt = promptInput?.value?.trim() || '';
+
+    // Validate prompt
+    if (!prompt) {
+      if (errorDiv) {
+        errorDiv.textContent = 'Please enter a prompt describing what you want the note to contain.';
+        errorDiv.style.display = 'block';
+      }
+      return;
+    }
+
+    // Hide error, show loading
+    if (errorDiv) errorDiv.style.display = 'none';
+    if (generatingDiv) generatingDiv.style.display = 'block';
+    if (generateBtn) generateBtn.disabled = true;
+
+    try {
+      const response = await fetch('/api/notes/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt,
+          workspace_id: this.currentNote?.folder_id || '',
+          agent_id: agentId
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate note');
+      }
+
+      const result = await response.json();
+
+      // Update the note fields with generated content
+      if (nameInput && result.title) {
+        nameInput.value = result.title;
+      }
+      if (contentInput && result.content) {
+        contentInput.value = result.content;
+      }
+
+      // Hide AI panel and show success
+      this.hideNoteAIPanel();
+      this.showToast('Note content generated', 'success');
+
+    } catch (error) {
+      console.error('Note AI generation failed:', error);
+      if (errorDiv) {
+        errorDiv.textContent = error.message || 'Failed to generate note content. Please try again.';
+        errorDiv.style.display = 'block';
+      }
+    } finally {
+      if (generatingDiv) generatingDiv.style.display = 'none';
+      if (generateBtn) generateBtn.disabled = false;
     }
   },
 

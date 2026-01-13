@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
+	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
@@ -130,6 +131,9 @@ type Server struct {
 	sessionStore        session.HybridStore
 	sessionHandler      *sessionhttp.Handler
 	autoClassifyHandler *sessionhttp.AutoClassifyHandler
+
+	// Note generation
+	noteHandler *notehttp.Handler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
