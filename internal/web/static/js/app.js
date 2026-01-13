@@ -609,13 +609,6 @@ function tryRenderJsonTable(message) {
   }
 }
 
-// HTML escape helper function
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 // Internal function: Add message to UI only (used by restore function)
 function appendMessageToUI(message, isUser = false, isError = false) {
   const chatArea = document.getElementById('chatArea');
