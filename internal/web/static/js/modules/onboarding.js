@@ -4,7 +4,7 @@ import { smartOnboardingManager } from './smartOnboarding.js';
 export class OnboardingManager {
   constructor() {
     this.currentStep = 0;
-    this.totalSteps = 6;
+    this.totalSteps = 7;
     this.modal = null;
     this.modalInstance = null;
     this.deviceInfo = null;
@@ -12,6 +12,18 @@ export class OnboardingManager {
     this.smartOnboarding = smartOnboardingManager;
     this.completedSteps = new Set();
     this.skippedSteps = new Set();
+    this.web3Connected = false;
+    this.web3Address = null;
+    this.web3ChainId = null;
+
+    // Supported chains for Web3
+    this.CHAINS = {
+      1: { name: 'Ethereum Mainnet', symbol: 'ETH' },
+      137: { name: 'Polygon', symbol: 'MATIC' },
+      42161: { name: 'Arbitrum', symbol: 'ETH' },
+      10: { name: 'Optimism', symbol: 'ETH' },
+      8453: { name: 'Base', symbol: 'ETH' }
+    };
 
     // Step names for dynamic title updates
     this.stepTitles = [
@@ -19,6 +31,7 @@ export class OnboardingManager {
       'Device Detection',
       'Configure API Keys',
       'Configure System Model',
+      'Connect Web3 Wallet',
       'Personalize Your Experience',
       'Setup Complete'
     ];
@@ -104,6 +117,18 @@ export class OnboardingManager {
         const input = document.getElementById('anthropicApiKey');
         input.type = input.type === 'password' ? 'text' : 'password';
       });
+    }
+
+    // Web3 wallet connection buttons
+    const web3ConnectBtn = document.getElementById('onboardingWeb3ConnectBtn');
+    const web3DisconnectBtn = document.getElementById('onboardingWeb3DisconnectBtn');
+
+    if (web3ConnectBtn) {
+      web3ConnectBtn.addEventListener('click', () => this.connectWeb3Wallet());
+    }
+
+    if (web3DisconnectBtn) {
+      web3DisconnectBtn.addEventListener('click', () => this.disconnectWeb3Wallet());
     }
 
     // Keyboard navigation
@@ -644,6 +669,232 @@ export class OnboardingManager {
     }
   }
 
+  // Initialize Web3 step UI based on wallet availability
+  async initWeb3Step() {
+    const statusIcon = document.getElementById('onboardingWeb3StatusIcon');
+    const statusText = document.getElementById('onboardingWeb3StatusText');
+    const statusDetails = document.getElementById('onboardingWeb3StatusDetails');
+    const noWalletDiv = document.getElementById('onboardingWeb3NoWallet');
+    const disconnectedDiv = document.getElementById('onboardingWeb3Disconnected');
+    const connectedDiv = document.getElementById('onboardingWeb3Connected');
+
+    // Check if ethereum provider exists
+    if (typeof window.ethereum === 'undefined') {
+      // No wallet detected
+      statusIcon.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#ffc107">
+          <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'No Wallet Detected';
+      statusDetails.textContent = 'Install MetaMask or another Web3 wallet';
+
+      if (noWalletDiv) noWalletDiv.classList.remove('d-none');
+      if (disconnectedDiv) disconnectedDiv.classList.add('d-none');
+      if (connectedDiv) connectedDiv.classList.add('d-none');
+      return;
+    }
+
+    // Check if already connected (from settings)
+    try {
+      const response = await fetch('/api/web3-wallet');
+      const data = await response.json();
+
+      if (data.connected) {
+        // Check if wallet is still connected in browser
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+
+        if (accounts.length > 0 && accounts[0].toLowerCase() === data.address.toLowerCase()) {
+          // Wallet is connected
+          this.web3Connected = true;
+          this.web3Address = data.address;
+          this.web3ChainId = data.chain_id;
+          this.showWeb3Connected(data);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking Web3 wallet status:', error);
+    }
+
+    // Wallet available but not connected
+    statusIcon.innerHTML = `
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="var(--bs-secondary)">
+        <path d="M21,18V19A2,2 0 0,1 19,21H5C3.89,21 3,20.1 3,19V5A2,2 0 0,1 5,3H19A2,2 0 0,1 21,5V6H12C10.89,6 10,6.9 10,8V16A2,2 0 0,0 12,18M12,16H22V8H12M16,13.5A1.5,1.5 0 0,1 14.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,12A1.5,1.5 0 0,1 16,13.5Z"/>
+      </svg>
+    `;
+    statusText.textContent = 'Ready to Connect';
+    statusDetails.textContent = 'Click the button below to connect your wallet';
+
+    if (noWalletDiv) noWalletDiv.classList.add('d-none');
+    if (disconnectedDiv) disconnectedDiv.classList.remove('d-none');
+    if (connectedDiv) connectedDiv.classList.add('d-none');
+  }
+
+  // Connect Web3 wallet
+  async connectWeb3Wallet() {
+    if (typeof window.ethereum === 'undefined') {
+      this.showWeb3Alert('No Web3 wallet detected. Please install MetaMask.', 'warning');
+      return;
+    }
+
+    const statusIcon = document.getElementById('onboardingWeb3StatusIcon');
+    const statusText = document.getElementById('onboardingWeb3StatusText');
+    const statusDetails = document.getElementById('onboardingWeb3StatusDetails');
+
+    // Show connecting state
+    statusIcon.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    statusText.textContent = 'Connecting...';
+    statusDetails.textContent = 'Please approve the connection in your wallet';
+
+    try {
+      // Request accounts
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+      if (accounts.length === 0) {
+        throw new Error('No accounts found');
+      }
+
+      this.web3Address = accounts[0];
+
+      // Get chain ID
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      this.web3ChainId = parseInt(chainId, 16);
+
+      // Try to resolve ENS name (only on mainnet)
+      let ensName = null;
+      if (this.web3ChainId === 1 && typeof window.ethers !== 'undefined') {
+        try {
+          const provider = new window.ethers.BrowserProvider(window.ethereum);
+          ensName = await provider.lookupAddress(this.web3Address);
+        } catch {
+          // ENS resolution failed, that's ok
+        }
+      }
+
+      // Save to server
+      await fetch('/api/web3-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: this.web3Address,
+          chain_id: this.web3ChainId,
+          ens_name: ensName || ''
+        })
+      });
+
+      this.web3Connected = true;
+
+      // Show connected state
+      this.showWeb3Connected({
+        address: this.web3Address,
+        address_masked: this.maskWeb3Address(this.web3Address),
+        chain_id: this.web3ChainId,
+        chain_name: this.CHAINS[this.web3ChainId]?.name || `Chain ${this.web3ChainId}`,
+        ens_name: ensName
+      });
+
+      this.showWeb3Alert('Wallet connected successfully!', 'success');
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+
+      // Reset to disconnected state
+      await this.initWeb3Step();
+
+      if (error.code === 4001) {
+        this.showWeb3Alert('Connection request was rejected.', 'warning');
+      } else {
+        this.showWeb3Alert('Failed to connect wallet. Please try again.', 'danger');
+      }
+    }
+  }
+
+  // Disconnect Web3 wallet
+  async disconnectWeb3Wallet() {
+    try {
+      await fetch('/api/web3-wallet', { method: 'DELETE' });
+
+      this.web3Connected = false;
+      this.web3Address = null;
+      this.web3ChainId = null;
+
+      await this.initWeb3Step();
+      this.showWeb3Alert('Wallet disconnected.', 'info');
+    } catch (error) {
+      console.error('Failed to disconnect wallet:', error);
+      this.showWeb3Alert('Failed to disconnect wallet.', 'danger');
+    }
+  }
+
+  // Show Web3 connected state
+  showWeb3Connected(data) {
+    const statusIcon = document.getElementById('onboardingWeb3StatusIcon');
+    const statusText = document.getElementById('onboardingWeb3StatusText');
+    const statusDetails = document.getElementById('onboardingWeb3StatusDetails');
+    const noWalletDiv = document.getElementById('onboardingWeb3NoWallet');
+    const disconnectedDiv = document.getElementById('onboardingWeb3Disconnected');
+    const connectedDiv = document.getElementById('onboardingWeb3Connected');
+
+    // Update status
+    statusIcon.innerHTML = `
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
+        <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
+      </svg>
+    `;
+    statusText.textContent = 'Wallet Connected';
+    statusDetails.textContent = data.address_masked || this.maskWeb3Address(data.address);
+
+    // Update connected info
+    const addressEl = document.getElementById('onboardingWeb3Address');
+    const ensEl = document.getElementById('onboardingWeb3ENSName');
+    const networkEl = document.getElementById('onboardingWeb3Network');
+
+    if (addressEl) addressEl.textContent = data.address_masked || this.maskWeb3Address(data.address);
+    if (ensEl) {
+      if (data.ens_name) {
+        ensEl.textContent = data.ens_name;
+        ensEl.classList.remove('d-none');
+      } else {
+        ensEl.textContent = '';
+        ensEl.classList.add('d-none');
+      }
+    }
+    if (networkEl) networkEl.textContent = data.chain_name;
+
+    // Show/hide sections
+    if (noWalletDiv) noWalletDiv.classList.add('d-none');
+    if (disconnectedDiv) disconnectedDiv.classList.add('d-none');
+    if (connectedDiv) connectedDiv.classList.remove('d-none');
+  }
+
+  // Mask Web3 address
+  maskWeb3Address(address) {
+    if (!address || address.length < 10) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  }
+
+  // Show Web3 alert
+  showWeb3Alert(message, type = 'info') {
+    const alertsContainer = document.getElementById('onboardingWeb3Alerts');
+    if (!alertsContainer) return;
+
+    const alertId = `web3Alert${Date.now()}`;
+    const alertHtml = `
+      <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    `;
+
+    alertsContainer.insertAdjacentHTML('beforeend', alertHtml);
+
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+      const alertEl = document.getElementById(alertId);
+      if (alertEl) alertEl.remove();
+    }, 5000);
+  }
+
   // Move to next step
   async nextStep() {
     if (this.currentStep < this.totalSteps - 1) {
@@ -666,7 +917,12 @@ export class OnboardingManager {
       // Step 3: Save system model if leaving System Model step
       if (this.currentStep === 3) {
         await this.saveSystemModel();
+        // Initialize Web3 step for step 4
+        await this.initWeb3Step();
       }
+
+      // Step 4: Web3 wallet step - no save needed, user can skip
+      // The wallet state is saved immediately when connected
 
       // Track completed step locally
       this.completedSteps.add(this.currentStep);

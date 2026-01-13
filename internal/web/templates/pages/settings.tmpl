@@ -358,6 +358,146 @@
           <div id="systemModelAlerts" class="mt-3"></div>
         </div>
 
+        <!-- Web3 Wallet Section -->
+        <div class="modern-card p-4 mb-4">
+          <h4 class="mb-4" style="color: var(--text-primary);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M21,18V19A2,2 0 0,1 19,21H5C3.89,21 3,20.1 3,19V5A2,2 0 0,1 5,3H19A2,2 0 0,1 21,5V6H12C10.89,6 10,6.9 10,8V16A2,2 0 0,0 12,18M12,16H22V8H12M16,13.5A1.5,1.5 0 0,1 14.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,12A1.5,1.5 0 0,1 16,13.5Z"/>
+            </svg>
+            Web3 Wallet
+            <small class="ms-2" style="color: var(--text-secondary);">(Blockchain Integration)</small>
+          </h4>
+
+          <div class="mb-3">
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">
+              Connect your Web3 wallet to enable future blockchain features like token-gated access, NFT verification, and on-chain actions.
+            </p>
+          </div>
+
+          <!-- Connection Status -->
+          <div id="web3Status" class="mb-4 p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+            <div class="d-flex align-items-center">
+              <div id="web3StatusIndicator" class="me-3">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+              </div>
+              <div class="flex-grow-1">
+                <div id="web3StatusText" style="color: var(--text-primary); font-weight: 500;">Checking wallet...</div>
+                <div id="web3StatusDetails" style="color: var(--text-secondary); font-size: 0.85rem;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Connected State (hidden by default) -->
+          <div id="web3Connected" class="d-none">
+            <!-- Wallet Info -->
+            <div class="row g-3 mb-4">
+              <div class="col-md-6">
+                <div class="p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+                  <div class="d-flex align-items-center mb-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--accent-color);">
+                      <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+                    </svg>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Address</span>
+                  </div>
+                  <div id="web3Address" style="color: var(--text-primary); font-weight: 500; font-family: monospace;">-</div>
+                  <div id="web3ENSName" style="color: var(--accent-color); font-size: 0.85rem;"></div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+                  <div class="d-flex align-items-center mb-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="color: var(--accent-color);">
+                      <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C6.22,11.88 6.22,7.12 9.17,4.17C12.12,1.22 16.88,1.22 19.83,4.17C22.78,7.12 22.78,11.88 19.83,14.83C19.44,15.22 18.8,15.22 18.41,14.83C18,14.44 18,13.8 18.41,13.41C20.58,11.24 20.58,7.76 18.41,5.59C16.24,3.42 12.76,3.42 10.59,5.59C8.42,7.76 8.42,11.24 10.59,13.41Z"/>
+                    </svg>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Network</span>
+                  </div>
+                  <div id="web3Network" style="color: var(--text-primary); font-weight: 500;">-</div>
+                  <div id="web3ChainId" style="color: var(--text-secondary); font-size: 0.85rem;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Network Selector -->
+            <div class="mb-4">
+              <label class="form-label fw-semibold" style="color: var(--text-primary);">
+                Switch Network
+              </label>
+              <select id="web3NetworkSelect" class="form-select"
+                      style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <option value="1">Ethereum Mainnet</option>
+                <option value="137">Polygon</option>
+                <option value="42161">Arbitrum</option>
+                <option value="10">Optimism</option>
+                <option value="8453">Base</option>
+              </select>
+            </div>
+
+            <!-- Disconnect Button -->
+            <div class="d-flex gap-2">
+              <button id="web3SwitchNetworkBtn" class="modern-btn modern-btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                </svg>
+                Switch Network
+              </button>
+              <button id="web3DisconnectBtn" class="modern-btn modern-btn-secondary" style="color: var(--danger-color, #dc3545);">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M19,3H5C3.89,3 3,3.89 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z"/>
+                </svg>
+                Disconnect Wallet
+              </button>
+            </div>
+          </div>
+
+          <!-- Disconnected State (hidden by default) -->
+          <div id="web3Disconnected" class="d-none">
+            <div class="text-center py-4">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.5;" class="mb-3">
+                <path d="M21,18V19A2,2 0 0,1 19,21H5C3.89,21 3,20.1 3,19V5A2,2 0 0,1 5,3H19A2,2 0 0,1 21,5V6H12C10.89,6 10,6.9 10,8V16A2,2 0 0,0 12,18M12,16H22V8H12M16,13.5A1.5,1.5 0 0,1 14.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,12A1.5,1.5 0 0,1 16,13.5Z"/>
+              </svg>
+              <p style="color: var(--text-secondary);">No wallet connected</p>
+              <p style="color: var(--text-secondary); font-size: 0.85rem;" class="mb-4">
+                Connect a Web3 wallet like MetaMask to get started.
+              </p>
+              <button id="web3ConnectBtn" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M21,18V19A2,2 0 0,1 19,21H5C3.89,21 3,20.1 3,19V5A2,2 0 0,1 5,3H19A2,2 0 0,1 21,5V6H12C10.89,6 10,6.9 10,8V16A2,2 0 0,0 12,18M12,16H22V8H12M16,13.5A1.5,1.5 0 0,1 14.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,12A1.5,1.5 0 0,1 16,13.5Z"/>
+                </svg>
+                Connect Wallet
+              </button>
+            </div>
+            <div class="mt-3 p-3" style="background: var(--bg-secondary); border-radius: var(--radius-md);">
+              <div style="color: var(--text-secondary); font-size: 0.85rem;">
+                <strong>Supported wallets:</strong> MetaMask, WalletConnect, and other Web3 wallets
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.85rem;" class="mt-1">
+                <strong>Supported networks:</strong> Ethereum, Polygon, Arbitrum, Optimism, Base
+              </div>
+            </div>
+          </div>
+
+          <!-- No Wallet Available State (hidden by default) -->
+          <div id="web3NoWallet" class="d-none">
+            <div class="alert alert-warning mb-0">
+              <div class="d-flex align-items-start">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2 flex-shrink-0" style="margin-top: 2px;">
+                  <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+                <div>
+                  <strong>No Web3 wallet detected</strong>
+                  <p class="mb-2" style="font-size: 0.9rem;">Install a Web3 wallet browser extension to connect.</p>
+                  <a href="https://metamask.io/download/" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-warning">
+                    Install MetaMask
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alerts Container -->
+          <div id="web3Alerts" class="mt-3"></div>
+        </div>
+
         <!-- MCP Servers Section -->
         <div class="modern-card p-4 mb-4">
           <h4 class="mb-4" style="color: var(--text-primary);">
@@ -829,6 +969,7 @@
   <script src="/js/modules/marketplace-settings.js"></script>
   <script src="/js/modules/user-profile.js"></script>
   <script src="/js/modules/device-capabilities.js"></script>
+  <script src="/js/modules/web3-settings.js"></script>
 </body>
 </html>
 {{end}}
