@@ -1051,11 +1051,21 @@ const sessionManager = {
         return;
       }
 
-      // Reset mode to manual
-      this.chatAutoMode = false;
-      const manualRadio = document.getElementById('chatConfigModeManual');
-      if (manualRadio) manualRadio.checked = true;
-      this.handleChatModeChange('manual');
+      // Check LLM availability to determine default mode
+      await this.checkChatLlmAvailability();
+
+      // Default to Auto mode if System Model is configured, otherwise Manual
+      if (this.chatSystemModelConfigured && this.chatLlmAvailable) {
+        this.chatAutoMode = true;
+        const autoRadio = document.getElementById('chatConfigModeAuto');
+        if (autoRadio) autoRadio.checked = true;
+        this.handleChatModeChange('auto');
+      } else {
+        this.chatAutoMode = false;
+        const manualRadio = document.getElementById('chatConfigModeManual');
+        if (manualRadio) manualRadio.checked = true;
+        this.handleChatModeChange('manual');
+      }
 
       // Clear auto message textarea
       const autoMessageInput = document.getElementById('chatAutoMessage');
@@ -1107,6 +1117,26 @@ const sessionManager = {
         console.error('No agents available');
         return;
       }
+
+      // Check LLM availability to determine default mode
+      await this.checkChatLlmAvailability();
+
+      // Default to Auto mode if System Model is configured, otherwise Manual
+      if (this.chatSystemModelConfigured && this.chatLlmAvailable) {
+        this.chatAutoMode = true;
+        const autoRadio = document.getElementById('chatConfigModeAuto');
+        if (autoRadio) autoRadio.checked = true;
+        this.handleChatModeChange('auto');
+      } else {
+        this.chatAutoMode = false;
+        const manualRadio = document.getElementById('chatConfigModeManual');
+        if (manualRadio) manualRadio.checked = true;
+        this.handleChatModeChange('manual');
+      }
+
+      // Clear auto message textarea
+      const autoMessageInput = document.getElementById('chatAutoMessage');
+      if (autoMessageInput) autoMessageInput.value = '';
 
       // Populate workspace dropdown
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
