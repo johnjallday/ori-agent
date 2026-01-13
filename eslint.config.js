@@ -59,6 +59,9 @@ export default [
         marked: 'readonly',
         hljs: 'readonly',
         mermaid: 'readonly',
+        ethers: 'readonly',
+        // Web3 settings manager
+        web3SettingsManager: 'readonly',
         // Node.js (for CommonJS modules)
         module: 'readonly',
         require: 'readonly',

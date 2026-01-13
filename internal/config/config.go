@@ -23,6 +23,12 @@ type Settings struct {
 	SessionCleanupEnabled bool `json:"session_cleanup_enabled"` // Enable automatic cleanup of old sessions (default: true)
 	SessionCleanupDays    int  `json:"session_cleanup_days"`    // Days of inactivity before session cleanup (default: 30)
 	SessionMaxCount       int  `json:"session_max_count"`       // Maximum number of sessions to keep (0 = unlimited, default: 1000)
+
+	// Web3 wallet settings
+	Web3WalletAddress string `json:"web3_wallet_address,omitempty"` // Connected wallet address (0x...)
+	Web3ChainID       int    `json:"web3_chain_id,omitempty"`       // Connected chain ID (1=Ethereum, 137=Polygon, etc.)
+	Web3ENSName       string `json:"web3_ens_name,omitempty"`       // ENS name if available
+	Web3ConnectedAt   string `json:"web3_connected_at,omitempty"`   // ISO timestamp of when wallet was connected
 }
 
 // Manager handles configuration loading and saving
@@ -374,6 +380,143 @@ func validateSystemModel(provider, model string) error {
 		if !isLower && !isUpper && !isDigit && !isAllowed {
 			return fmt.Errorf("invalid system model %q: contains invalid character %q", model, string(char))
 		}
+	}
+
+	return nil
+}
+
+// Web3Wallet represents the connected wallet information
+type Web3Wallet struct {
+	Address     string `json:"address"`
+	ChainID     int    `json:"chain_id"`
+	ENSName     string `json:"ens_name,omitempty"`
+	ConnectedAt string `json:"connected_at,omitempty"`
+}
+
+// GetWeb3Wallet returns the connected Web3 wallet info
+func (m *Manager) GetWeb3Wallet() *Web3Wallet {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.settings.Web3WalletAddress == "" {
+		return nil
+	}
+
+	return &Web3Wallet{
+		Address:     m.settings.Web3WalletAddress,
+		ChainID:     m.settings.Web3ChainID,
+		ENSName:     m.settings.Web3ENSName,
+		ConnectedAt: m.settings.Web3ConnectedAt,
+	}
+}
+
+// SetWeb3Wallet updates the Web3 wallet connection
+func (m *Manager) SetWeb3Wallet(wallet *Web3Wallet) error {
+	if wallet == nil {
+		// Clear wallet
+		m.mu.Lock()
+		m.settings.Web3WalletAddress = ""
+		m.settings.Web3ChainID = 0
+		m.settings.Web3ENSName = ""
+		m.settings.Web3ConnectedAt = ""
+		m.mu.Unlock()
+		return nil
+	}
+
+	// Validate address format
+	if err := validateWeb3Address(wallet.Address); err != nil {
+		return err
+	}
+
+	// Validate chain ID
+	if err := validateChainID(wallet.ChainID); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.settings.Web3WalletAddress = wallet.Address
+	m.settings.Web3ChainID = wallet.ChainID
+	m.settings.Web3ENSName = wallet.ENSName
+	m.settings.Web3ConnectedAt = wallet.ConnectedAt
+	m.mu.Unlock()
+
+	return nil
+}
+
+// ClearWeb3Wallet removes the Web3 wallet connection
+func (m *Manager) ClearWeb3Wallet() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings.Web3WalletAddress = ""
+	m.settings.Web3ChainID = 0
+	m.settings.Web3ENSName = ""
+	m.settings.Web3ConnectedAt = ""
+}
+
+// IsWeb3WalletConnected returns true if a wallet is connected
+func (m *Manager) IsWeb3WalletConnected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.Web3WalletAddress != ""
+}
+
+// MaskWeb3Address returns a masked version of the wallet address for display
+func MaskWeb3Address(address string) string {
+	if len(address) < 10 {
+		return address
+	}
+	return address[:6] + "..." + address[len(address)-4:]
+}
+
+// validateWeb3Address validates an Ethereum address format
+func validateWeb3Address(address string) error {
+	if address == "" {
+		return fmt.Errorf("wallet address cannot be empty")
+	}
+
+	// Must start with 0x
+	if !strings.HasPrefix(address, "0x") {
+		return fmt.Errorf("invalid wallet address: must start with '0x'")
+	}
+
+	// Must be exactly 42 characters (0x + 40 hex chars)
+	if len(address) != 42 {
+		return fmt.Errorf("invalid wallet address: must be 42 characters")
+	}
+
+	// Must contain only valid hex characters after 0x
+	for _, char := range address[2:] {
+		isDigit := char >= '0' && char <= '9'
+		isLowerHex := char >= 'a' && char <= 'f'
+		isUpperHex := char >= 'A' && char <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
+			return fmt.Errorf("invalid wallet address: contains invalid character %q", string(char))
+		}
+	}
+
+	return nil
+}
+
+// SupportedChains returns the list of supported chain IDs and names
+func SupportedChains() map[int]string {
+	return map[int]string{
+		1:     "Ethereum",
+		137:   "Polygon",
+		42161: "Arbitrum",
+		10:    "Optimism",
+		8453:  "Base",
+	}
+}
+
+// validateChainID validates that the chain ID is supported
+func validateChainID(chainID int) error {
+	if chainID == 0 {
+		return fmt.Errorf("chain ID cannot be zero")
+	}
+
+	supported := SupportedChains()
+	if _, ok := supported[chainID]; !ok {
+		return fmt.Errorf("unsupported chain ID %d: must be one of %v", chainID, supported)
 	}
 
 	return nil

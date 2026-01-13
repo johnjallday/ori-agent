@@ -288,6 +288,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
 	mux.HandleFunc("/api/settings/system-paths", s.settingsHandler.SystemPathsHandler)
 
+	// Web3 Wallet endpoints
+	mux.HandleFunc("/api/web3-wallet", s.settingsHandler.Web3WalletHandler)
+	mux.HandleFunc("/api/web3-chains", s.settingsHandler.Web3ChainsHandler)
+
 	// Reset endpoints
 	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)
 	mux.HandleFunc("/api/reset/preview", s.resetHandler.GetResetPreview)
