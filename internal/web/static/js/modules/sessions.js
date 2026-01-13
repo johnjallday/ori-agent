@@ -124,6 +124,21 @@ const sessionManager = {
       e.stopPropagation();
       this.showCreateChatModal();
     });
+
+    // New note button - create note in active folder or root
+    document.getElementById('newNoteBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.createNewNoteForFolder(this.activeFolder || null);
+    });
+
+    // New task button - open task modal for active folder or root
+    document.getElementById('newTaskBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.openTaskModalForWorkspace(this.activeFolder || null);
+    });
+
     document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.handleEmptyStateAction());
 
     // Create chat modal - create button
