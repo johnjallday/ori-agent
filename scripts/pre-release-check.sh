@@ -249,6 +249,45 @@ if [ "${SKIP_SECURITY_SCAN}" != "true" ]; then
   fi
 fi
 
+# JavaScript Linting (if package.json exists)
+if [ -f "package.json" ]; then
+  # Check if lint:js script exists
+  if grep -q '"lint:js"' package.json 2>/dev/null; then
+    run_check "JS Lint Check" "npm run lint:js" || {
+      # JS lint check failed - offer to auto-fix
+      if grep -q '"lint:js:fix"' package.json 2>/dev/null; then
+        echo -e "${YELLOW}💡 Tip: Automated JS lint fixing is available${NC}"
+        echo ""
+        read -p "Run automated JS lint fixer? [y/N]: " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+          echo ""
+          echo -e "${BLUE}Running npm run lint:js:fix...${NC}"
+          echo ""
+          npm run lint:js:fix
+          echo ""
+          echo -e "${BLUE}Re-running JS lint check after fixes...${NC}"
+          echo ""
+          # Re-run JS lint check after fixes
+          if run_check "JS Lint Check (after fixes)" "npm run lint:js"; then
+            # Remove the original failure from FAILED_CHECKS
+            FAILED_CHECKS=("${FAILED_CHECKS[@]/JS Lint Check/}")
+          fi
+        fi
+      else
+        echo -e "${YELLOW}💡 Tip: Add a 'lint:js:fix' script to package.json for auto-fixing${NC}"
+        echo ""
+      fi
+    }
+  else
+    echo -e "${YELLOW}⚠️  JS Lint Check: SKIPPED (no 'lint:js' script in package.json)${NC}"
+    echo ""
+  fi
+else
+  echo -e "${YELLOW}⚠️  JS Lint Check: SKIPPED (no package.json found)${NC}"
+  echo ""
+fi
+
 # 2. TESTS (ALL)
 echo ""
 echo "════════════════════════════════════════════"
