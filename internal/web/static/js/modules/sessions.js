@@ -125,18 +125,26 @@ const sessionManager = {
       this.showCreateChatModal();
     });
 
-    // New note button - create note in active folder or root
+    // New note button - create note in active folder
     document.getElementById('newNoteBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.createNewNoteForFolder(this.activeFolder || null);
+      if (!this.activeFolder) {
+        this.showToast('Please select a workspace first', 'warning');
+        return;
+      }
+      this.createNewNoteForFolder(this.activeFolder);
     });
 
-    // New task button - open task modal for active folder or root
+    // New task button - open task modal for active folder
     document.getElementById('newTaskBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      this.openTaskModalForWorkspace(this.activeFolder || null);
+      if (!this.activeFolder) {
+        this.showToast('Please select a workspace first', 'warning');
+        return;
+      }
+      this.openTaskModalForWorkspace(this.activeFolder);
     });
 
     document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.handleEmptyStateAction());
