@@ -20,10 +20,13 @@ function showNotification(message, type = 'info') {
   `;
   notification.innerHTML = `
     <div class="d-flex align-items-center">
-      <span>${message}</span>
+      <span class="notification-message"></span>
       <button type="button" class="btn-close ms-2" aria-label="Close"></button>
     </div>
   `;
+
+  // Set message text safely (prevents XSS)
+  notification.querySelector('.notification-message').textContent = message;
 
   // Add to body
   document.body.appendChild(notification);

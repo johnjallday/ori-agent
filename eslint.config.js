@@ -13,6 +13,10 @@ export default [
         API: 'readonly',
         Logger: 'readonly',
         EventBus: 'readonly',
+        DOMUtils: 'readonly',
+        escapeHtml: 'readonly',
+        escapeAttr: 'readonly',
+        escapeJs: 'readonly',
         // Application globals
         Toast: 'readonly',
         FormValidation: 'writable',

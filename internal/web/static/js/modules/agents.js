@@ -429,6 +429,12 @@ function createAgentElement(agentName, agentType, currentAgent) {
   agentDiv.style.borderRadius = '8px';
   agentDiv.style.overflow = 'hidden';
 
+  // Escape agent name for safe HTML rendering (XSS prevention)
+  const safeAgentName = escapeHtml(agentName);
+  const safeAgentNameJs = escapeJs(agentName);
+  const safeAgentNameAttr = escapeAttr(agentName);
+  const safeTypeLabel = escapeHtml(typeLabel);
+
   agentDiv.innerHTML = `
     <div class="accordion-header" id="heading-${accordionId}">
       <button class="d-flex align-items-center justify-content-between p-2 w-100 border-0 accordion-button collapsed"
@@ -441,15 +447,15 @@ function createAgentElement(agentName, agentType, currentAgent) {
         <div class="d-flex align-items-center gap-2 flex-grow-1">
           ${isCurrentAgent ? '<div class="status-indicator status-online"></div>' : ''}
           <div class="d-flex flex-column">
-            <span style="color: var(--text-primary); font-weight: 500;">${agentName}</span>
-            <span style="color: var(--text-secondary); font-size: 0.7rem;">${typeLabel}</span>
+            <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
+            <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
           </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
-          ${!isCurrentAgent ? `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${agentName}')" title="Switch to this agent" style="font-size: 0.75rem; cursor: pointer;">
+          ${!isCurrentAgent ? `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${safeAgentNameJs}')" title="Switch to this agent" style="font-size: 0.75rem; cursor: pointer;">
             Load
           </span>` : ''}
-          <span class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${agentName}')" title="Delete agent" style="cursor: pointer;">
+          <span class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${safeAgentNameJs}')" title="Delete agent" style="cursor: pointer;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
             </svg>
@@ -470,7 +476,7 @@ function createAgentElement(agentName, agentType, currentAgent) {
           <div class="d-flex flex-column">
             <label style="color: var(--text-primary); font-size: 0.85rem; margin-bottom: 0.5rem;">Agent Name</label>
             <input type="text" id="agentNameInput-${accordionId}" class="form-control form-control-sm"
-                   value="${agentName}"
+                   value="${safeAgentNameAttr}"
                    style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem;"
                    placeholder="Enter agent name">
           </div>
