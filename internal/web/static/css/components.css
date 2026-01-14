@@ -1,0 +1,1151 @@
+/**
+ * Component Styles
+ * UI components: buttons, cards, inputs, modals, badges, chat, etc.
+ */
+
+/* =============================================================================
+   MODERN CARD
+   ============================================================================= */
+
+.modern-card {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.modern-card:hover {
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+[data-bs-theme="dark"] .modern-card {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] .modern-card:hover {
+  background: rgba(15, 23, 42, 0.6);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Bootstrap Card overrides */
+.card {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  background: rgba(255, 255, 255, 0.98) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+[data-bs-theme="dark"] .card {
+  background: rgba(15, 23, 42, 0.3) !important;
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-bs-theme="dark"] .card:hover {
+  background: rgba(15, 23, 42, 0.4) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-bs-theme="dark"] .card .card-title,
+[data-bs-theme="dark"] .card .card-text,
+[data-bs-theme="dark"] .card h5,
+[data-bs-theme="dark"] .card p {
+  color: #f8fafc !important;
+}
+
+[data-bs-theme="dark"] .card .text-muted,
+[data-bs-theme="dark"] .card small {
+  color: #cbd5e1 !important;
+}
+
+/* =============================================================================
+   MODERN BUTTONS
+   ============================================================================= */
+
+.modern-btn {
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+
+.modern-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.modern-btn:hover::before {
+  left: 100%;
+}
+
+.modern-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.modern-btn-primary {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+  color: white;
+}
+
+.modern-btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.modern-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+}
+
+[data-bs-theme="dark"] .modern-btn-secondary {
+  background: rgba(15, 23, 42, 0.3);
+  color: var(--text-primary);
+}
+
+[data-bs-theme="dark"] .modern-btn-secondary:hover {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.modern-btn-success {
+  background: linear-gradient(135deg, var(--success-color) 0%, #34d399 100%);
+  color: white;
+}
+
+.modern-btn-danger {
+  background: linear-gradient(135deg, var(--danger-color) 0%, #f87171 100%);
+  color: white;
+}
+
+/* Active page indicator for sidebar navigation */
+.sidebar .modern-card .modern-btn-primary {
+  position: relative;
+}
+
+.sidebar .modern-card .modern-btn-primary::after {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: var(--primary-color);
+  border-radius: 0 2px 2px 0;
+}
+
+[data-bs-theme="dark"] .sidebar .modern-card .modern-btn-primary::after {
+  background: #818cf8;
+}
+
+/* Bootstrap outline buttons enhancement */
+.btn-outline-primary {
+  color: white !important;
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border: 2px solid rgba(255, 255, 255, 0.4) !important;
+  font-weight: 600 !important;
+  backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+}
+
+.btn-outline-primary:hover {
+  background-color: rgba(29, 78, 216, 0.6) !important;
+  border-color: #1d4ed8 !important;
+  color: white !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(29, 78, 216, 0.3);
+}
+
+.btn-check:checked + .btn-outline-primary {
+  background-color: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: white !important;
+  box-shadow: 0 6px 20px rgba(29, 78, 216, 0.5);
+  transform: translateY(-2px);
+}
+
+[data-bs-theme="dark"] .btn-outline-primary {
+  color: white !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+[data-bs-theme="dark"] .btn-outline-primary:hover {
+  background-color: rgba(37, 99, 235, 0.5) !important;
+  border-color: #2563eb !important;
+  color: white !important;
+}
+
+[data-bs-theme="dark"] .btn-check:checked + .btn-outline-primary {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+  color: white !important;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+  transform: translateY(-2px);
+}
+
+/* =============================================================================
+   MODERN INPUTS
+   ============================================================================= */
+
+.modern-input {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-md);
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  color: var(--text-primary);
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.modern-input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 1;
+}
+
+[data-bs-theme="dark"] .modern-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.modern-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+[data-bs-theme="dark"] .modern-input {
+  background: rgba(15, 23, 42, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] .modern-input:focus {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Bootstrap form controls with glassmorphism */
+.form-control,
+.form-select,
+textarea.form-control {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  color: var(--text-primary) !important;
+}
+
+.form-control:focus,
+.form-select:focus,
+textarea.form-control:focus {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+}
+
+[data-bs-theme="dark"] .form-control,
+[data-bs-theme="dark"] .form-select,
+[data-bs-theme="dark"] textarea.form-control {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-bs-theme="dark"] .form-control:focus,
+[data-bs-theme="dark"] .form-select:focus,
+[data-bs-theme="dark"] textarea.form-control:focus {
+  background: rgba(15, 23, 42, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* =============================================================================
+   BADGES
+   ============================================================================= */
+
+.modern-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+[data-bs-theme="dark"] .modern-badge {
+  background: rgba(15, 23, 42, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.badge-primary { background: var(--primary-color); color: white; }
+.badge-secondary { background: var(--bg-tertiary); color: var(--text-secondary); }
+.badge-success { background: var(--success-color); color: white; }
+.badge-info { background: var(--info-color); color: white; }
+
+/* =============================================================================
+   GLASSMORPHISM EFFECTS
+   ============================================================================= */
+
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme="dark"] .glassmorphism {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.glassmorphism-strong {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(30px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+[data-bs-theme="dark"] .glassmorphism-strong {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Floating glass effect */
+.floating-glass {
+  position: relative;
+}
+
+.floating-glass::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.1));
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.floating-glass:hover::before {
+  opacity: 1;
+}
+
+/* =============================================================================
+   MODALS
+   ============================================================================= */
+
+.modal-content {
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-bs-theme="dark"] .modal-content {
+  background: rgba(15, 23, 42, 0.25) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.modal-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(15px) !important;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+[data-bs-theme="dark"] .modal-header {
+  background: rgba(15, 23, 42, 0.2) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.modal-title {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* =============================================================================
+   NAV PILLS
+   ============================================================================= */
+
+.nav-pills .nav-link {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.nav-pills .nav-link:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.nav-pills .nav-link.active {
+  background: var(--primary-color) !important;
+  color: white !important;
+  box-shadow: var(--shadow-sm);
+}
+
+/* =============================================================================
+   LIST ITEMS
+   ============================================================================= */
+
+.modern-list-item {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.modern-list-item:hover {
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.modern-section-header {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Agent/Plugin/Setting items */
+.agent-item,
+.plugin-item,
+.setting-item {
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.agent-item:hover,
+.plugin-item:hover {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+[data-bs-theme="dark"] .agent-item,
+[data-bs-theme="dark"] .plugin-item,
+[data-bs-theme="dark"] .setting-item {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-bs-theme="dark"] .agent-item:hover,
+[data-bs-theme="dark"] .plugin-item:hover {
+  background: rgba(15, 23, 42, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* List groups with glassmorphism */
+.list-group-item {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  transition: all 0.2s ease !important;
+}
+
+.list-group-item:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  transform: translateY(-1px);
+}
+
+[data-bs-theme="dark"] .list-group-item {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-bs-theme="dark"] .list-group-item:hover {
+  background: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* =============================================================================
+   STATUS INDICATORS
+   ============================================================================= */
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-online { background: var(--success-color); }
+.status-offline { background: var(--secondary-color); }
+
+/* Plugin health badge */
+.plugin-health-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.plugin-health-badge:empty {
+  display: none;
+}
+
+.plugin-health-badge.healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success-color);
+}
+
+.plugin-health-badge.degraded {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning-color);
+}
+
+.plugin-health-badge.unhealthy {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger-color);
+}
+
+[data-bs-theme="dark"] .plugin-health-badge.healthy {
+  background: rgba(16, 185, 129, 0.2);
+}
+
+[data-bs-theme="dark"] .plugin-health-badge.degraded {
+  background: rgba(245, 158, 11, 0.2);
+}
+
+[data-bs-theme="dark"] .plugin-health-badge.unhealthy {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* =============================================================================
+   CHAT CONTENT
+   ============================================================================= */
+
+#chatArea {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(5px);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] #chatArea {
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.chat-content {
+  line-height: 1.6;
+}
+
+.chat-content h1, .chat-content h2, .chat-content h3,
+.chat-content h4, .chat-content h5, .chat-content h6 {
+  color: var(--text-primary);
+  margin: 0.75rem 0 0.5rem 0;
+  font-weight: 600;
+}
+
+.chat-content h2 {
+  font-size: 1.1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.25rem;
+}
+
+.chat-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-bs-theme="dark"] .chat-content table {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.chat-content thead {
+  background: var(--primary-color);
+  color: white;
+}
+
+.chat-content th,
+.chat-content td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.chat-content th {
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.chat-content tbody tr {
+  transition: all 0.2s ease;
+}
+
+.chat-content tbody tr:hover {
+  background: var(--bg-tertiary) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.chat-content tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.chat-content code {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: var(--primary-color);
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--radius-sm);
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 0.875em;
+}
+
+[data-bs-theme="dark"] .chat-content code:not(pre code) {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.chat-content pre {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+
+[data-bs-theme="dark"] .chat-content pre {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.chat-content pre code {
+  background: none !important;
+  border: none !important;
+  padding: 0;
+}
+
+.chat-content ul, .chat-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.chat-content li {
+  margin: 0.25rem 0;
+}
+
+.chat-content blockquote {
+  border-left: 3px solid var(--primary-color);
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.chat-content strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.chat-content em {
+  color: var(--text-secondary);
+}
+
+.chat-content p {
+  margin: 0.5rem 0;
+}
+
+/* Message containers */
+.message-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-message {
+  align-items: flex-end;
+}
+
+.assistant-message {
+  align-items: flex-start;
+}
+
+.message-container .modern-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.message-container .modern-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.8s ease;
+}
+
+.message-container:hover .modern-card::before {
+  left: 100%;
+}
+
+/* Typing indicator */
+.typing-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.typing-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  animation: typing 1.4s infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+/* Copy button */
+.copy-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.chat-content pre:hover .copy-button {
+  opacity: 1;
+}
+
+.copy-button:hover {
+  background: var(--primary-color);
+  color: white;
+}
+
+/* =============================================================================
+   DROPDOWNS
+   ============================================================================= */
+
+.dropdown-menu {
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2) !important;
+}
+
+[data-bs-theme="dark"] .dropdown-menu {
+  background: rgba(15, 23, 42, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.dropdown-item {
+  color: var(--text-primary) !important;
+  transition: all 0.2s ease;
+}
+
+.dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-bs-theme="dark"] .dropdown-item:hover {
+  background: rgba(15, 23, 42, 0.3) !important;
+}
+
+/* Plugin pages dropdown */
+#pluginPagesMenu .dropdown-item {
+  color: var(--text-primary) !important;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 4px;
+  margin: 2px 4px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#pluginPagesMenu .dropdown-item:hover,
+#pluginPagesMenu .dropdown-item:focus {
+  background: var(--bg-secondary) !important;
+  color: var(--primary-color) !important;
+}
+
+#pluginPagesMenu .dropdown-item:active {
+  background: var(--bg-tertiary) !important;
+  color: var(--primary-color) !important;
+}
+
+/* =============================================================================
+   PROGRESS BARS
+   ============================================================================= */
+
+.progress {
+  background: rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] .progress {
+  background: rgba(15, 23, 42, 0.3) !important;
+}
+
+/* =============================================================================
+   SCROLLBARS
+   ============================================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+[data-bs-theme="dark"] ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+[data-bs-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+[data-bs-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* =============================================================================
+   ANIMATIONS
+   ============================================================================= */
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading shimmer effect */
+.loading-glass {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-glass::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* =============================================================================
+   DARK MODE TOGGLE
+   ============================================================================= */
+
+[data-bs-theme="dark"] #darkModeToggle span {
+  display: none;
+}
+
+[data-bs-theme="dark"] #darkModeToggle:after {
+  content: "Light";
+}
+
+#darkModeToggle span {
+  display: inline;
+}
+
+/* Override Bootstrap's text-muted in dark mode */
+[data-bs-theme="dark"] .text-muted {
+  color: #cbd5e1 !important;
+}
+
+/* =============================================================================
+   NAVIGATION LINKS
+   ============================================================================= */
+
+.nav-link-item {
+  position: relative;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.nav-link-item:hover {
+  background: var(--bg-secondary) !important;
+  color: var(--primary-color) !important;
+}
+
+.nav-link-item:active,
+.nav-link-item.active {
+  background: var(--bg-tertiary) !important;
+  color: var(--primary-color) !important;
+}
+
+/* =============================================================================
+   PLUGIN REGISTRY
+   ============================================================================= */
+
+#registryList .list-group-item,
+#localRegistryList .list-group-item,
+#downloadablePluginsList .list-group-item {
+  padding: 1rem 1.25rem;
+}
+
+#registryList .btn-sm,
+#localRegistryList .btn-sm,
+#downloadablePluginsList .btn-sm {
+  min-width: 80px;
+  white-space: nowrap;
+}
+
+#localRegistryList .list-group-item {
+  border-left: 3px solid var(--success-color);
+}
+
+#downloadablePluginsList .list-group-item {
+  border-left: 3px solid var(--primary-color);
+}
+
+.pills-plugins h6 svg {
+  vertical-align: text-top;
+}
+
+/* =============================================================================
+   CONTENT TYPE INDICATORS
+   ============================================================================= */
+
+.content-type-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.content-type-table::before {
+  content: "📊";
+}
+
+.content-type-list::before {
+  content: "📋";
+}
+
+.content-type-structured::before {
+  content: "🔧";
+}
+
+.table-info {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  text-align: center;
+}
+
+/* =============================================================================
+   PLUGIN ITEM RESPONSIVE LAYOUT
+   ============================================================================= */
+
+.plugin-item .d-flex {
+  align-items: flex-start !important;
+  gap: 0.5rem;
+}
+
+.plugin-item .d-flex > div:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.plugin-item .d-flex > div:last-child {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.sidebar-compact .plugin-item .d-flex > div:last-child {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sidebar-compact .plugin-item .plugin-remove-btn {
+  margin-right: 0 !important;
+  margin-bottom: 0.25rem;
+  padding: 0.25rem;
+  min-width: 24px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-compact .plugin-item .plugin-remove-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sidebar-compact .plugin-item .form-switch {
+  margin: 0;
+  transform: scale(0.9);
+}
+
+.sidebar-very-compact .plugin-item {
+  padding: 0.5rem;
+}
+
+.sidebar-very-compact .plugin-item .d-flex {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.sidebar-very-compact .plugin-item .d-flex > div:last-child {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sidebar-very-compact .plugin-item .plugin-remove-btn {
+  margin-right: 0.5rem !important;
+  margin-bottom: 0;
+}
+
+.plugin-item .plugin-remove-btn {
+  flex-shrink: 0;
+  min-width: auto;
+  padding: 0.25rem 0.5rem;
+}
+
+.plugin-item .form-switch {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.plugin-item .form-switch .form-check-input {
+  margin: 0;
+}
+
+.plugin-item .fw-medium {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-item .text-muted.small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

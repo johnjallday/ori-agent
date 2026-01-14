@@ -95,14 +95,14 @@ class ThemeManager {
     const html = document.documentElement;
     const body = document.body;
 
+    // Only use data-bs-theme attribute for theme switching
+    // All CSS now uses [data-bs-theme="dark"] selectors
     if (theme === 'dark') {
       html.setAttribute('data-bs-theme', 'dark');
-      body.classList.add('dark-mode');
       body.classList.remove('bg-light');
       body.classList.add('bg-dark');
     } else {
       html.setAttribute('data-bs-theme', 'light');
-      body.classList.remove('dark-mode');
       body.classList.remove('bg-dark');
       body.classList.add('bg-light');
     }

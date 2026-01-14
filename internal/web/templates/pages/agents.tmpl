@@ -6,9 +6,6 @@
 (function() {
   const savedTheme = localStorage.getItem('ori-theme') || 'light';
   document.documentElement.setAttribute('data-bs-theme', savedTheme);
-  if (savedTheme === 'dark') {
-    document.documentElement.classList.add('dark-mode');
-  }
 })();
 </script>
 
@@ -43,7 +40,6 @@
         margin: 0;
     }
 
-    .dark-mode .page-title p,
     [data-bs-theme="dark"] .page-title p {
         color: rgba(255, 255, 255, 0.7);
     }
@@ -106,7 +102,6 @@
         font-weight: 500;
     }
 
-    .dark-mode .stat-label,
     [data-bs-theme="dark"] .stat-label {
         color: var(--text-muted);
     }
@@ -118,7 +113,6 @@
         color: rgba(0, 0, 0, 0.9);
     }
 
-    .dark-mode .stat-value,
     [data-bs-theme="dark"] .stat-value {
         color: var(--text-primary);
     }
@@ -203,7 +197,7 @@
     }
 
     /* Ensure white text in dark mode */
-    .dark-mode .view-btn {
+    [data-bs-theme="dark"] .view-btn {
         color: white;
     }
 
@@ -232,7 +226,6 @@
         user-select: none;
     }
 
-    .dark-mode .agents-table th,
     [data-bs-theme="dark"] .agents-table th {
         color: var(--text-muted);
     }
