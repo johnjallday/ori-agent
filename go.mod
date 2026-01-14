@@ -11,6 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
+	github.com/invopop/jsonschema v0.13.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/openai/openai-go/v3 v3.16.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -44,7 +45,6 @@ require (
 	github.com/go-text/typesetting v0.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
-	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
