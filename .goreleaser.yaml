@@ -14,6 +14,8 @@ before:
   hooks:
     # Install dependencies
     - go mod tidy
+    # Sync plugin dependencies (ensures plugin go.mod files are in sync with main module)
+    - ./scripts/sync-plugin-deps.sh
     # Build internal plugins (required for complete distribution)
     - ./scripts/build-plugins.sh
     # Build external/shared plugins (optional; these live outside this repo under ../plugins)
