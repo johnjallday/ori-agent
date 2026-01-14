@@ -8,9 +8,15 @@ set -o pipefail
 
 VERSION=${1:-""}
 FAILED_CHECKS=()
-declare -A FAILED_OUTPUTS  # Store error output for each failed check
+FAILED_OUTPUTS_DIR=$(mktemp -d)  # Directory to store error output for each failed check
 
 cd "$(dirname "$0")/.."
+
+# Cleanup temp directory on exit
+cleanup() {
+  rm -rf "$FAILED_OUTPUTS_DIR"
+}
+trap cleanup EXIT
 
 # Colors for output
 RED='\033[0;31m'
@@ -70,8 +76,10 @@ run_check() {
     echo -e "${RED}❌ $name: FAILED${NC}"
     echo ""
     FAILED_CHECKS+=("$name")
-    # Store last 30 lines of output for the summary
-    FAILED_OUTPUTS["$name"]=$(tail -30 "$output_file")
+    # Store last 30 lines of output for the summary (use sanitized filename)
+    local safe_name
+    safe_name=$(echo "$name" | tr ' /' '__')
+    tail -30 "$output_file" > "$FAILED_OUTPUTS_DIR/$safe_name"
     rm -f "$output_file"
     return 1
   fi
@@ -332,7 +340,7 @@ else
   echo ""
   FAILED_CHECKS+=("All Tests")
   # Store last 50 lines of test output for the summary (more lines for test errors)
-  FAILED_OUTPUTS["All Tests"]=$(tail -50 "$TEST_OUTPUT_FILE")
+  tail -50 "$TEST_OUTPUT_FILE" > "$FAILED_OUTPUTS_DIR/All_Tests"
 
   : <<'CLAUDE_AUTOFIX_DISABLED'
   # Tests failed - automatically invoke Claude to fix
@@ -846,10 +854,11 @@ else
   echo "════════════════════════════════════════════"
   echo ""
   for check in "${FAILED_CHECKS[@]}"; do
-    if [ -n "${FAILED_OUTPUTS[$check]:-}" ]; then
+    safe_name=$(echo "$check" | tr ' /' '__')
+    if [ -f "$FAILED_OUTPUTS_DIR/$safe_name" ]; then
       echo -e "${RED}━━━ $check ━━━${NC}"
       echo ""
-      echo "${FAILED_OUTPUTS[$check]}"
+      cat "$FAILED_OUTPUTS_DIR/$safe_name"
       echo ""
     fi
   done
