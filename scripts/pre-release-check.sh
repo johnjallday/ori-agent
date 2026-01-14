@@ -69,10 +69,24 @@ run_check() {
   fi
 }
 
-# 1. CODE QUALITY CHECKS
+# 1. DEPENDABOT PR MERGE (first to get latest dependencies)
 echo ""
 echo "════════════════════════════════════════════"
-echo "1. CODE QUALITY CHECKS"
+echo "1. DEPENDABOT PR MERGE"
+echo "════════════════════════════════════════════"
+echo ""
+
+if [ -f "./scripts/merge-dependabot.sh" ]; then
+  run_check "Merge Dependabot PRs" "./scripts/merge-dependabot.sh" || true
+else
+  echo -e "${YELLOW}⚠️  Dependabot Merge: SKIPPED (merge-dependabot.sh not found)${NC}"
+  echo ""
+fi
+
+# 2. CODE QUALITY CHECKS
+echo ""
+echo "════════════════════════════════════════════"
+echo "2. CODE QUALITY CHECKS"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -288,10 +302,10 @@ else
   echo ""
 fi
 
-# 2. TESTS (ALL)
+# 3. TESTS (ALL)
 echo ""
 echo "════════════════════════════════════════════"
-echo "2. TESTS (Unit + Integration + E2E + User)"
+echo "3. TESTS (Unit + Integration + E2E + User)"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -518,10 +532,10 @@ EOF
   rm -f "$TEST_OUTPUT_FILE"
 fi
 
-# 3. BUILD VERIFICATION
+# 4. BUILD VERIFICATION
 echo ""
 echo "════════════════════════════════════════════"
-echo "3. BUILD VERIFICATION"
+echo "4. BUILD VERIFICATION"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -544,10 +558,10 @@ else
   echo ""
 fi
 
-# 4. DEPENDENCY CHECK
+# 5. DEPENDENCY CHECK
 echo ""
 echo "════════════════════════════════════════════"
-echo "4. DEPENDENCY CHECK"
+echo "5. DEPENDENCY CHECK"
 echo "════════════════════════════════════════════"
 echo ""
 
@@ -585,20 +599,6 @@ run_check "Go Mod Tidy" "go mod tidy && git diff --exit-code go.mod go.sum" || {
     fi
   fi
 }
-
-# 5. DEPENDABOT PR MERGE
-echo ""
-echo "════════════════════════════════════════════"
-echo "5. DEPENDABOT PR MERGE"
-echo "════════════════════════════════════════════"
-echo ""
-
-if [ -f "./scripts/merge-dependabot.sh" ]; then
-  run_check "Merge Dependabot PRs" "./scripts/merge-dependabot.sh" || true
-else
-  echo -e "${YELLOW}⚠️  Dependabot Merge: SKIPPED (merge-dependabot.sh not found)${NC}"
-  echo ""
-fi
 
 # 6. UPDATE README
 echo ""

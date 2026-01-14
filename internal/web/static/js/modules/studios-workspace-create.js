@@ -36,7 +36,7 @@ function openCreateWorkspaceModal() {
   }
 
   // Reset selected agents
-  selectedAgents = new Set();
+  window.selectedAgents.clear();
 
   const modalElement = document.getElementById('addFolderModal');
   if (!modalElement) {
@@ -52,10 +52,10 @@ function openCreateWorkspaceModal() {
  * @param {string} agentName - Name of the agent to toggle
  */
 function toggleAgent(agentName) {
-  if (selectedAgents.has(agentName)) {
-    selectedAgents.delete(agentName);
+  if (window.selectedAgents.has(agentName)) {
+    window.selectedAgents.delete(agentName);
   } else {
-    selectedAgents.add(agentName);
+    window.selectedAgents.add(agentName);
   }
 }
 
@@ -96,9 +96,9 @@ async function createWorkspace() {
     const result = await response.json();
 
     // Add selected agents to the workspace if any were selected
-    if (result.folder && selectedAgents.size > 0) {
+    if (result.folder && window.selectedAgents.size > 0) {
       const workspaceId = result.folder.id;
-      for (const agentName of selectedAgents) {
+      for (const agentName of window.selectedAgents) {
         await fetch(`/api/workspaces/${workspaceId}/agents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -122,7 +122,7 @@ async function createWorkspace() {
     // Clear form
     if (nameInput) nameInput.value = '';
     if (descriptionInput) descriptionInput.value = '';
-    selectedAgents.clear();
+    window.selectedAgents.clear();
 
     // Refresh workspaces list if function exists
     if (typeof loadWorkspaces === 'function') {
@@ -149,25 +149,14 @@ function showError(message) {
   }
 }
 
-/**
- * Escapes HTML special characters to prevent XSS attacks
- * @param {string|null} text - Text to escape
- * @returns {string} HTML-escaped text
- */
-// escapeHtml is defined in studios-workspace.js and exported to window
-function escapeHtml(text) {
-  if (text == null) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 /**
  * Sets the list of available agents for workspace creation
  * @param {Array<Object>} agents - Array of agent objects with name property
  */
 function setAvailableAgents(agents) {
-  availableAgents = agents;
+  window.availableAgents = agents;
 }
 
 /**

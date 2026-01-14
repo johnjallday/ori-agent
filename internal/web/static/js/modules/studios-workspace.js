@@ -3,9 +3,8 @@
  * Handles workspace CRUD operations, agent management, and UI interactions for the Studios page
  */
 
-// Global state
-let availableAgents = [];
-const selectedAgents = new Set();
+// Global state - use window object for shared state with other modules
+// These are initialized in studios.tmpl inline script
 let workspaceRefreshInterval = null;
 let hasLoadedWorkspaces = false;
 
@@ -18,7 +17,8 @@ const MAX_CONSECUTIVE_FAILURES = 3; // After 3 failures, show offline notificati
 let serverOfflineNotification = null;
 
 // Studios-specific state for agent management
-const studiosSystemAgents = [];
+// Note: Using let instead of const so studios-agent-modals.js can reassign this array
+let studiosSystemAgents = [];
 // studiosAvailableProviders is declared in studios-agent-modals.js
 
 /**
@@ -490,15 +490,7 @@ function renderWorkspaceCard(workspace) {
     `;
 }
 
-/**
- * Utility function to escape HTML
- */
-function escapeHtml(text) {
-  if (text == null) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 /**
  * Load available agents for workspace creation
@@ -508,7 +500,7 @@ async function loadWorkspaceAgents() {
     const response = await fetch('/api/agents');
     const data = await response.json();
 
-    availableAgents = data.agents || [];
+    window.availableAgents = data.agents || [];
     populateAgentDropdown();
   } catch (error) {
     console.error('Error loading workspace agents:', error);
@@ -521,7 +513,7 @@ async function loadWorkspaceAgents() {
 function populateAgentDropdown() {
   const select = document.getElementById('parent-agent');
   if (!select) return;
-  select.innerHTML = availableAgents.map(agent =>
+  select.innerHTML = (window.availableAgents || []).map(agent =>
     `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`
   ).join('');
 }
@@ -615,7 +607,7 @@ window.viewWorkspace = viewWorkspace;
 window.deleteWorkspace = deleteWorkspace;
 window.openWorkspaceCanvas = openWorkspaceCanvas;
 window.switchView = switchView;
-window.escapeHtml = escapeHtml;
+// Note: escapeHtml is provided by dom-utils.js which should be loaded before this script
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', initializeStudiosPage);

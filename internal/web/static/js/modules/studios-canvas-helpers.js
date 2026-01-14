@@ -2395,15 +2395,7 @@ async function toggleCanvasAnimation() {
   await executeExecutableNodes();
 }
 
-/**
- * Utility function to escape HTML (uses global from studios-workspace.js)
- */
-function escapeHtml(text) {
-  if (text == null) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 /**
  * Connect current selection to merge node

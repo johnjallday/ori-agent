@@ -417,11 +417,7 @@ function formatDate(dateString) {
   return date.toLocaleDateString();
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 function showLoading(show) {
   document.getElementById('loadingState').style.display = show ? 'block' : 'none';

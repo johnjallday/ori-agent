@@ -1023,11 +1023,7 @@ function formatFullDate(dateString) {
   return date.toLocaleString();
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text == null ? '' : String(text);
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 function showLoading(show) {
   const loading = document.getElementById('loadingState');
