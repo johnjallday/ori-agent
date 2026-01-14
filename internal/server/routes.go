@@ -17,6 +17,8 @@ import (
 // registerRoutes registers all HTTP routes for the server.
 // Routes are organized by domain for clarity and maintainability.
 func registerRoutes(mux *http.ServeMux, s *Server) {
+	caps := s.privateCapabilitiesSnapshot()
+
 	// =============================================================================
 	// Health Check Endpoint
 	// =============================================================================
@@ -289,8 +291,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/system-paths", s.settingsHandler.SystemPathsHandler)
 
 	// Web3 Wallet endpoints
-	mux.HandleFunc("/api/web3-wallet", s.settingsHandler.Web3WalletHandler)
-	mux.HandleFunc("/api/web3-chains", s.settingsHandler.Web3ChainsHandler)
+	if caps.Web3Wallet {
+		mux.HandleFunc("/api/web3-wallet", s.settingsHandler.Web3WalletHandler)
+		mux.HandleFunc("/api/web3-chains", s.settingsHandler.Web3ChainsHandler)
+	}
 
 	// Reset endpoints
 	mux.HandleFunc("/api/reset", s.resetHandler.HandleReset)

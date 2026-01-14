@@ -25,9 +25,14 @@ This directory contains detailed documentation for Ori Agent.
 - [Release Checklist](./RELEASE_CHECKLIST.md) - Pre-release validation checklist
 - [Dependency Management](./DEPENDENCY_MANAGEMENT.md) - Managing Go dependencies
 
+### Project Policies
+- [Ori Services](../ORI_SERVICES.md) - Private services access and scope
+- [Trademarks](../TRADEMARKS.md) - Branding and trademark usage
+
 ### Feature Planning
 - [Agent Output Viewing Plan](./features/AGENT_OUTPUT_VIEWING_PLAN.md) - Implementation plan for viewing agent outputs
 - [Progress Tracking Plan](./features/PROGRESS_TRACKING_PLAN.md) - Implementation plan for progress tracking
+- [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
 
 ### UI Documentation
 - [Form Styling Index](./ui/FORM_STYLING_INDEX.md) - Navigation guide for all form styling docs
@@ -58,6 +63,9 @@ docs/
 ├── features/
 │   ├── AGENT_OUTPUT_VIEWING_PLAN.md    # Agent output viewing implementation plan
 │   └── PROGRESS_TRACKING_PLAN.md       # Progress tracking implementation plan
+│
+├── architecture/
+│   └── open-core-boundaries.md         # Open-core vs private service boundaries
 │
 └── ui/
     ├── FORM_STYLING_INDEX.md           # Form styling documentation index

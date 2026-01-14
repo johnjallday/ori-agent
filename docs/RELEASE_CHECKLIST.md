@@ -205,6 +205,11 @@ ls -lh plugins/*/[plugin-name]
 **Must pass**: Yes
 **Output**: Plugin executables in `plugins/*/`
 
+### Open-Core Boundary Check
+
+- Confirm `ori-platform-services` (private repo) is not included in build artifacts.
+- Verify no private service endpoints, keys, or secrets are referenced in release binaries.
+
 ---
 
 ## 5. Installer Tests (10-15 minutes)

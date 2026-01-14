@@ -15,6 +15,7 @@ export class OnboardingManager {
     this.web3Connected = false;
     this.web3Address = null;
     this.web3ChainId = null;
+    this.web3Enabled = true;
 
     // Supported chains for Web3
     this.CHAINS = {
@@ -44,6 +45,8 @@ export class OnboardingManager {
       // Modal only exists on main chat page - silently return on other pages
       return;
     }
+
+    this.web3Enabled = !(window.oriFeatures && window.oriFeatures.web3Enabled === false);
 
     // Initialize Bootstrap modal
     this.modalInstance = new bootstrap.Modal(this.modal, {
@@ -678,6 +681,15 @@ export class OnboardingManager {
     const disconnectedDiv = document.getElementById('onboardingWeb3Disconnected');
     const connectedDiv = document.getElementById('onboardingWeb3Connected');
 
+    if (!statusIcon || !statusText || !statusDetails) {
+      return;
+    }
+
+    if (!this.web3Enabled) {
+      this.showWeb3Disabled();
+      return;
+    }
+
     // Check if ethereum provider exists
     if (typeof window.ethereum === 'undefined') {
       // No wallet detected
@@ -733,6 +745,12 @@ export class OnboardingManager {
 
   // Connect Web3 wallet
   async connectWeb3Wallet() {
+    if (!this.web3Enabled) {
+      this.showWeb3Disabled();
+      this.showWeb3Alert('Web3 features are disabled on this server.', 'info');
+      return;
+    }
+
     if (typeof window.ethereum === 'undefined') {
       this.showWeb3Alert('No Web3 wallet detected. Please install MetaMask.', 'warning');
       return;
@@ -811,6 +829,12 @@ export class OnboardingManager {
 
   // Disconnect Web3 wallet
   async disconnectWeb3Wallet() {
+    if (!this.web3Enabled) {
+      this.showWeb3Disabled();
+      this.showWeb3Alert('Web3 features are disabled on this server.', 'info');
+      return;
+    }
+
     try {
       await fetch('/api/web3-wallet', { method: 'DELETE' });
 
@@ -865,6 +889,29 @@ export class OnboardingManager {
     if (noWalletDiv) noWalletDiv.classList.add('d-none');
     if (disconnectedDiv) disconnectedDiv.classList.add('d-none');
     if (connectedDiv) connectedDiv.classList.remove('d-none');
+  }
+
+  // Show Web3 disabled state
+  showWeb3Disabled() {
+    const statusIcon = document.getElementById('onboardingWeb3StatusIcon');
+    const statusText = document.getElementById('onboardingWeb3StatusText');
+    const statusDetails = document.getElementById('onboardingWeb3StatusDetails');
+    const noWalletDiv = document.getElementById('onboardingWeb3NoWallet');
+    const disconnectedDiv = document.getElementById('onboardingWeb3Disconnected');
+    const connectedDiv = document.getElementById('onboardingWeb3Connected');
+
+    if (!statusIcon || !statusText || !statusDetails) {
+      return;
+    }
+
+    statusIcon.innerHTML =
+      '<span class="badge bg-secondary" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
+    statusText.textContent = 'Web3 Disabled';
+    statusDetails.textContent = 'Web3 features are disabled on this server.';
+
+    if (noWalletDiv) noWalletDiv.classList.add('d-none');
+    if (disconnectedDiv) disconnectedDiv.classList.add('d-none');
+    if (connectedDiv) connectedDiv.classList.add('d-none');
   }
 
   // Mask Web3 address

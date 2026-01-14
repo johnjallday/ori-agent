@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/marketplacehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/privateservices"
 	web "github.com/johnjallday/ori-agent/internal/web"
 )
 
@@ -24,6 +25,7 @@ func (b *ServerBuilder) initializeConfiguration() error {
 		return err
 	}
 	b.server.configManager = configMgr
+	b.server.privateServicesClient = privateservices.NewEnvClient()
 	return nil
 }
 
