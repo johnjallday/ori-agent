@@ -275,9 +275,10 @@ func extractJSON(content string) string {
 				continue
 			}
 			if !inString {
-				if ch == '{' {
+				switch ch {
+				case '{':
 					braceCount++
-				} else if ch == '}' {
+				case '}':
 					braceCount--
 					if braceCount == 0 {
 						return content[:i+1]

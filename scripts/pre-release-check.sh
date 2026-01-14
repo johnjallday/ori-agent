@@ -8,6 +8,7 @@ set -o pipefail
 
 VERSION=${1:-""}
 FAILED_CHECKS=()
+declare -A FAILED_OUTPUTS  # Store error output for each failed check
 
 cd "$(dirname "$0")/.."
 
@@ -52,19 +53,26 @@ fi
 run_check() {
   local name=$1
   local command=$2
+  local output_file
+  output_file=$(mktemp)
 
   echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo -e "${BLUE}Running: $name${NC}"
   echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-  if eval "$command"; then
+  # Run command and capture output (both stdout and stderr)
+  if eval "$command" 2>&1 | tee "$output_file"; then
     echo -e "${GREEN}✅ $name: PASSED${NC}"
     echo ""
+    rm -f "$output_file"
     return 0
   else
     echo -e "${RED}❌ $name: FAILED${NC}"
     echo ""
     FAILED_CHECKS+=("$name")
+    # Store last 30 lines of output for the summary
+    FAILED_OUTPUTS["$name"]=$(tail -30 "$output_file")
+    rm -f "$output_file"
     return 1
   fi
 }
@@ -323,6 +331,8 @@ else
   echo -e "${RED}❌ All Tests: FAILED${NC}"
   echo ""
   FAILED_CHECKS+=("All Tests")
+  # Store last 50 lines of test output for the summary (more lines for test errors)
+  FAILED_OUTPUTS["All Tests"]=$(tail -50 "$TEST_OUTPUT_FILE")
 
   : <<'CLAUDE_AUTOFIX_DISABLED'
   # Tests failed - automatically invoke Claude to fix
@@ -829,6 +839,21 @@ else
     echo -e "${RED}  • $check${NC}"
   done
   echo ""
+
+  # Show error details for each failed check
+  echo "════════════════════════════════════════════"
+  echo -e "${RED}ERROR DETAILS${NC}"
+  echo "════════════════════════════════════════════"
+  echo ""
+  for check in "${FAILED_CHECKS[@]}"; do
+    if [ -n "${FAILED_OUTPUTS[$check]:-}" ]; then
+      echo -e "${RED}━━━ $check ━━━${NC}"
+      echo ""
+      echo "${FAILED_OUTPUTS[$check]}"
+      echo ""
+    fi
+  done
+
   echo "Please fix the issues above before releasing."
   echo ""
   exit 1

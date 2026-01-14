@@ -2,18 +2,33 @@ package llm
 
 import (
 	"context"
+	"net"
 	"os"
 	"testing"
 	"time"
 )
 
-// TestProviderIntegration tests the full provider flow with OpenAI
-// This test requires a valid OPENAI_API_KEY environment variable
-func TestProviderIntegration(t *testing.T) {
+func requireOpenAI(t *testing.T) string {
+	t.Helper()
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		t.Skip("OPENAI_API_KEY not set - skipping integration test")
 	}
+
+	conn, err := net.DialTimeout("tcp", "api.openai.com:443", 2*time.Second)
+	if err != nil {
+		t.Skipf("OpenAI endpoint unreachable - skipping integration test: %v", err)
+	}
+	_ = conn.Close()
+
+	return apiKey
+}
+
+// TestProviderIntegration tests the full provider flow with OpenAI
+// This test requires a valid OPENAI_API_KEY environment variable
+func TestProviderIntegration(t *testing.T) {
+	apiKey := requireOpenAI(t)
 
 	// Create factory and register provider
 	factory := NewFactory()
@@ -212,10 +227,7 @@ func TestProviderIntegration(t *testing.T) {
 
 // TestProviderFactoryIntegration tests that the factory works correctly in a real scenario
 func TestProviderFactoryIntegration(t *testing.T) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		t.Skip("OPENAI_API_KEY not set - skipping integration test")
-	}
+	apiKey := requireOpenAI(t)
 
 	factory := NewFactory()
 
