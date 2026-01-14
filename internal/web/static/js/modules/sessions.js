@@ -125,15 +125,11 @@ const sessionManager = {
       this.showCreateChatModal();
     });
 
-    // New note button - create note in active folder
+    // New note button - open note modal (workspace selectable)
     document.getElementById('newNoteBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!this.activeFolder) {
-        this.showToast('Please select a workspace first', 'warning');
-        return;
-      }
-      this.createNewNoteForFolder(this.activeFolder);
+      this.openNoteCreateModal(this.activeFolder || null);
     });
 
     // New task button - open task modal (workspace can be selected in modal if not active)
@@ -3639,12 +3635,27 @@ const sessionManager = {
 
   // Show toast notification
   showToast(message, type = 'info') {
-    // Use global showToast if available, otherwise console log
+    const normalizedType = (type || 'info').toLowerCase();
+    const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+
+    if (window.Toast) {
+      const toastFn = window.Toast[toastType];
+      if (typeof toastFn === 'function') {
+        toastFn(message);
+        return;
+      }
+      if (typeof window.Toast.show === 'function') {
+        window.Toast.show(message, toastType);
+        return;
+      }
+    }
+
     if (typeof window.showToast === 'function') {
       window.showToast(message, type);
-    } else {
-      console.log(`[${type.toUpperCase()}] ${message}`);
+      return;
     }
+
+    console.log(`[${type.toUpperCase()}] ${message}`);
   },
 
   // ============================================================================
@@ -3654,6 +3665,7 @@ const sessionManager = {
   // Notes state (keyed by folder ID)
   notesByFolder: new Map(),
   currentNote: null,
+  noteModalWorkspaceId: null,
   isNotePreviewMode: false,
 
   // Load notes for a folder
@@ -3968,6 +3980,23 @@ const sessionManager = {
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
 
+    // Note workspace selector
+    document.getElementById('noteWorkspaceChange')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showNoteWorkspaceSelector();
+    });
+
+    document.getElementById('noteWorkspaceSelect')?.addEventListener('change', (e) => {
+      const workspaceId = e.target.value;
+      if (!workspaceId) {
+        this.noteModalWorkspaceId = null;
+        return;
+      }
+      this.noteModalWorkspaceId = workspaceId;
+      this.showNoteWorkspaceBadge(workspaceId, true);
+    });
+
     // Note preview toggle
     document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
 
@@ -4136,12 +4165,106 @@ const sessionManager = {
     }
   },
 
+  // Open note editor modal for a new note
+  openNoteCreateModal(workspaceId = null) {
+    this.currentNote = null;
+    this.noteModalWorkspaceId = workspaceId;
+    this.isNotePreviewMode = false;
+
+    const modal = document.getElementById('noteEditorModal');
+    if (!modal) return;
+
+    const nameInput = document.getElementById('noteNameInput');
+    const contentInput = document.getElementById('noteContentInput');
+    const previewContent = document.getElementById('notePreviewContent');
+    const previewToggle = document.getElementById('notePreviewToggle');
+    const lastSaved = document.getElementById('noteLastSaved');
+    const saveBtn = document.getElementById('saveNoteBtn');
+
+    if (nameInput) nameInput.value = '';
+    if (contentInput) {
+      contentInput.value = '';
+      contentInput.style.display = 'block';
+    }
+    if (previewContent) previewContent.style.display = 'none';
+    if (previewToggle) previewToggle.classList.remove('active');
+    if (lastSaved) lastSaved.textContent = '';
+    if (saveBtn) saveBtn.textContent = 'Create Note';
+
+    if (workspaceId) {
+      this.showNoteWorkspaceBadge(workspaceId, true);
+    } else {
+      this.showNoteWorkspaceSelector();
+    }
+
+    // Reset AI panel state
+    this.hideNoteAIPanel();
+    this.loadNoteAIAgents();
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+
+    setTimeout(() => {
+      nameInput?.focus();
+    }, 100);
+  },
+
+  showNoteWorkspaceBadge(workspaceId, allowChange = false) {
+    const badge = document.getElementById('noteWorkspaceBadge');
+    const nameSpan = document.getElementById('noteWorkspaceName');
+    const selector = document.getElementById('noteWorkspaceSelector');
+    const changeBtn = document.getElementById('noteWorkspaceChange');
+
+    if (selector) selector.style.display = 'none';
+    if (!badge || !nameSpan) return;
+
+    if (!workspaceId) {
+      badge.style.display = 'none';
+      return;
+    }
+
+    const folder = this.findFolderById(workspaceId, this.folders);
+    nameSpan.textContent = folder?.name || 'Unknown Workspace';
+    badge.style.display = 'block';
+    if (changeBtn) changeBtn.style.display = allowChange ? 'inline-flex' : 'none';
+  },
+
+  showNoteWorkspaceSelector() {
+    const badge = document.getElementById('noteWorkspaceBadge');
+    const selector = document.getElementById('noteWorkspaceSelector');
+    if (badge) badge.style.display = 'none';
+    if (selector) selector.style.display = 'block';
+    this.populateNoteWorkspaceDropdown();
+  },
+
+  populateNoteWorkspaceDropdown() {
+    const select = document.getElementById('noteWorkspaceSelect');
+    if (!select) return;
+
+    let options = '<option value="">-- Select a workspace --</option>';
+    const appendOptions = (folders, depth = 0) => {
+      (folders || []).forEach(folder => {
+        const indent = depth > 0 ? `${'-- '.repeat(depth)}` : '';
+        const label = `${indent}${folder.name || 'Unnamed Workspace'}`;
+        const selected = folder.id === this.noteModalWorkspaceId ? ' selected' : '';
+        options += `<option value="${this.escapeHtml(folder.id)}"${selected}>${this.escapeHtml(label)}</option>`;
+        if (folder.children && folder.children.length > 0) {
+          appendOptions(folder.children, depth + 1);
+        }
+      });
+    };
+
+    appendOptions(this.folders);
+    select.innerHTML = options;
+  },
+
   // Open note editor modal
   async openNoteEditor(noteId) {
     const note = await this.getNote(noteId);
     if (!note) return;
 
     this.currentNote = note;
+    this.noteModalWorkspaceId = note.workspace_id || note.folder_id || null;
     this.isNotePreviewMode = false;
 
     const modal = document.getElementById('noteEditorModal');
@@ -4150,6 +4273,7 @@ const sessionManager = {
     const previewContent = document.getElementById('notePreviewContent');
     const previewToggle = document.getElementById('notePreviewToggle');
     const lastSaved = document.getElementById('noteLastSaved');
+    const saveBtn = document.getElementById('saveNoteBtn');
 
     if (nameInput) nameInput.value = note.name;
     if (contentInput) {
@@ -4161,6 +4285,13 @@ const sessionManager = {
     if (lastSaved) {
       lastSaved.textContent = `Last saved: ${this.formatDateTime(note.updated_at)}`;
     }
+    if (saveBtn) saveBtn.textContent = 'Save';
+
+    if (this.noteModalWorkspaceId) {
+      this.showNoteWorkspaceBadge(this.noteModalWorkspaceId, false);
+    } else {
+      this.showNoteWorkspaceSelector();
+    }
 
     // Reset AI panel state
     this.hideNoteAIPanel();
@@ -4171,23 +4302,39 @@ const sessionManager = {
   },
 
   // Create new note for folder (called from folder context menu)
-  async createNewNoteForFolder(folderId) {
-    const note = await this.createNote(folderId, 'Untitled Note', '');
-    if (note) {
-      this.openNoteEditor(note.id);
-    }
+  createNewNoteForFolder(folderId) {
+    this.openNoteCreateModal(folderId);
   },
 
   // Save current note
   async saveCurrentNote() {
-    if (!this.currentNote) return;
-
     const nameInput = document.getElementById('noteNameInput');
     const contentInput = document.getElementById('noteContentInput');
+    const noteName = nameInput?.value?.trim() || 'Untitled Note';
+    const noteContent = contentInput?.value || '';
+
+    if (!this.currentNote) {
+      const workspaceId = this.noteModalWorkspaceId;
+      if (!workspaceId) {
+        this.showToast('Please select a workspace first', 'warning');
+        this.showNoteWorkspaceSelector();
+        return;
+      }
+
+      const created = await this.createNote(workspaceId, noteName, noteContent);
+      if (created) {
+        this.currentNote = created;
+        this.showToast('Note created', 'success');
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
+        modal?.hide();
+      }
+      return;
+    }
 
     const updates = {
-      name: nameInput?.value || 'Untitled Note',
-      content: contentInput?.value || ''
+      name: noteName,
+      content: noteContent
     };
 
     const updated = await this.updateNote(this.currentNote.id, updates);
@@ -4274,6 +4421,7 @@ const sessionManager = {
 
     const agentId = agentSelect?.value || '';
     const prompt = promptInput?.value?.trim() || '';
+    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
 
     // Validate prompt
     if (!prompt) {
@@ -4295,7 +4443,7 @@ const sessionManager = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: prompt,
-          workspace_id: this.currentNote?.folder_id || '',
+          workspace_id: workspaceId,
           agent_id: agentId
         })
       });

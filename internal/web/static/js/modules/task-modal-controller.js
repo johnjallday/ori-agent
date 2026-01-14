@@ -1040,6 +1040,17 @@ class TaskModalController {
     // Try to use existing toast mechanism if available
     if (window.sessionManager?.showToast) {
       window.sessionManager.showToast(message, type);
+    } else if (window.Toast) {
+      const normalizedType = (type || 'info').toLowerCase();
+      const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+      const toastFn = window.Toast[toastType];
+      if (typeof toastFn === 'function') {
+        toastFn(message);
+      } else if (typeof window.Toast.show === 'function') {
+        window.Toast.show(message, toastType);
+      } else {
+        alert(message);
+      }
     } else if (window.workspaceDashboard?.showToast) {
       window.workspaceDashboard.showToast('', message, type);
     } else {
