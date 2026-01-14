@@ -63,10 +63,14 @@ func createRegistryManager() (*registry.Manager, error) {
 		mgr = registry.NewManager()
 	}
 
-	// Refresh plugin registry from GitHub on startup
-	if err := mgr.RefreshFromGitHub(); err != nil {
-		logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
-		logger.Debug("Will use cached or local registry", logger.Fields{})
+	// Refresh plugin registry from GitHub on startup (skip in test mode to avoid blocking startup).
+	if shouldRefreshRegistryOnStartup() {
+		if err := mgr.RefreshFromGitHub(); err != nil {
+			logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
+			logger.Debug("Will use cached or local registry", logger.Fields{})
+		}
+	} else {
+		logger.Debug("Skipping GitHub registry refresh in test mode", logger.Fields{})
 	}
 
 	// Scan uploaded_plugins directory and auto-register any new plugins
@@ -92,10 +96,14 @@ func createRegistryManagerWithMarketplace() (*registry.Manager, *marketplace.Sto
 		mgr = registry.NewManager()
 	}
 
-	// Refresh plugin registry from GitHub on startup
-	if err := mgr.RefreshFromGitHub(); err != nil {
-		logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
-		logger.Debug("Will use cached or local registry", logger.Fields{})
+	// Refresh plugin registry from GitHub on startup (skip in test mode to avoid blocking startup).
+	if shouldRefreshRegistryOnStartup() {
+		if err := mgr.RefreshFromGitHub(); err != nil {
+			logger.Error("Failed to refresh plugin registry from GitHub", logger.Fields{"plugin": err})
+			logger.Debug("Will use cached or local registry", logger.Fields{})
+		}
+	} else {
+		logger.Debug("Skipping GitHub registry refresh in test mode", logger.Fields{})
 	}
 
 	// Scan uploaded_plugins directory and auto-register any new plugins
@@ -106,6 +114,10 @@ func createRegistryManagerWithMarketplace() (*registry.Manager, *marketplace.Sto
 	}
 
 	return mgr, mpStore, nil
+}
+
+func shouldRefreshRegistryOnStartup() bool {
+	return os.Getenv("TEST_MODE") == ""
 }
 
 // createLLMFactory creates a new LLM factory instance.

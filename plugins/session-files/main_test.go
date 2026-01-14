@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newMockClient(handler http.Handler) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, req)
+			return recorder.Result(), nil
+		}),
+	}
+}
+
 func TestValidateFilename(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -251,8 +267,7 @@ func TestBase64Encoding(t *testing.T) {
 
 // TestHandleListWithMockServer tests the list operation with a mock server
 func TestHandleListWithMockServer(t *testing.T) {
-	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
 		}
@@ -270,50 +285,29 @@ func TestHandleListWithMockServer(t *testing.T) {
 			],
 			"count": 1
 		}`))
-	}))
-	defer server.Close()
+	})
 
 	tool := &sessionFilesTool{
-		httpClient: server.Client(),
+		httpClient: newMockClient(handler),
 	}
 
-	// Create a modified handleList that uses our test server URL
-	params := &SessionFilesParams{
-		Operation: "list",
-		SessionID: "test-session",
-	}
-
-	// Make a direct HTTP request to verify the mock works
-	url := server.URL + "/api/sessions/" + params.SessionID + "/files"
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-	resp, err := tool.httpClient.Do(req)
+	result, err := tool.Call(context.Background(), `{"operation":"list","session_id":"test-session"}`)
 	if err != nil {
-		t.Fatalf("HTTP request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
+		t.Fatalf("Call failed: %v", err)
 	}
 
-	var listResp ListFilesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	if !strings.Contains(result, "Files in session test-session") {
+		t.Errorf("expected session header in response, got: %s", result)
 	}
 
-	if listResp.Count != 1 {
-		t.Errorf("expected count 1, got %d", listResp.Count)
-	}
-
-	if len(listResp.Files) != 1 || listResp.Files[0].Name != "test.txt" {
-		t.Error("expected one file named test.txt")
+	if !strings.Contains(result, "test.txt") {
+		t.Errorf("expected file name in response, got: %s", result)
 	}
 }
 
 // TestHandleDeleteWithMockServer tests the delete operation with a mock server
 func TestHandleDeleteWithMockServer(t *testing.T) {
-	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			t.Errorf("expected DELETE, got %s", r.Method)
 		}
@@ -324,24 +318,19 @@ func TestHandleDeleteWithMockServer(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message": "File deleted"}`))
-	}))
-	defer server.Close()
+	})
 
 	tool := &sessionFilesTool{
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+		httpClient: newMockClient(handler),
 	}
 
-	// Make a direct HTTP request to verify the mock works
-	url := server.URL + "/api/sessions/test-session/files/file-123"
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodDelete, url, nil)
-	resp, err := tool.httpClient.Do(req)
+	result, err := tool.Call(context.Background(), `{"operation":"delete","session_id":"test-session","file_id":"file-123"}`)
 	if err != nil {
-		t.Fatalf("HTTP request failed: %v", err)
+		t.Fatalf("Call failed: %v", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	if !strings.Contains(result, "deleted successfully") {
+		t.Errorf("expected delete confirmation, got: %s", result)
 	}
 }
 
@@ -403,12 +392,10 @@ func TestMissingSessionID(t *testing.T) {
 
 // TestMissingRequiredParams tests that required params are validated for each operation
 func TestMissingRequiredParams(t *testing.T) {
-	// Create a mock server that always returns 200 so we can test param validation
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+	})
 
 	tests := []struct {
 		name    string
@@ -448,7 +435,7 @@ func TestMissingRequiredParams(t *testing.T) {
 	}
 
 	tool := &sessionFilesTool{
-		httpClient: server.Client(),
+		httpClient: newMockClient(handler),
 	}
 
 	for _, tt := range tests {
