@@ -476,19 +476,27 @@ function initializeDarkMode() {
   html.setAttribute('data-bs-theme', savedTheme);
   updateDarkModeButton(savedTheme);
 
-  darkModeToggle.addEventListener('click', function() {
-    const currentTheme = html.getAttribute('data-bs-theme');
-    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-bs-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    updateDarkModeButton(newTheme);
-  });
+  // Only add event listener if darkModeToggle exists
+  // Note: themeManager.js may also handle this, so check if already initialized
+  if (darkModeToggle && !darkModeToggle.dataset.mcpInitialized) {
+    darkModeToggle.dataset.mcpInitialized = 'true';
+    darkModeToggle.addEventListener('click', function() {
+      const currentTheme = html.getAttribute('data-bs-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-bs-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      updateDarkModeButton(newTheme);
+    });
+  }
 }
 
 function updateDarkModeButton(theme) {
   const button = document.getElementById('darkModeToggle');
+  if (!button) return;
   const span = button.querySelector('span');
-  span.textContent = theme === 'dark' ? 'Light' : 'Dark';
+  if (span) {
+    span.textContent = theme === 'dark' ? 'Light' : 'Dark';
+  }
 }
 
 // Cleanup on page unload

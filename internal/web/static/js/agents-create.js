@@ -301,11 +301,7 @@ function showLoading(show) {
   document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 // ============================================
 // Auto-Config Functions

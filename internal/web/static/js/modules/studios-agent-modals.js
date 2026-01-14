@@ -571,16 +571,7 @@ function initializeAgentModalListeners() {
   }
 }
 
-/**
- * Utility function to escape HTML (uses window.escapeHtml if available)
- */
-// escapeHtml is defined in studios-workspace.js and exported to window
-function escapeHtml(text) {
-  if (text == null) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 /**
  * Reset auto-config state (called when form is reset or modal closed)

@@ -373,13 +373,7 @@ function renderMobileCards() {
   });
 }
 
-// HTML escape helper
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
+// escapeHtml is provided by dom-utils.js
 
 function renderTagBadges(tags) {
   if (!Array.isArray(tags) || tags.length === 0) {
