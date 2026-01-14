@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/plugindownloader"
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
+	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -61,6 +62,7 @@ type IntegrationSystemFacade struct {
 	MCPRegistry      *mcp.Registry
 	MCPConfigManager *mcp.ConfigManager
 	UpdateManager    *updatemanager.Manager
+	PrivateServices  privateservices.Client
 }
 
 // UISystemFacade manages UI rendering and web-related dependencies
@@ -145,11 +147,13 @@ func NewIntegrationSystemFacade(
 	mcpRegistry *mcp.Registry,
 	mcpConfigManager *mcp.ConfigManager,
 	updateManager *updatemanager.Manager,
+	privateServices privateservices.Client,
 ) *IntegrationSystemFacade {
 	return &IntegrationSystemFacade{
 		MCPRegistry:      mcpRegistry,
 		MCPConfigManager: mcpConfigManager,
 		UpdateManager:    updateManager,
+		PrivateServices:  privateServices,
 	}
 }
 

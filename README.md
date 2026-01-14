@@ -15,6 +15,25 @@ I don't plan on promoting this until Q426 or Q127 (This date may change).
 If you are here early, then welcome! Hope you enjoy this. 
 Let me know, how this is.
 
+## Open-Core Boundary
+
+Ori Agent core is open-source and can be used commercially. Web3/token and marketplace payment services are not included in this repo and are operated privately.
+
+Open-source core includes:
+- Agent runtime, orchestration, plugin SDK, and local plugin execution
+- UI, settings, and local plugin marketplace management
+- Web3 wallet UI for local metadata only (no on-chain operations)
+
+Private services (not included):
+- Ori Token issuance, daily credits, cashout, and anti-cheat
+- Marketplace payments and Ori-specific monetization flows
+
+Details: `docs/architecture/open-core-boundaries.md`
+
+Additional terms:
+- `ORI_SERVICES.md` (private services access)
+- `TRADEMARKS.md` (branding and trademark use)
+
 
 ## 🤖 Supported Providers
 
@@ -334,4 +353,3 @@ buymeacoffee.com/johnjallday
 ---
 
 Made with ❤️ using Go and modern web technologies
-

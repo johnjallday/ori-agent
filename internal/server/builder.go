@@ -234,6 +234,7 @@ func (b *ServerBuilder) createDomainFacades() error {
 		b.server.mcpRegistry,
 		b.server.mcpConfigManager,
 		b.server.updateMgr,
+		b.server.privateServicesClient,
 	)
 
 	// UI System Facade

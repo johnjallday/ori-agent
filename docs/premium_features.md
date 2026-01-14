@@ -3,6 +3,10 @@
 This document captures a proposed Free / Pro / Pro+ tiering plan for Ori Agent,
 focused on individual power users and fully local usage (no cloud dependency).
 
+Note: Web3/token and marketplace payment features are planned for private Ori services
+and are not part of the open-source repo. This document is for internal planning
+and does not provide guidance for third-party web3 implementations.
+
 ## Target Audience
 
 - Individual power users

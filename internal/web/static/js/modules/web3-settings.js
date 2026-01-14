@@ -11,6 +11,7 @@ class Web3SettingsManager {
     this.chainId = null;
     this.ensName = null;
     this.isInitialized = false;
+    this.web3Enabled = true;
 
     // Supported chains configuration
     this.CHAINS = {
@@ -35,6 +36,11 @@ class Web3SettingsManager {
     }
 
     this.cacheElements();
+    this.web3Enabled = !(window.oriFeatures && window.oriFeatures.web3Enabled === false);
+    if (!this.web3Enabled) {
+      this.showDisabledState();
+      return;
+    }
     this.bindEvents();
 
     // Check if ethereum provider is available
@@ -160,6 +166,11 @@ class Web3SettingsManager {
    * Connect wallet
    */
   async connectWallet() {
+    if (!this.web3Enabled) {
+      this.showDisabledState();
+      return;
+    }
+
     if (!window.ethereum) {
       this.showAlert("No Web3 wallet detected. Please install MetaMask.", "warning");
       return;
@@ -222,6 +233,11 @@ class Web3SettingsManager {
    * Disconnect wallet
    */
   async disconnectWallet(silent = false) {
+    if (!this.web3Enabled) {
+      this.showDisabledState();
+      return;
+    }
+
     try {
       // Clear server state
       await fetch("/api/web3-wallet", { method: "DELETE" });
@@ -248,6 +264,11 @@ class Web3SettingsManager {
    * Switch network
    */
   async switchNetwork() {
+    if (!this.web3Enabled) {
+      this.showDisabledState();
+      return;
+    }
+
     if (!window.ethereum || !this.elements.networkSelect) return;
 
     const targetChainId = parseInt(this.elements.networkSelect.value, 10);
@@ -443,6 +464,25 @@ class Web3SettingsManager {
     this.elements.connected.classList.add("d-none");
     this.elements.disconnected.classList.add("d-none");
     this.elements.noWallet.classList.remove("d-none");
+  }
+
+  /**
+   * Show disabled state UI
+   */
+  showDisabledState() {
+    if (!this.elements.statusIndicator) {
+      return;
+    }
+
+    this.elements.statusIndicator.innerHTML =
+      '<span class="badge bg-secondary" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
+    this.elements.statusText.textContent = "Web3 Disabled";
+    this.elements.statusDetails.textContent = "Web3 features are disabled on this server.";
+
+    this.elements.connected.classList.add("d-none");
+    this.elements.disconnected.classList.add("d-none");
+    this.elements.noWallet.classList.add("d-none");
+    this.showAlert("Web3 features are disabled on this server.", "info");
   }
 
   /**

@@ -37,6 +37,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginmanager"
 	"github.com/johnjallday/ori-agent/internal/pluginupdate"
 	"github.com/johnjallday/ori-agent/internal/pluginupdateservice"
+	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -65,33 +66,34 @@ type Server struct {
 
 	// Internal fields (used by builder, kept for backward compatibility)
 	// These are populated during initialization and wrapped in facades
-	clientFactory       *client.Factory
-	llmFactory          *llm.Factory
-	registryManager     *registry.Manager
-	st                  store.Store
-	pluginReg           types.PluginRegistry
-	agentStorePath      string
-	configManager       *config.Manager
-	templateRenderer    *web.TemplateRenderer
-	pluginDownloader    *plugindownloader.PluginDownloader
-	updateMgr           *updatemanager.Manager
-	workspaceStore      workspace.Store
-	taskExecutor        *workspace.TaskExecutor
-	stepExecutor        *workspace.StepExecutor
-	taskScheduler       *workspace.TaskScheduler
-	eventBus            *workspace.EventBus
-	notificationService *workspace.NotificationService
-	studioOrchestrator  *workspace.Orchestrator
-	costTracker         *llm.CostTracker
-	mcpRegistry         *mcp.Registry
-	mcpConfigManager    *mcp.ConfigManager
-	locationManager     *location.Manager
-	onboardingMgr       *onboarding.Manager
-	categoryManager     *pluginmanager.CategoryManager
-	permissionManager   *pluginmanager.PermissionManager
-	notificationManager *pluginmanager.NotificationManager
-	backupManager       *pluginmanager.BackupManager
-	pluginUpdateService *pluginupdateservice.Service
+	clientFactory         *client.Factory
+	llmFactory            *llm.Factory
+	registryManager       *registry.Manager
+	st                    store.Store
+	pluginReg             types.PluginRegistry
+	agentStorePath        string
+	configManager         *config.Manager
+	privateServicesClient privateservices.Client
+	templateRenderer      *web.TemplateRenderer
+	pluginDownloader      *plugindownloader.PluginDownloader
+	updateMgr             *updatemanager.Manager
+	workspaceStore        workspace.Store
+	taskExecutor          *workspace.TaskExecutor
+	stepExecutor          *workspace.StepExecutor
+	taskScheduler         *workspace.TaskScheduler
+	eventBus              *workspace.EventBus
+	notificationService   *workspace.NotificationService
+	studioOrchestrator    *workspace.Orchestrator
+	costTracker           *llm.CostTracker
+	mcpRegistry           *mcp.Registry
+	mcpConfigManager      *mcp.ConfigManager
+	locationManager       *location.Manager
+	onboardingMgr         *onboarding.Manager
+	categoryManager       *pluginmanager.CategoryManager
+	permissionManager     *pluginmanager.PermissionManager
+	notificationManager   *pluginmanager.NotificationManager
+	backupManager         *pluginmanager.BackupManager
+	pluginUpdateService   *pluginupdateservice.Service
 
 	// HTTP Handlers (kept separate as they're endpoints, not core logic)
 	healthManager          *healthhttp.Manager
@@ -246,11 +248,23 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 	}
 }
 
+func (s *Server) privateCapabilitiesSnapshot() privateservices.Capabilities {
+	if s.privateServicesClient == nil {
+		return privateservices.NoopClient{}.Capabilities()
+	}
+	return s.privateServicesClient.Capabilities()
+}
+
 // prepareBasePageData prepares common page data with theme and current agent
 func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data := web.GetDefaultData()
 	data.CurrentPage = pageName
 	data.Theme = s.Storage.OnboardingMgr.GetTheme()
+
+	caps := s.privateCapabilitiesSnapshot()
+	data.Extra["Web3Enabled"] = caps.Web3Wallet
+	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
+	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
 
 	if agents, current := s.Storage.ListAgents(); len(agents) > 0 {
 		currentAgentName := current
