@@ -136,15 +136,12 @@ const sessionManager = {
       this.createNewNoteForFolder(this.activeFolder);
     });
 
-    // New task button - open task modal for active folder
+    // New task button - open task modal (workspace can be selected in modal if not active)
     document.getElementById('newTaskBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!this.activeFolder) {
-        this.showToast('Please select a workspace first', 'warning');
-        return;
-      }
-      this.openTaskModalForWorkspace(this.activeFolder);
+      // Open task modal - if no active folder, user can select workspace in the modal
+      this.openTaskModalForWorkspace(this.activeFolder || null);
     });
 
     document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.handleEmptyStateAction());

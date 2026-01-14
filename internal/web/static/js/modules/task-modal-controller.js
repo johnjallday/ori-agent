@@ -85,6 +85,23 @@ class TaskModalController {
       }
     });
 
+    // Workspace selector handlers
+    document.getElementById('taskModalChangeWorkspace')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.showWorkspaceSelector();
+    });
+
+    document.getElementById('taskModalWorkspaceSelect')?.addEventListener('change', (e) => {
+      const newWorkspaceId = e.target.value;
+      if (newWorkspaceId) {
+        this.workspaceId = newWorkspaceId;
+        this.showWorkspaceBadge(newWorkspaceId);
+        // Re-populate agent dropdown for new workspace
+        this.populateAgentDropdown(newWorkspaceId);
+      }
+    });
+
     // Fetch system paths
     this.fetchSystemPaths();
 
@@ -196,8 +213,12 @@ class TaskModalController {
   async showWorkspaceBadge(workspaceId) {
     const badge = document.getElementById('taskModalWorkspaceBadge');
     const nameSpan = document.getElementById('taskModalWorkspaceName');
+    const selector = document.getElementById('taskModalWorkspaceSelector');
 
     if (!badge || !nameSpan) return;
+
+    // Hide selector when showing badge
+    if (selector) selector.style.display = 'none';
 
     if (!workspaceId) {
       badge.style.display = 'none';
@@ -239,12 +260,63 @@ class TaskModalController {
   }
 
   /**
+   * Show workspace selector dropdown
+   */
+  showWorkspaceSelector() {
+    const badge = document.getElementById('taskModalWorkspaceBadge');
+    const selector = document.getElementById('taskModalWorkspaceSelector');
+
+    if (badge) badge.style.display = 'none';
+    if (selector) selector.style.display = 'block';
+
+    // Populate the dropdown
+    this.populateWorkspaceDropdown();
+  }
+
+  /**
+   * Populate workspace dropdown with available workspaces
+   */
+  async populateWorkspaceDropdown() {
+    const select = document.getElementById('taskModalWorkspaceSelect');
+    if (!select) return;
+
+    // Start with default option
+    let options = '<option value="">-- Select a workspace --</option>';
+
+    try {
+      // Fetch all workspaces
+      const response = await fetch('/api/workspaces');
+      if (response.ok) {
+        const data = await response.json();
+        const workspaces = data.folders || data.workspaces || [];
+
+        workspaces.forEach(ws => {
+          const selected = ws.id === this.workspaceId ? 'selected' : '';
+          options += `<option value="${ws.id}" ${selected}>${ws.name || 'Unnamed Workspace'}</option>`;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load workspaces:', err);
+    }
+
+    // Fallback: try to get from sessionManager
+    if (options === '<option value="">-- Select a workspace --</option>' && window.sessionManager?.folders) {
+      window.sessionManager.folders.forEach(folder => {
+        const selected = folder.id === this.workspaceId ? 'selected' : '';
+        options += `<option value="${folder.id}" ${selected}>${folder.name || 'Unnamed Workspace'}</option>`;
+      });
+    }
+
+    select.innerHTML = options;
+  }
+
+  /**
    * Open the modal for creating a new task
-   * @param {string} workspaceId - The workspace ID to create the task in
+   * @param {string} workspaceId - The workspace ID to create the task in (optional - if not provided, shows selector)
    * @param {string} prefillTitle - Optional title to prefill
    * @param {function} onSave - Optional callback after successful save
    */
-  async openForCreate(workspaceId, prefillTitle = '', onSave = null) {
+  async openForCreate(workspaceId = null, prefillTitle = '', onSave = null) {
     this.init();
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
@@ -259,8 +331,13 @@ class TaskModalController {
       modalTitle.textContent = 'Create Task';
     }
 
-    // Show workspace badge
-    await this.showWorkspaceBadge(workspaceId);
+    // Show workspace badge or selector based on whether workspaceId is provided
+    if (workspaceId) {
+      await this.showWorkspaceBadge(workspaceId);
+    } else {
+      // No workspace pre-selected - show the selector
+      this.showWorkspaceSelector();
+    }
 
     // Check LLM availability to determine default mode
     await this.checkLlmAvailability();
@@ -412,7 +489,9 @@ class TaskModalController {
     }
 
     if (!this.workspaceId) {
-      this.showToast('No workspace selected', 'error');
+      this.showToast('Please select a workspace for this task', 'error');
+      // Show the workspace selector if it's hidden
+      this.showWorkspaceSelector();
       return;
     }
 
@@ -504,7 +583,9 @@ class TaskModalController {
     }
 
     if (!this.workspaceId) {
-      this.showToast('No workspace selected', 'error');
+      this.showToast('Please select a workspace for this task', 'error');
+      // Show the workspace selector if it's hidden
+      this.showWorkspaceSelector();
       return;
     }
 
