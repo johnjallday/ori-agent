@@ -446,22 +446,32 @@ Please fix these test failures by modifying the source files (not test files, un
   fi
 CLAUDE_AUTOFIX_DISABLED
 
-  # Tests failed - invoke Ollama to analyze and suggest fixes
-  # Check if ollama CLI is available
-  if command -v ollama &> /dev/null; then
-    echo -e "${BLUE}Invoking Ollama (ministral-3) to analyze test errors...${NC}"
+  # Tests failed - automatically invoke Codex to fix
+  # Check if codex CLI is available
+  if command -v codex &> /dev/null; then
+    echo -e "${BLUE}Automatically invoking Codex to fix test errors...${NC}"
     echo ""
 
-    # Extract the failing test output (more lines for race conditions which are verbose)
-    TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -200)
+    # Feedback loop: keep fixing until tests pass or max iterations
+    MAX_ITERATIONS=3
+    ITERATION=1
+    TESTS_PASSED=false
 
-    echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║       OLLAMA TEST ERROR ANALYSIS           ║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
-    echo ""
+    while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$TESTS_PASSED" = false ]; do
+      echo ""
+      echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+      echo -e "${BLUE}║     CODEX FIX ITERATION $ITERATION/$MAX_ITERATIONS              ║${NC}"
+      echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+      echo ""
 
-    # Create prompt for Ollama
-    PROMPT="You are a Go developer. Analyze these test failures and provide specific fixes.
+      # Extract the failing test output (more lines for race conditions which are verbose)
+      TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -300)
+
+      echo -e "${BLUE}Invoking Codex to fix test errors...${NC}"
+      echo ""
+
+      # Create prompt for Codex
+      PROMPT="The following Go tests are failing. Please analyze the errors and fix them.
 
 IMPORTANT: If you see 'DATA RACE' or 'race detected' errors, this means concurrent goroutines are accessing shared data without synchronization. Look at the file paths and line numbers in the race output - you'll need to add mutex locking (sync.Mutex or sync.RWMutex) around the shared data access.
 
@@ -469,24 +479,66 @@ Test output:
 
 $TEST_ERRORS
 
-Please:
-1. Identify the root cause of each failure
-2. Provide the specific code changes needed to fix each issue
-3. Show the file path and line numbers where changes should be made"
+Please fix these test failures by modifying the source files (not test files, unless the test itself is wrong)."
 
-    # Run Ollama with ministral-3 model
-    echo "$PROMPT" | ollama run ministral-3
+      # Call Codex with the test errors
+      if printf '%s\n' "$PROMPT" | codex exec --full-auto -C "$(pwd)" -; then
+        echo ""
+        echo -e "${GREEN}✓ Codex finished processing${NC}"
+      else
+        echo ""
+        echo -e "${YELLOW}⚠️  Codex encountered an issue${NC}"
+      fi
 
-    echo ""
-    echo -e "${YELLOW}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║         MANUAL FIXES REQUIRED              ║${NC}"
-    echo -e "${YELLOW}╚════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}Review the analysis above and apply the suggested fixes.${NC}"
-    echo -e "${YELLOW}Then re-run: ./scripts/pre-release-check.sh${NC}"
-    echo ""
+      echo ""
+      echo -e "${BLUE}Re-running tests after Codex fixes...${NC}"
+      echo ""
+      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+      echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
+      echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+      if go test -p 1 -race ./... 2>&1 | tee "$TEST_OUTPUT_FILE"; then
+        echo -e "${GREEN}✅ All Tests (iteration $ITERATION): PASSED${NC}"
+        echo ""
+        TESTS_PASSED=true
+        # Remove the original failure from FAILED_CHECKS
+        FAILED_CHECKS=("${FAILED_CHECKS[@]/All Tests/}")
+      else
+        echo -e "${RED}❌ All Tests (iteration $ITERATION): FAILED${NC}"
+        echo ""
+
+        if [ $ITERATION -lt $MAX_ITERATIONS ]; then
+          echo -e "${YELLOW}⚠️  Still have test failures. Attempting fix again...${NC}"
+          echo ""
+        else
+          echo -e "${RED}❌ Maximum iterations reached. Manual intervention required.${NC}"
+          echo ""
+        fi
+      fi
+
+      ITERATION=$((ITERATION + 1))
+    done
+
+    if [ "$TESTS_PASSED" = true ]; then
+      echo ""
+      echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
+      echo -e "${GREEN}║         TESTS FIXED BY CODEX               ║${NC}"
+      echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+      echo ""
+      echo -e "${GREEN}✅ All test errors fixed successfully!${NC}"
+      echo ""
+    else
+      echo ""
+      echo -e "${RED}╔════════════════════════════════════════════╗${NC}"
+      echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
+      echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
+      echo ""
+      echo -e "${RED}❌ Codex could not resolve all test errors.${NC}"
+      echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
+      echo ""
+    fi
   else
-    echo -e "${RED}❌ Ollama not found. Install from: https://ollama.ai${NC}"
+    echo -e "${RED}❌ Codex CLI not found. Install from: https://github.com/openai/codex${NC}"
     echo ""
     echo -e "${YELLOW}Falling back to diagnostic tool...${NC}"
     echo ""
