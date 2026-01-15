@@ -527,6 +527,11 @@
   display: none;
 }
 
+.workspace-hub[data-state="launcher"] .workspace-hub-header,
+.workspace-hub[data-state="loading"] .workspace-hub-header {
+  display: none;
+}
+
 .workspace-hub[data-state="launcher"] .workspace-launcher {
   display: block;
 }

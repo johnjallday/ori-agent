@@ -1270,10 +1270,19 @@ function setupSidebarToggle() {
     // Handle window resize
     function handleSidebarResponsive() {
       if (window.innerWidth >= 992) { // lg breakpoint
-        // Show sidebar on large screens
-        sidebar.classList.remove('d-none');
+        if (sidebar.classList.contains('d-none')) {
+          sidebar.classList.remove('d-lg-block');
+          sidebar.classList.remove('sidebar-mobile-show');
+          sidebarToggle.setAttribute('aria-expanded', 'false');
+          // Set sidebar width to 0 when hidden
+          document.documentElement.style.setProperty('--sidebar-width', '0px');
+          return;
+        }
+
+        // Keep sidebar visible on large screens when explicitly opened
         sidebar.classList.remove('sidebar-mobile-show');
         sidebar.classList.add('d-lg-block');
+        sidebarToggle.setAttribute('aria-expanded', 'true');
         // Restore sidebar width
         const savedWidth = localStorage.getItem('sidebarWidth') || '300';
         document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
@@ -1282,6 +1291,7 @@ function setupSidebarToggle() {
         sidebar.classList.add('d-none');
         sidebar.classList.remove('d-lg-block');
         sidebar.classList.remove('sidebar-mobile-show');
+        sidebarToggle.setAttribute('aria-expanded', 'false');
         // Set sidebar width to 0
         document.documentElement.style.setProperty('--sidebar-width', '0px');
       }
