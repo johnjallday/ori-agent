@@ -2,7 +2,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light home-hub">
   <!-- Toast Notification Container -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
@@ -16,10 +16,12 @@
     {{template "session-sidebar.tmpl" .}}
 
     <!-- Main Content -->
-    <main class="main-content" role="main" aria-label="Chat area">
-      {{template "chat-area.tmpl" .}}
+    <main class="main-content" role="main" aria-label="Workspace hub">
+      {{template "workspace-hub.tmpl" .}}
     </main>
   </div>
+
+  {{template "chat-area.tmpl" .}}
 
   <!-- Add Agent Modal -->
   <div class="modal fade" id="addAgentModal" tabindex="-1" aria-labelledby="addAgentModalLabel" aria-hidden="true">
@@ -434,5 +436,6 @@
   <script src="/js/modules/form-validation.js"></script>
   <script src="/js/file-manager.js"></script>
   <script src="/js/app.js?v=1694538177"></script>
+  <script src="/js/modules/workspace-hub.js"></script>
 </body>
 </html>

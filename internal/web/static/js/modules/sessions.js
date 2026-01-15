@@ -51,6 +51,13 @@ const sessionManager = {
     return this.activeSessionId;
   },
 
+  // Ensure chat panel is visible when switching/creating sessions
+  openChatPanelIfAvailable() {
+    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
+      window.chatPanel.open();
+    }
+  },
+
   // Get headers for API requests that need session context
   getSessionHeaders() {
     const headers = {};
@@ -1368,6 +1375,8 @@ const sessionManager = {
           clearChatHistory();
         }
 
+        this.openChatPanelIfAvailable();
+
         return data.session;
       }
       return null;
@@ -1482,6 +1491,8 @@ const sessionManager = {
         if (typeof clearChatHistory === 'function') {
           clearChatHistory();
         }
+
+        this.openChatPanelIfAvailable();
       }
     } catch (error) {
       console.error('Failed to create session in folder:', error);
@@ -1513,6 +1524,8 @@ const sessionManager = {
 
       // Restore messages to chat area
       this.restoreSessionMessages(session);
+
+      this.openChatPanelIfAvailable();
 
       // Initialize/update session file manager
       this.initializeSessionFiles(sessionId);

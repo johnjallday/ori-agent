@@ -1,61 +1,142 @@
-<div class="modern-card p-4 mb-3" id="chatContainer" style="height: 60vh; position: relative; display: flex; flex-direction: column;">
-  <!-- Combined Session & Agent Info Bar -->
-  <div id="chatInfoBar" class="chat-info-bar mb-3" style="display: none;">
-    <div class="d-flex align-items-center justify-content-between">
-      <div class="d-flex align-items-center gap-3">
-        <!-- Session Info -->
-        <div id="chatSessionInfo" class="d-flex align-items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="chat-session-icon">
-            <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
-          </svg>
-          <span class="chat-session-title" id="chatSessionTitle">-</span>
-        </div>
-        <!-- Separator -->
-        <span class="chat-info-separator">|</span>
-        <!-- Agent Info -->
-        <div id="chatAgentInfo" class="d-flex align-items-center gap-2">
-          <span class="chat-agent-indicator"></span>
-          <span class="chat-agent-name" id="chatAgentName">-</span>
-        </div>
-        <!-- Separator -->
-        <span class="chat-info-separator">|</span>
-        <!-- Model Info -->
-        <div id="chatModelInfo" class="d-flex align-items-center gap-2" style="display: none;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="chat-model-icon" aria-hidden="true">
-            <path d="M9,3V5H15V3H17V5A2,2 0 0,1 19,7V17A2,2 0 0,1 17,19V21H15V19H9V21H7V19A2,2 0 0,1 5,17V7A2,2 0 0,1 7,5V3H9M7,7V17H17V7H7Z"/>
-          </svg>
-          <span class="chat-model-name" id="chatModelName">-</span>
+<div id="chatPanelBackdrop" class="chat-panel-backdrop" aria-hidden="true"></div>
+<div id="chatPanel" class="chat-panel" aria-hidden="true">
+  <div class="chat-panel-header">
+    <div class="chat-panel-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2" aria-hidden="true">
+        <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
+      </svg>
+      <span>Chat</span>
+    </div>
+    <button type="button" id="chatPanelClose" class="chat-panel-close" aria-label="Close chat panel">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+      </svg>
+    </button>
+  </div>
+  <div class="chat-panel-content">
+    <div class="modern-card p-4 mb-3" id="chatContainer" style="height: 60vh; position: relative; display: flex; flex-direction: column;">
+      <!-- Combined Session & Agent Info Bar -->
+      <div id="chatInfoBar" class="chat-info-bar mb-3" style="display: none;">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="d-flex align-items-center gap-3">
+            <!-- Session Info -->
+            <div id="chatSessionInfo" class="d-flex align-items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="chat-session-icon">
+                <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
+              </svg>
+              <span class="chat-session-title" id="chatSessionTitle">-</span>
+            </div>
+            <!-- Separator -->
+            <span class="chat-info-separator">|</span>
+            <!-- Agent Info -->
+            <div id="chatAgentInfo" class="d-flex align-items-center gap-2">
+              <span class="chat-agent-indicator"></span>
+              <span class="chat-agent-name" id="chatAgentName">-</span>
+            </div>
+            <!-- Separator -->
+            <span class="chat-info-separator">|</span>
+            <!-- Model Info -->
+            <div id="chatModelInfo" class="d-flex align-items-center gap-2" style="display: none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="chat-model-icon" aria-hidden="true">
+                <path d="M9,3V5H15V3H17V5A2,2 0 0,1 19,7V17A2,2 0 0,1 17,19V21H15V19H9V21H7V19A2,2 0 0,1 5,17V7A2,2 0 0,1 7,5V3H9M7,7V17H17V7H7Z"/>
+              </svg>
+              <span class="chat-model-name" id="chatModelName">-</span>
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary chat-tasks-btn" id="chatTasksBtn" title="View session tasks" aria-label="View session tasks">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+              </svg>
+              <span>Tasks</span>
+              <span id="chatTasksBadge" class="chat-tasks-badge d-none">0</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary chat-agent-edit-btn" id="chatEditAgentBtn" title="Edit agent settings" aria-label="Edit agent settings">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+              <span>Edit</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary chat-agent-change-btn" id="chatChangeAgentBtn" title="Change agent for this session" aria-label="Change agent for this session">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2Z"/>
+              </svg>
+              <span>Change</span>
+            </button>
+          </div>
         </div>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary chat-tasks-btn" id="chatTasksBtn" title="View session tasks" aria-label="View session tasks">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M3,5H9V11H3V5M5,7V9H7V7H5M11,7H21V9H11V7M11,15H21V17H11V15M5,20L1.5,16.5L2.91,15.09L5,17.17L9.59,12.59L11,14L5,20Z"/>
+      <div id="chatArea" class="overflow-auto flex-grow-1" style="padding-right: 0.5rem;" role="log" aria-label="Chat messages" aria-live="polite">
+        <!-- Chat messages will be populated here -->
+      </div>
+    </div>
+
+    <div class="modern-card p-3" id="inputContainer">
+      <!-- File Upload Area -->
+      <div id="uploadedFilesArea" class="mb-3" style="display: none;">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <label class="chat-label" style="font-size: 12px; margin: 0;">Uploaded Files:</label>
+          <button id="clearFilesBtn" class="btn btn-sm btn-link clear-files-btn" style="padding: 0; font-size: 12px;" aria-label="Clear all uploaded files">
+            Clear all
+          </button>
+        </div>
+        <div id="uploadedFilesList" class="d-flex flex-wrap gap-2"></div>
+      </div>
+
+      <div class="d-flex gap-3 align-items-end">
+        <div class="flex-grow-1">
+          <div id="inputWrapper" class="input-wrapper">
+            <textarea
+              id="input"
+              class="modern-input w-100"
+              placeholder="Type your message here..."
+              rows="3"
+              style="resize: vertical; min-height: 80px; max-height: 200px; font-family: inherit;"
+              aria-label="Message input"
+            ></textarea>
+            <div id="dropZoneIndicator" class="drop-zone-indicator"></div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <div class="d-flex gap-2 align-items-center">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="enterToSend" checked>
+                <label class="form-check-label chat-label" for="enterToSend" style="font-size: 12px;">
+                  Enter to send
+                </label>
+              </div>
+              <label for="fileUpload" class="btn btn-sm attach-files-btn" style="margin: 0; padding: 4px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); cursor: pointer; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" aria-label="Attach files to message">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                  <path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/>
+                </svg>
+                Attach Files
+              </label>
+              <input type="file" id="fileUpload" multiple accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.xml,.html,.mp3,.wav,.flac,.ogg,.zip,.pptx,.xlsx,.png,.jpg,.jpeg,.gif,.webp" style="display: none;" aria-label="Select files to upload">
+              <button id="clearChatBtn" class="btn btn-sm clear-chat-btn" style="padding: 4px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" title="Clear chat history" aria-label="Clear chat history">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                  <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                </svg>
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+        <button
+          id="sendBtn"
+          class="modern-btn modern-btn-primary"
+          style="height: fit-content; min-width: 48px; padding: 0.5rem 1rem;"
+          title="Send message"
+          aria-label="Send message"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/>
           </svg>
-          <span>Tasks</span>
-          <span id="chatTasksBadge" class="chat-tasks-badge d-none">0</span>
-        </button>
-        <button type="button" class="btn btn-sm btn-outline-primary chat-agent-edit-btn" id="chatEditAgentBtn" title="Edit agent settings" aria-label="Edit agent settings">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
-          </svg>
-          <span>Edit</span>
-        </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary chat-agent-change-btn" id="chatChangeAgentBtn" title="Change agent for this session" aria-label="Change agent for this session">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2Z"/>
-          </svg>
-          <span>Change</span>
         </button>
       </div>
     </div>
   </div>
-  <div id="chatArea" class="overflow-auto flex-grow-1" style="padding-right: 0.5rem;" role="log" aria-label="Chat messages" aria-live="polite">
-    <!-- Chat messages will be populated here -->
-  </div>
 </div>
 
-<!-- Workspace Tasks Modal (Popup) - Outside chatContainer for proper z-index -->
+<!-- Workspace Tasks Modal (Popup) - Outside chat panel for proper z-index -->
 <div id="mainTaskModal" class="main-task-modal" style="display: none;">
   <div class="main-task-modal-backdrop" id="mainTaskModalBackdrop"></div>
   <div class="main-task-modal-dialog">
@@ -187,68 +268,5 @@
       <button type="button" class="schedule-detail-btn schedule-detail-btn-toggle" id="scheduleDetailToggleBtn">Disable</button>
       <button type="button" class="schedule-detail-btn schedule-detail-btn-trigger" id="scheduleDetailTriggerBtn">Trigger Now</button>
     </div>
-  </div>
-</div>
-
-<div class="modern-card p-3" id="inputContainer">
-  <!-- File Upload Area -->
-  <div id="uploadedFilesArea" class="mb-3" style="display: none;">
-    <div class="d-flex align-items-center justify-content-between mb-2">
-      <label class="chat-label" style="font-size: 12px; margin: 0;">Uploaded Files:</label>
-      <button id="clearFilesBtn" class="btn btn-sm btn-link clear-files-btn" style="padding: 0; font-size: 12px;" aria-label="Clear all uploaded files">
-        Clear all
-      </button>
-    </div>
-    <div id="uploadedFilesList" class="d-flex flex-wrap gap-2"></div>
-  </div>
-
-  <div class="d-flex gap-3 align-items-end">
-    <div class="flex-grow-1">
-      <div id="inputWrapper" class="input-wrapper">
-        <textarea
-          id="input"
-          class="modern-input w-100"
-          placeholder="Type your message here..."
-          rows="3"
-          style="resize: vertical; min-height: 80px; max-height: 200px; font-family: inherit;"
-          aria-label="Message input"
-        ></textarea>
-        <div id="dropZoneIndicator" class="drop-zone-indicator"></div>
-      </div>
-      <div class="d-flex justify-content-between align-items-center mt-2">
-        <div class="d-flex gap-2 align-items-center">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="enterToSend" checked>
-            <label class="form-check-label chat-label" for="enterToSend" style="font-size: 12px;">
-              Enter to send
-            </label>
-          </div>
-          <label for="fileUpload" class="btn btn-sm attach-files-btn" style="margin: 0; padding: 4px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); cursor: pointer; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" aria-label="Attach files to message">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
-              <path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/>
-            </svg>
-            Attach Files
-          </label>
-          <input type="file" id="fileUpload" multiple accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.xml,.html,.mp3,.wav,.flac,.ogg,.zip,.pptx,.xlsx,.png,.jpg,.jpeg,.gif,.webp" style="display: none;" aria-label="Select files to upload">
-          <button id="clearChatBtn" class="btn btn-sm clear-chat-btn" style="padding: 4px 10px; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" title="Clear chat history" aria-label="Clear chat history">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
-              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
-            </svg>
-            Clear
-          </button>
-        </div>
-      </div>
-    </div>
-    <button
-      id="sendBtn"
-      class="modern-btn modern-btn-primary"
-      style="height: fit-content; min-width: 48px; padding: 0.5rem 1rem;"
-      title="Send message"
-      aria-label="Send message"
-    >
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M2,21L23,12L2,3V10L17,12L2,14V21Z"/>
-      </svg>
-    </button>
   </div>
 </div>

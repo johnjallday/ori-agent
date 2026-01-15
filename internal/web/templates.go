@@ -72,6 +72,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/head.tmpl",
 		"templates/components/sidebar.tmpl",
 		"templates/components/session-sidebar.tmpl",
+		"templates/components/workspace-hub.tmpl",
 		"templates/components/chat-area.tmpl",
 		"templates/components/task-modal.tmpl",
 		"templates/components/modals.tmpl",

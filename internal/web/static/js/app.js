@@ -1089,6 +1089,48 @@ function setupChat() {
   appLog.debug('Chat functionality initialized');
 }
 
+// ---- Chat Panel (Drawer) ----
+function setupChatPanel() {
+  const panel = document.getElementById('chatPanel');
+  if (!panel) return;
+
+  const closeBtn = document.getElementById('chatPanelClose');
+  const backdrop = document.getElementById('chatPanelBackdrop');
+  const input = document.getElementById('input');
+
+  const open = () => {
+    document.body.classList.add('chat-panel-open');
+    panel.setAttribute('aria-hidden', 'false');
+    if (backdrop) backdrop.setAttribute('aria-hidden', 'false');
+    setTimeout(() => input?.focus(), 50);
+  };
+
+  const close = () => {
+    document.body.classList.remove('chat-panel-open');
+    panel.setAttribute('aria-hidden', 'true');
+    if (backdrop) backdrop.setAttribute('aria-hidden', 'true');
+  };
+
+  const toggle = () => {
+    if (document.body.classList.contains('chat-panel-open')) {
+      close();
+    } else {
+      open();
+    }
+  };
+
+  closeBtn?.addEventListener('click', close);
+  backdrop?.addEventListener('click', close);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('chat-panel-open')) {
+      close();
+    }
+  });
+
+  window.chatPanel = { open, close, toggle, isOpen: () => document.body.classList.contains('chat-panel-open') };
+}
+
 // ---- Sidebar Functionality ----
 // Sidebar functionality has been moved to modular files:
 // - js/modules/agents.js - Agent management
@@ -1261,6 +1303,7 @@ async function initializeApp() {
 
   // Set up chat functionality
   setupChat();
+  setupChatPanel();
 
   // Set up sidebar toggle functionality
   setupSidebarToggle();
