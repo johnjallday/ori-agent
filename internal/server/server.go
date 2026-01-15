@@ -380,15 +380,8 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("workspaces")
-	// Note: uses "studios" template
-	html, err := s.UI.TemplateRenderer.RenderTemplate("studios", data)
-	if err != nil {
-		logger.Error("Failed to render studios template", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Internal Server Error")
-		return
-	}
-	orihttp.WriteHTML(w, html)
+	// Redirect to home page - workspace hub is now on the home page
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // handleWorkspacesRoutes handles all /workspaces/* routes
@@ -396,8 +389,8 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// Extract path after /workspaces/
 	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
 	if path == "" || path == r.URL.Path {
-		// No ID provided, redirect to workspaces list
-		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		// No ID provided, redirect to home page
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
@@ -411,19 +404,8 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Otherwise, serve the workspace dashboard
-	s.serveWorkspaceDashboard(w, r, workspaceID)
-}
-
-func (s *Server) serveWorkspaceDashboard(w http.ResponseWriter, r *http.Request, workspaceID string) {
-	data := s.prepareBasePageData("workspaces")
-	data.Title = "Workspace Dashboard - Ori Agent"
-	data.BrandText = "Ori Agent"
-	data.ShowSidebarToggle = true
-	data.Extra = map[string]interface{}{
-		"WorkspaceID": workspaceID,
-	}
-	s.renderAndWritePage(w, "workspace-dashboard", data)
+	// Otherwise, redirect to home page (workspace hub has all dashboard features now)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, r *http.Request, workspaceID string) {

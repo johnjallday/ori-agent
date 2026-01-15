@@ -1081,6 +1081,12 @@ const sessionManager = {
         });
       }
 
+      // Reset auto mode info text to default (no workspace pre-selected)
+      const autoModeText = document.getElementById('chatAutoModeText');
+      if (autoModeText) {
+        autoModeText.textContent = 'The AI will automatically select the best workspace and agent after a few messages.';
+      }
+
       // Populate agent dropdown
       const agentSelect = document.getElementById('chatAgentSelect');
       if (agentSelect) {
@@ -1149,6 +1155,16 @@ const sessionManager = {
         });
       }
 
+      // Update auto mode info text based on whether workspace is pre-selected
+      const autoModeText = document.getElementById('chatAutoModeText');
+      if (autoModeText) {
+        if (workspaceId) {
+          autoModeText.textContent = 'The workspace is already set. The AI will select the best agent after a few messages.';
+        } else {
+          autoModeText.textContent = 'The AI will automatically select the best workspace and agent after a few messages.';
+        }
+      }
+
       // Populate agent dropdown
       const agentSelect = document.getElementById('chatAgentSelect');
       if (agentSelect) {
@@ -1212,23 +1228,37 @@ const sessionManager = {
     }
 
     if (this.chatAutoMode && this.chatLlmAvailable) {
-      // Auto mode - create session with default agent, no workspace
-      // The workspace and agent will be determined after a few messages
+      // Auto mode - create session with default agent
+      // If workspace is pre-selected, use it (no AI classification needed for workspace)
       const agents = await this.fetchAgents();
       if (!agents || agents.length === 0) {
         console.error('No agents available');
         return;
       }
 
+      // Check if workspace was pre-selected
+      const workspaceSelect = document.getElementById('chatWorkspaceSelect');
+      const preSelectedWorkspace = workspaceSelect?.value || '';
+
       // Use first agent as default
       const defaultAgent = agents[0].name;
-      const session = await this.createSessionWithAgent(defaultAgent);
+
+      let session;
+      if (preSelectedWorkspace) {
+        // Workspace already known - create session in that workspace directly
+        session = await this.createSessionWithAgentInFolder(defaultAgent, preSelectedWorkspace);
+        console.log('Auto-mode session created with pre-selected workspace:', session?.id, preSelectedWorkspace);
+      } else {
+        // No workspace pre-selected - let AI classify later
+        session = await this.createSessionWithAgent(defaultAgent);
+        if (session && session.id) {
+          // Mark this session for auto-classification (workspace will be determined by AI)
+          this.autoModeSessionIds.add(session.id);
+          console.log('Auto-mode session created (will classify workspace):', session.id);
+        }
+      }
 
       if (session && session.id) {
-        // Mark this session for auto-classification
-        this.autoModeSessionIds.add(session.id);
-        console.log('Auto-mode session created:', session.id);
-
         // Send the initial message after a brief delay to ensure UI is ready
         if (initialMessage && window.sendMessageToChat) {
           setTimeout(() => {

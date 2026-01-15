@@ -14,9 +14,7 @@
     workspaceUpdated: document.getElementById('hubWorkspaceUpdated'),
     workspaceAgents: document.getElementById('hubWorkspaceAgents'),
     workspaceDescription: document.getElementById('hubWorkspaceDescription'),
-    workspaceOpenBtn: document.getElementById('hubOpenWorkspaceBtn'),
     workspaceCanvasBtn: document.getElementById('hubOpenCanvasBtn'),
-    newTaskBtn: document.getElementById('hubNewTaskBtn'),
     addTaskBtn: document.getElementById('hubAddTaskBtn'),
     refreshTasksBtn: document.getElementById('hubRefreshTasksBtn'),
     tasksList: document.getElementById('hubTasksList'),
@@ -26,14 +24,18 @@
     statScheduled: document.getElementById('hubStatScheduled'),
     statFailed: document.getElementById('hubStatFailed'),
     schedulesList: document.getElementById('hubSchedulesList'),
-    schedulesBtn: document.getElementById('hubSchedulesBtn'),
     viewSchedulesBtn: document.getElementById('hubViewSchedulesBtn'),
-    openChatBtn: document.getElementById('hubOpenChatBtn'),
     launcher: document.getElementById('workspaceLauncher'),
     launcherGrid: document.getElementById('launcherGrid'),
     launcherEmpty: document.getElementById('launcherEmptyState'),
     launcherRefreshBtn: document.getElementById('launcherRefreshBtn'),
-    loadingOverlay: document.getElementById('workspaceHubLoading')
+    loadingOverlay: document.getElementById('workspaceHubLoading'),
+    sessionsList: document.getElementById('hubSessionsList'),
+    newSessionBtn: document.getElementById('hubNewSessionBtn'),
+    notesList: document.getElementById('hubNotesList'),
+    newNoteBtn: document.getElementById('hubNewNoteBtn'),
+    filesList: document.getElementById('hubFilesList'),
+    addFileBtn: document.getElementById('hubAddFileBtn')
   };
 
   const state = {
@@ -41,7 +43,10 @@
     workspaceMap: new Map(),
     selectedId: null,
     tasks: [],
-    stats: null
+    stats: null,
+    sessions: [],
+    notes: [],
+    files: []
   };
 
   function escapeHtml(text) {
@@ -162,10 +167,6 @@
       elements.workspaceDescription.textContent = workspace.description || 'No description';
     }
 
-    if (elements.workspaceOpenBtn) {
-      elements.workspaceOpenBtn.href = `/workspaces/${encodeURIComponent(workspace.id)}`;
-    }
-
     if (elements.workspaceCanvasBtn) {
       elements.workspaceCanvasBtn.href = `/workspaces/${encodeURIComponent(workspace.id)}/canvas`;
     }
@@ -181,7 +182,6 @@
     if (elements.workspaceAgents) elements.workspaceAgents.textContent = '--';
     if (elements.workspaceDescription) elements.workspaceDescription.textContent = '--';
 
-    if (elements.workspaceOpenBtn) elements.workspaceOpenBtn.removeAttribute('href');
     if (elements.workspaceCanvasBtn) elements.workspaceCanvasBtn.removeAttribute('href');
   }
 
@@ -306,6 +306,216 @@
     elements.schedulesList.innerHTML = items.join('');
   }
 
+  function renderSessions(sessions) {
+    if (!elements.sessionsList) return;
+
+    if (!sessions || sessions.length === 0) {
+      elements.sessionsList.innerHTML = '<div class="hub-empty">No chat sessions yet.</div>';
+      return;
+    }
+
+    const items = sessions.map((session) => {
+      const title = session.title || session.name || 'Untitled Chat';
+      const agent = session.agent_name || 'default';
+      const updated = formatDate(session.updated_at || session.created_at);
+      const messageCount = session.message_count || 0;
+
+      return `
+        <div class="hub-session-item" data-session-id="${escapeHtml(session.id)}">
+          <div class="hub-session-info">
+            <div class="hub-session-title">${escapeHtml(title)}</div>
+            <div class="hub-session-meta">
+              <span class="hub-session-agent">${escapeHtml(agent)}</span>
+              <span>${messageCount} message${messageCount === 1 ? '' : 's'}</span>
+              <span>${escapeHtml(updated)}</span>
+            </div>
+          </div>
+          <button class="modern-btn modern-btn-secondary hub-session-open" data-action="open">Open</button>
+        </div>
+      `;
+    });
+
+    elements.sessionsList.innerHTML = items.join('');
+
+    elements.sessionsList.querySelectorAll('.hub-session-item').forEach((item) => {
+      const sessionId = item.dataset.sessionId;
+
+      item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openSession(sessionId);
+      });
+
+      item.addEventListener('click', () => openSession(sessionId));
+    });
+  }
+
+  async function loadWorkspaceSessions(workspaceId) {
+    if (!workspaceId) return;
+
+    if (elements.sessionsList) {
+      elements.sessionsList.innerHTML = '<div class="hub-loading">Loading sessions...</div>';
+    }
+
+    try {
+      const response = await fetch(`/api/sessions?folder_id=${encodeURIComponent(workspaceId)}`);
+      if (!response.ok) throw new Error('Failed to load sessions');
+
+      const data = await response.json();
+      state.sessions = data.sessions || [];
+      renderSessions(state.sessions);
+    } catch (error) {
+      console.error('Workspace hub failed to load sessions:', error);
+      if (elements.sessionsList) {
+        elements.sessionsList.innerHTML = '<div class="hub-empty">Unable to load sessions.</div>';
+      }
+    }
+  }
+
+  function openSession(sessionId) {
+    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
+      window.chatPanel.open();
+    }
+
+    if (window.sessionManager && typeof window.sessionManager.switchToSession === 'function') {
+      window.sessionManager.switchToSession(sessionId);
+    }
+  }
+
+  function renderNotes(notes) {
+    if (!elements.notesList) return;
+
+    if (!notes || notes.length === 0) {
+      elements.notesList.innerHTML = '<div class="hub-empty">No notes yet.</div>';
+      return;
+    }
+
+    const items = notes.slice(0, 5).map((note) => {
+      const title = note.name || 'Untitled Note';
+      const updated = formatDate(note.updated_at || note.created_at);
+      const preview = note.content ? note.content.substring(0, 80).replace(/\n/g, ' ') : '';
+
+      return `
+        <div class="hub-note-item" data-note-id="${escapeHtml(note.id)}">
+          <div class="hub-note-info">
+            <div class="hub-note-title">${escapeHtml(title)}</div>
+            <div class="hub-note-preview">${escapeHtml(preview)}${note.content && note.content.length > 80 ? '...' : ''}</div>
+            <div class="hub-note-meta">${escapeHtml(updated)}</div>
+          </div>
+          <button class="modern-btn modern-btn-secondary hub-note-open" data-action="open">Open</button>
+        </div>
+      `;
+    });
+
+    elements.notesList.innerHTML = items.join('');
+
+    elements.notesList.querySelectorAll('.hub-note-item').forEach((item) => {
+      const noteId = item.dataset.noteId;
+
+      item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openNote(noteId);
+      });
+
+      item.addEventListener('click', () => openNote(noteId));
+    });
+  }
+
+  async function loadWorkspaceNotes(workspaceId) {
+    if (!workspaceId) return;
+
+    if (elements.notesList) {
+      elements.notesList.innerHTML = '<div class="hub-loading">Loading notes...</div>';
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`);
+      if (!response.ok) throw new Error('Failed to load notes');
+
+      const data = await response.json();
+      state.notes = data.notes || [];
+      renderNotes(state.notes);
+    } catch (error) {
+      console.error('Workspace hub failed to load notes:', error);
+      if (elements.notesList) {
+        elements.notesList.innerHTML = '<div class="hub-empty">Unable to load notes.</div>';
+      }
+    }
+  }
+
+  function openNote(noteId) {
+    if (window.sessionManager && typeof window.sessionManager.openNoteEditorModal === 'function') {
+      const note = state.notes.find(n => n.id === noteId);
+      if (note) {
+        window.sessionManager.openNoteEditorModal(note);
+      }
+    }
+  }
+
+  function createNewNote() {
+    if (!state.selectedId) return;
+    if (window.sessionManager && typeof window.sessionManager.openNoteCreateModal === 'function') {
+      window.sessionManager.openNoteCreateModal(state.selectedId);
+    }
+  }
+
+  function renderFiles(files) {
+    if (!elements.filesList) return;
+
+    if (!files || files.length === 0) {
+      elements.filesList.innerHTML = '<div class="hub-empty">No files yet.</div>';
+      return;
+    }
+
+    const getFileIcon = (type, mime) => {
+      if (type === 'image' || (mime && mime.startsWith('image/'))) {
+        return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.5,13.5L11,16.5L14.5,12L19,18H5M21,19V5C21,3.89 20.1,3 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19Z"/></svg>';
+      }
+      if (type === 'doc' || (mime && (mime.includes('text') || mime.includes('document')))) {
+        return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14,17H7V15H14M17,13H7V11H17M17,9H7V7H17M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3Z"/></svg>';
+      }
+      return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13,9V3.5L18.5,9M6,2C4.89,2 4,2.89 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6Z"/></svg>';
+    };
+
+    const formatFileSize = (bytes) => {
+      if (!bytes) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+
+    const items = files.slice(0, 5).map((file) => {
+      const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
+      const size = file.file_meta ? formatFileSize(file.file_meta.size) : '';
+      const icon = getFileIcon(file.type, file.file_meta?.mime);
+
+      return `
+        <div class="hub-file-item" data-file-id="${escapeHtml(file.id)}">
+          <div class="hub-file-icon">${icon}</div>
+          <div class="hub-file-info">
+            <div class="hub-file-title">${escapeHtml(title)}</div>
+            ${size ? `<div class="hub-file-meta">${escapeHtml(size)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    elements.filesList.innerHTML = items.join('');
+
+    elements.filesList.querySelectorAll('.hub-file-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const fileId = item.dataset.fileId;
+        openFile(fileId);
+      });
+    });
+  }
+
+  function openFile(fileId) {
+    // Open the canvas to view/edit the file attachment
+    if (state.selectedId) {
+      window.location.href = `/workspaces/${encodeURIComponent(state.selectedId)}/canvas`;
+    }
+  }
+
   async function loadWorkspaceTasks(workspaceId) {
     if (!workspaceId) return;
 
@@ -351,9 +561,36 @@
     renderWorkspaceSummary(workspace);
     setState('selected');
     loadWorkspaceTasks(workspaceId);
+    loadWorkspaceSessions(workspaceId);
+    loadWorkspaceNotes(workspaceId);
+    loadWorkspaceFiles(workspaceId);
 
     if (focus && elements.workspaceSelect) {
       elements.workspaceSelect.blur();
+    }
+  }
+
+  async function loadWorkspaceFiles(workspaceId) {
+    if (!workspaceId) return;
+
+    if (elements.filesList) {
+      elements.filesList.innerHTML = '<div class="hub-loading">Loading files...</div>';
+    }
+
+    try {
+      // Fetch full workspace data to get attachments
+      const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}`);
+      if (!response.ok) throw new Error('Failed to load workspace');
+
+      const workspace = await response.json();
+      // Filter attachments that have file metadata (actual files, not just notes)
+      state.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      renderFiles(state.files);
+    } catch (error) {
+      console.error('Workspace hub failed to load files:', error);
+      if (elements.filesList) {
+        elements.filesList.innerHTML = '<div class="hub-empty">Unable to load files.</div>';
+      }
     }
   }
 
@@ -374,6 +611,15 @@
     }
     if (elements.schedulesList) {
       elements.schedulesList.innerHTML = '<div class=\"hub-empty\">Select a workspace to view schedules.</div>';
+    }
+    if (elements.sessionsList) {
+      elements.sessionsList.innerHTML = '<div class=\"hub-empty\">Select a workspace to view sessions.</div>';
+    }
+    if (elements.notesList) {
+      elements.notesList.innerHTML = '<div class="hub-empty">Select a workspace to view notes.</div>';
+    }
+    if (elements.filesList) {
+      elements.filesList.innerHTML = '<div class="hub-empty">Select a workspace to view files.</div>';
     }
   }
 
@@ -449,10 +695,6 @@
       elements.workspaceBrowseBtn.addEventListener('click', () => showLauncher());
     }
 
-    if (elements.newTaskBtn) {
-      elements.newTaskBtn.addEventListener('click', openTaskModal);
-    }
-
     if (elements.addTaskBtn) {
       elements.addTaskBtn.addEventListener('click', openTaskModal);
     }
@@ -465,20 +707,34 @@
       });
     }
 
-    if (elements.schedulesBtn) {
-      elements.schedulesBtn.addEventListener('click', openSchedulePanel);
-    }
-
     if (elements.viewSchedulesBtn) {
       elements.viewSchedulesBtn.addEventListener('click', openSchedulePanel);
     }
 
-    if (elements.openChatBtn) {
-      elements.openChatBtn.addEventListener('click', () => openChatForWorkspace(state.selectedId));
-    }
-
     if (elements.launcherRefreshBtn) {
       elements.launcherRefreshBtn.addEventListener('click', () => loadWorkspaces());
+    }
+
+    if (elements.newSessionBtn) {
+      elements.newSessionBtn.addEventListener('click', () => {
+        if (!state.selectedId) return;
+        if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
+          window.sessionManager.showCreateChatModalForWorkspace(state.selectedId);
+        }
+      });
+    }
+
+    if (elements.newNoteBtn) {
+      elements.newNoteBtn.addEventListener('click', createNewNote);
+    }
+
+    if (elements.addFileBtn) {
+      elements.addFileBtn.addEventListener('click', () => {
+        // Open canvas to add files
+        if (state.selectedId) {
+          window.location.href = `/workspaces/${encodeURIComponent(state.selectedId)}/canvas`;
+        }
+      });
     }
   }
 
