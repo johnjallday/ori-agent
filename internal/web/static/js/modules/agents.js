@@ -452,9 +452,12 @@ function createAgentElement(agentName, agentType, currentAgent) {
           </div>
         </div>
         <div class="agent-actions d-flex align-items-center gap-2">
-          ${!isCurrentAgent ? `<span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); switchToAgent('${safeAgentNameJs}')" title="Switch to this agent" style="font-size: 0.75rem; cursor: pointer;">
-            Load
-          </span>` : ''}
+          <span class="modern-btn modern-btn-secondary px-2 py-1" onclick="event.stopPropagation(); newChatWithAgent('${safeAgentNameJs}')" title="Start new chat with this agent" style="font-size: 0.75rem; cursor: pointer;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: -1px;">
+              <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+            </svg>
+            New Chat
+          </span>
           <span class="btn btn-sm btn-link p-1" onclick="event.stopPropagation(); deleteAgent('${safeAgentNameJs}')" title="Delete agent" style="cursor: pointer;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/>
@@ -547,47 +550,127 @@ function createAgentElement(agentName, agentType, currentAgent) {
   return agentDiv;
 }
 
-// Switch to agent
-async function switchToAgent(agentName) {
+// Start new chat with agent - shows workspace picker
+async function newChatWithAgent(agentName) {
   try {
-    const activeSession = window.sessionManager?.getActiveSession?.();
-    if (activeSession && window.sessionManager?.changeSessionAgent) {
-      await window.sessionManager.changeSessionAgent(activeSession.id, agentName);
-    } else {
-      await API.put(`/api/agents?name=${encodeURIComponent(agentName)}`);
-    }
+    // Fetch available workspaces
+    const response = await API.get('/api/folders');
+    const folders = response.folders || [];
 
-    // Show success notification
-    if (typeof showNotification === 'function') {
-      showNotification(`Switched to agent: ${agentName}`, 'success');
-    }
-
-    // Emit event for other modules
-    EventBus.emit('agent:switched', { name: agentName });
-
-    // Refresh the agent list to update current agent
-    await loadAgentsForSidebar();
-
-    // Reload plugins for the new agent
-    if (typeof loadPlugins === 'function') {
-      await loadPlugins();
-    } else if (typeof loadPluginsForSidebar === 'function') {
-      await loadPluginsForSidebar();
-    }
-
-    // Reload settings for the new agent
-    if (typeof loadSettings === 'function') {
-      await loadSettings();
-    }
-
-    agentsLog.info('Switched to agent', { agent: agentName });
+    // Show workspace picker modal
+    showWorkspacePickerForAgent(agentName, folders);
 
   } catch (error) {
-    agentsLog.error('Error switching agent', error);
-    if (typeof showNotification === 'function') {
-      showNotification(`Failed to switch to agent: ${agentName}`, 'error');
+    agentsLog.error('Error fetching workspaces', error);
+    // Fallback: create session without workspace
+    if (window.sessionManager?.createSessionWithAgent) {
+      await window.sessionManager.createSessionWithAgent(agentName);
     }
   }
+}
+
+// Show workspace picker modal for new chat
+function showWorkspacePickerForAgent(agentName, folders) {
+  // Remove existing modal if any
+  const existingModal = document.getElementById('workspacePickerModal');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'workspacePickerModal';
+  modal.className = 'modal fade show';
+  modal.style.display = 'block';
+  modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+  modal.style.zIndex = '10600';
+
+  const escapeHtml = (str) => {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  };
+
+  modal.innerHTML = `
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
+          <h6 class="modal-title" style="color: var(--text-primary);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: -2px;">
+              <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2Z"/>
+            </svg>
+            New Chat with ${escapeHtml(agentName)}
+          </h6>
+          <button type="button" class="btn-close" data-dismiss="modal" style="filter: var(--btn-close-filter);"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">Choose where to save this conversation:</p>
+          <div class="workspace-picker-list">
+            <button class="workspace-picker-item modern-btn modern-btn-secondary w-100 mb-2 text-start" data-folder="">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="opacity: 0.6;">
+                <path d="M20,18H4V8H20M20,6H12L10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6Z"/>
+              </svg>
+              <span>No workspace (root)</span>
+            </button>
+            ${folders.map(folder => `
+              <button class="workspace-picker-item modern-btn modern-btn-secondary w-100 mb-2 text-start" data-folder="${folder.id}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="opacity: 0.6;">
+                  <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+                </svg>
+                <span>${escapeHtml(folder.name)}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Handle workspace selection
+  modal.querySelectorAll('.workspace-picker-item').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const folderId = btn.dataset.folder;
+      modal.remove();
+
+      try {
+        if (folderId && window.sessionManager?.createSessionWithAgentInFolder) {
+          await window.sessionManager.createSessionWithAgentInFolder(agentName, folderId);
+        } else if (window.sessionManager?.createSessionWithAgent) {
+          await window.sessionManager.createSessionWithAgent(agentName);
+        }
+
+        if (typeof showNotification === 'function') {
+          showNotification(`Started new chat with ${agentName}`, 'success');
+        }
+
+        // Emit event for other modules
+        EventBus.emit('agent:newChat', { name: agentName, folderId });
+
+        // Refresh agent list to show new current agent
+        await loadAgentsForSidebar();
+
+      } catch (error) {
+        agentsLog.error('Error creating session', error);
+        if (typeof showNotification === 'function') {
+          showNotification(`Failed to create chat: ${error.message}`, 'error');
+        }
+      }
+    });
+  });
+
+  // Handle close
+  modal.querySelector('.btn-close').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.remove();
+  });
+
+  // Handle escape key
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      modal.remove();
+      document.removeEventListener('keydown', handleEscape);
+    }
+  };
+  document.addEventListener('keydown', handleEscape);
 }
 
 // Delete agent

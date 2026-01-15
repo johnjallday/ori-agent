@@ -1,4 +1,26 @@
 <div class="workspace-hub" id="workspaceHub" data-state="loading">
+  <section class="workspace-launcher" id="workspaceLauncher" aria-live="polite">
+    <div class="launcher-card modern-card">
+      <div class="launcher-header">
+        <div>
+          <h2 class="launcher-title">Choose a workspace</h2>
+          <p class="launcher-subtitle">Start with tasks and schedules, then open chat when needed.</p>
+        </div>
+        <div class="launcher-actions">
+          <button id="launcherCreateWorkspaceBtn" class="modern-btn modern-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+            </svg>
+            Create Workspace
+          </button>
+          <button id="launcherRefreshBtn" class="modern-btn modern-btn-secondary" type="button">Refresh</button>
+        </div>
+      </div>
+      <div id="launcherGrid" class="launcher-grid"></div>
+      <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
+    </div>
+  </section>
+
   <header class="workspace-hub-header modern-card">
     <div class="hub-header-main">
       <div class="hub-title">
@@ -137,28 +159,6 @@
       </div>
     </aside>
   </div>
-
-  <section class="workspace-launcher" id="workspaceLauncher" aria-live="polite">
-    <div class="launcher-card modern-card">
-      <div class="launcher-header">
-        <div>
-          <h2 class="launcher-title">Choose a workspace</h2>
-          <p class="launcher-subtitle">Start with tasks and schedules, then open chat when needed.</p>
-        </div>
-        <div class="launcher-actions">
-          <button id="launcherCreateWorkspaceBtn" class="modern-btn modern-btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addFolderModal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-              <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-            </svg>
-            Create Workspace
-          </button>
-          <button id="launcherRefreshBtn" class="modern-btn modern-btn-secondary" type="button">Refresh</button>
-        </div>
-      </div>
-      <div id="launcherGrid" class="launcher-grid"></div>
-      <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
-    </div>
-  </section>
 
   <div class="workspace-hub-loading" id="workspaceHubLoading">
     <div class="hub-loading-spinner"></div>

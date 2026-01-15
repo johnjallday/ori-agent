@@ -433,16 +433,54 @@
   position: fixed;
   top: 76px;
   right: 0;
-  width: 420px;
+  width: 520px;
+  min-width: 360px;
+  max-width: 80vw;
   height: calc(100vh - 76px);
   background: var(--bg-primary);
   border-left: 1px solid var(--border-color);
   box-shadow: -16px 0 40px rgba(0, 0, 0, 0.12);
   transform: translateX(100%);
-  transition: transform 0.25s ease;
+  transition: transform 0.25s ease, width 0s;
   z-index: 10500;
   display: flex;
   flex-direction: column;
+}
+
+/* Resize handle on left edge */
+.chat-panel-resize {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 10;
+  transition: background 0.15s ease;
+}
+
+.chat-panel-resize:hover,
+.chat-panel-resize.resizing {
+  background: var(--primary-color);
+}
+
+.chat-panel-resize::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  background: var(--border-color);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-panel-resize:hover::before {
+  opacity: 1;
 }
 
 .chat-panel-backdrop {
@@ -501,10 +539,27 @@ body.chat-panel-open .chat-panel-backdrop {
   flex: 1;
   height: auto !important;
   margin-bottom: 0 !important;
+  min-height: 0;
+}
+
+.chat-panel #chatArea {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .chat-panel #inputContainer {
   margin-top: auto;
+}
+
+/* Modals that appear over chat panel need higher z-index */
+#changeAgentModal,
+#workspacePickerModal {
+  z-index: 10700 !important;
+}
+
+#changeAgentModal + .modal-backdrop,
+#workspacePickerModal + .modal-backdrop {
+  z-index: 10650 !important;
 }
 
 @media (max-width: 1200px) {

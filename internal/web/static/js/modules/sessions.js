@@ -93,6 +93,7 @@ const sessionManager = {
     this.bindEvents();
     this.bindNoteEvents();
     this.setupKeyboardShortcuts();
+    this.restoreSidebarState();
     this.initChatAgentBar();
     this.initMainTaskPanel();
     this.initScheduledTasksModal();
@@ -1501,7 +1502,11 @@ const sessionManager = {
 
   // Switch to a session
   async switchToSession(sessionId) {
-    if (sessionId === this.activeSessionId) return;
+    // If clicking on already-active session, just open the chat panel
+    if (sessionId === this.activeSessionId) {
+      this.openChatPanelIfAvailable();
+      return;
+    }
 
     try {
       // Load full session with messages
@@ -2531,23 +2536,45 @@ const sessionManager = {
     });
   },
 
-  // Toggle sidebar (for mobile only - desktop sidebar is always visible)
-  toggleSidebar() {
+  // Restore sidebar state from localStorage
+  restoreSidebarState() {
     const sidebar = document.getElementById('sessionSidebar');
-    if (sidebar) {
-      // On mobile (< 992px), toggle the mobile-open class
-      if (window.innerWidth < 992) {
-        sidebar.classList.toggle('mobile-open');
-      }
-      // On desktop, sidebar is always visible - no toggle needed
+    if (!sidebar) return;
+
+    // Default to collapsed (true) if no preference saved
+    const isCollapsed = localStorage.getItem('sessionSidebarCollapsed') !== 'false';
+    if (isCollapsed) {
+      sidebar.classList.add('collapsed');
+    } else {
+      sidebar.classList.remove('collapsed');
     }
   },
 
-  // Close sidebar on mobile
-  closeSidebarMobile() {
+  // Toggle sidebar visibility
+  toggleSidebar() {
     const sidebar = document.getElementById('sessionSidebar');
-    if (sidebar && window.innerWidth < 992) {
-      sidebar.classList.remove('mobile-open');
+    if (sidebar) {
+      sidebar.classList.toggle('collapsed');
+      // Save preference
+      localStorage.setItem('sessionSidebarCollapsed', sidebar.classList.contains('collapsed'));
+    }
+  },
+
+  // Close sidebar
+  closeSidebar() {
+    const sidebar = document.getElementById('sessionSidebar');
+    if (sidebar) {
+      sidebar.classList.add('collapsed');
+      localStorage.setItem('sessionSidebarCollapsed', 'true');
+    }
+  },
+
+  // Open sidebar
+  openSidebar() {
+    const sidebar = document.getElementById('sessionSidebar');
+    if (sidebar) {
+      sidebar.classList.remove('collapsed');
+      localStorage.setItem('sessionSidebarCollapsed', 'false');
     }
   },
 
@@ -3058,7 +3085,7 @@ const sessionManager = {
     if (existingModal) existingModal.remove();
 
     const modalHtml = `
-      <div class="modal fade" id="changeAgentModal" tabindex="-1">
+      <div class="modal fade" id="changeAgentModal" tabindex="-1" style="z-index: 10700;">
         <div class="modal-dialog modal-dialog-centered">
           <div class="modal-content bg-dark text-light">
             <div class="modal-header border-secondary">

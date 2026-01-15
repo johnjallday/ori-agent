@@ -1096,7 +1096,14 @@ function setupChatPanel() {
 
   const closeBtn = document.getElementById('chatPanelClose');
   const backdrop = document.getElementById('chatPanelBackdrop');
+  const resizeHandle = document.getElementById('chatPanelResize');
   const input = document.getElementById('input');
+
+  // Restore saved width
+  const savedWidth = localStorage.getItem('chatPanelWidth');
+  if (savedWidth) {
+    panel.style.width = savedWidth;
+  }
 
   const open = () => {
     document.body.classList.add('chat-panel-open');
@@ -1127,6 +1134,44 @@ function setupChatPanel() {
       close();
     }
   });
+
+  // Resize functionality
+  if (resizeHandle) {
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const startResize = (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = panel.offsetWidth;
+      resizeHandle.classList.add('resizing');
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    };
+
+    const doResize = (e) => {
+      if (!isResizing) return;
+      const diff = startX - e.clientX;
+      const newWidth = Math.min(Math.max(startWidth + diff, 360), window.innerWidth * 0.8);
+      panel.style.width = `${newWidth}px`;
+    };
+
+    const stopResize = () => {
+      if (!isResizing) return;
+      isResizing = false;
+      resizeHandle.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Save width preference
+      localStorage.setItem('chatPanelWidth', panel.style.width);
+    };
+
+    resizeHandle.addEventListener('mousedown', startResize);
+    document.addEventListener('mousemove', doResize);
+    document.addEventListener('mouseup', stopResize);
+  }
 
   window.chatPanel = { open, close, toggle, isOpen: () => document.body.classList.contains('chat-panel-open') };
 }
