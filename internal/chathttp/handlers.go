@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/client"
+	"github.com/johnjallday/ori-agent/internal/fileparser"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -380,8 +382,25 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		filesContext.WriteString("Here are the uploaded documents:\n\n")
 
 		for _, file := range textFiles {
+			fileText := file.Content
+			if isParseableDocument(file.Name) {
+				parsedText, err := parseUploadedFileText(file)
+				if err != nil {
+					logger.Warn("Failed to extract text from uploaded file", logger.Fields{
+						"name":  file.Name,
+						"type":  file.Type,
+						"error": err.Error(),
+					})
+					fileText = fmt.Sprintf("[Unable to extract text from %s]", file.Name)
+				} else if strings.TrimSpace(parsedText) == "" {
+					fileText = fmt.Sprintf("[No extractable text found in %s]", file.Name)
+				} else {
+					fileText = parsedText
+				}
+			}
+
 			filesContext.WriteString(fmt.Sprintf("=== File: %s ===\n", file.Name))
-			filesContext.WriteString(file.Content)
+			filesContext.WriteString(fileText)
 			filesContext.WriteString("\n\n")
 		}
 
@@ -720,4 +739,26 @@ func isImageMimeType(mimeType string) bool {
 	default:
 		return false
 	}
+}
+
+func isParseableDocument(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".pdf", ".docx", ".pptx", ".xlsx":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseUploadedFileText(file UploadedFile) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(file.Content)
+	if err != nil {
+		return "", fmt.Errorf("invalid base64 content")
+	}
+
+	if err := fileparser.ValidateFileSize(int64(len(decoded))); err != nil {
+		return "", err
+	}
+
+	return fileparser.ParseFile(file.Name, decoded)
 }
