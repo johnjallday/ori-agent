@@ -3020,3 +3020,88 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   background: rgba(99, 102, 241, 0.15);
   color: var(--primary-color);
 }
+
+/* =============================================================================
+   New Chat Modal - File Attachment Styles
+   ============================================================================= */
+
+.chat-file-drop-zone {
+  border: 2px dashed var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.chat-file-drop-zone:hover {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.chat-file-drop-zone.drag-active {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+  border-style: solid;
+}
+
+.chat-file-drop-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.chat-selected-files {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.chat-selected-file-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.chat-file-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.chat-file-size {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.chat-file-remove {
+  background: none;
+  border: none;
+  padding: 0.15rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-file-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}

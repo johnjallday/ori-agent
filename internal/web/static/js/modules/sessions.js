@@ -31,6 +31,7 @@ const sessionManager = {
   chatLlmAvailable: false,
   chatSystemModelConfigured: false,
   autoModeSessionIds: new Set(), // Sessions that need auto-classification
+  chatPendingFiles: [], // Files to attach when creating chat
 
   // Tab ID for multi-tab support
   tabId: null,
@@ -1073,6 +1074,11 @@ const sessionManager = {
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
 
+      // Reset file attachments
+      this.chatPendingFiles = [];
+      this.updateChatFilesPreview();
+      this.bindChatFileEvents();
+
       // Populate workspace dropdown
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
       if (workspaceSelect) {
@@ -1145,6 +1151,11 @@ const sessionManager = {
       // Clear auto message textarea
       const autoMessageInput = document.getElementById('chatAutoMessage');
       if (autoMessageInput) autoMessageInput.value = '';
+
+      // Reset file attachments
+      this.chatPendingFiles = [];
+      this.updateChatFilesPreview();
+      this.bindChatFileEvents();
 
       // Populate workspace dropdown
       const workspaceSelect = document.getElementById('chatWorkspaceSelect');
@@ -1260,6 +1271,11 @@ const sessionManager = {
       }
 
       if (session && session.id) {
+        // Upload pending files first
+        if (this.chatPendingFiles.length > 0) {
+          await this.uploadChatPendingFiles(session.id);
+        }
+
         // Send the initial message after a brief delay to ensure UI is ready
         if (initialMessage && window.sendMessageToChat) {
           setTimeout(() => {
@@ -1281,18 +1297,173 @@ const sessionManager = {
       }
 
       // Create the session
+      let session;
       if (workspaceId) {
-        await this.createSessionWithAgentInFolder(agentName, workspaceId);
+        session = await this.createSessionWithAgentInFolder(agentName, workspaceId);
       } else {
-        await this.createSessionWithAgent(agentName);
+        session = await this.createSessionWithAgent(agentName);
+      }
+
+      // Upload pending files
+      if (session && session.id && this.chatPendingFiles.length > 0) {
+        await this.uploadChatPendingFiles(session.id);
       }
     }
+
+    // Clear pending files
+    this.chatPendingFiles = [];
   },
 
   // Create new session - shows agent picker dialog first (legacy)
   async createNewSession() {
     // Now redirects to the modal
     this.showCreateChatModal();
+  },
+
+  // =============================================================================
+  // Chat Modal File Attachment Functions
+  // =============================================================================
+
+  bindChatFileEvents() {
+    const dropZone = document.getElementById('chatFileDropZone');
+    const fileInput = document.getElementById('chatFileInput');
+
+    if (dropZone) {
+      // Remove old event listeners by cloning the element
+      const newDropZone = dropZone.cloneNode(true);
+      dropZone.parentNode.replaceChild(newDropZone, dropZone);
+
+      newDropZone.addEventListener('click', () => {
+        document.getElementById('chatFileInput')?.click();
+      });
+      newDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        newDropZone.classList.add('drag-active');
+      });
+      newDropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        newDropZone.classList.remove('drag-active');
+      });
+      newDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        newDropZone.classList.remove('drag-active');
+        const files = e.dataTransfer?.files;
+        if (files && files.length > 0) {
+          this.addChatFiles(Array.from(files));
+        }
+      });
+    }
+
+    if (fileInput) {
+      const newFileInput = fileInput.cloneNode(true);
+      fileInput.parentNode.replaceChild(newFileInput, fileInput);
+
+      newFileInput.addEventListener('change', (e) => {
+        const files = e.target?.files;
+        if (files && files.length > 0) {
+          this.addChatFiles(Array.from(files));
+          e.target.value = '';
+        }
+      });
+    }
+  },
+
+  addChatFiles(files) {
+    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    files.forEach((file) => {
+      if (file.size > maxSize) {
+        if (window.Toast) {
+          Toast.warning(`${file.name} exceeds 10MB limit`);
+        }
+        return;
+      }
+      // Avoid duplicates
+      if (!this.chatPendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+        this.chatPendingFiles.push(file);
+      }
+    });
+
+    this.updateChatFilesPreview();
+  },
+
+  updateChatFilesPreview() {
+    const container = document.getElementById('chatSelectedFiles');
+    if (!container) return;
+
+    if (this.chatPendingFiles.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'block';
+
+    const formatSize = (bytes) => {
+      if (!bytes) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+
+    const items = this.chatPendingFiles.map((file, index) => `
+      <div class="chat-selected-file-item" data-index="${index}">
+        <span class="chat-file-name">${this.escapeHtml(file.name)}</span>
+        <span class="chat-file-size">${formatSize(file.size)}</span>
+        <button type="button" class="chat-file-remove" data-index="${index}" title="Remove">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+    `);
+
+    container.innerHTML = items.join('');
+
+    // Bind remove buttons
+    container.querySelectorAll('.chat-file-remove').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = parseInt(btn.dataset.index, 10);
+        this.chatPendingFiles.splice(index, 1);
+        this.updateChatFilesPreview();
+      });
+    });
+  },
+
+  async uploadChatPendingFiles(sessionId) {
+    if (!sessionId || this.chatPendingFiles.length === 0) return;
+
+    for (const file of this.chatPendingFiles) {
+      try {
+        await this.uploadFileToSession(sessionId, file);
+        console.log('Uploaded file to session:', file.name);
+      } catch (error) {
+        console.error('Failed to upload file:', file.name, error);
+        if (window.Toast) {
+          Toast.error(`Failed to upload ${file.name}`);
+        }
+      }
+    }
+  },
+
+  async uploadFileToSession(sessionId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`/api/sessions/${sessionId}/files`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status}`);
+    }
+
+    return response.json();
   },
 
   // Fetch available agents
