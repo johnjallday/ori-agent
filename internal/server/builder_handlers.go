@@ -118,6 +118,8 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.sessionHandler = sessionhttp.New(sessionStore)
 		// Initialize auto-classify handler for session classification
 		s.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, s.st, s.llmFactory, s.configManager)
+		// Initialize smart input handler for Workspace Hub classification
+		s.smartInputHandler = sessionhttp.NewSmartInputHandler(sessionStore, s.llmFactory, s.configManager)
 		// Initialize note generation handler
 		s.noteHandler = notehttp.NewHandler(s.llmFactory, s.configManager, s.st)
 		// Wire session store to chat handler for multi-tab support

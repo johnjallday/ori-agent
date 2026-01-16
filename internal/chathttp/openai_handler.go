@@ -30,7 +30,7 @@ func (h *Handler) handleOpenAIChat(
 	agentClient openai.Client,
 ) {
 	sessionID := h.getSessionID(r)
-	ctx, cancel := context.WithTimeout(baseCtx, ContextTimeout)
+	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
 
 	// Convert llm.Tool to OpenAI format

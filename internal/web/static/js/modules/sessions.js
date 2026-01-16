@@ -1532,8 +1532,11 @@ const sessionManager = {
 
   // Switch to a session
   async switchToSession(sessionId) {
+    const chatArea = document.getElementById('chatArea');
+    const hasRenderedMessages = chatArea && chatArea.children.length > 0;
+
     // If clicking on already-active session, just open the chat panel
-    if (sessionId === this.activeSessionId) {
+    if (sessionId === this.activeSessionId && hasRenderedMessages) {
       this.openChatPanelIfAvailable();
       return;
     }

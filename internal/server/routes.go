@@ -584,6 +584,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("/api/sessions/auto-classify", s.autoClassifyHandler.HandleAutoClassify)
 		}
 
+		if s.smartInputHandler != nil {
+			mux.HandleFunc("/api/smart-input/classify", s.smartInputHandler.HandleClassify)
+			mux.HandleFunc("/api/smart-input/override", s.smartInputHandler.HandleOverride)
+		}
+
 		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 

@@ -25,7 +25,7 @@
     <div class="hub-header-main">
       <div class="hub-title">
         <span class="hub-title-eyebrow">Workspace Hub</span>
-        <h1 class="hub-title-text">Get work done without the chat-first drag.</h1>
+        <h1 class="hub-title-text"></h1>
         <p class="hub-title-subtext">Pick a workspace, track tasks, and open chat only when you need it.</p>
       </div>
       <div class="hub-header-controls">
@@ -50,6 +50,32 @@
   </header>
 
   <div class="workspace-hub-body" id="workspaceHubBody" aria-live="polite">
+    <div class="hub-smart-input modern-card" id="hubSmartInput">
+      <div class="hub-smart-input-header">
+        <div>
+          <span class="hub-smart-input-label">Quick add</span>
+          <span class="hub-smart-input-helper">Auto-detects tasks vs chat.</span>
+        </div>
+      </div>
+      <div class="hub-smart-input-main">
+        <label for="hubSmartInputField" class="visually-hidden">Describe a task or question</label>
+        <input id="hubSmartInputField" class="modern-input" type="text" placeholder="Add a task or ask a question..." autocomplete="off">
+        <button id="hubSmartInputSubmit" class="modern-btn modern-btn-primary" type="button">Send</button>
+      </div>
+      <div class="hub-smart-input-status" id="hubSmartInputStatus" role="status" aria-live="polite"></div>
+      <div class="hub-smart-input-prompt" id="hubSmartInputPrompt" hidden>
+        <div>
+          <div class="hub-smart-input-prompt-text">Not sure which flow you want. Choose one:</div>
+          <div class="hub-smart-input-prompt-hint" id="hubSmartInputPromptHint"></div>
+        </div>
+        <div class="hub-smart-input-prompt-actions">
+          <button id="hubSmartInputPromptTask" class="modern-btn modern-btn-primary" type="button">Create Task</button>
+          <button id="hubSmartInputPromptChat" class="modern-btn modern-btn-secondary" type="button">Start Chat</button>
+          <button id="hubSmartInputPromptCancel" class="modern-btn modern-btn-secondary hub-smart-input-prompt-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <div class="hub-stats" id="hubStats">
       <div class="hub-stat">
         <span class="hub-stat-label">Completed</span>

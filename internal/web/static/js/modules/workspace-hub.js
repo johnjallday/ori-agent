@@ -2,6 +2,8 @@
   'use strict';
 
   const STORAGE_KEY = 'oriWorkspaceHubSelectedId';
+  const SMART_INPUT_CLASSIFY_ENDPOINT = '/api/smart-input/classify';
+  const SMART_INPUT_OVERRIDE_ENDPOINT = '/api/smart-input/override';
 
   const hubEl = document.getElementById('workspaceHub');
   if (!hubEl) return;
@@ -35,7 +37,16 @@
     notesList: document.getElementById('hubNotesList'),
     newNoteBtn: document.getElementById('hubNewNoteBtn'),
     filesList: document.getElementById('hubFilesList'),
-    addFileBtn: document.getElementById('hubAddFileBtn')
+    addFileBtn: document.getElementById('hubAddFileBtn'),
+    smartInputCard: document.getElementById('hubSmartInput'),
+    smartInputField: document.getElementById('hubSmartInputField'),
+    smartInputSubmit: document.getElementById('hubSmartInputSubmit'),
+    smartInputStatus: document.getElementById('hubSmartInputStatus'),
+    smartInputPrompt: document.getElementById('hubSmartInputPrompt'),
+    smartInputPromptHint: document.getElementById('hubSmartInputPromptHint'),
+    smartInputPromptTask: document.getElementById('hubSmartInputPromptTask'),
+    smartInputPromptChat: document.getElementById('hubSmartInputPromptChat'),
+    smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel')
   };
 
   const state = {
@@ -46,7 +57,8 @@
     stats: null,
     sessions: [],
     notes: [],
-    files: []
+    files: [],
+    smartInput: null
   };
 
   function escapeHtml(text) {
@@ -69,6 +81,87 @@
     hubEl.dataset.state = nextState;
     if (elements.loadingOverlay) {
       elements.loadingOverlay.style.display = nextState === 'loading' ? 'flex' : 'none';
+    }
+  }
+
+  function setSmartInputStatus(message, { busy = false } = {}) {
+    if (!elements.smartInputStatus) return;
+    elements.smartInputStatus.textContent = message || '';
+    elements.smartInputStatus.classList.toggle('is-busy', busy);
+  }
+
+  function setSmartInputEnabled(enabled) {
+    if (elements.smartInputField) elements.smartInputField.disabled = !enabled;
+    if (elements.smartInputSubmit) elements.smartInputSubmit.disabled = !enabled;
+    if (elements.smartInputCard) {
+      elements.smartInputCard.classList.toggle('is-disabled', !enabled);
+    }
+  }
+
+  function setSmartInputBusy(isBusy, message) {
+    if (elements.smartInputField) elements.smartInputField.disabled = isBusy;
+    if (elements.smartInputSubmit) elements.smartInputSubmit.disabled = isBusy;
+    if (elements.smartInputCard) {
+      elements.smartInputCard.dataset.state = isBusy ? 'deciding' : 'idle';
+    }
+    if (message !== undefined) {
+      setSmartInputStatus(message, { busy: isBusy });
+    } else if (isBusy) {
+      setSmartInputStatus('Deciding...', { busy: true });
+    } else {
+      setSmartInputStatus('', { busy: false });
+    }
+  }
+
+  function setSmartInputDefaultDecision(decision) {
+    const isTask = decision === 'task';
+    const isChat = decision === 'chat';
+
+    if (elements.smartInputPromptTask) {
+      elements.smartInputPromptTask.classList.toggle('is-default', isTask);
+    }
+    if (elements.smartInputPromptChat) {
+      elements.smartInputPromptChat.classList.toggle('is-default', isChat);
+    }
+    if (elements.smartInputPromptHint) {
+      if (isTask) {
+        elements.smartInputPromptHint.textContent = 'Suggested: Create Task';
+      } else if (isChat) {
+        elements.smartInputPromptHint.textContent = 'Suggested: Start Chat';
+      } else {
+        elements.smartInputPromptHint.textContent = '';
+      }
+    }
+  }
+
+  function hideSmartInputPrompt() {
+    if (elements.smartInputPrompt) {
+      elements.smartInputPrompt.hidden = true;
+    }
+  }
+
+  function resetSmartInputPrompt() {
+    state.smartInput = null;
+    hideSmartInputPrompt();
+    setSmartInputDefaultDecision(null);
+  }
+
+  function showSmartInputPrompt(payload) {
+    if (!elements.smartInputPrompt) return;
+    state.smartInput = {
+      input: payload.input,
+      predictedDecision: payload.decision,
+      confidence: payload.confidence || 0,
+      method: payload.method || 'fallback'
+    };
+    setSmartInputDefaultDecision(payload.decision);
+    elements.smartInputPrompt.hidden = false;
+    setSmartInputStatus(payload.message || 'Choose where to route this.', { busy: false });
+  }
+
+  function clearSmartInputField() {
+    if (elements.smartInputField) {
+      elements.smartInputField.value = '';
     }
   }
 
@@ -560,6 +653,9 @@
 
     renderWorkspaceSummary(workspace);
     setState('selected');
+    setSmartInputEnabled(true);
+    resetSmartInputPrompt();
+    setSmartInputStatus('', { busy: false });
     loadWorkspaceTasks(workspaceId);
     loadWorkspaceSessions(workspaceId);
     loadWorkspaceNotes(workspaceId);
@@ -600,6 +696,10 @@
       elements.workspaceSelect.value = '';
     }
     state.selectedId = null;
+    setSmartInputEnabled(false);
+    resetSmartInputPrompt();
+    clearSmartInputField();
+    setSmartInputStatus('Select a workspace to use quick add.', { busy: false });
     sessionStorage.removeItem(STORAGE_KEY);
     clearWorkspaceSummary();
     renderStats({ completed: 0, in_progress: 0, failed: 0, scheduled: 0 });
@@ -679,6 +779,183 @@
     }
   }
 
+  async function classifySmartInput(input) {
+    const response = await fetch(SMART_INPUT_CLASSIFY_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: state.selectedId,
+        input
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to classify input');
+    }
+
+    return response.json();
+  }
+
+  async function logSmartInputOverride(payload) {
+    try {
+      await fetch(SMART_INPUT_OVERRIDE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: payload.workspaceId,
+          input: payload.input,
+          predicted_decision: payload.predictedDecision,
+          selected_decision: payload.selectedDecision,
+          confidence: payload.confidence,
+          method: payload.method
+        })
+      });
+    } catch (error) {
+      console.warn('Failed to log smart input override:', error);
+    }
+  }
+
+  async function createTaskFromSmartInput(input) {
+    const response = await fetch('/api/orchestration/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studio_id: state.selectedId,
+        description: input,
+        details: '',
+        priority: 3
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to create task');
+    }
+
+    await loadWorkspaceTasks(state.selectedId);
+  }
+
+  async function createChatFromSmartInput(input) {
+    if (!window.sessionManager || typeof window.sessionManager.fetchAgents !== 'function') {
+      throw new Error('Chat manager not available');
+    }
+
+    const agents = await window.sessionManager.fetchAgents();
+    if (!agents || agents.length === 0) {
+      throw new Error('No agents available');
+    }
+
+    const agentName = agents[0].name;
+    if (typeof window.sessionManager.createSessionWithAgentInFolder === 'function') {
+      await window.sessionManager.createSessionWithAgentInFolder(agentName, state.selectedId);
+    } else if (typeof window.sessionManager.createSessionWithAgent === 'function') {
+      await window.sessionManager.createSessionWithAgent(agentName);
+    }
+
+    if (window.sendMessageToChat) {
+      setTimeout(() => window.sendMessageToChat(input), 100);
+    }
+
+    await loadWorkspaceSessions(state.selectedId);
+  }
+
+  async function handleSmartInputDecision(decision, classification = null) {
+    const meta = classification || state.smartInput || {};
+    const input = meta.input || (elements.smartInputField ? elements.smartInputField.value.trim() : '');
+    if (!input) return;
+
+    const predictedDecision = meta.decision || meta.predictedDecision || decision;
+    const confidence = meta.confidence || 0;
+    const method = meta.method || 'fallback';
+
+    hideSmartInputPrompt();
+    setSmartInputBusy(true, decision === 'task' ? 'Creating task...' : 'Starting chat...');
+
+    try {
+      if (decision === 'task') {
+        await createTaskFromSmartInput(input);
+        setSmartInputBusy(false, 'Task created.');
+      } else {
+        await createChatFromSmartInput(input);
+        setSmartInputBusy(false, 'Chat started.');
+      }
+
+      clearSmartInputField();
+    } catch (error) {
+      console.error('Smart input routing failed:', error);
+      setSmartInputBusy(false, 'Something went wrong. Try again.');
+      if (window.Toast) {
+        window.Toast.error(decision === 'task' ? 'Failed to create task' : 'Failed to start chat');
+      }
+    }
+
+    if (predictedDecision && predictedDecision !== decision) {
+      void logSmartInputOverride({
+        workspaceId: state.selectedId,
+        input,
+        predictedDecision,
+        selectedDecision: decision,
+        confidence,
+        method
+      });
+    }
+
+    state.smartInput = null;
+  }
+
+  async function submitSmartInput() {
+    if (!elements.smartInputField) return;
+
+    const input = elements.smartInputField.value.trim();
+    if (!input) {
+      setSmartInputStatus('Type something to get started.', { busy: false });
+      return;
+    }
+
+    if (!state.selectedId) {
+      setSmartInputStatus('Select a workspace first.', { busy: false });
+      return;
+    }
+
+    resetSmartInputPrompt();
+    setSmartInputBusy(true, 'Deciding...');
+
+    let classification;
+    try {
+      classification = await classifySmartInput(input);
+    } catch (error) {
+      console.error('Smart input classification failed:', error);
+      setSmartInputBusy(false);
+      showSmartInputPrompt({
+        input,
+        decision: 'task',
+        confidence: 0,
+        method: 'fallback',
+        message: 'Could not auto-classify. Choose where to route this.'
+      });
+      return;
+    }
+
+    setSmartInputBusy(false);
+
+    const decision = classification.decision || 'task';
+    const payload = {
+      input,
+      decision,
+      confidence: classification.confidence || 0,
+      method: classification.method || 'fallback',
+      message: classification.message
+    };
+
+    if (classification.needs_confirmation) {
+      showSmartInputPrompt(payload);
+      return;
+    }
+
+    await handleSmartInputDecision(decision, payload);
+  }
+
   function bindEvents() {
     if (elements.workspaceSelect) {
       elements.workspaceSelect.addEventListener('change', (event) => {
@@ -736,6 +1013,48 @@
         }
       });
     }
+
+    if (elements.smartInputSubmit) {
+      elements.smartInputSubmit.addEventListener('click', submitSmartInput);
+    }
+
+    if (elements.smartInputField) {
+      elements.smartInputField.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitSmartInput();
+        }
+      });
+
+      elements.smartInputField.addEventListener('input', () => {
+        if (elements.smartInputPrompt && !elements.smartInputPrompt.hidden) {
+          resetSmartInputPrompt();
+        }
+        setSmartInputStatus('', { busy: false });
+      });
+    }
+
+    if (elements.smartInputPromptTask) {
+      elements.smartInputPromptTask.addEventListener('click', () => handleSmartInputDecision('task'));
+    }
+
+    if (elements.smartInputPromptChat) {
+      elements.smartInputPromptChat.addEventListener('click', () => handleSmartInputDecision('chat'));
+    }
+
+    if (elements.smartInputPromptCancel) {
+      elements.smartInputPromptCancel.addEventListener('click', () => {
+        resetSmartInputPrompt();
+        setSmartInputStatus('', { busy: false });
+      });
+    }
+  }
+
+  if (window.EventBus) {
+    EventBus.on('workspace:files:updated', (data) => {
+      if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
+      loadWorkspaceFiles(state.selectedId);
+    }, 'workspaceHub');
   }
 
   bindEvents();
