@@ -64,7 +64,19 @@
     deleteConfirmModal: document.getElementById('hubDeleteConfirmModal'),
     deleteConfirmTitle: document.getElementById('hubDeleteConfirmTitle'),
     deleteConfirmBody: document.getElementById('hubDeleteConfirmBody'),
-    deleteConfirmBtn: document.getElementById('hubDeleteConfirmBtn')
+    deleteConfirmBtn: document.getElementById('hubDeleteConfirmBtn'),
+    // Add file modal
+    addFileModal: document.getElementById('hubAddFileModal'),
+    fileDropZone: document.getElementById('hubFileDropZone'),
+    fileInput: document.getElementById('hubFileInput'),
+    selectedFilesPreview: document.getElementById('hubSelectedFilesPreview'),
+    selectedFilesList: document.getElementById('hubSelectedFilesList'),
+    fileTitle: document.getElementById('hubFileTitle'),
+    fileNotes: document.getElementById('hubFileNotes'),
+    fileUploadProgress: document.getElementById('hubFileUploadProgress'),
+    fileUploadPercent: document.getElementById('hubFileUploadPercent'),
+    fileUploadProgressBar: document.getElementById('hubFileUploadProgressBar'),
+    addFileSubmitBtn: document.getElementById('hubAddFileSubmitBtn')
   };
 
   const state = {
@@ -79,7 +91,9 @@
     smartInput: null,
     // Selection mode state
     selectionMode: { tasks: false, sessions: false, notes: false, files: false },
-    selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() }
+    selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() },
+    // File upload state
+    pendingFiles: []
   };
 
   function escapeHtml(text) {
@@ -1107,6 +1121,275 @@
     }
   }
 
+  // =============================================================================
+  // Add File Modal Functions
+  // =============================================================================
+
+  function openAddFileModal() {
+    if (!state.selectedId) return;
+
+    // Reset modal state
+    state.pendingFiles = [];
+    if (elements.fileTitle) elements.fileTitle.value = '';
+    if (elements.fileNotes) elements.fileNotes.value = '';
+    if (elements.selectedFilesPreview) elements.selectedFilesPreview.style.display = 'none';
+    if (elements.selectedFilesList) elements.selectedFilesList.innerHTML = '';
+    if (elements.fileUploadProgress) elements.fileUploadProgress.style.display = 'none';
+    if (elements.addFileSubmitBtn) elements.addFileSubmitBtn.disabled = true;
+
+    if (elements.addFileModal && window.bootstrap) {
+      const modal = new bootstrap.Modal(elements.addFileModal);
+      modal.show();
+    }
+  }
+
+  function updateSelectedFilesPreview() {
+    if (!elements.selectedFilesPreview || !elements.selectedFilesList) return;
+
+    if (state.pendingFiles.length === 0) {
+      elements.selectedFilesPreview.style.display = 'none';
+      if (elements.addFileSubmitBtn) elements.addFileSubmitBtn.disabled = true;
+      return;
+    }
+
+    elements.selectedFilesPreview.style.display = 'block';
+    if (elements.addFileSubmitBtn) elements.addFileSubmitBtn.disabled = false;
+
+    const formatFileSize = (bytes) => {
+      if (!bytes) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+
+    const items = state.pendingFiles.map((file, index) => `
+      <div class="hub-selected-file-item" data-index="${index}">
+        <div class="hub-selected-file-info">
+          <span class="hub-selected-file-name">${escapeHtml(file.name)}</span>
+          <span class="hub-selected-file-size">${formatFileSize(file.size)}</span>
+        </div>
+        <button type="button" class="hub-selected-file-remove" data-index="${index}" title="Remove">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+    `);
+
+    elements.selectedFilesList.innerHTML = items.join('');
+
+    // Bind remove button handlers
+    elements.selectedFilesList.querySelectorAll('.hub-selected-file-remove').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const index = parseInt(btn.dataset.index, 10);
+        state.pendingFiles.splice(index, 1);
+        updateSelectedFilesPreview();
+      });
+    });
+  }
+
+  function handleFileDropZoneDragOver(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (elements.fileDropZone) {
+      elements.fileDropZone.classList.add('drag-active');
+    }
+  }
+
+  function handleFileDropZoneDragLeave(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (elements.fileDropZone) {
+      elements.fileDropZone.classList.remove('drag-active');
+    }
+  }
+
+  function handleFileDropZoneDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (elements.fileDropZone) {
+      elements.fileDropZone.classList.remove('drag-active');
+    }
+
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      addFilesToPending(Array.from(files));
+    }
+  }
+
+  function handleFileInputChange(event) {
+    const files = event.target?.files;
+    if (files && files.length > 0) {
+      addFilesToPending(Array.from(files));
+      event.target.value = ''; // Reset input
+    }
+  }
+
+  function addFilesToPending(files) {
+    // Max file size: 10MB
+    const maxSize = 10 * 1024 * 1024;
+
+    files.forEach((file) => {
+      if (file.size > maxSize) {
+        if (window.Toast) {
+          window.Toast.warning(`${file.name} exceeds 10MB limit`);
+        }
+        return;
+      }
+      // Avoid duplicates
+      if (!state.pendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+        state.pendingFiles.push(file);
+      }
+    });
+
+    updateSelectedFilesPreview();
+  }
+
+  async function submitAddFile() {
+    if (!state.selectedId || state.pendingFiles.length === 0) return;
+
+    const title = elements.fileTitle?.value?.trim() || '';
+    const notes = elements.fileNotes?.value?.trim() || '';
+
+    if (elements.addFileSubmitBtn) {
+      elements.addFileSubmitBtn.disabled = true;
+      elements.addFileSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading...';
+    }
+
+    if (elements.fileUploadProgress) {
+      elements.fileUploadProgress.style.display = 'block';
+    }
+
+    let successCount = 0;
+    const total = state.pendingFiles.length;
+
+    for (let i = 0; i < state.pendingFiles.length; i++) {
+      const file = state.pendingFiles[i];
+      const percent = Math.round(((i + 0.5) / total) * 100);
+
+      if (elements.fileUploadPercent) {
+        elements.fileUploadPercent.textContent = `${percent}%`;
+      }
+      if (elements.fileUploadProgressBar) {
+        elements.fileUploadProgressBar.style.width = `${percent}%`;
+      }
+
+      try {
+        await uploadFileAttachment(file, title, notes);
+        successCount++;
+      } catch (error) {
+        console.error('Failed to upload file:', file.name, error);
+        if (window.Toast) {
+          window.Toast.error(`Failed to upload ${file.name}`);
+        }
+      }
+    }
+
+    // Complete progress
+    if (elements.fileUploadPercent) {
+      elements.fileUploadPercent.textContent = '100%';
+    }
+    if (elements.fileUploadProgressBar) {
+      elements.fileUploadProgressBar.style.width = '100%';
+    }
+
+    // Close modal
+    if (elements.addFileModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(elements.addFileModal);
+      if (modal) modal.hide();
+    }
+
+    // Reset state
+    state.pendingFiles = [];
+
+    // Show success toast
+    if (successCount > 0 && window.Toast) {
+      window.Toast.success(`Uploaded ${successCount} file${successCount !== 1 ? 's' : ''}`);
+    }
+
+    // Reload files list
+    await loadWorkspaceFiles(state.selectedId);
+
+    // Notify other components
+    if (window.EventBus) {
+      EventBus.emit('workspace:files:updated', { workspaceId: state.selectedId });
+    }
+
+    // Reset button
+    if (elements.addFileSubmitBtn) {
+      elements.addFileSubmitBtn.disabled = false;
+      elements.addFileSubmitBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+          <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+        </svg>
+        Upload
+      `;
+    }
+  }
+
+  async function uploadFileAttachment(file, title, notes) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = async (e) => {
+        try {
+          // Get base64 content
+          let content = e.target.result;
+          if (content.includes(',')) {
+            content = content.split(',')[1];
+          }
+
+          // Determine file type
+          let type = 'other';
+          const mime = file.type || '';
+          const ext = file.name.split('.').pop().toLowerCase();
+
+          if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+            type = 'image';
+          } else if (mime.includes('pdf') || ext === 'pdf') {
+            type = 'pdf';
+          } else if (mime.includes('text') || ['txt', 'md', 'json', 'xml', 'csv', 'html'].includes(ext)) {
+            type = 'doc';
+          }
+
+          const attachment = {
+            title: title || file.name,
+            body: notes || '',
+            type: type,
+            file_meta: {
+              name: file.name,
+              size: file.size,
+              mime: mime || 'application/octet-stream',
+              content: content
+            }
+          };
+
+          const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(attachment)
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Upload failed');
+          }
+
+          resolve(await response.json());
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function loadWorkspaceTasks(workspaceId) {
     if (!workspaceId) return;
 
@@ -1505,9 +1788,8 @@
 
     if (elements.addFileBtn) {
       elements.addFileBtn.addEventListener('click', () => {
-        // Open canvas to add files
         if (state.selectedId) {
-          window.location.href = `/workspaces/${encodeURIComponent(state.selectedId)}/canvas`;
+          openAddFileModal();
         }
       });
     }
@@ -1589,6 +1871,20 @@
     }
     if (elements.deleteConfirmModal) {
       elements.deleteConfirmModal.addEventListener('hidden.bs.modal', handleDeleteCancel);
+    }
+
+    // File upload modal
+    if (elements.fileDropZone) {
+      elements.fileDropZone.addEventListener('click', () => elements.fileInput?.click());
+      elements.fileDropZone.addEventListener('dragover', handleFileDropZoneDragOver);
+      elements.fileDropZone.addEventListener('dragleave', handleFileDropZoneDragLeave);
+      elements.fileDropZone.addEventListener('drop', handleFileDropZoneDrop);
+    }
+    if (elements.fileInput) {
+      elements.fileInput.addEventListener('change', handleFileInputChange);
+    }
+    if (elements.addFileSubmitBtn) {
+      elements.addFileSubmitBtn.addEventListener('click', submitAddFile);
     }
   }
 

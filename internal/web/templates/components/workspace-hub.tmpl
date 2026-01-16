@@ -264,4 +264,71 @@
       </div>
     </div>
   </div>
+
+  <!-- Add File Modal -->
+  <div class="modal fade" id="hubAddFileModal" tabindex="-1" aria-labelledby="hubAddFileModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hubAddFileModalTitle">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>
+            </svg>
+            Add File
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="hubAddFileForm">
+            <!-- Drag and Drop Zone -->
+            <div id="hubFileDropZone" class="hub-file-drop-zone mb-3">
+              <div class="hub-file-drop-zone-content">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="color: var(--text-secondary); opacity: 0.6;">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+                </svg>
+                <p style="color: var(--text-primary); margin-bottom: 4px;">Drag & drop files here</p>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 12px;">or click to browse</p>
+                <input type="file" id="hubFileInput" multiple style="display: none;">
+              </div>
+            </div>
+            <!-- Selected Files Preview -->
+            <div id="hubSelectedFilesPreview" class="hub-selected-files-preview" style="display: none;">
+              <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Selected Files</label>
+              <div id="hubSelectedFilesList" class="hub-selected-files-list"></div>
+            </div>
+            <!-- Title -->
+            <div class="mb-3">
+              <label for="hubFileTitle" class="form-label" style="color: var(--text-primary); font-weight: 500;">Title (optional)</label>
+              <input type="text" class="form-control" id="hubFileTitle" placeholder="Enter a title for the file(s)...">
+              <small class="text-muted">If left blank, the filename will be used</small>
+            </div>
+            <!-- Notes -->
+            <div class="mb-3">
+              <label for="hubFileNotes" class="form-label" style="color: var(--text-primary); font-weight: 500;">Notes (optional)</label>
+              <textarea class="form-control" id="hubFileNotes" rows="2" placeholder="Add notes or description..."></textarea>
+            </div>
+          </form>
+          <!-- Upload Progress -->
+          <div id="hubFileUploadProgress" class="hub-file-upload-progress" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span style="color: var(--text-primary);">Uploading...</span>
+              <span id="hubFileUploadPercent" style="color: var(--text-secondary);">0%</span>
+            </div>
+            <div class="progress">
+              <div id="hubFileUploadProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="hubAddFileSubmitBtn" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+            </svg>
+            Upload
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

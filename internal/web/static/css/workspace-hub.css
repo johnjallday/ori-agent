@@ -1082,3 +1082,114 @@ body.chat-panel-open .chat-panel-backdrop {
   border-radius: 999px;
   margin-left: 0.25rem;
 }
+
+/* =============================================================================
+   Add File Modal Styles
+   ============================================================================= */
+
+.hub-file-drop-zone {
+  border: 2px dashed var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.hub-file-drop-zone:hover {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.hub-file-drop-zone.drag-active {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.1);
+  border-style: solid;
+}
+
+.hub-file-drop-zone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.hub-selected-files-preview {
+  margin-bottom: 1rem;
+}
+
+.hub-selected-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.hub-selected-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+}
+
+.hub-selected-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.hub-selected-file-name {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-selected-file-size {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.hub-selected-file-remove {
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.hub-selected-file-remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.hub-file-upload-progress {
+  margin-top: 1rem;
+}
+
+.hub-file-upload-progress .progress {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-secondary, #e2e8f0);
+}
+
+.hub-file-upload-progress .progress-bar {
+  background: linear-gradient(90deg, var(--accent-primary, #3b82f6), #60a5fa);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
