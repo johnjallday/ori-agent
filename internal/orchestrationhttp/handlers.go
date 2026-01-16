@@ -359,6 +359,12 @@ func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.ScheduledTaskHandler(w, r)
 }
 
+// BulkDeleteTasksHandler handles bulk deletion of tasks
+// Delegates to TaskHandler for modular organization
+func (h *Handler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Request) {
+	h.taskHandlerSub.BulkDeleteTasksHandler(w, r)
+}
+
 // ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)
 // Delegates to StreamingHandler for modular organization
 func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {

@@ -44,11 +44,6 @@ func (ts *testStore) CreateAgent(name string, config *store.CreateAgentConfig) e
 	return nil
 }
 
-func (ts *testStore) SwitchAgent(name string) error {
-	ts.currentAgent = name
-	return nil
-}
-
 func (ts *testStore) DeleteAgent(name string) error {
 	delete(ts.agents, name)
 	return nil
@@ -124,7 +119,7 @@ func setupTestHandlerWithPlugins(t *testing.T, plugins []types.PluginRegistryEnt
 		Plugins: make(map[string]types.LoadedPlugin),
 	}
 	_ = st.SetAgent("test-agent", testAgent)
-	_ = st.SwitchAgent("test-agent")
+	st.currentAgent = "test-agent"
 
 	// Initialize registry manager
 	regMgr := registry.NewManager()

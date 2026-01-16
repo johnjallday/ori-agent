@@ -327,3 +327,351 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}
 }
+
+// MoveToTrash handles PATCH /api/studios/:id/attachments/:attachment_id/trash
+// Soft-deletes an attachment by setting its DeletedAt timestamp
+func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+	attachmentID := parts[2]
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	attachment, err := studio.GetAttachment(attachmentID)
+	if err != nil {
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	// Set DeletedAt timestamp
+	now := time.Now()
+	attachment.DeletedAt = &now
+	attachment.UpdatedAt = now
+
+	if err := studio.UpdateAttachment(*attachment); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to move attachment to trash: %v", err))
+		return
+	}
+
+	if err := h.store.Save(studio); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+		return
+	}
+
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventAttachmentUpdated,
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"attachment":    attachment,
+				"action":        "moved_to_trash",
+				"attachment_id": attachmentID,
+			},
+		})
+	}
+
+	logger.Info("Attachment moved to trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Attachment moved to trash",
+		"attachment_id": attachmentID,
+		"studio":        studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// RestoreFromTrash handles PATCH /api/studios/:id/attachments/:attachment_id/restore
+// Restores a soft-deleted attachment by clearing its DeletedAt timestamp
+func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+	attachmentID := parts[2]
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	attachment, err := studio.GetAttachment(attachmentID)
+	if err != nil {
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	if attachment.DeletedAt == nil {
+		orihttp.BadRequest(w, "Attachment is not in trash")
+		return
+	}
+
+	// Clear DeletedAt timestamp to restore
+	attachment.DeletedAt = nil
+	attachment.UpdatedAt = time.Now()
+
+	if err := studio.UpdateAttachment(*attachment); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to restore attachment: %v", err))
+		return
+	}
+
+	if err := h.store.Save(studio); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+		return
+	}
+
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventAttachmentUpdated,
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"attachment":    attachment,
+				"action":        "restored_from_trash",
+				"attachment_id": attachmentID,
+			},
+		})
+	}
+
+	logger.Info("Attachment restored from trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Attachment restored from trash",
+		"attachment_id": attachmentID,
+		"attachment":    attachment,
+		"studio":        studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// ListTrash handles GET /api/studios/:id/trash
+// Returns all soft-deleted attachments for a workspace
+func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	// Filter for trashed attachments
+	trashedAttachments := []Attachment{}
+	for _, attachment := range studio.Attachments {
+		if attachment.DeletedAt != nil {
+			trashedAttachments = append(trashedAttachments, attachment)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"attachments": trashedAttachments,
+		"count":       len(trashedAttachments),
+		"studio":      studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// EmptyTrash handles DELETE /api/studios/:id/trash/:attachment_id
+// Permanently deletes a single attachment from trash
+func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+	attachmentID := parts[2]
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	// Verify the attachment exists and is in trash
+	attachment, err := studio.GetAttachment(attachmentID)
+	if err != nil {
+		orihttp.NotFound(w, err.Error())
+		return
+	}
+
+	if attachment.DeletedAt == nil {
+		orihttp.BadRequest(w, "Attachment is not in trash. Use the trash endpoint first.")
+		return
+	}
+
+	// Permanently delete
+	if err := studio.DeleteAttachment(attachmentID); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to permanently delete attachment: %v", err))
+		return
+	}
+
+	if err := h.store.Save(studio); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+		return
+	}
+
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventAttachmentDeleted,
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"attachment_id": attachmentID,
+				"action":        "permanently_deleted",
+			},
+		})
+	}
+
+	logger.Info("Attachment permanently deleted from trash", logger.Fields{"attachment_id": attachmentID, "studio_id": studioID})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Attachment permanently deleted",
+		"attachment_id": attachmentID,
+		"studio":        studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// BulkMoveToTrash handles POST /api/studios/:id/attachments/bulk-trash
+// Moves multiple attachments to trash at once
+func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/studios/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 {
+		orihttp.BadRequest(w, "Invalid URL format")
+		return
+	}
+	studioID := parts[0]
+
+	var req struct {
+		AttachmentIDs []string `json:"attachment_ids"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if len(req.AttachmentIDs) == 0 {
+		orihttp.BadRequest(w, "attachment_ids is required")
+		return
+	}
+
+	studio, err := h.store.Get(studioID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Studio not found: %v", err))
+		return
+	}
+
+	now := time.Now()
+	successCount := 0
+	failedCount := 0
+	var errors []string
+
+	for _, attachmentID := range req.AttachmentIDs {
+		attachment, err := studio.GetAttachment(attachmentID)
+		if err != nil {
+			failedCount++
+			errors = append(errors, fmt.Sprintf("%s: %v", attachmentID, err))
+			continue
+		}
+
+		attachment.DeletedAt = &now
+		attachment.UpdatedAt = now
+
+		if err := studio.UpdateAttachment(*attachment); err != nil {
+			failedCount++
+			errors = append(errors, fmt.Sprintf("%s: %v", attachmentID, err))
+			continue
+		}
+
+		successCount++
+	}
+
+	if err := h.store.Save(studio); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save studio: %v", err))
+		return
+	}
+
+	if h.eventBus != nil {
+		h.eventBus.Publish(Event{
+			Type:        EventWorkspaceUpdated,
+			WorkspaceID: studioID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"action":        "bulk_moved_to_trash",
+				"success_count": successCount,
+				"failed_count":  failedCount,
+			},
+		})
+	}
+
+	logger.Info("Bulk move to trash completed", logger.Fields{
+		"studio_id":     studioID,
+		"success_count": successCount,
+		"failed_count":  failedCount,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":       "Bulk move to trash completed",
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"errors":        errors,
+		"studio":        studioID,
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}

@@ -961,3 +961,102 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		"task_id":   req.TaskID,
 	})
 }
+
+// BulkDeleteTasksHandler handles DELETE /api/orchestration/tasks/bulk
+// Deletes multiple tasks at once
+func (th *TaskHandler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodDelete {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		TaskIDs     []string `json:"task_ids"`
+		WorkspaceID string   `json:"workspace_id"` // Optional: if provided, only delete from this workspace
+	}
+
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if len(req.TaskIDs) == 0 {
+		orihttp.BadRequest(w, "task_ids is required")
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+	var errors []string
+
+	// Group tasks by workspace for efficiency
+	tasksByWorkspace := make(map[string][]string)
+	for _, taskID := range req.TaskIDs {
+		task, err := th.communicator.GetTask(taskID)
+		if err != nil {
+			failedCount++
+			errors = append(errors, fmt.Sprintf("%s: task not found", taskID))
+			continue
+		}
+
+		// If workspace_id is specified, verify task belongs to it
+		if req.WorkspaceID != "" && task.WorkspaceID != req.WorkspaceID {
+			failedCount++
+			errors = append(errors, fmt.Sprintf("%s: task belongs to different workspace", taskID))
+			continue
+		}
+
+		tasksByWorkspace[task.WorkspaceID] = append(tasksByWorkspace[task.WorkspaceID], taskID)
+	}
+
+	// Delete tasks from each workspace
+	for workspaceID, taskIDs := range tasksByWorkspace {
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			for _, taskID := range taskIDs {
+				failedCount++
+				errors = append(errors, fmt.Sprintf("%s: workspace not found", taskID))
+			}
+			continue
+		}
+
+		for _, taskID := range taskIDs {
+			if err := ws.DeleteTask(taskID); err != nil {
+				failedCount++
+				errors = append(errors, fmt.Sprintf("%s: %v", taskID, err))
+				continue
+			}
+			successCount++
+		}
+
+		if err := th.workspaceStore.Save(ws); err != nil {
+			logger.Error("Failed to save workspace after bulk delete", logger.Fields{"workspace_id": workspaceID, "error": err})
+		}
+
+		// Publish event for the workspace
+		if th.eventBus != nil {
+			th.eventBus.Publish(workspace.Event{
+				Type:        workspace.EventWorkspaceUpdated,
+				WorkspaceID: workspaceID,
+				Data: map[string]interface{}{
+					"action":        "bulk_delete_tasks",
+					"deleted_count": len(taskIDs),
+				},
+			})
+		}
+	}
+
+	logger.Info("Bulk delete tasks completed", logger.Fields{
+		"success_count": successCount,
+		"failed_count":  failedCount,
+	})
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":       true,
+		"message":       "Bulk delete completed",
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"errors":        errors,
+	})
+}

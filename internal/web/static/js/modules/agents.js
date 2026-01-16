@@ -1058,10 +1058,6 @@ async function updateAgentSettings(agentName, accordionId) {
     // If name changed, reload agents list to reflect the change
     if (newAgentName !== agentName) {
       await loadAgentsForSidebar();
-      // If this was the current agent, switch to the new name
-      if (currentAgentName === agentName) {
-        switchToAgent(newAgentName);
-      }
     }
 
   } catch (error) {

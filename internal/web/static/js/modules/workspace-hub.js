@@ -46,7 +46,25 @@
     smartInputPromptHint: document.getElementById('hubSmartInputPromptHint'),
     smartInputPromptTask: document.getElementById('hubSmartInputPromptTask'),
     smartInputPromptChat: document.getElementById('hubSmartInputPromptChat'),
-    smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel')
+    smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel'),
+    // Selection mode elements
+    tasksPanel: document.getElementById('hubTasksPanel'),
+    sessionsPanel: document.getElementById('hubSessionsPanel'),
+    notesPanel: document.getElementById('hubNotesPanel'),
+    filesPanel: document.getElementById('hubFilesPanel'),
+    selectTasksBtn: document.getElementById('hubSelectTasksBtn'),
+    bulkDeleteTasksBtn: document.getElementById('hubBulkDeleteTasksBtn'),
+    selectSessionsBtn: document.getElementById('hubSelectSessionsBtn'),
+    bulkDeleteSessionsBtn: document.getElementById('hubBulkDeleteSessionsBtn'),
+    selectNotesBtn: document.getElementById('hubSelectNotesBtn'),
+    bulkDeleteNotesBtn: document.getElementById('hubBulkDeleteNotesBtn'),
+    selectFilesBtn: document.getElementById('hubSelectFilesBtn'),
+    bulkTrashFilesBtn: document.getElementById('hubBulkTrashFilesBtn'),
+    // Delete confirmation modal
+    deleteConfirmModal: document.getElementById('hubDeleteConfirmModal'),
+    deleteConfirmTitle: document.getElementById('hubDeleteConfirmTitle'),
+    deleteConfirmBody: document.getElementById('hubDeleteConfirmBody'),
+    deleteConfirmBtn: document.getElementById('hubDeleteConfirmBtn')
   };
 
   const state = {
@@ -58,7 +76,10 @@
     sessions: [],
     notes: [],
     files: [],
-    smartInput: null
+    smartInput: null,
+    // Selection mode state
+    selectionMode: { tasks: false, sessions: false, notes: false, files: false },
+    selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() }
   };
 
   function escapeHtml(text) {
@@ -162,6 +183,347 @@
   function clearSmartInputField() {
     if (elements.smartInputField) {
       elements.smartInputField.value = '';
+    }
+  }
+
+  // =============================================================================
+  // Delete Confirmation Modal
+  // =============================================================================
+
+  let deleteConfirmResolve = null;
+
+  function showDeleteConfirm(options) {
+    return new Promise((resolve) => {
+      deleteConfirmResolve = resolve;
+
+      if (elements.deleteConfirmTitle) {
+        elements.deleteConfirmTitle.textContent = options.title || 'Confirm Delete';
+      }
+      if (elements.deleteConfirmBody) {
+        elements.deleteConfirmBody.textContent = options.message || 'Are you sure you want to delete the selected items?';
+      }
+      if (elements.deleteConfirmBtn) {
+        elements.deleteConfirmBtn.textContent = options.variant === 'trash' ? 'Move to Trash' : 'Delete';
+      }
+
+      if (elements.deleteConfirmModal && window.bootstrap) {
+        const modal = new bootstrap.Modal(elements.deleteConfirmModal);
+        modal.show();
+      }
+    });
+  }
+
+  function handleDeleteConfirm() {
+    if (deleteConfirmResolve) {
+      deleteConfirmResolve(true);
+      deleteConfirmResolve = null;
+    }
+    if (elements.deleteConfirmModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(elements.deleteConfirmModal);
+      if (modal) modal.hide();
+    }
+  }
+
+  function handleDeleteCancel() {
+    if (deleteConfirmResolve) {
+      deleteConfirmResolve(false);
+      deleteConfirmResolve = null;
+    }
+  }
+
+  // =============================================================================
+  // Selection Mode Functions
+  // =============================================================================
+
+  function toggleSelectionMode(panelType) {
+    const isEnabled = !state.selectionMode[panelType];
+    state.selectionMode[panelType] = isEnabled;
+    state.selectedItems[panelType].clear();
+
+    const panelMap = {
+      tasks: elements.tasksPanel,
+      sessions: elements.sessionsPanel,
+      notes: elements.notesPanel,
+      files: elements.filesPanel
+    };
+
+    const panel = panelMap[panelType];
+    if (panel) {
+      panel.classList.toggle('selection-mode', isEnabled);
+    }
+
+    updateBulkActionsVisibility(panelType);
+
+    // Re-render to show/hide checkboxes
+    if (panelType === 'tasks') renderTasksList(state.tasks);
+    if (panelType === 'sessions') renderSessions(state.sessions);
+    if (panelType === 'notes') renderNotes(state.notes);
+    if (panelType === 'files') renderFiles(state.files);
+  }
+
+  function toggleItemSelection(panelType, itemId) {
+    const selectedSet = state.selectedItems[panelType];
+    if (selectedSet.has(itemId)) {
+      selectedSet.delete(itemId);
+    } else {
+      selectedSet.add(itemId);
+    }
+
+    // Update UI for selected item
+    const selector = {
+      tasks: '.hub-task-card',
+      sessions: '.hub-session-item',
+      notes: '.hub-note-item',
+      files: '.hub-file-item'
+    }[panelType];
+
+    const idAttr = {
+      tasks: 'data-task-id',
+      sessions: 'data-session-id',
+      notes: 'data-note-id',
+      files: 'data-file-id'
+    }[panelType];
+
+    const item = document.querySelector(`${selector}[${idAttr}="${itemId}"]`);
+    if (item) {
+      item.classList.toggle('selected', selectedSet.has(itemId));
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      if (checkbox) checkbox.checked = selectedSet.has(itemId);
+    }
+
+    updateBulkActionsVisibility(panelType);
+  }
+
+  function updateBulkActionsVisibility(panelType) {
+    const count = state.selectedItems[panelType].size;
+    const btnMap = {
+      tasks: elements.bulkDeleteTasksBtn,
+      sessions: elements.bulkDeleteSessionsBtn,
+      notes: elements.bulkDeleteNotesBtn,
+      files: elements.bulkTrashFilesBtn
+    };
+
+    const btn = btnMap[panelType];
+    if (btn) {
+      btn.style.display = count > 0 ? 'inline-flex' : 'none';
+    }
+  }
+
+  // =============================================================================
+  // Individual Delete Functions
+  // =============================================================================
+
+  async function deleteTask(taskId) {
+    const confirmed = await showDeleteConfirm({
+      title: 'Delete Task',
+      message: 'Are you sure you want to delete this task? This action cannot be undone.'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to delete task');
+
+      if (window.Toast) window.Toast.success('Task deleted');
+      await loadWorkspaceTasks(state.selectedId);
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      if (window.Toast) window.Toast.error('Failed to delete task');
+    }
+  }
+
+  async function deleteSession(sessionId) {
+    const confirmed = await showDeleteConfirm({
+      title: 'Delete Chat Session',
+      message: 'Are you sure you want to delete this chat session and all its messages? This action cannot be undone.'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to delete session');
+
+      if (window.Toast) window.Toast.success('Session deleted');
+      await loadWorkspaceSessions(state.selectedId);
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      if (window.Toast) window.Toast.error('Failed to delete session');
+    }
+  }
+
+  async function deleteNote(noteId) {
+    const confirmed = await showDeleteConfirm({
+      title: 'Delete Note',
+      message: 'Are you sure you want to delete this note? This action cannot be undone.'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to delete note');
+
+      if (window.Toast) window.Toast.success('Note deleted');
+      await loadWorkspaceNotes(state.selectedId);
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      if (window.Toast) window.Toast.error('Failed to delete note');
+    }
+  }
+
+  async function moveFileToTrash(fileId) {
+    const confirmed = await showDeleteConfirm({
+      title: 'Move to Trash',
+      message: 'Move this file to trash? You can restore it later from the canvas.',
+      variant: 'trash'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
+        method: 'PATCH'
+      });
+      if (!response.ok) throw new Error('Failed to move file to trash');
+
+      if (window.Toast) window.Toast.success('File moved to trash');
+      await loadWorkspaceFiles(state.selectedId);
+    } catch (error) {
+      console.error('Failed to move file to trash:', error);
+      if (window.Toast) window.Toast.error('Failed to move file to trash');
+    }
+  }
+
+  // =============================================================================
+  // Bulk Delete Functions
+  // =============================================================================
+
+  async function bulkDeleteTasks() {
+    const ids = Array.from(state.selectedItems.tasks);
+    if (ids.length === 0) return;
+
+    const confirmed = await showDeleteConfirm({
+      title: `Delete ${ids.length} Task${ids.length > 1 ? 's' : ''}`,
+      message: `Are you sure you want to delete ${ids.length} task${ids.length > 1 ? 's' : ''}? This action cannot be undone.`
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_ids: ids, workspace_id: state.selectedId })
+      });
+      if (!response.ok) throw new Error('Failed to delete tasks');
+
+      const result = await response.json();
+      if (window.Toast) {
+        window.Toast.success(`Deleted ${result.success_count} task${result.success_count !== 1 ? 's' : ''}`);
+      }
+
+      toggleSelectionMode('tasks');
+      await loadWorkspaceTasks(state.selectedId);
+    } catch (error) {
+      console.error('Failed to bulk delete tasks:', error);
+      if (window.Toast) window.Toast.error('Failed to delete tasks');
+    }
+  }
+
+  async function bulkDeleteSessions() {
+    const ids = Array.from(state.selectedItems.sessions);
+    if (ids.length === 0) return;
+
+    const confirmed = await showDeleteConfirm({
+      title: `Delete ${ids.length} Session${ids.length > 1 ? 's' : ''}`,
+      message: `Are you sure you want to delete ${ids.length} chat session${ids.length > 1 ? 's' : ''} and all their messages? This action cannot be undone.`
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/sessions/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_ids: ids })
+      });
+      if (!response.ok) throw new Error('Failed to delete sessions');
+
+      const result = await response.json();
+      if (window.Toast) {
+        window.Toast.success(`Deleted ${result.success_count} session${result.success_count !== 1 ? 's' : ''}`);
+      }
+
+      toggleSelectionMode('sessions');
+      await loadWorkspaceSessions(state.selectedId);
+    } catch (error) {
+      console.error('Failed to bulk delete sessions:', error);
+      if (window.Toast) window.Toast.error('Failed to delete sessions');
+    }
+  }
+
+  async function bulkDeleteNotes() {
+    const ids = Array.from(state.selectedItems.notes);
+    if (ids.length === 0) return;
+
+    const confirmed = await showDeleteConfirm({
+      title: `Delete ${ids.length} Note${ids.length > 1 ? 's' : ''}`,
+      message: `Are you sure you want to delete ${ids.length} note${ids.length > 1 ? 's' : ''}? This action cannot be undone.`
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/notes/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note_ids: ids })
+      });
+      if (!response.ok) throw new Error('Failed to delete notes');
+
+      const result = await response.json();
+      if (window.Toast) {
+        window.Toast.success(`Deleted ${result.success_count} note${result.success_count !== 1 ? 's' : ''}`);
+      }
+
+      toggleSelectionMode('notes');
+      await loadWorkspaceNotes(state.selectedId);
+    } catch (error) {
+      console.error('Failed to bulk delete notes:', error);
+      if (window.Toast) window.Toast.error('Failed to delete notes');
+    }
+  }
+
+  async function bulkMoveFilesToTrash() {
+    const ids = Array.from(state.selectedItems.files);
+    if (ids.length === 0) return;
+
+    const confirmed = await showDeleteConfirm({
+      title: `Move ${ids.length} File${ids.length > 1 ? 's' : ''} to Trash`,
+      message: `Move ${ids.length} file${ids.length > 1 ? 's' : ''} to trash? You can restore them later from the canvas.`,
+      variant: 'trash'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachment_ids: ids })
+      });
+      if (!response.ok) throw new Error('Failed to move files to trash');
+
+      const result = await response.json();
+      if (window.Toast) {
+        window.Toast.success(`Moved ${result.success_count} file${result.success_count !== 1 ? 's' : ''} to trash`);
+      }
+
+      toggleSelectionMode('files');
+      await loadWorkspaceFiles(state.selectedId);
+    } catch (error) {
+      console.error('Failed to bulk move files to trash:', error);
+      if (window.Toast) window.Toast.error('Failed to move files to trash');
     }
   }
 
@@ -320,25 +682,39 @@
       elements.tasksSubtitle.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
     }
 
+    const inSelectionMode = state.selectionMode.tasks;
+    const selectedSet = state.selectedItems.tasks;
+
     const items = tasks.map((task) => {
       const status = task.status || 'pending';
       const scheduleLabel = task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
       const assignment = task.to || 'unassigned';
+      const isSelected = selectedSet.has(task.id);
 
       return `
-        <div class="hub-task-card" data-task-id="${escapeHtml(task.id)}">
-          <div class="hub-task-header">
-            <div class="hub-task-title">${escapeHtml(task.name || task.description || task.id)}</div>
-            <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(status.replace('_', ' '))}</span>
+        <div class="hub-task-card${isSelected ? ' selected' : ''}" data-task-id="${escapeHtml(task.id)}">
+          <div class="hub-item-checkbox">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select task">
           </div>
-          <div class="hub-task-meta">
-            <span>${escapeHtml(assignment)}</span>
-            <span>${escapeHtml(scheduleLabel)}</span>
+          <div class="hub-task-content">
+            <div class="hub-task-header">
+              <div class="hub-task-title">${escapeHtml(task.name || task.description || task.id)}</div>
+              <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(status.replace('_', ' '))}</span>
+            </div>
+            <div class="hub-task-meta">
+              <span>${escapeHtml(assignment)}</span>
+              <span>${escapeHtml(scheduleLabel)}</span>
+            </div>
+            <div class="hub-task-actions">
+              <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
+              <button class="modern-btn modern-btn-secondary" data-action="chat">Open Chat</button>
+            </div>
           </div>
-          <div class="hub-task-actions">
-            <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
-            <button class="modern-btn modern-btn-secondary" data-action="chat">Open Chat</button>
-          </div>
+          <button class="hub-item-delete-btn" data-action="delete" title="Delete task">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
         </div>
       `;
     });
@@ -348,6 +724,30 @@
     elements.tasksList.querySelectorAll('.hub-task-card').forEach((card) => {
       const taskId = card.dataset.taskId;
       const task = tasks.find((item) => item.id === taskId);
+
+      // Handle checkbox click in selection mode
+      const checkbox = card.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.addEventListener('change', (event) => {
+          event.stopPropagation();
+          toggleItemSelection('tasks', taskId);
+        });
+      }
+
+      // Handle card click in selection mode
+      card.addEventListener('click', (event) => {
+        if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
+          toggleItemSelection('tasks', taskId);
+        }
+      });
+
+      // Delete button
+      card.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          deleteTask(taskId);
+        });
+      });
 
       card.querySelectorAll('[data-action="edit"]').forEach((btn) => {
         btn.addEventListener('click', (event) => {
@@ -407,14 +807,21 @@
       return;
     }
 
+    const inSelectionMode = state.selectionMode.sessions;
+    const selectedSet = state.selectedItems.sessions;
+
     const items = sessions.map((session) => {
       const title = session.title || session.name || 'Untitled Chat';
       const agent = session.agent_name || 'default';
       const updated = formatDate(session.updated_at || session.created_at);
       const messageCount = session.message_count || 0;
+      const isSelected = selectedSet.has(session.id);
 
       return `
-        <div class="hub-session-item" data-session-id="${escapeHtml(session.id)}">
+        <div class="hub-session-item${isSelected ? ' selected' : ''}" data-session-id="${escapeHtml(session.id)}">
+          <div class="hub-item-checkbox">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select session">
+          </div>
           <div class="hub-session-info">
             <div class="hub-session-title">${escapeHtml(title)}</div>
             <div class="hub-session-meta">
@@ -424,6 +831,11 @@
             </div>
           </div>
           <button class="modern-btn modern-btn-secondary hub-session-open" data-action="open">Open</button>
+          <button class="hub-item-delete-btn" data-action="delete" title="Delete session">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
         </div>
       `;
     });
@@ -433,12 +845,33 @@
     elements.sessionsList.querySelectorAll('.hub-session-item').forEach((item) => {
       const sessionId = item.dataset.sessionId;
 
+      // Handle checkbox click in selection mode
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.addEventListener('change', (event) => {
+          event.stopPropagation();
+          toggleItemSelection('sessions', sessionId);
+        });
+      }
+
+      // Delete button
+      item.querySelector('[data-action="delete"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteSession(sessionId);
+      });
+
       item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
         event.stopPropagation();
         openSession(sessionId);
       });
 
-      item.addEventListener('click', () => openSession(sessionId));
+      item.addEventListener('click', (event) => {
+        if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
+          toggleItemSelection('sessions', sessionId);
+        } else if (!inSelectionMode && !event.target.closest('button')) {
+          openSession(sessionId);
+        }
+      });
     });
   }
 
@@ -482,19 +915,31 @@
       return;
     }
 
+    const inSelectionMode = state.selectionMode.notes;
+    const selectedSet = state.selectedItems.notes;
+
     const items = notes.slice(0, 5).map((note) => {
       const title = note.name || 'Untitled Note';
       const updated = formatDate(note.updated_at || note.created_at);
       const preview = note.content ? note.content.substring(0, 80).replace(/\n/g, ' ') : '';
+      const isSelected = selectedSet.has(note.id);
 
       return `
-        <div class="hub-note-item" data-note-id="${escapeHtml(note.id)}">
+        <div class="hub-note-item${isSelected ? ' selected' : ''}" data-note-id="${escapeHtml(note.id)}">
+          <div class="hub-item-checkbox">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select note">
+          </div>
           <div class="hub-note-info">
             <div class="hub-note-title">${escapeHtml(title)}</div>
             <div class="hub-note-preview">${escapeHtml(preview)}${note.content && note.content.length > 80 ? '...' : ''}</div>
             <div class="hub-note-meta">${escapeHtml(updated)}</div>
           </div>
           <button class="modern-btn modern-btn-secondary hub-note-open" data-action="open">Open</button>
+          <button class="hub-item-delete-btn" data-action="delete" title="Delete note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
         </div>
       `;
     });
@@ -504,12 +949,33 @@
     elements.notesList.querySelectorAll('.hub-note-item').forEach((item) => {
       const noteId = item.dataset.noteId;
 
+      // Handle checkbox click in selection mode
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.addEventListener('change', (event) => {
+          event.stopPropagation();
+          toggleItemSelection('notes', noteId);
+        });
+      }
+
+      // Delete button
+      item.querySelector('[data-action="delete"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteNote(noteId);
+      });
+
       item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
         event.stopPropagation();
         openNote(noteId);
       });
 
-      item.addEventListener('click', () => openNote(noteId));
+      item.addEventListener('click', (event) => {
+        if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
+          toggleItemSelection('notes', noteId);
+        } else if (!inSelectionMode && !event.target.closest('button')) {
+          openNote(noteId);
+        }
+      });
     });
   }
 
@@ -559,6 +1025,9 @@
       return;
     }
 
+    const inSelectionMode = state.selectionMode.files;
+    const selectedSet = state.selectedItems.files;
+
     const getFileIcon = (type, mime) => {
       if (type === 'image' || (mime && mime.startsWith('image/'))) {
         return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8.5,13.5L11,16.5L14.5,12L19,18H5M21,19V5C21,3.89 20.1,3 19,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19Z"/></svg>';
@@ -580,14 +1049,23 @@
       const title = file.title || (file.file_meta && file.file_meta.name) || 'Untitled File';
       const size = file.file_meta ? formatFileSize(file.file_meta.size) : '';
       const icon = getFileIcon(file.type, file.file_meta?.mime);
+      const isSelected = selectedSet.has(file.id);
 
       return `
-        <div class="hub-file-item" data-file-id="${escapeHtml(file.id)}">
+        <div class="hub-file-item${isSelected ? ' selected' : ''}" data-file-id="${escapeHtml(file.id)}">
+          <div class="hub-item-checkbox">
+            <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select file">
+          </div>
           <div class="hub-file-icon">${icon}</div>
           <div class="hub-file-info">
             <div class="hub-file-title">${escapeHtml(title)}</div>
             ${size ? `<div class="hub-file-meta">${escapeHtml(size)}</div>` : ''}
           </div>
+          <button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
         </div>
       `;
     });
@@ -595,9 +1073,29 @@
     elements.filesList.innerHTML = items.join('');
 
     elements.filesList.querySelectorAll('.hub-file-item').forEach((item) => {
-      item.addEventListener('click', () => {
-        const fileId = item.dataset.fileId;
-        openFile(fileId);
+      const fileId = item.dataset.fileId;
+
+      // Handle checkbox click in selection mode
+      const checkbox = item.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.addEventListener('change', (event) => {
+          event.stopPropagation();
+          toggleItemSelection('files', fileId);
+        });
+      }
+
+      // Trash button
+      item.querySelector('[data-action="trash"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        moveFileToTrash(fileId);
+      });
+
+      item.addEventListener('click', (event) => {
+        if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
+          toggleItemSelection('files', fileId);
+        } else if (!inSelectionMode && !event.target.closest('button')) {
+          openFile(fileId);
+        }
       });
     });
   }
@@ -1047,6 +1545,50 @@
         resetSmartInputPrompt();
         setSmartInputStatus('', { busy: false });
       });
+    }
+
+    // ==========================================================================
+    // Selection Mode and Delete Buttons
+    // ==========================================================================
+
+    // Tasks selection
+    if (elements.selectTasksBtn) {
+      elements.selectTasksBtn.addEventListener('click', () => toggleSelectionMode('tasks'));
+    }
+    if (elements.bulkDeleteTasksBtn) {
+      elements.bulkDeleteTasksBtn.addEventListener('click', bulkDeleteTasks);
+    }
+
+    // Sessions selection
+    if (elements.selectSessionsBtn) {
+      elements.selectSessionsBtn.addEventListener('click', () => toggleSelectionMode('sessions'));
+    }
+    if (elements.bulkDeleteSessionsBtn) {
+      elements.bulkDeleteSessionsBtn.addEventListener('click', bulkDeleteSessions);
+    }
+
+    // Notes selection
+    if (elements.selectNotesBtn) {
+      elements.selectNotesBtn.addEventListener('click', () => toggleSelectionMode('notes'));
+    }
+    if (elements.bulkDeleteNotesBtn) {
+      elements.bulkDeleteNotesBtn.addEventListener('click', bulkDeleteNotes);
+    }
+
+    // Files selection
+    if (elements.selectFilesBtn) {
+      elements.selectFilesBtn.addEventListener('click', () => toggleSelectionMode('files'));
+    }
+    if (elements.bulkTrashFilesBtn) {
+      elements.bulkTrashFilesBtn.addEventListener('click', bulkMoveFilesToTrash);
+    }
+
+    // Delete confirmation modal
+    if (elements.deleteConfirmBtn) {
+      elements.deleteConfirmBtn.addEventListener('click', handleDeleteConfirm);
+    }
+    if (elements.deleteConfirmModal) {
+      elements.deleteConfirmModal.addEventListener('hidden.bs.modal', handleDeleteCancel);
     }
   }
 

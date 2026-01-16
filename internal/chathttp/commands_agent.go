@@ -255,77 +255,19 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// HandleSwitch handles the /switch command to switch between agents
+// HandleSwitch handles the /switch command - now redirects users to session-based switching
 func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, agentName string) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// If no agent name provided, list available agents
-	if agentName == "" {
-		names, current := ch.store.ListAgents()
-		agentList := fmt.Sprintf("**Available agents:** %s\n\n**Current agent:** %s\n\nUsage: `/switch <agent-name>`",
-			strings.Join(names, ", "), current)
+	// List available agents and explain the new approach
+	names, _ := ch.store.ListAgents()
+	helpMsg := fmt.Sprintf("**Available agents:** %s\n\n"+
+		"To switch agents, use the **Change** button in the chat info bar at the top of the chat window. "+
+		"Each session can use a different agent independently.",
+		strings.Join(names, ", "))
 
-		response := map[string]any{
-			"response": agentList,
-		}
-		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
-		return
-	}
-
-	// Get list of available agents to validate the requested agent exists
-	names, current := ch.store.ListAgents()
-
-	// Check if the requested agent exists
-	found := false
-	for _, name := range names {
-		if name == agentName {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		errorMsg := fmt.Sprintf("❌ **Agent '%s' not found.**\n\nAvailable agents: %s",
-			agentName, strings.Join(names, ", "))
-		response := map[string]any{
-			"response": errorMsg,
-		}
-		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
-		return
-	}
-
-	// Check if we're already on the requested agent
-	if current == agentName {
-		response := map[string]any{
-			"response": fmt.Sprintf("✅ **Already using agent '%s'**", agentName),
-		}
-		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
-		return
-	}
-
-	// Switch to the requested agent
-	if err := ch.store.SwitchAgent(agentName); err != nil {
-		errorMsg := fmt.Sprintf("❌ **Failed to switch to agent '%s':** %v", agentName, err)
-		response := map[string]any{
-			"response": errorMsg,
-		}
-		if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
-			logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-		}
-		return
-	}
-
-	// Success message
-	successMsg := fmt.Sprintf("✅ **Switched to agent '%s'**\n\nYou are now using the '%s' agent for all interactions.",
-		agentName, agentName)
 	response := map[string]any{
-		"response": successMsg,
+		"response": helpMsg,
 	}
 	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})

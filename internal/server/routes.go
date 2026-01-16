@@ -503,6 +503,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/messages", s.orchestrationHandler.MessagesHandler)
 	mux.HandleFunc("/api/orchestration/delegate", s.orchestrationHandler.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/tasks", s.orchestrationHandler.TasksHandler)
+	mux.HandleFunc("/api/orchestration/tasks/bulk", s.orchestrationHandler.BulkDeleteTasksHandler)
 	mux.HandleFunc("/api/orchestration/tasks/execute", s.orchestrationHandler.ExecuteTaskHandler)
 	if s.autoTaskHandler != nil {
 		mux.HandleFunc("/api/orchestration/tasks/auto-parse", s.autoTaskHandler.HandleAutoTask)
@@ -575,9 +576,10 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	// Session Management Endpoints (including Session Files)
 	// =============================================================================
 	if s.sessionHandler != nil {
-		// Cleanup and stats routes (must be registered before the wildcard routes)
+		// Cleanup, stats, and bulk operations routes (must be registered before the wildcard routes)
 		mux.HandleFunc("/api/sessions/cleanup", s.sessionHandler.HandleCleanup)
 		mux.HandleFunc("/api/sessions/stats", s.sessionHandler.HandleStorageStats)
+		mux.HandleFunc("/api/sessions/bulk", s.sessionHandler.HandleBulkDeleteSessions)
 
 		// Auto-classify route (must be registered before the wildcard routes)
 		if s.autoClassifyHandler != nil {
@@ -656,8 +658,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		})
 		mux.HandleFunc("/api/sessions", s.sessionHandler.HandleSessions)
 
-		// Notes search must be before the wildcard /api/notes/
+		// Notes search and bulk operations must be before the wildcard /api/notes/
 		mux.HandleFunc("/api/notes/search", s.sessionHandler.HandleNotes)
+		mux.HandleFunc("/api/notes/bulk", s.sessionHandler.HandleBulkDeleteNotes)
 		// Note AI generation endpoint
 		if s.noteHandler != nil {
 			mux.HandleFunc("/api/notes/generate", s.noteHandler.GenerateHandler)
@@ -748,17 +751,34 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
-		} else if strings.Contains(r.URL.Path, "/attachments") {
-
-			switch r.Method {
-			case http.MethodPost:
-				s.studioHandler.CreateAttachment(w, r)
-			case http.MethodPatch:
-				s.studioHandler.UpdateAttachment(w, r)
-			case http.MethodDelete:
-				s.studioHandler.DeleteAttachment(w, r)
-			default:
+		} else if strings.Contains(r.URL.Path, "/trash") {
+			// Handle trash operations
+			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodGet {
+				s.studioHandler.ListTrash(w, r)
+			} else if r.Method == http.MethodDelete {
+				s.studioHandler.EmptyTrash(w, r)
+			} else {
 				orihttp.MethodNotAllowed(w)
+			}
+		} else if strings.Contains(r.URL.Path, "/attachments") {
+			// Handle attachment trash operations
+			if strings.HasSuffix(r.URL.Path, "/trash") && r.Method == http.MethodPatch {
+				s.studioHandler.MoveToTrash(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/restore") && r.Method == http.MethodPatch {
+				s.studioHandler.RestoreFromTrash(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/bulk-trash") && r.Method == http.MethodPost {
+				s.studioHandler.BulkMoveToTrash(w, r)
+			} else {
+				switch r.Method {
+				case http.MethodPost:
+					s.studioHandler.CreateAttachment(w, r)
+				case http.MethodPatch:
+					s.studioHandler.UpdateAttachment(w, r)
+				case http.MethodDelete:
+					s.studioHandler.DeleteAttachment(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
 			}
 			// Handle canvas store node operations (must be before /store-nodes check)
 		} else if strings.Contains(r.URL.Path, "/canvas/store-nodes") {

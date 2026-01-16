@@ -26,7 +26,6 @@ func (m *mockAgentStore) GetAgent(name string) (*agent.Agent, bool) {
 
 func (m *mockAgentStore) ListAgents() ([]string, string)                                 { return nil, "" }
 func (m *mockAgentStore) CreateAgent(name string, config *store.CreateAgentConfig) error { return nil }
-func (m *mockAgentStore) SwitchAgent(name string) error                                  { return nil }
 func (m *mockAgentStore) DeleteAgent(name string) error                                  { return nil }
 func (m *mockAgentStore) SetAgent(name string, ag *agent.Agent) error                    { return nil }
 func (m *mockAgentStore) Save() error                                                    { return nil }

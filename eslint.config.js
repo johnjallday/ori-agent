@@ -30,7 +30,6 @@ export default [
         loadPlugins: 'readonly',
         loadPluginsForSidebar: 'readonly',
         loadSettings: 'readonly',
-        switchToAgent: 'readonly',
         loadAgent: 'readonly',
         refreshPluginList: 'readonly',
         currentAgent: 'writable',

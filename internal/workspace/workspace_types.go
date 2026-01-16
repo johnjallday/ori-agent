@@ -117,6 +117,7 @@ type Attachment struct {
 	Y           float64             `json:"y"`
 	CreatedAt   time.Time           `json:"created_at"`
 	UpdatedAt   time.Time           `json:"updated_at"`
+	DeletedAt   *time.Time          `json:"deleted_at,omitempty"` // Soft-delete timestamp (nil = active, set = in trash)
 }
 
 // AgentMessage represents a message passed between agents

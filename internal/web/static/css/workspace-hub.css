@@ -962,3 +962,123 @@ body.chat-panel-open .chat-panel-backdrop {
     padding-bottom: 1.25rem;
   }
 }
+
+/* =============================================================================
+   Selection Mode Styles
+   ============================================================================= */
+
+/* Selection mode on panels */
+.hub-panel.selection-mode .hub-panel-body {
+  /* Slight visual indicator when in selection mode */
+}
+
+/* Item checkbox container - hidden by default, shown in selection mode */
+.hub-item-checkbox {
+  display: none;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
+}
+
+.hub-panel.selection-mode .hub-item-checkbox {
+  display: flex;
+  align-items: center;
+}
+
+.hub-item-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent-primary, #3b82f6);
+}
+
+/* Selected item highlight */
+.hub-task-card.selected,
+.hub-session-item.selected,
+.hub-note-item.selected,
+.hub-file-item.selected {
+  border-color: var(--accent-primary, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* Per-item delete button - visible on hover */
+.hub-item-delete-btn {
+  display: none;
+  padding: 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm, 4px);
+  transition: color 0.15s ease, background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.hub-item-delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.hub-task-card:hover .hub-item-delete-btn,
+.hub-session-item:hover .hub-item-delete-btn,
+.hub-note-item:hover .hub-item-delete-btn,
+.hub-file-item:hover .hub-item-delete-btn {
+  display: flex;
+}
+
+/* Hide individual delete buttons in selection mode */
+.hub-panel.selection-mode .hub-item-delete-btn {
+  display: none !important;
+}
+
+/* Danger button styling */
+.modern-btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+}
+
+.modern-btn-danger:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+.modern-btn-danger:active {
+  background: #b91c1c;
+}
+
+/* Selection mode button active state */
+.hub-panel.selection-mode #hubSelectTasksBtn,
+.hub-panel.selection-mode #hubSelectSessionsBtn,
+.hub-panel.selection-mode #hubSelectNotesBtn,
+.hub-panel.selection-mode #hubSelectFilesBtn {
+  background: var(--accent-primary, #3b82f6);
+  color: white;
+}
+
+/* Adjust task card layout for selection mode */
+.hub-panel.selection-mode .hub-task-card {
+  flex-direction: row;
+  align-items: center;
+}
+
+.hub-panel.selection-mode .hub-task-card .hub-task-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Make items look clickable in selection mode */
+.hub-panel.selection-mode .hub-task-card,
+.hub-panel.selection-mode .hub-session-item,
+.hub-panel.selection-mode .hub-note-item,
+.hub-panel.selection-mode .hub-file-item {
+  cursor: pointer;
+}
+
+/* Selected count badge (optional, for future enhancement) */
+.hub-selected-count {
+  font-size: 0.7rem;
+  background: var(--accent-primary, #3b82f6);
+  color: white;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  margin-left: 0.25rem;
+}

@@ -296,3 +296,52 @@ func (h *Handler) searchNotes(w http.ResponseWriter, r *http.Request) {
 		"notes": notes,
 	})
 }
+
+// HandleBulkDeleteNotes handles DELETE /api/notes/bulk
+// Deletes multiple notes at once
+func (h *Handler) HandleBulkDeleteNotes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		NoteIDs []string `json:"note_ids"`
+	}
+
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if len(req.NoteIDs) == 0 {
+		_ = orihttp.RespondBadRequest(w, "note_ids is required")
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+	var errors []string
+
+	for _, noteID := range req.NoteIDs {
+		err := h.store.DeleteNote(r.Context(), noteID)
+		if err != nil {
+			failedCount++
+			errors = append(errors, noteID+": "+err.Error())
+			continue
+		}
+		successCount++
+	}
+
+	logger.Info("Bulk delete notes completed", logger.Fields{
+		"success_count": successCount,
+		"failed_count":  failedCount,
+	})
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":       true,
+		"message":       "Bulk delete completed",
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"errors":        errors,
+	})
+}

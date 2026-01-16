@@ -435,3 +435,52 @@ func (h *Handler) HandleCacheStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.store.GetCacheStats()
 	orihttp.WriteJSON(w, stats)
 }
+
+// HandleBulkDeleteSessions handles DELETE /api/sessions/bulk
+// Deletes multiple sessions at once (cascades to delete all messages)
+func (h *Handler) HandleBulkDeleteSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		SessionIDs []string `json:"session_ids"`
+	}
+
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if len(req.SessionIDs) == 0 {
+		_ = orihttp.RespondBadRequest(w, "session_ids is required")
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+	var errors []string
+
+	for _, sessionID := range req.SessionIDs {
+		err := h.store.DeleteSession(r.Context(), sessionID)
+		if err != nil {
+			failedCount++
+			errors = append(errors, sessionID+": "+err.Error())
+			continue
+		}
+		successCount++
+	}
+
+	logger.Info("Bulk delete sessions completed", logger.Fields{
+		"success_count": successCount,
+		"failed_count":  failedCount,
+	})
+
+	orihttp.WriteJSON(w, map[string]interface{}{
+		"success":       true,
+		"message":       "Bulk delete completed",
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"errors":        errors,
+	})
+}

@@ -122,7 +122,6 @@ type mockStore struct{}
 
 func (m *mockStore) ListAgents() (names []string, current string)                { return nil, "" }
 func (m *mockStore) CreateAgent(name string, cfg *store.CreateAgentConfig) error { return nil }
-func (m *mockStore) SwitchAgent(name string) error                               { return nil }
 func (m *mockStore) DeleteAgent(name string) error                               { return nil }
 func (m *mockStore) GetAgent(name string) (*agent.Agent, bool)                   { return nil, false }
 func (m *mockStore) SetAgent(name string, ag *agent.Agent) error                 { return nil }

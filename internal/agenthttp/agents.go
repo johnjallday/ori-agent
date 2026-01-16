@@ -191,18 +191,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": "Agent '" + req.Name + "' created successfully",
 		})
 
-	case http.MethodPut:
-		name := r.URL.Query().Get("name")
-		if name == "" {
-			orihttp.BadRequest(w, "name required")
-			return
-		}
-		if err := h.State.SwitchAgent(name); err != nil {
-			orihttp.BadRequest(w, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-
 	case http.MethodPatch:
 		// PATCH /api/agents/:name - Update agent metadata
 		agentName := orihttp.RequirePathParamOrQuery(w, r, "/api/agents/", "name")
@@ -280,9 +268,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			agent.Metadata.Favorite = *req.Favorite
 		}
 
-		// Track if this was the current agent (for rename handling)
-		_, currentAgent := h.State.ListAgents()
-		wasCurrent := currentAgent == agentName
 		newName := agentName
 
 		// Update timestamp if statistics exist
@@ -312,9 +297,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				logger.Error("Failed to delete old agent record after rename", logger.Fields{"name": agentName, "err": err})
 			}
 			newName = *req.Name
-			if wasCurrent {
-				_ = h.State.SwitchAgent(newName)
-			}
 		} else {
 			if err := h.State.SetAgent(agentName, agent); err != nil {
 				logger.Error("Failed to update agent metadata", logger.Fields{"agent": err})

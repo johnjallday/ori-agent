@@ -16,7 +16,6 @@ type Store interface {
 	// Agents
 	ListAgents() (names []string, current string)
 	CreateAgent(name string, config *CreateAgentConfig) error
-	SwitchAgent(name string) error
 	DeleteAgent(name string) error
 
 	// Get/Set directly

@@ -28,10 +28,6 @@ func (m *mockStore) CreateAgent(name string, config *store.CreateAgentConfig) er
 	return nil
 }
 
-func (m *mockStore) SwitchAgent(name string) error {
-	return nil
-}
-
 func (m *mockStore) DeleteAgent(name string) error {
 	return nil
 }

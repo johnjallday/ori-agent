@@ -2,7 +2,6 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,23 +124,6 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 		s.agents[name] = newAgent
 	}
 	return s.saveUnlocked()
-}
-
-func (s *fileStore) SwitchAgent(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.agents[name]; !exists {
-		return errors.New("agent not found")
-	}
-	s.current = name
-
-	// Save main store
-	if err := s.saveUnlocked(); err != nil {
-		return err
-	}
-
-	// Also write agents.json in current working directory for plugins
-	return s.writeAgentsJSON()
 }
 
 func (s *fileStore) DeleteAgent(name string) error {

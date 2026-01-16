@@ -6,7 +6,6 @@ let dashboardCurrentView = 'table';
 const dashboardCurrentSort = 'name';
 const dashboardSortOrder = 'asc';
 let dashboardRefreshInterval = null;
-let dashboardActiveAgent = ''; // Currently active/loaded agent
 
 // Initialize dashboard
 function initializeDashboard() {
@@ -73,8 +72,7 @@ async function loadAgents() {
     console.log('📊 Data received:', data);
     dashboardAllAgents = data.agents || [];
     dashboardFilteredAgents = [...dashboardAllAgents];
-    dashboardActiveAgent = data.current || ''; // Track the currently active agent
-    console.log('✅ Loaded', dashboardAllAgents.length, 'agents, active:', dashboardActiveAgent);
+    console.log('✅ Loaded', dashboardAllAgents.length, 'agents');
 
     updateStatistics();
     renderDashboardAgents();
@@ -154,13 +152,6 @@ function renderTableView() {
   dashboardFilteredAgents.forEach(agent => {
     const row = document.createElement('tr');
     row.onclick = () => viewAgent(agent.name);
-    const isActive = agent.name === dashboardActiveAgent;
-
-    // Highlight active agent row
-    if (isActive) {
-      row.style.background = 'rgba(40, 167, 69, 0.15)';
-      row.style.borderLeft = '3px solid var(--success-color)';
-    }
 
     row.innerHTML = `
             <td>
@@ -179,9 +170,6 @@ function renderTableView() {
             <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
             <td>
                 <div class="actions-cell" onclick="event.stopPropagation()">
-                    ${isActive ?
-    '<button class="action-btn" disabled style="opacity: 0.5; cursor: default;">Active</button>' :
-    `<button class="action-btn" onclick="loadAgentForChat('${escapeHtml(agent.name)}')">Load</button>`}
                     <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
                     <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
                 </div>
@@ -201,13 +189,6 @@ function renderCardView() {
     const card = document.createElement('div');
     card.className = 'agent-card';
     card.onclick = () => viewAgent(agent.name);
-    const isActive = agent.name === dashboardActiveAgent;
-
-    // Add active styling to card
-    if (isActive) {
-      card.style.borderColor = 'var(--success-color)';
-      card.style.boxShadow = '0 0 0 2px rgba(40, 167, 69, 0.2)';
-    }
 
     card.innerHTML = `
             <div class="agent-card-header">
@@ -236,9 +217,6 @@ function renderCardView() {
                 </div>
             </div>
             <div class="agent-card-actions" onclick="event.stopPropagation()">
-                ${isActive ?
-    '<button class="action-btn" disabled style="opacity: 0.5; cursor: default;">Active</button>' :
-    `<button class="action-btn" onclick="loadAgentForChat('${escapeHtml(agent.name)}')">Load</button>`}
                 <button class="action-btn" onclick="viewAgent('${escapeHtml(agent.name)}')">View</button>
                 <button class="action-btn" onclick="confirmDelete('${escapeHtml(agent.name)}')">Delete</button>
             </div>
@@ -327,17 +305,6 @@ function createAgent() {
 // View agent details
 function viewAgent(name) {
   window.location.href = `/agents/${encodeURIComponent(name)}`;
-}
-
-// Load agent for chat (sets current agent then redirects to chat view)
-async function loadAgentForChat(name) {
-  try {
-    await switchToAgent(name);
-    window.location.href = '/';
-  } catch (error) {
-    console.error('Failed to load agent for chat:', error);
-    showError('Failed to load agent for chat');
-  }
 }
 
 // Delete agent with confirmation
