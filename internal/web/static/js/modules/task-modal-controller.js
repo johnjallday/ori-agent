@@ -17,6 +17,8 @@ class TaskModalController {
     this.autoMode = false;
     this.llmAvailable = false;
     this.systemModelConfigured = false;
+    // File attachment state
+    this.pendingFiles = [];
   }
 
   /**
@@ -104,6 +106,9 @@ class TaskModalController {
 
     // Fetch system paths
     this.fetchSystemPaths();
+
+    // File attachment handlers
+    this.bindFileEvents();
 
     this.initialized = true;
   }
@@ -381,6 +386,9 @@ class TaskModalController {
     // Reset auto-save fields
     this.resetAutoSaveFields();
 
+    // Reset file attachments
+    this.resetFiles();
+
     // Show modal
     modal.style.display = 'flex';
 
@@ -433,6 +441,9 @@ class TaskModalController {
 
     // Populate auto-save fields
     this.populateAutoSaveFields(task);
+
+    // Reset file attachments (for edit mode, we start fresh)
+    this.resetFiles();
 
     // Show modal
     modal.style.display = 'flex';
@@ -532,6 +543,12 @@ class TaskModalController {
           const errText = await response.text();
           throw new Error(errText || 'Failed to update task');
         }
+
+        // Upload files to existing task
+        if (this.pendingFiles.length > 0) {
+          await this.uploadFilesToTask(this.editingTaskId);
+        }
+
         this.showToast('Task updated', 'success');
       } else {
         // Create new task
@@ -554,8 +571,18 @@ class TaskModalController {
           const errText = await response.text();
           throw new Error(errText || 'Failed to create task');
         }
+
+        // Upload files to newly created task
+        const createdTask = await response.json();
+        if (createdTask?.id && this.pendingFiles.length > 0) {
+          await this.uploadFilesToTask(createdTask.id);
+        }
+
         this.showToast('Task created', 'success');
       }
+
+      // Clear pending files
+      this.pendingFiles = [];
 
       this.close();
 
@@ -1056,6 +1083,161 @@ class TaskModalController {
     } else {
       // Fallback to alert
       alert(message);
+    }
+  }
+
+  // =============================================================================
+  // File Attachment Methods
+  // =============================================================================
+
+  /**
+   * Bind file drag-and-drop and input events
+   */
+  bindFileEvents() {
+    const dropZone = document.getElementById('taskModalFileDropZone');
+    const fileInput = document.getElementById('taskModalFileInput');
+
+    if (dropZone) {
+      dropZone.addEventListener('click', () => {
+        document.getElementById('taskModalFileInput')?.click();
+      });
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-active');
+      });
+      dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-active');
+      });
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-active');
+        const files = e.dataTransfer?.files;
+        if (files && files.length > 0) {
+          this.addFiles(Array.from(files));
+        }
+      });
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener('change', (e) => {
+        const files = e.target?.files;
+        if (files && files.length > 0) {
+          this.addFiles(Array.from(files));
+          e.target.value = '';
+        }
+      });
+    }
+  }
+
+  /**
+   * Add files to pending list
+   */
+  addFiles(files) {
+    const maxSize = 10 * 1024 * 1024; // 10MB
+
+    files.forEach((file) => {
+      if (file.size > maxSize) {
+        this.showToast(`${file.name} exceeds 10MB limit`, 'warning');
+        return;
+      }
+      // Avoid duplicates
+      if (!this.pendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+        this.pendingFiles.push(file);
+      }
+    });
+
+    this.updateFilesPreview();
+  }
+
+  /**
+   * Update file preview display
+   */
+  updateFilesPreview() {
+    const container = document.getElementById('taskModalSelectedFiles');
+    if (!container) return;
+
+    if (this.pendingFiles.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'block';
+
+    const formatSize = (bytes) => {
+      if (!bytes) return '';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    };
+
+    const escapeHtml = (text) => {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    };
+
+    const items = this.pendingFiles.map((file, index) => `
+      <div class="task-selected-file-item" data-index="${index}">
+        <span class="task-file-name">${escapeHtml(file.name)}</span>
+        <span class="task-file-size">${formatSize(file.size)}</span>
+        <button type="button" class="task-file-remove" data-index="${index}" title="Remove">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
+      </div>
+    `);
+
+    container.innerHTML = items.join('');
+
+    // Bind remove buttons
+    container.querySelectorAll('.task-file-remove').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = parseInt(btn.dataset.index, 10);
+        this.pendingFiles.splice(index, 1);
+        this.updateFilesPreview();
+      });
+    });
+  }
+
+  /**
+   * Reset file attachments
+   */
+  resetFiles() {
+    this.pendingFiles = [];
+    this.updateFilesPreview();
+  }
+
+  /**
+   * Upload pending files to a task
+   */
+  async uploadFilesToTask(taskId) {
+    if (!taskId || this.pendingFiles.length === 0) return;
+
+    for (const file of this.pendingFiles) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`/api/orchestration/tasks/${taskId}/files`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.status}`);
+        }
+        console.log('Uploaded file to task:', file.name);
+      } catch (error) {
+        console.error('Failed to upload file:', file.name, error);
+        this.showToast(`Failed to upload ${file.name}`, 'error');
+      }
     }
   }
 }
