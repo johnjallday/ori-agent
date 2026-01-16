@@ -1193,3 +1193,26 @@ body.chat-panel-open .chat-panel-backdrop {
   border-radius: 4px;
   transition: width 0.3s ease;
 }
+
+/* Quick Add Attach Button */
+.hub-smart-input-attach {
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hub-smart-input-attach svg {
+  opacity: 0.8;
+}
+
+.hub-smart-input-attach:hover svg {
+  opacity: 1;
+}
+
+.hub-smart-input-main {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}

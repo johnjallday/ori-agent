@@ -47,6 +47,7 @@
     smartInputPromptTask: document.getElementById('hubSmartInputPromptTask'),
     smartInputPromptChat: document.getElementById('hubSmartInputPromptChat'),
     smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel'),
+    smartInputAttachBtn: document.getElementById('hubSmartInputAttachBtn'),
     // Selection mode elements
     tasksPanel: document.getElementById('hubTasksPanel'),
     sessionsPanel: document.getElementById('hubSessionsPanel'),
@@ -1796,6 +1797,14 @@
 
     if (elements.smartInputSubmit) {
       elements.smartInputSubmit.addEventListener('click', submitSmartInput);
+    }
+
+    if (elements.smartInputAttachBtn) {
+      elements.smartInputAttachBtn.addEventListener('click', () => {
+        if (state.selectedId) {
+          openAddFileModal();
+        }
+      });
     }
 
     if (elements.smartInputField) {
