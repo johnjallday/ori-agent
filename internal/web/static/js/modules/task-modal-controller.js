@@ -702,6 +702,15 @@ class TaskModalController {
         throw new Error(errText || 'Failed to create task');
       }
 
+      // Upload files to newly created task
+      const createdTask = await createResponse.json();
+      if (createdTask?.id && this.pendingFiles.length > 0) {
+        await this.uploadFilesToTask(createdTask.id);
+      }
+
+      // Clear pending files
+      this.pendingFiles = [];
+
       this.showToast('Task created', 'success');
       this.close();
 
