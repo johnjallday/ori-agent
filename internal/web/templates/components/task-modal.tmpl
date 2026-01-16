@@ -65,17 +65,44 @@
 
       <!-- Auto Mode Section -->
       <div id="taskAutoSection" style="display: none;">
-        <div class="task-modal-field" style="margin-bottom: 12px;">
-          <div style="background: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: var(--text-secondary);">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
-              <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-            </svg>
-            Describe your task in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
+        <!-- Auto Create Mode -->
+        <div id="taskAutoCreateSection">
+          <div class="task-modal-field" style="margin-bottom: 12px;">
+            <div style="background: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: var(--text-secondary);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
+                <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+              </svg>
+              Describe your task in natural language. Include timing like "at 6pm", "every Monday", or "in 2 hours".
+            </div>
+          </div>
+          <div class="task-modal-field">
+            <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
+            <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
           </div>
         </div>
-        <div class="task-modal-field">
-          <label for="taskAutoDescription" class="task-modal-label">Describe your task</label>
-          <textarea id="taskAutoDescription" class="task-modal-textarea" rows="4" placeholder="Example: Research 3 things to do in NYC scheduled at 6pm tomorrow&#10;&#10;Or: Send a daily summary report every morning at 9am&#10;&#10;Or: Check server status every 30 minutes"></textarea>
+        <!-- Auto Edit Mode -->
+        <div id="taskAutoEditSection" style="display: none;">
+          <div class="task-modal-field" style="margin-bottom: 12px;">
+            <div style="background: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; color: var(--text-secondary);">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: text-bottom; margin-right: 4px; color: #3b82f6;">
+                <path d="M13,9H11V7H13M13,17H11V11H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
+              </svg>
+              Describe how you want to modify this task. The AI will update it based on your instructions.
+            </div>
+          </div>
+          <!-- Current Task Display -->
+          <div class="task-modal-field" style="margin-bottom: 12px;">
+            <label class="task-modal-label">Current Task</label>
+            <div id="taskAutoEditCurrentTask" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+              <div id="taskAutoEditCurrentTitle" style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"></div>
+              <div id="taskAutoEditCurrentDetails" style="font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;"></div>
+              <div id="taskAutoEditCurrentMeta" style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted);"></div>
+            </div>
+          </div>
+          <div class="task-modal-field">
+            <label for="taskAutoEditDescription" class="task-modal-label">How would you like to modify it?</label>
+            <textarea id="taskAutoEditDescription" class="task-modal-textarea" rows="3" placeholder="Example: Change the schedule to every weekday at 9am&#10;&#10;Or: Add more details about the expected output format&#10;&#10;Or: Assign this to a different agent"></textarea>
+          </div>
         </div>
       </div>
 

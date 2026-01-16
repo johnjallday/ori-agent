@@ -19,6 +19,8 @@ class TaskModalController {
     this.systemModelConfigured = false;
     // File attachment state
     this.pendingFiles = [];
+    // Current task being edited (for auto edit mode)
+    this.currentTask = null;
   }
 
   /**
@@ -137,6 +139,8 @@ class TaskModalController {
   handleModeChange(mode) {
     const manualSection = document.getElementById('taskManualSection');
     const autoSection = document.getElementById('taskAutoSection');
+    const autoCreateSection = document.getElementById('taskAutoCreateSection');
+    const autoEditSection = document.getElementById('taskAutoEditSection');
     const llmWarning = document.getElementById('taskLlmNotAvailableWarning');
     const llmWarningMessage = document.getElementById('taskLlmWarningMessage');
     const saveButtonText = document.getElementById('taskModalSaveText');
@@ -148,7 +152,17 @@ class TaskModalController {
         if (manualSection) manualSection.style.display = 'none';
         if (autoSection) autoSection.style.display = 'block';
         if (llmWarning) llmWarning.style.display = 'none';
-        if (saveButtonText) saveButtonText.textContent = 'Create Task';
+
+        // Show appropriate auto subsection based on edit vs create
+        if (this.editingTaskId) {
+          if (autoCreateSection) autoCreateSection.style.display = 'none';
+          if (autoEditSection) autoEditSection.style.display = 'block';
+          if (saveButtonText) saveButtonText.textContent = 'Update Task';
+        } else {
+          if (autoCreateSection) autoCreateSection.style.display = 'block';
+          if (autoEditSection) autoEditSection.style.display = 'none';
+          if (saveButtonText) saveButtonText.textContent = 'Create Task';
+        }
       } else {
         // LLM not available - show warning
         if (manualSection) manualSection.style.display = 'none';
@@ -408,6 +422,7 @@ class TaskModalController {
     this.editingTaskId = task.id;
     this.workspaceId = task.workspace_id || task.studio_id;
     this.onSaveCallback = onSave;
+    this.currentTask = task; // Store for auto edit mode
 
     const modal = document.getElementById('taskModal');
     if (!modal) return;
@@ -420,6 +435,24 @@ class TaskModalController {
 
     // Show workspace badge
     await this.showWorkspaceBadge(this.workspaceId);
+
+    // Check LLM availability
+    await this.checkLlmAvailability();
+
+    // Default to Manual mode for editing (user can switch to Auto)
+    this.autoMode = false;
+    const manualRadio = document.getElementById('taskConfigModeManual');
+    const autoRadio = document.getElementById('taskConfigModeAuto');
+    if (manualRadio) manualRadio.checked = true;
+    if (autoRadio) autoRadio.checked = false;
+    this.handleModeChange('manual');
+
+    // Populate auto edit section with current task details
+    this.populateAutoEditSection(task);
+
+    // Clear auto edit description
+    const autoEditDescription = document.getElementById('taskAutoEditDescription');
+    if (autoEditDescription) autoEditDescription.value = '';
 
     // Populate agent assignment dropdown first
     this.populateAgentDropdown(this.workspaceId, task);
@@ -455,6 +488,48 @@ class TaskModalController {
   }
 
   /**
+   * Populate the auto edit section with current task details
+   */
+  populateAutoEditSection(task) {
+    const titleEl = document.getElementById('taskAutoEditCurrentTitle');
+    const detailsEl = document.getElementById('taskAutoEditCurrentDetails');
+    const metaEl = document.getElementById('taskAutoEditCurrentMeta');
+
+    if (titleEl) {
+      titleEl.textContent = task.description || 'Untitled Task';
+    }
+
+    if (detailsEl) {
+      detailsEl.textContent = task.details || '(No details)';
+      detailsEl.style.display = task.details ? 'block' : 'none';
+    }
+
+    if (metaEl) {
+      const metaParts = [];
+
+      // Priority
+      const priorityLabels = { 1: 'Highest', 2: 'High', 3: 'Medium', 4: 'Low', 5: 'Lowest' };
+      if (task.priority) {
+        metaParts.push(`Priority: ${priorityLabels[task.priority] || task.priority}`);
+      }
+
+      // Agent assignment
+      if (task.to) {
+        metaParts.push(`Agent: ${task.to}`);
+      }
+
+      // Schedule
+      if (task.schedule_enabled && task.schedule) {
+        const scheduleType = task.schedule.type || 'unknown';
+        metaParts.push(`Schedule: ${scheduleType}`);
+      }
+
+      metaEl.textContent = metaParts.join(' • ');
+      metaEl.style.display = metaParts.length > 0 ? 'block' : 'none';
+    }
+  }
+
+  /**
    * Close the modal
    */
   close() {
@@ -465,6 +540,7 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
+    this.currentTask = null;
   }
 
   /**
@@ -477,9 +553,15 @@ class TaskModalController {
       return;
     }
 
-    // Handle auto mode - parse natural language description
+    // Handle auto mode - parse natural language description (create)
     if (this.autoMode && !this.editingTaskId) {
       await this.saveAutoMode();
+      return;
+    }
+
+    // Handle auto mode - edit with natural language
+    if (this.autoMode && this.editingTaskId) {
+      await this.saveAutoEditMode();
       return;
     }
 
@@ -725,6 +807,142 @@ class TaskModalController {
       // Restore button state
       if (saveButton) saveButton.disabled = false;
       if (saveText) saveText.textContent = originalText || 'Create Task';
+    }
+  }
+
+  /**
+   * Save task in auto edit mode - parse modification instructions and update task
+   */
+  async saveAutoEditMode() {
+    const autoEditDescriptionInput = document.getElementById('taskAutoEditDescription');
+    const modificationDescription = autoEditDescriptionInput?.value?.trim();
+
+    if (!modificationDescription) {
+      this.showToast('Please describe how you want to modify the task', 'error');
+      autoEditDescriptionInput?.focus();
+      return;
+    }
+
+    if (!this.currentTask || !this.editingTaskId) {
+      this.showToast('No task selected for editing', 'error');
+      return;
+    }
+
+    // Show loading state
+    const saveButton = document.getElementById('taskModalSave');
+    const saveText = document.getElementById('taskModalSaveText');
+    const originalText = saveText?.textContent;
+    if (saveButton) saveButton.disabled = true;
+    if (saveText) saveText.textContent = 'Updating...';
+
+    try {
+      // Call auto-edit endpoint with current task and modification request
+      const parseResponse = await fetch('/api/orchestration/tasks/auto-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: this.editingTaskId,
+          current_task: {
+            description: this.currentTask.description,
+            details: this.currentTask.details || '',
+            priority: this.currentTask.priority || 3,
+            to: this.currentTask.to || '',
+            schedule_enabled: this.currentTask.schedule_enabled || false,
+            schedule: this.currentTask.schedule || null,
+            schedule_name: this.currentTask.schedule_name || '',
+            result_storage: this.currentTask.result_storage || null
+          },
+          modification: modificationDescription,
+          workspace_id: this.workspaceId
+        })
+      });
+
+      if (!parseResponse.ok) {
+        const errText = await parseResponse.text();
+        throw new Error(errText || 'Failed to parse modification');
+      }
+
+      const parsed = await parseResponse.json();
+
+      // Build update data from parsed response
+      let to = '';
+      let assignedNodeId = '';
+      if (parsed.agent_name) {
+        assignedNodeId = `${parsed.agent_name}-node-1`;
+        to = parsed.agent_name;
+      }
+
+      // Build schedule data
+      let scheduleData = { schedule_enabled: false };
+      if (parsed.schedule_enabled && parsed.schedule) {
+        const schedule = { ...parsed.schedule };
+        if (schedule.once_at && !schedule.run_at) {
+          schedule.run_at = schedule.once_at;
+          delete schedule.once_at;
+        }
+        scheduleData = {
+          schedule: schedule,
+          schedule_enabled: true,
+          schedule_name: parsed.schedule_name || ''
+        };
+      }
+
+      // Build result storage data
+      let resultStorageData = {};
+      if (parsed.result_storage && parsed.result_storage.enabled) {
+        resultStorageData = {
+          result_storage: {
+            enabled: true,
+            format: parsed.result_storage.format || 'text',
+            store_node_id: parsed.result_storage.store_node_id || undefined,
+            file_path: parsed.result_storage.file_path || undefined
+          }
+        };
+      }
+
+      // Update the task
+      const updateResponse = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: this.editingTaskId,
+          description: parsed.title || this.currentTask.description,
+          details: parsed.details !== undefined ? parsed.details : (this.currentTask.details || ''),
+          priority: parsed.priority || this.currentTask.priority || 3,
+          to: to || this.currentTask.to || undefined,
+          assigned_node_id: assignedNodeId || undefined,
+          ...scheduleData,
+          ...resultStorageData
+        })
+      });
+
+      if (!updateResponse.ok) {
+        const errText = await updateResponse.text();
+        throw new Error(errText || 'Failed to update task');
+      }
+
+      // Upload files if any
+      if (this.pendingFiles.length > 0) {
+        await this.uploadFilesToTask(this.editingTaskId);
+      }
+
+      // Clear pending files
+      this.pendingFiles = [];
+
+      this.showToast('Task updated', 'success');
+      this.close();
+
+      // Call the callback if provided
+      if (this.onSaveCallback) {
+        this.onSaveCallback();
+      }
+    } catch (error) {
+      console.error('Failed to update task in auto mode:', error);
+      this.showToast(error.message || 'Failed to update task', 'error');
+    } finally {
+      // Restore button state
+      if (saveButton) saveButton.disabled = false;
+      if (saveText) saveText.textContent = originalText || 'Update Task';
     }
   }
 
