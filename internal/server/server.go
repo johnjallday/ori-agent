@@ -243,7 +243,7 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
+		WriteTimeout:      6 * time.Minute,
 		IdleTimeout:       90 * time.Second,
 	}
 }

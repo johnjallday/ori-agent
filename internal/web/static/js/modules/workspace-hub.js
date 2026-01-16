@@ -738,6 +738,13 @@
     }
   }
 
+  if (window.EventBus) {
+    EventBus.on('workspace:files:updated', (data) => {
+      if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
+      loadWorkspaceFiles(state.selectedId);
+    }, 'workspaceHub');
+  }
+
   bindEvents();
   loadWorkspaces();
 })();

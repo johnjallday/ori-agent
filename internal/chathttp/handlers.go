@@ -32,7 +32,7 @@ import (
 // Timeout constants for various operations
 const (
 	// ChatRequestTimeout is the maximum time allowed for a chat request to complete
-	ChatRequestTimeout = 180 * time.Second
+	ChatRequestTimeout = 5 * time.Minute
 
 	// ToolExecutionTimeout is the maximum time allowed for a single tool execution
 	ToolExecutionTimeout = 30 * time.Second

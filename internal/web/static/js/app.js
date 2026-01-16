@@ -787,6 +787,160 @@ async function displayTaskList(sessionId) {
   }
 }
 
+function isTextLikeMimeType(mimeType) {
+  if (!mimeType) return false;
+  const lower = mimeType.toLowerCase();
+  return lower.startsWith('text/') || lower.includes('json') || lower.includes('xml') ||
+    lower.includes('csv') || lower.includes('markdown') || lower.includes('html');
+}
+
+function hasTextExtension(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ['txt', 'md', 'json', 'xml', 'html', 'csv'].includes(ext);
+}
+
+function shouldTreatContentAsBase64(file) {
+  if (file.encoding === 'base64') return true;
+  if (file.encoding === 'text') return false;
+  if (isTextLikeMimeType(file.type)) return false;
+  if (file.name && hasTextExtension(file.name)) return false;
+  return true;
+}
+
+function base64ToBlob(base64, mimeType) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType || 'application/octet-stream' });
+}
+
+function buildUploadBlob(file) {
+  const mimeType = file.type || 'application/octet-stream';
+  if (shouldTreatContentAsBase64(file)) {
+    try {
+      return base64ToBlob(file.content || '', mimeType);
+    } catch (error) {
+      appLog.warn('Failed to decode attachment, falling back to text upload', error);
+    }
+  }
+
+  const textMime = isTextLikeMimeType(mimeType) ? mimeType : 'text/plain';
+  return new Blob([file.content || ''], { type: textMime });
+}
+
+async function uploadFileToSession(sessionId, file) {
+  const formData = new FormData();
+  formData.append('file', buildUploadBlob(file), file.name || 'attachment');
+
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/files/upload`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    let message = 'Failed to save attachment';
+    try {
+      const data = await response.json();
+      if (data.message) message = data.message;
+    } catch (error) {
+      appLog.warn('Failed to parse upload error response', error);
+    }
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  return data.file || null;
+}
+
+function buildSessionFileUrl(sessionId, fileId) {
+  if (!sessionId || !fileId) return '';
+  return new URL(`/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}/download`, window.location.origin).toString();
+}
+
+function inferWorkspaceAttachmentType(file) {
+  const mime = (file.type || '').toLowerCase();
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('text/') || mime.includes('json') || mime.includes('xml') || mime.includes('csv') ||
+    mime.includes('pdf') || mime.includes('word') || mime.includes('presentation') || mime.includes('spreadsheet')) {
+    return 'doc';
+  }
+  return 'other';
+}
+
+async function createWorkspaceAttachment(workspaceId, sessionId, file, entry) {
+  if (!workspaceId || !entry) return;
+
+  const fileUrl = buildSessionFileUrl(sessionId, entry.id);
+  const payload = {
+    title: entry.name || file.name || 'Attachment',
+    type: inferWorkspaceAttachmentType(file),
+    file_meta: {
+      name: entry.name || file.name,
+      size: entry.size || file.size || 0,
+      mime: entry.mime_type || file.type || 'application/octet-stream',
+      url: fileUrl
+    }
+  };
+
+  const response = await fetch(`/api/studios/${encodeURIComponent(workspaceId)}/attachments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    let message = 'Failed to add attachment to workspace';
+    try {
+      const data = await response.json();
+      if (data.message) message = data.message;
+    } catch (error) {
+      appLog.warn('Failed to parse workspace attachment error response', error);
+    }
+    throw new Error(message);
+  }
+}
+
+async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
+  if (!sessionId || !files || files.length === 0) return;
+
+  try {
+    const results = await Promise.allSettled(files.map(file => uploadFileToSession(sessionId, file)));
+    const failures = results.filter(result => result.status === 'rejected');
+    const successes = results
+      .map((result, index) => (result.status === 'fulfilled' && result.value ? { file: files[index], entry: result.value } : null))
+      .filter(Boolean);
+
+    if (failures.length > 0 && window.Toast) {
+      const label = failures.length === 1 ? 'attachment' : 'attachments';
+      Toast.warning(`${failures.length} ${label} failed to save to session files`);
+    }
+
+    if (window.sessionFileManager && window.sessionFileManager.sessionId === sessionId) {
+      window.sessionFileManager.loadFiles();
+    }
+
+    if (workspaceId && successes.length > 0) {
+      const attachmentResults = await Promise.allSettled(
+        successes.map(item => createWorkspaceAttachment(workspaceId, sessionId, item.file, item.entry))
+      );
+      const attachmentFailures = attachmentResults.filter(result => result.status === 'rejected');
+      if (attachmentFailures.length > 0 && window.Toast) {
+        Toast.warning('Some attachments could not be added to the workspace');
+      }
+      if (window.EventBus) {
+        EventBus.emit('workspace:files:updated', { workspaceId });
+      }
+    }
+  } catch (error) {
+    appLog.error('Failed to persist chat attachments to session files', error);
+    if (window.Toast) {
+      Toast.warning('Failed to save attachments to session files');
+    }
+  }
+}
+
 // Send message to chat API
 async function sendMessage(message) {
   // Check if state machine is active (replaces isWaitingForResponse)
@@ -812,6 +966,14 @@ async function sendMessage(message) {
 
   // Get uploaded files
   const uploadedFiles = window.getUploadedFiles ? window.getUploadedFiles() : [];
+  const activeSessionId = window.sessionManager?.getActiveSessionId?.();
+  const activeSession = window.sessionManager?.getActiveSession?.();
+  const activeWorkspaceId = activeSession?.folder_id;
+  const filesToPersist = uploadedFiles.slice();
+
+  if (activeSessionId && filesToPersist.length > 0) {
+    persistUploadedFilesToSession(activeSessionId, filesToPersist, activeWorkspaceId);
+  }
 
   // Add user message to chat (including file info if any)
   let displayMessage = trimmedMessage;

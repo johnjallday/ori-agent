@@ -126,6 +126,22 @@ async function handleFileSelect(event) {
   event.target.value = '';
 }
 
+function isLikelyBase64(content) {
+  if (!content || typeof content !== 'string') return false;
+  if (content.length % 4 !== 0) return false;
+  return /^[A-Za-z0-9+/=]+$/.test(content);
+}
+
+function inferContentEncoding(fileData) {
+  if (fileData.encoding) return fileData.encoding;
+  const type = (fileData.type || '').toLowerCase();
+  if (type.startsWith('text/') || type.includes('json') || type.includes('xml') || type.includes('csv') ||
+      type.includes('markdown') || type.includes('html')) {
+    return 'text';
+  }
+  return isLikelyBase64(fileData.content) ? 'base64' : 'text';
+}
+
 // Process files (shared between file input and drag-drop)
 async function processFiles(files) {
   // Allowed file extensions
@@ -183,7 +199,8 @@ async function processFiles(files) {
         name: file.name,
         type: mimeType,
         size: file.size,
-        content: result.binaryContent || result.content  // Prefer binary content for files that have it
+        content: result.binaryContent || result.content,  // Prefer binary content for files that have it
+        encoding: result.binaryContent ? 'base64' : 'text'
       });
 
       console.log(`File added: ${file.name}, type: ${mimeType}, has binary: ${!!result.binaryContent}`);
@@ -413,7 +430,8 @@ function addFileToUpload(fileData) {
     name: fileData.name,
     type: fileData.type,
     size: fileData.size,
-    content: fileData.content
+    content: fileData.content,
+    encoding: inferContentEncoding(fileData)
   });
   updateFilesList();
 
