@@ -120,8 +120,16 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get all agents
-	agents, _ := h.agentStore.ListAgents()
+	// Get all agents with their descriptions for intelligent matching
+	agentNames, _ := h.agentStore.ListAgents()
+	agents := make([]string, 0, len(agentNames))
+	agentDescriptions := make(map[string]string)
+	for _, name := range agentNames {
+		agents = append(agents, name)
+		if ag, found := h.agentStore.GetAgent(name); found && ag.Metadata != nil && ag.Metadata.Description != "" {
+			agentDescriptions[name] = ag.Metadata.Description
+		}
+	}
 
 	// Get the configured system model
 	systemProvider, systemModel := h.configManager.GetSystemModel()
@@ -138,7 +146,7 @@ func (h *AutoTaskHandler) HandleAutoTask(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Parse the task description using LLM
-	taskConfig, err := h.parseTaskDescription(r.Context(), result.Provider, systemProvider, result.Model, req.Description, agents)
+	taskConfig, err := h.parseTaskDescription(r.Context(), result.Provider, systemProvider, result.Model, req.Description, agents, agentDescriptions)
 	if err != nil {
 		logger.Error("Auto-task parsing failed", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to parse task description: "+err.Error())
@@ -156,6 +164,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
 	model string,
 	description string,
 	agents []string,
+	agentDescriptions map[string]string,
 ) (*AutoTaskResponse, error) {
 
 	// Get current time for context
@@ -163,34 +172,50 @@ func (h *AutoTaskHandler) parseTaskDescription(
 	currentTime := now.Format("2006-01-02 15:04:05")
 	currentDay := now.Weekday().String()
 
-	// Build agent list
-	agentList := "Available agents: "
+	// Build agent list with descriptions for intelligent matching
+	var agentList string
 	if len(agents) == 0 {
-		agentList += "(none)"
+		agentList = "Available agents: (none)"
 	} else {
-		agentList += strings.Join(agents, ", ")
+		agentList = "Available agents:\n"
+		for _, name := range agents {
+			if desc, ok := agentDescriptions[name]; ok {
+				agentList += fmt.Sprintf("- %s: %s\n", name, desc)
+			} else {
+				agentList += fmt.Sprintf("- %s\n", name)
+			}
+		}
 	}
 
-	systemPrompt := fmt.Sprintf(`Parse the task description and extract structured information.
+	systemPrompt := fmt.Sprintf(`Parse the task description and return a JSON object with EXACTLY this structure:
+
+{
+  "title": "short task title",
+  "details": "additional context or empty string",
+  "agent_name": "name of matching agent or empty string",
+  "priority": 3,
+  "schedule_enabled": false,
+  "schedule_name": "",
+  "schedule": null,
+  "result_storage": null,
+  "reasoning": "brief explanation"
+}
 
 Current time: %s (%s)
 %s
 
 Schedule parsing rules:
-- "at 6pm" or "at 18:00" -> type=once, once_at=today at that time (or tomorrow if passed)
-- "every day at 9am" -> type=daily, time="09:00"
-- "every Monday at 10am" -> type=weekly, day_of_week=1, time="10:00"
-- "every 30 minutes" -> type=interval, interval_minutes=30
+- "at 6pm" or "at 18:00" -> schedule_enabled=true, schedule={"type":"once","once_at":"ISO datetime"}
+- "every day at 9am" -> schedule_enabled=true, schedule={"type":"daily","time":"09:00"}
+- "every Monday at 10am" -> schedule_enabled=true, schedule={"type":"weekly","day_of_week":1,"time":"10:00"}
+- "every 30 minutes" -> schedule_enabled=true, schedule={"type":"interval","interval_minutes":30}
 - No time mentioned -> schedule_enabled=false, schedule=null
 
-Result storage parsing rules:
-- "save to file", "save results", "store output" -> enabled=true, format based on context
-- "save as json" or "output json" -> enabled=true, format="json"
-- "save as markdown" or "as md" -> enabled=true, format="markdown"
-- "save to /path/to/file" -> enabled=true, file_path="/path/to/file"
-- No save/store mentioned -> result_storage=null
+Result storage: set result_storage={"enabled":true,"format":"text|json|markdown"} only if user mentions saving results.
 
-Agent assignment: Match task type to available agent names. Leave empty if no clear match.`, currentTime, currentDay, agentList)
+Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
+
+IMPORTANT: Always return the exact JSON structure shown above. Never return error messages or different formats.`, currentTime, currentDay, agentList)
 
 	userMessage := description
 

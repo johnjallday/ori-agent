@@ -108,7 +108,8 @@ const sessionManager = {
       this.showAddWorkspaceModal();
     } else if (!restored && this.sessions.length > 0) {
       // No saved session but sessions exist - use the first one
-      await this.switchToSession(this.sessions[0].id);
+      // Pass false to not auto-open the chat panel on page load
+      await this.switchToSession(this.sessions[0].id, false);
     }
 
     // Start polling for session updates
@@ -1531,13 +1532,14 @@ const sessionManager = {
   },
 
   // Switch to a session
-  async switchToSession(sessionId) {
+  // openChat: whether to open the chat panel (default true for user-initiated, false for init)
+  async switchToSession(sessionId, openChat = true) {
     const chatArea = document.getElementById('chatArea');
     const hasRenderedMessages = chatArea && chatArea.children.length > 0;
 
     // If clicking on already-active session, just open the chat panel
     if (sessionId === this.activeSessionId && hasRenderedMessages) {
-      this.openChatPanelIfAvailable();
+      if (openChat) this.openChatPanelIfAvailable();
       return;
     }
 
@@ -1563,7 +1565,7 @@ const sessionManager = {
       // Restore messages to chat area
       this.restoreSessionMessages(session);
 
-      this.openChatPanelIfAvailable();
+      if (openChat) this.openChatPanelIfAvailable();
 
       // Initialize/update session file manager
       this.initializeSessionFiles(sessionId);
