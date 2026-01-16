@@ -197,14 +197,48 @@ class TaskModalController {
         this.defaultOutputDir = data.default_output_dir;
         this.homeDir = data.home_dir;
 
-        // Update the display
-        const pathDisplay = document.getElementById('taskModalDefaultOutputPath');
-        if (pathDisplay && this.defaultOutputDir) {
-          pathDisplay.textContent = this.defaultOutputDir;
-        }
+        // Update the display (will be overwritten by workspace-specific path if available)
+        this.updateOutputPathDisplay(this.defaultOutputDir);
       }
     } catch (err) {
       console.error('Failed to fetch system paths:', err);
+    }
+  }
+
+  /**
+   * Fetch workspace-specific output path
+   */
+  async fetchWorkspaceOutputPath(workspaceId) {
+    if (!workspaceId) {
+      // No workspace - show global default
+      this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}`);
+      if (response.ok) {
+        const workspace = await response.json();
+        // Construct the workspace output path
+        const workspaceName = workspace.name || 'workspace';
+        const outputPath = workspace.output_dir || `workspaces/${workspaceName}/outputs/`;
+        this.updateOutputPathDisplay(outputPath);
+      } else {
+        this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspace output path:', err);
+      this.updateOutputPathDisplay(this.defaultOutputDir || 'outputs/');
+    }
+  }
+
+  /**
+   * Update the output path display element
+   */
+  updateOutputPathDisplay(path) {
+    const pathDisplay = document.getElementById('taskModalDefaultOutputPath');
+    if (pathDisplay) {
+      pathDisplay.textContent = path || 'outputs/';
     }
   }
 
@@ -400,6 +434,9 @@ class TaskModalController {
     // Reset auto-save fields
     this.resetAutoSaveFields();
 
+    // Fetch workspace-specific output path
+    await this.fetchWorkspaceOutputPath(workspaceId);
+
     // Reset file attachments
     this.resetFiles();
 
@@ -474,6 +511,9 @@ class TaskModalController {
 
     // Populate auto-save fields
     this.populateAutoSaveFields(task);
+
+    // Fetch workspace-specific output path
+    await this.fetchWorkspaceOutputPath(this.workspaceId);
 
     // Reset file attachments (for edit mode, we start fresh)
     this.resetFiles();
