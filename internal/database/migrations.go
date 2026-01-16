@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 9
+const schemaVersion = 10
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -78,6 +78,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration008RenameFoldersToWorkspaces(ctx)
 	case 9:
 		return db.migration009OrchestrationData(ctx)
+	case 10:
+		return db.migration010SmartInputOverrides(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -941,6 +943,38 @@ func (db *DB) migration009OrchestrationData(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN workflows_json TEXT DEFAULT '{}'
 	`); err != nil {
 		return fmt.Errorf("failed to add workflows_json column: %w", err)
+	}
+
+	return nil
+}
+
+// migration010SmartInputOverrides adds a table for smart input override logging.
+func (db *DB) migration010SmartInputOverrides(ctx context.Context) error {
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS smart_input_overrides (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT,
+			input TEXT NOT NULL,
+			predicted_decision TEXT NOT NULL,
+			selected_decision TEXT NOT NULL,
+			method TEXT NOT NULL,
+			confidence REAL NOT NULL,
+			created_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("failed to create smart_input_overrides table: %w", err)
+	}
+
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_smart_input_overrides_workspace_id ON smart_input_overrides(workspace_id)",
+		"CREATE INDEX IF NOT EXISTS idx_smart_input_overrides_created_at ON smart_input_overrides(created_at DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_smart_input_overrides_predicted ON smart_input_overrides(predicted_decision)",
+	}
+
+	for _, idx := range indexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			return fmt.Errorf("failed to create smart_input_overrides index: %w", err)
+		}
 	}
 
 	return nil

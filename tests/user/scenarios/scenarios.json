@@ -370,6 +370,34 @@
       "verification": "Did all plugins load without conflicts?",
       "expected": "All plugins enabled successfully, no errors, agent functional",
       "notes": "Tests plugin compatibility and resource usage"
+    },
+    {
+      "id": "sc017",
+      "name": "Workspace Hub Smart Input",
+      "category": "core-workflow",
+      "platform": "all",
+      "difficulty": "easy",
+      "estimatedTime": "4 minutes",
+      "description": "Use the Workspace Hub quick add to create tasks or start chat sessions with auto-classification and manual override.",
+      "prerequisites": [
+        "Server running on http://localhost:8765",
+        "At least one workspace exists",
+        "At least one agent exists"
+      ],
+      "steps": [
+        "Open http://localhost:8765 in your browser",
+        "Open Workspace Hub and select a workspace",
+        "In Quick add, enter: 'todo: update quarterly report' and click Send",
+        "Verify the Tasks panel refreshes with the new task",
+        "In Quick add, enter: 'How should we prioritize Q2?' and press Enter",
+        "Verify a new chat session opens and the message is sent",
+        "In Quick add, enter: 'plan roadmap'",
+        "When the prompt appears, choose 'Start Chat'",
+        "Verify a new chat session is created and the prompt closes"
+      ],
+      "verification": "Did tasks and chat sessions route correctly, and did the ambiguity prompt appear for 'plan roadmap'?",
+      "expected": "Task created for todo input, chat session created for question input, prompt shown for ambiguous input with user choice honored",
+      "notes": "Optional: inspect sessions.db smart_input_overrides for an override row after choosing Start Chat."
     }
   ],
   "categories": {

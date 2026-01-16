@@ -91,6 +91,101 @@
   opacity: 0.9;
 }
 
+.hub-smart-input {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hub-smart-input.is-disabled {
+  opacity: 0.6;
+}
+
+.hub-smart-input-label {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.hub-smart-input-helper {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.hub-smart-input-main {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.hub-smart-input-main .modern-input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.hub-smart-input-status {
+  min-height: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hub-smart-input-status.is-busy::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-primary, #3b82f6);
+  animation: hubSpin 0.8s linear infinite;
+}
+
+.hub-smart-input-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.hub-smart-input-prompt-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.hub-smart-input-prompt-hint {
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.hub-smart-input-prompt-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hub-smart-input-prompt .modern-btn.is-default {
+  box-shadow: 0 0 0 1px var(--accent-primary, #3b82f6);
+}
+
+.hub-smart-input-prompt-cancel {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
 .workspace-hub-body {
   display: flex;
   flex-direction: column;
@@ -845,6 +940,16 @@ body.chat-panel-open .chat-panel-backdrop {
 @media (max-width: 768px) {
   .workspace-hub-header {
     padding: 1.25rem;
+  }
+
+  .hub-smart-input-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hub-smart-input-prompt {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .chat-panel {

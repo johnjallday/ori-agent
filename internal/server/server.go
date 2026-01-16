@@ -133,6 +133,7 @@ type Server struct {
 	sessionStore        session.HybridStore
 	sessionHandler      *sessionhttp.Handler
 	autoClassifyHandler *sessionhttp.AutoClassifyHandler
+	smartInputHandler   *sessionhttp.SmartInputHandler
 
 	// Note generation
 	noteHandler *notehttp.Handler
