@@ -317,7 +317,7 @@
                 </a>
 
                 <!-- Brand -->
-                <a class="navbar-brand fw-bold text-decoration-none align-items-center" href="/" style="color: #d1d5db; font-size: 1.25rem; cursor: pointer;">
+                <a class="navbar-brand fw-bold text-decoration-none align-items-center" href="/" style="color: var(--primary-color); font-size: 1.25rem; cursor: pointer;">
                     <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
                         <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
                              L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
@@ -334,12 +334,31 @@
                     <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; background: var(--bg-tertiary);">Agents</a>
                     <span style="color: var(--text-muted);">|</span>
                     <a href="/plugins" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
-                    <span style="color: var(--text-muted);">|</span>
-                    <a href="/workspaces" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
+                    <!-- Plugin Pages Dropdown (hidden by default, populated via JS) -->
+                    <span id="pluginPagesDelimiter" style="color: var(--text-muted); display: none;">|</span>
+                    <div id="pluginPagesDropdown" class="dropdown" style="display: none; position: relative; z-index: 10001;">
+                        <button class="nav-link-item dropdown-toggle" type="button" id="pluginPagesBtn" data-bs-toggle="dropdown" aria-expanded="false" style="color: var(--text-primary); background: none; border: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; cursor: pointer;">
+                            Pages
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-dark" id="pluginPagesMenu" aria-labelledby="pluginPagesBtn" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.3); position: absolute; z-index: 10001;">
+                            <!-- Populated dynamically via JavaScript -->
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Center-Right: System Model Indicator -->
+                <div class="d-flex align-items-center ms-auto me-3">
+                    <a href="/settings" id="systemModelIndicator" class="d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.2s;" title="System Model - Click to configure">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
+                            <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
+                        </svg>
+                        <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary);">Loading...</span>
+                        <span id="navSystemModelProvider" class="badge" style="font-size: 0.7rem; padding: 0.2rem 0.4rem; background: var(--bg-tertiary); color: var(--text-muted);"></span>
+                    </a>
                 </div>
 
                 <!-- Right: Theme Toggle -->
-                <div class="d-flex align-items-center gap-3 ms-auto">
+                <div class="d-flex align-items-center gap-3">
                     <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
