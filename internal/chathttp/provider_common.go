@@ -170,23 +170,6 @@ func writeErrorResponse(w http.ResponseWriter, message string) {
 	})
 }
 
-// writeToolCallResponse writes a response with tool call results
-func writeToolCallResponse(w http.ResponseWriter, result ExecuteToolCallsResult) {
-	response := map[string]any{
-		"response":  result.CombinedResult,
-		"toolCalls": result.Results,
-	}
-
-	if result.StructuredData != nil {
-		response["structured"] = true
-		response["displayType"] = string(result.StructuredData.DisplayType)
-		response["title"] = result.StructuredData.Title
-		response["description"] = result.StructuredData.Description
-	}
-
-	writeJSONResponse(w, response)
-}
-
 // getFollowUpSystemPrompt returns the system prompt for follow-up requests after tool execution
 func getFollowUpSystemPrompt() string {
 	return "The tool was executed successfully. Simply acknowledge the result without suggesting follow-up actions or next steps. If the tool returned configuration data, settings, or structured information, display that data clearly. For action tools (like opening projects, launching applications), provide only a brief confirmation."
