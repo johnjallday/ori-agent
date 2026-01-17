@@ -559,11 +559,7 @@
       alert(message);
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
+    // escapeHtml is provided by dom-utils.js
   </script>
   {{template "modals.tmpl" .}}
 </body>

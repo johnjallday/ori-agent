@@ -23,11 +23,11 @@
       {{end}}
 
       <!-- Brand -->
-      <a class="navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}#d1d5db{{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
+      <a class="navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--primary-color){{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
         {{if .BrandIcon}}
         {{.BrandIcon}}
         {{else if .UseLegacyIcon}}
-        <span data-icon="plugin" data-icon-size="36" data-icon-class="me-2" style="color: #d1d5db;"></span>
+        <span data-icon="plugin" data-icon-size="36" data-icon-class="me-2" style="color: var(--primary-color);"></span>
         {{else}}
         <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
           <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344

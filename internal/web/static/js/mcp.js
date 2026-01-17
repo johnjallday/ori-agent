@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
   loadMarketplaceServers();
   loadServers();
   startStatusPolling();
-  initializeDarkMode();
+  // Dark mode is handled by themeManager.js
 });
 
 function initializeEventListeners() {
@@ -465,38 +465,6 @@ function createToastContainer() {
   container.style = 'position: fixed; top: 100px; right: 20px; z-index: 9999; min-width: 300px;';
   document.body.appendChild(container);
   return container;
-}
-
-function initializeDarkMode() {
-  const darkModeToggle = document.getElementById('darkModeToggle');
-  const html = document.documentElement;
-
-  // Check saved preference
-  const savedTheme = localStorage.getItem('theme') || 'light';
-  html.setAttribute('data-bs-theme', savedTheme);
-  updateDarkModeButton(savedTheme);
-
-  // Only add event listener if darkModeToggle exists
-  // Note: themeManager.js may also handle this, so check if already initialized
-  if (darkModeToggle && !darkModeToggle.dataset.mcpInitialized) {
-    darkModeToggle.dataset.mcpInitialized = 'true';
-    darkModeToggle.addEventListener('click', function() {
-      const currentTheme = html.getAttribute('data-bs-theme');
-      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-bs-theme', newTheme);
-      localStorage.setItem('theme', newTheme);
-      updateDarkModeButton(newTheme);
-    });
-  }
-}
-
-function updateDarkModeButton(theme) {
-  const button = document.getElementById('darkModeToggle');
-  if (!button) return;
-  const span = button.querySelector('span');
-  if (span) {
-    span.textContent = theme === 'dark' ? 'Light' : 'Dark';
-  }
 }
 
 // Cleanup on page unload

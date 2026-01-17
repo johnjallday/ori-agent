@@ -5,7 +5,7 @@
 
 /* Body and Background */
 body {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%) !important;
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%) !important;
   color: var(--text-primary);
   min-height: 100vh;
   font-size: 14px;

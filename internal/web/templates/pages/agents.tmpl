@@ -35,13 +35,17 @@
     }
 
     .page-title p {
-        color: rgba(255, 255, 255, 0.85);
+        color: var(--text-secondary);
         font-size: 14px;
         margin: 0;
     }
 
     [data-bs-theme="dark"] .page-title p {
         color: rgba(255, 255, 255, 0.7);
+    }
+
+    [data-bs-theme="light"] .page-title p {
+        color: var(--text-secondary);
     }
 
     .header-actions {

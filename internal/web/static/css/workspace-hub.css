@@ -200,7 +200,10 @@
   grid-template-rows: 1fr 1fr 1fr;
   gap: 0.5rem;
   flex: 1;
-  min-height: 300px;
+  /* Dynamic height based on viewport */
+  height: calc(100vh - 220px);
+  min-height: 400px;
+  max-height: calc(100vh - 180px);
 }
 
 .hub-panel-tasks {
@@ -218,12 +221,12 @@
   grid-row: 1;
 }
 
-.hub-panel-schedules {
+.hub-panel-files {
   grid-column: 3;
   grid-row: 2;
 }
 
-.hub-panel-files {
+.hub-panel-schedules {
   grid-column: 3;
   grid-row: 3;
 }
@@ -255,6 +258,26 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for panel bodies */
+.hub-bento-grid .hub-panel-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.hub-bento-grid .hub-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.hub-bento-grid .hub-panel-body::-webkit-scrollbar-thumb {
+  background: var(--border-color, #e2e8f0);
+  border-radius: 3px;
+}
+
+.hub-bento-grid .hub-panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted, #94a3b8);
 }
 
 .hub-panel .hub-panel-title {
@@ -904,7 +927,9 @@ body.chat-panel-open .chat-panel-backdrop {
   .hub-bento-grid {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto auto auto;
+    height: auto;
     min-height: auto;
+    max-height: none;
   }
 
   .hub-panel-tasks {
@@ -918,18 +943,18 @@ body.chat-panel-open .chat-panel-backdrop {
   }
 
   .hub-panel-notes,
-  .hub-panel-schedules {
+  .hub-panel-files {
     grid-column: span 1;
     grid-row: 3;
   }
 
-  .hub-panel-files {
+  .hub-panel-schedules {
     grid-column: 1 / -1;
     grid-row: 4;
   }
 
   .hub-bento-grid .hub-panel-body {
-    max-height: 150px;
+    max-height: 200px;
   }
 
   .hub-stats {
