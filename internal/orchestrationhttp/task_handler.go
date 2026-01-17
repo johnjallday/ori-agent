@@ -378,27 +378,157 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		TaskID                 string                         `json:"task_id"`
-		Status                 string                         `json:"status"`
-		Result                 string                         `json:"result"`
-		Error                  string                         `json:"error"`
-		Description            *string                        `json:"description"`             // Optional: update task description
-		Details                *string                        `json:"details"`                 // Optional: update task details
-		To                     *string                        `json:"to"`                      // Optional: reassign task to different agent
-		AssignedNodeID         *string                        `json:"assigned_node_id"`        // Optional: target specific agent instance/node
-		InputTaskIDs           []string                       `json:"input_task_ids"`          // Optional: update input task connections
-		ParentTaskID           *string                        `json:"parent_task_id"`          // Optional: update parent task relationship
-		SubtaskIndex           *int                           `json:"subtask_index"`           // Optional: update subtask ordering
-		ResultCombinationMode  *string                        `json:"result_combination_mode"` // Optional: update combination mode
-		CombinationInstruction *string                        `json:"combination_instruction"` // Optional: update combination instruction
-		Schedule               json.RawMessage                `json:"schedule"`                // Optional: schedule configuration (frontend format)
-		ScheduleEnabled        *bool                          `json:"schedule_enabled"`        // Optional: enable/disable schedule
-		ScheduleName           *string                        `json:"schedule_name"`           // Optional: schedule name
-		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`          // Optional: auto-save configuration
+// taskUpdateRequest contains all fields for task update operations
+type taskUpdateRequest struct {
+	TaskID                 string                         `json:"task_id"`
+	Status                 string                         `json:"status"`
+	Result                 string                         `json:"result"`
+	Error                  string                         `json:"error"`
+	Description            *string                        `json:"description"`
+	Details                *string                        `json:"details"`
+	To                     *string                        `json:"to"`
+	AssignedNodeID         *string                        `json:"assigned_node_id"`
+	InputTaskIDs           []string                       `json:"input_task_ids"`
+	ParentTaskID           *string                        `json:"parent_task_id"`
+	SubtaskIndex           *int                           `json:"subtask_index"`
+	ResultCombinationMode  *string                        `json:"result_combination_mode"`
+	CombinationInstruction *string                        `json:"combination_instruction"`
+	Schedule               json.RawMessage                `json:"schedule"`
+	ScheduleEnabled        *bool                          `json:"schedule_enabled"`
+	ScheduleName           *string                        `json:"schedule_name"`
+	ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
+}
+
+// hasFieldUpdates returns true if the request contains any field updates
+func (r *taskUpdateRequest) hasFieldUpdates() bool {
+	return r.Description != nil || r.Details != nil || r.InputTaskIDs != nil ||
+		r.To != nil || r.ParentTaskID != nil || r.SubtaskIndex != nil ||
+		r.ResultCombinationMode != nil || r.ResultStorage != nil
+}
+
+// hasScheduleUpdates returns true if the request contains schedule-related updates
+func (r *taskUpdateRequest) hasScheduleUpdates(schedule *workspace.ScheduleConfig, clearSchedule bool) bool {
+	return schedule != nil || clearSchedule || r.ScheduleEnabled != nil || r.ScheduleName != nil
+}
+
+// applyBasicFieldUpdates applies description, details, input connections, parent, and subtask updates
+func (th *TaskHandler) applyBasicFieldUpdates(task *workspace.Task, req *taskUpdateRequest) {
+	if req.Description != nil {
+		task.Description = *req.Description
+		logger.Debug("Updated task description", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.Details != nil {
+		task.Details = *req.Details
+		logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
+	}
+	if req.InputTaskIDs != nil {
+		task.InputTaskIDs = req.InputTaskIDs
+		logger.Debug("Updated task input connections", logger.Fields{"task_id": req.TaskID, "inputtaskids": req.InputTaskIDs})
+	}
+	if req.ParentTaskID != nil {
+		task.ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
+		if task.ParentTaskID == "" {
+			task.SubtaskIndex = 0
+		}
+		logger.Debug("Updated task parent", logger.Fields{"task_id": req.TaskID, "parent_task_id": task.ParentTaskID})
+	}
+	if req.SubtaskIndex != nil {
+		task.SubtaskIndex = *req.SubtaskIndex
+		logger.Debug("Updated task subtask index", logger.Fields{"task_id": req.TaskID, "subtask_index": *req.SubtaskIndex})
+	}
+	if req.ResultStorage != nil {
+		task.ResultStorage = req.ResultStorage
+		logger.Debug("Updated task result storage", logger.Fields{"task_id": req.TaskID, "enabled": req.ResultStorage.Enabled})
+	}
+}
+
+// applyScheduleUpdates applies schedule configuration changes to a task
+// Returns an error message if validation fails, empty string otherwise
+func (th *TaskHandler) applyScheduleUpdates(task *workspace.Task, req *taskUpdateRequest, schedule *workspace.ScheduleConfig, clearSchedule bool) string {
+	if schedule != nil {
+		task.Schedule = schedule
+		if task.ScheduleEnabled {
+			task.NextRun = th.calculateNextRun(task)
+		}
+		logger.Debug("Updated task schedule", logger.Fields{"task_id": req.TaskID})
 	}
 
+	if clearSchedule {
+		task.Schedule = nil
+		task.ScheduleEnabled = false
+		task.ScheduleName = ""
+		task.NextRun = nil
+		logger.Debug("Cleared task schedule", logger.Fields{"task_id": req.TaskID})
+	}
+
+	if req.ScheduleEnabled != nil {
+		if *req.ScheduleEnabled {
+			taskTo := task.To
+			if req.To != nil {
+				taskTo = *req.To
+			}
+			if taskTo == "" || taskTo == "unassigned" {
+				return "Scheduled tasks must be assigned to an agent. Please assign an agent before enabling the schedule."
+			}
+		}
+
+		task.ScheduleEnabled = *req.ScheduleEnabled
+		if *req.ScheduleEnabled && task.Schedule != nil {
+			task.NextRun = th.calculateNextRun(task)
+		} else if !*req.ScheduleEnabled {
+			task.NextRun = nil
+		}
+		logger.Debug("Updated task schedule enabled", logger.Fields{"task_id": req.TaskID, "enabled": *req.ScheduleEnabled})
+	}
+
+	if req.ScheduleName != nil {
+		task.ScheduleName = *req.ScheduleName
+	}
+
+	return ""
+}
+
+// calculateNextRun calculates the next run time for a scheduled task
+func (th *TaskHandler) calculateNextRun(task *workspace.Task) *time.Time {
+	if task.Schedule == nil {
+		return nil
+	}
+	lastRun := time.Time{}
+	if task.LastRun != nil {
+		lastRun = *task.LastRun
+	}
+	return workspace.CalculateNextRun(*task.Schedule, lastRun)
+}
+
+// buildTaskUpdateEventData builds the event data for a task update
+func (th *TaskHandler) buildTaskUpdateEventData(req *taskUpdateRequest, schedule *workspace.ScheduleConfig) map[string]interface{} {
+	eventData := map[string]interface{}{
+		"task_id":     req.TaskID,
+		"update_type": "task_update",
+	}
+	if req.InputTaskIDs != nil {
+		eventData["input_task_ids"] = req.InputTaskIDs
+	}
+	if req.To != nil {
+		eventData["to"] = *req.To
+	}
+	if req.AssignedNodeID != nil {
+		eventData["assigned_node_id"] = *req.AssignedNodeID
+	}
+	if schedule != nil {
+		eventData["schedule"] = schedule
+	}
+	if req.ScheduleEnabled != nil {
+		eventData["schedule_enabled"] = *req.ScheduleEnabled
+	}
+	if req.ScheduleName != nil {
+		eventData["schedule_name"] = *req.ScheduleName
+	}
+	return eventData
+}
+
+func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	var req taskUpdateRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
@@ -426,8 +556,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Handle task updates (description, details, input connections, reassignment, combination mode, schedule, or result storage)
-	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ParentTaskID != nil || req.SubtaskIndex != nil || req.ResultCombinationMode != nil || schedule != nil || clearSchedule || req.ScheduleEnabled != nil || req.ScheduleName != nil || req.ResultStorage != nil {
+	// Handle task updates (description, details, input connections, reassignment, schedule, or result storage)
+	if req.hasFieldUpdates() || req.hasScheduleUpdates(schedule, clearSchedule) {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
 		// Get task and workspace using helper
@@ -444,38 +574,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			if ws.Tasks[i].ID == req.TaskID {
 				taskIndex = i
 
-				// Update description
-				if req.Description != nil {
-					ws.Tasks[i].Description = *req.Description
-					logger.Debug("Updated task description", logger.Fields{"task_id": req.TaskID})
-				}
-
-				// Update details
-				if req.Details != nil {
-					ws.Tasks[i].Details = *req.Details
-					logger.Debug("Updated task details", logger.Fields{"task_id": req.TaskID})
-				}
-
-				// Update input connections
-				if req.InputTaskIDs != nil {
-					ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
-					logger.Debug("Updated task input connections", logger.Fields{"task_id": req.TaskID, "inputtaskids": req.InputTaskIDs})
-				}
-
-				// Update parent task relationship
-				if req.ParentTaskID != nil {
-					ws.Tasks[i].ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
-					if ws.Tasks[i].ParentTaskID == "" {
-						ws.Tasks[i].SubtaskIndex = 0
-					}
-					logger.Debug("Updated task parent", logger.Fields{"task_id": req.TaskID, "parent_task_id": ws.Tasks[i].ParentTaskID})
-				}
-
-				// Update subtask ordering
-				if req.SubtaskIndex != nil {
-					ws.Tasks[i].SubtaskIndex = *req.SubtaskIndex
-					logger.Debug("Updated task subtask index", logger.Fields{"task_id": req.TaskID, "subtask_index": *req.SubtaskIndex})
-				}
+				// Apply basic field updates
+				th.applyBasicFieldUpdates(&ws.Tasks[i], &req)
 
 				// Update assignment using helper
 				if req.To != nil {
@@ -492,69 +592,10 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 					}
 				}
 
-				// Update schedule configuration
-				if schedule != nil {
-					ws.Tasks[i].Schedule = schedule
-					// Calculate initial NextRun if schedule is being set
-					if ws.Tasks[i].ScheduleEnabled {
-						// Use task's LastRun if available, otherwise zero time
-						lastRun := time.Time{}
-						if ws.Tasks[i].LastRun != nil {
-							lastRun = *ws.Tasks[i].LastRun
-						}
-						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*schedule, lastRun)
-					}
-					logger.Debug("Updated task schedule", logger.Fields{"task_id": req.TaskID})
-				}
-
-				// Clear schedule if explicitly set to null
-				if clearSchedule {
-					ws.Tasks[i].Schedule = nil
-					ws.Tasks[i].ScheduleEnabled = false
-					ws.Tasks[i].ScheduleName = ""
-					ws.Tasks[i].NextRun = nil
-					logger.Debug("Cleared task schedule", logger.Fields{"task_id": req.TaskID})
-				}
-
-				// Update schedule enabled state
-				if req.ScheduleEnabled != nil {
-					// Validate: can't enable schedule if task is unassigned
-					if *req.ScheduleEnabled {
-						taskTo := ws.Tasks[i].To
-						// Check if we're also updating the assignment in this request
-						if req.To != nil {
-							taskTo = *req.To
-						}
-						if taskTo == "" || taskTo == "unassigned" {
-							orihttp.BadRequest(w, "Scheduled tasks must be assigned to an agent. Please assign an agent before enabling the schedule.")
-							return
-						}
-					}
-
-					ws.Tasks[i].ScheduleEnabled = *req.ScheduleEnabled
-					// Calculate NextRun when enabling, clear when disabling
-					if *req.ScheduleEnabled && ws.Tasks[i].Schedule != nil {
-						// Use task's LastRun if available, otherwise zero time
-						lastRun := time.Time{}
-						if ws.Tasks[i].LastRun != nil {
-							lastRun = *ws.Tasks[i].LastRun
-						}
-						ws.Tasks[i].NextRun = workspace.CalculateNextRun(*ws.Tasks[i].Schedule, lastRun)
-					} else if !*req.ScheduleEnabled {
-						ws.Tasks[i].NextRun = nil
-					}
-					logger.Debug("Updated task schedule enabled", logger.Fields{"task_id": req.TaskID, "enabled": *req.ScheduleEnabled})
-				}
-
-				// Update schedule name
-				if req.ScheduleName != nil {
-					ws.Tasks[i].ScheduleName = *req.ScheduleName
-				}
-
-				// Update result storage configuration
-				if req.ResultStorage != nil {
-					ws.Tasks[i].ResultStorage = req.ResultStorage
-					logger.Debug("Updated task result storage", logger.Fields{"task_id": req.TaskID, "enabled": req.ResultStorage.Enabled})
+				// Apply schedule updates
+				if errMsg := th.applyScheduleUpdates(&ws.Tasks[i], &req, schedule, clearSchedule); errMsg != "" {
+					orihttp.BadRequest(w, errMsg)
+					return
 				}
 				break
 			}
@@ -577,33 +618,10 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 
 		// Publish event
 		if th.eventBus != nil {
-			eventData := map[string]interface{}{
-				"task_id":     req.TaskID,
-				"update_type": "task_update",
-			}
-			if req.InputTaskIDs != nil {
-				eventData["input_task_ids"] = req.InputTaskIDs
-			}
-			if req.To != nil {
-				eventData["to"] = *req.To
-			}
-			if req.AssignedNodeID != nil {
-				eventData["assigned_node_id"] = *req.AssignedNodeID
-			}
-			if schedule != nil {
-				eventData["schedule"] = schedule
-			}
-			if req.ScheduleEnabled != nil {
-				eventData["schedule_enabled"] = *req.ScheduleEnabled
-			}
-			if req.ScheduleName != nil {
-				eventData["schedule_name"] = *req.ScheduleName
-			}
-
 			th.eventBus.Publish(workspace.Event{
 				Type:        workspace.EventWorkspaceUpdated,
 				WorkspaceID: task.WorkspaceID,
-				Data:        eventData,
+				Data:        th.buildTaskUpdateEventData(&req, schedule),
 			})
 		}
 
@@ -611,7 +629,6 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		updatedTask, err := th.communicator.GetTask(req.TaskID)
 		if err != nil {
 			logger.Error("Failed to get updated task", logger.Fields{"task_id": req.TaskID, "error": err})
-			// Still return success since the update was performed, but log the retrieval error
 		}
 		w.WriteHeader(http.StatusOK)
 		orihttp.WriteJSON(w, updatedTask)

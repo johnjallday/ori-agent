@@ -78,16 +78,27 @@ func (h *Handler) WorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 	workflowID := parts[0]
 
+	// Handle import endpoint (no workflow ID)
+	if workflowID == "import" {
+		h.handleImportWorkflow(w, r)
+		return
+	}
+
 	if workflowID == "" {
 		orihttp.BadRequest(w, "Workflow ID is required")
 		return
 	}
 
-	// Check if this is a check-agents request
-
-	if len(parts) > 1 && parts[1] == "check-agents" {
-		h.handleCheckAgents(w, r, workflowID)
-		return
+	// Check if this is a sub-resource request
+	if len(parts) > 1 {
+		switch parts[1] {
+		case "check-agents":
+			h.handleCheckAgents(w, r, workflowID)
+			return
+		case "export":
+			h.handleExportWorkflow(w, r, workflowID)
+			return
+		}
 	}
 
 	switch r.Method {
@@ -221,6 +232,127 @@ func (h *Handler) handleDeleteWorkflow(w http.ResponseWriter, r *http.Request, w
 
 	logger.Info("Deleted custom workflow", logger.Fields{"id": workflowID})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleExportWorkflow exports a workflow as a downloadable JSON file
+func (h *Handler) handleExportWorkflow(w http.ResponseWriter, r *http.Request, workflowID string) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	if h.workflowManager == nil {
+		orihttp.InternalError(w, "Workflow manager not initialized")
+		return
+	}
+
+	workflow, err := h.workflowManager.GetWorkflow(workflowID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workflow not found: %v", err))
+		return
+	}
+
+	data, err := json.MarshalIndent(workflow, "", "  ")
+	if err != nil {
+		logger.Error("Failed to marshal workflow for export", logger.Fields{"id": workflowID, "err": err})
+		orihttp.InternalError(w, "Failed to export workflow")
+		return
+	}
+
+	// Sanitize filename - replace spaces and special chars
+	safeName := strings.ReplaceAll(workflow.Name, " ", "-")
+	safeName = strings.ReplaceAll(safeName, "/", "-")
+	filename := fmt.Sprintf("workflow-%s.json", safeName)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Write(data)
+
+	logger.Info("Exported workflow", logger.Fields{"id": workflowID, "name": workflow.Name})
+}
+
+// handleImportWorkflow imports a workflow from an uploaded JSON file
+func (h *Handler) handleImportWorkflow(w http.ResponseWriter, r *http.Request) {
+	if h.workflowManager == nil {
+		orihttp.InternalError(w, "Workflow manager not initialized")
+		return
+	}
+
+	// Parse multipart form (max 10MB)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		orihttp.BadRequest(w, "Failed to parse form data")
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		orihttp.BadRequest(w, "No file provided")
+		return
+	}
+	defer file.Close()
+
+	// Decode JSON
+	var workflow templates.CustomWorkflow
+	if err := json.NewDecoder(file).Decode(&workflow); err != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Invalid workflow JSON: %v", err))
+		return
+	}
+
+	// Validate workflow structure
+	if err := workflow.Validate(); err != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Invalid workflow: %v", err))
+		return
+	}
+
+	// Check for name conflicts and generate unique name if needed
+	existingWorkflows := h.workflowManager.ListWorkflows()
+	originalName := workflow.Name
+	nameExists := true
+	counter := 1
+
+	for nameExists {
+		nameExists = false
+		for _, existing := range existingWorkflows {
+			if existing.Name == workflow.Name {
+				nameExists = true
+				workflow.Name = fmt.Sprintf("%s (%d)", originalName, counter)
+				counter++
+				break
+			}
+		}
+	}
+
+	// Generate new ID for imported workflow
+	workflow.ID = ""
+	importedWorkflow := templates.NewCustomWorkflow(workflow.Name, workflow.Description, workflow.Category)
+	importedWorkflow.Nodes = workflow.Nodes
+	importedWorkflow.InternalConnections = workflow.InternalConnections
+	importedWorkflow.InputPorts = workflow.InputPorts
+	importedWorkflow.OutputPorts = workflow.OutputPorts
+	importedWorkflow.Layout = workflow.Layout
+
+	// Save workflow
+	if err := h.workflowManager.SaveWorkflow(importedWorkflow); err != nil {
+		logger.Error("Failed to save imported workflow", logger.Fields{"err": err})
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workflow: %v", err))
+		return
+	}
+
+	logger.Info("Imported workflow", logger.Fields{
+		"id":            importedWorkflow.ID,
+		"name":          importedWorkflow.Name,
+		"original_name": originalName,
+	})
+
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":            importedWorkflow.ID,
+		"name":          importedWorkflow.Name,
+		"original_name": originalName,
+		"message":       "Workflow imported successfully",
+	}); err != nil {
+		logger.Error("Failed to encode import response", logger.Fields{"err": err})
+	}
 }
 
 // handleCheckAgents checks if all agents required by a workflow are available in a studio

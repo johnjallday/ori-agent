@@ -18,6 +18,7 @@
     workspaceDescription: document.getElementById('hubWorkspaceDescription'),
     workspaceCanvasBtn: document.getElementById('hubOpenCanvasBtn'),
     addTaskBtn: document.getElementById('hubAddTaskBtn'),
+    importWorkflowBtn: document.getElementById('hubImportWorkflowBtn'),
     refreshTasksBtn: document.getElementById('hubRefreshTasksBtn'),
     tasksList: document.getElementById('hubTasksList'),
     tasksSubtitle: document.getElementById('hubTasksSubtitle'),
@@ -52,6 +53,7 @@
     smartInputProgressHeadline: document.getElementById('hubSmartInputProgressHeadline'),
     smartInputProgressMessage: document.getElementById('hubSmartInputProgressMessage'),
     smartInputProgressSteps: document.getElementById('hubSmartInputProgressSteps'),
+    smartInputCancelBtn: document.getElementById('hubSmartInputCancelBtn'),
     // Selection mode elements
     tasksPanel: document.getElementById('hubTasksPanel'),
     sessionsPanel: document.getElementById('hubSessionsPanel'),
@@ -100,6 +102,7 @@
     notes: [],
     files: [],
     smartInput: null,
+    smartInputCancelled: false,
     // Selection mode state
     selectionMode: { tasks: false, sessions: false, notes: false, files: false },
     selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() },
@@ -238,6 +241,25 @@
     const modal = getSmartInputProgressModal();
     if (!modal) return;
     modal.hide();
+  }
+
+  function cancelSmartInput() {
+    state.smartInputCancelled = true;
+    hideSmartInputProgress();
+    setSmartInputBusy(false);
+    resetSmartInputPrompt();
+    setSmartInputStatus('Cancelled', { busy: false });
+
+    // Clear status after a moment
+    setTimeout(() => {
+      if (elements.smartInputStatus && elements.smartInputStatus.textContent === 'Cancelled') {
+        setSmartInputStatus('');
+      }
+    }, 2000);
+
+    if (window.Toast) {
+      window.Toast.info('Operation cancelled');
+    }
   }
 
   function setSmartInputDefaultDecision(decision) {
@@ -587,6 +609,383 @@
         alert('Failed to execute task');
       }
     }
+  }
+
+  async function exportWorkflowTask(task, taskId) {
+    const subtasks = getSubtasksForParent(taskId);
+
+    // Build workflow export structure
+    const workflowExport = {
+      name: task.name || task.description || 'Exported Workflow',
+      description: task.description || '',
+      category: 'imported',
+      source: 'workspace',
+      exported_at: new Date().toISOString(),
+      steps: subtasks.map((subtask, index) => ({
+        step_number: subtask.subtask_index || index + 1,
+        name: subtask.name || subtask.description || `Step ${index + 1}`,
+        description: subtask.description || '',
+        assigned_to: subtask.to || 'unassigned',
+        dependencies: subtask.depends_on || []
+      }))
+    };
+
+    // Create and trigger download
+    const blob = new Blob([JSON.stringify(workflowExport, null, 2)], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (task.name || 'workflow').replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+    a.href = url;
+    a.download = `workflow-${safeName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    if (window.Toast) {
+      window.Toast.success('Workflow exported');
+    }
+  }
+
+  function saveTaskAsWorkflow(task, taskId) {
+    const subtasks = getSubtasksForParent(taskId);
+
+    if (subtasks.length === 0) {
+      if (window.Toast) {
+        window.Toast.error('Workflow must have at least one step');
+      }
+      return;
+    }
+
+    openSaveWorkflowModal(task, taskId, subtasks);
+  }
+
+  function openSaveWorkflowModal(task, taskId, subtasks) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('hubSaveWorkflowModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'hubSaveWorkflowModal';
+      modal.className = 'modal fade';
+      modal.tabIndex = -1;
+      modal.innerHTML = `
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" style="color: var(--text-primary);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+                </svg>
+                Save to Workflow Library
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Workflow Name</label>
+                <input type="text" id="hubSaveWorkflowName" class="form-control" placeholder="Enter workflow name">
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Description</label>
+                <textarea id="hubSaveWorkflowDesc" class="form-control" rows="3" placeholder="Describe what this workflow does..."></textarea>
+              </div>
+              <div class="mb-3">
+                <label class="form-label" style="color: var(--text-primary);">Category</label>
+                <input type="text" id="hubSaveWorkflowCategory" class="form-control" placeholder="e.g., automation, data, reports">
+              </div>
+              <div class="modern-card p-3" style="background: var(--bg-secondary);">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
+                    <path d="M3,4H7V8H3V4M9,5V7H21V5H9M3,10H7V14H3V10M9,11V13H21V11H9M3,16H7V20H3V16M9,17V19H21V17H9"/>
+                  </svg>
+                  <span style="color: var(--text-secondary); font-size: 0.85rem;"><strong id="hubSaveWorkflowStepCount">0</strong> steps will be saved</span>
+                </div>
+                <div id="hubSaveWorkflowSteps" style="font-size: 0.8rem; color: var(--text-muted); max-height: 100px; overflow-y: auto;"></div>
+              </div>
+              <div id="hubSaveWorkflowError" class="alert alert-danger mt-3" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="button" id="hubConfirmSaveWorkflowBtn" class="modern-btn modern-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/>
+                </svg>
+                Save to Library
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    // Populate modal
+    const nameInput = modal.querySelector('#hubSaveWorkflowName');
+    const descInput = modal.querySelector('#hubSaveWorkflowDesc');
+    const categoryInput = modal.querySelector('#hubSaveWorkflowCategory');
+    const stepCountEl = modal.querySelector('#hubSaveWorkflowStepCount');
+    const stepsEl = modal.querySelector('#hubSaveWorkflowSteps');
+    const errorEl = modal.querySelector('#hubSaveWorkflowError');
+    const confirmBtn = modal.querySelector('#hubConfirmSaveWorkflowBtn');
+
+    // Set default values
+    nameInput.value = task.name || task.description || '';
+    descInput.value = task.description || '';
+    categoryInput.value = 'workspace';
+    stepCountEl.textContent = subtasks.length;
+    stepsEl.innerHTML = subtasks.map((s, i) =>
+      `<div>${i + 1}. ${escapeHtml(s.name || s.description || 'Unnamed step')}</div>`
+    ).join('');
+    errorEl.style.display = 'none';
+
+    // Remove old listener and add new one
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+    newConfirmBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        errorEl.textContent = 'Please enter a workflow name';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      newConfirmBtn.disabled = true;
+      newConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+      errorEl.style.display = 'none';
+
+      try {
+        const workflowData = {
+          name: name,
+          description: descInput.value.trim(),
+          category: categoryInput.value.trim() || 'workspace',
+          nodes: subtasks.map((subtask, index) => ({
+            id: subtask.id || `node-${index}`,
+            type: 'task',
+            config: {
+              name: subtask.name || subtask.description || `Step ${index + 1}`,
+              description: subtask.description || '',
+              to: subtask.to || 'unassigned'
+            },
+            relative_x: 0,
+            relative_y: index * 100
+          })),
+          internal_connections: [],
+          layout: {
+            width: 300,
+            height: subtasks.length * 100 + 100,
+            node_positions: {}
+          }
+        };
+
+        const response = await fetch('/api/workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(workflowData)
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Failed to save workflow');
+        }
+
+        bootstrap.Modal.getInstance(modal).hide();
+        if (window.Toast) {
+          window.Toast.success(`Workflow "${name}" saved to library`);
+        }
+      } catch (error) {
+        console.error('Failed to save workflow:', error);
+        errorEl.textContent = 'Failed to save: ' + error.message;
+        errorEl.style.display = 'block';
+      } finally {
+        newConfirmBtn.disabled = false;
+        newConfirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/></svg> Save to Library';
+      }
+    });
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+
+    // Focus on name input when modal opens
+    modal.addEventListener('shown.bs.modal', () => nameInput.focus(), { once: true });
+  }
+
+  function openImportWorkflowModal() {
+    if (!state.selectedId) {
+      if (window.Toast) window.Toast.error('Please select a workspace first');
+      return;
+    }
+
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('hubImportWorkflowModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'hubImportWorkflowModal';
+      modal.className = 'modal fade';
+      modal.tabIndex = -1;
+      modal.innerHTML = `
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" style="color: var(--text-primary);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+                </svg>
+                Import Workflow
+              </h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <p style="color: var(--text-secondary);">Select a workflow JSON file to import as tasks:</p>
+              <div class="mb-3">
+                <input type="file" id="hubImportWorkflowFile" class="form-control" accept=".json,application/json">
+              </div>
+              <div id="hubImportWorkflowInfo" style="display: none;" class="modern-card p-3 mb-3">
+                <strong id="hubImportWorkflowName" style="color: var(--text-primary);"></strong>
+                <p id="hubImportWorkflowSteps" class="mb-0 mt-1 small" style="color: var(--text-muted);"></p>
+              </div>
+              <div id="hubImportWorkflowError" class="alert alert-danger" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="button" id="hubConfirmImportWorkflowBtn" class="modern-btn modern-btn-primary" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+                </svg>
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      // Set up file input handler
+      const fileInput = modal.querySelector('#hubImportWorkflowFile');
+      const confirmBtn = modal.querySelector('#hubConfirmImportWorkflowBtn');
+      const infoEl = modal.querySelector('#hubImportWorkflowInfo');
+      const nameEl = modal.querySelector('#hubImportWorkflowName');
+      const stepsEl = modal.querySelector('#hubImportWorkflowSteps');
+      const errorEl = modal.querySelector('#hubImportWorkflowError');
+
+      let selectedWorkflowData = null;
+
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) {
+          selectedWorkflowData = null;
+          infoEl.style.display = 'none';
+          confirmBtn.disabled = true;
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            selectedWorkflowData = data;
+            nameEl.textContent = data.name || 'Unnamed Workflow';
+            const stepCount = data.steps ? data.steps.length : 0;
+            stepsEl.textContent = `${stepCount} step${stepCount !== 1 ? 's' : ''}`;
+            infoEl.style.display = 'block';
+            errorEl.style.display = 'none';
+            confirmBtn.disabled = false;
+          } catch (err) {
+            selectedWorkflowData = null;
+            errorEl.textContent = 'Invalid JSON file';
+            errorEl.style.display = 'block';
+            infoEl.style.display = 'none';
+            confirmBtn.disabled = true;
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      confirmBtn.addEventListener('click', async () => {
+        if (!selectedWorkflowData || !state.selectedId) return;
+
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Importing...';
+
+        try {
+          await importWorkflowAsTask(selectedWorkflowData);
+          bootstrap.Modal.getInstance(modal).hide();
+          if (window.Toast) window.Toast.success('Workflow imported as tasks');
+          loadWorkspaceTasks(state.selectedId);
+        } catch (err) {
+          errorEl.textContent = 'Failed to import: ' + err.message;
+          errorEl.style.display = 'block';
+        } finally {
+          confirmBtn.disabled = false;
+          confirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/></svg> Import';
+        }
+      });
+    }
+
+    // Reset modal state
+    const fileInput = modal.querySelector('#hubImportWorkflowFile');
+    const infoEl = modal.querySelector('#hubImportWorkflowInfo');
+    const errorEl = modal.querySelector('#hubImportWorkflowError');
+    const confirmBtn = modal.querySelector('#hubConfirmImportWorkflowBtn');
+
+    fileInput.value = '';
+    infoEl.style.display = 'none';
+    errorEl.style.display = 'none';
+    confirmBtn.disabled = true;
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+  }
+
+  async function importWorkflowAsTask(workflowData) {
+    // Create parent task for the workflow
+    const parentTask = {
+      workspace_id: state.selectedId,
+      name: workflowData.name || 'Imported Workflow',
+      description: workflowData.description || '',
+      status: 'pending'
+    };
+
+    const parentResponse = await fetch('/api/orchestration/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parentTask)
+    });
+
+    if (!parentResponse.ok) {
+      throw new Error('Failed to create workflow task');
+    }
+
+    const parentResult = await parentResponse.json();
+    const parentId = parentResult.id;
+
+    // Create subtasks for each step
+    if (workflowData.steps && workflowData.steps.length > 0) {
+      for (let i = 0; i < workflowData.steps.length; i++) {
+        const step = workflowData.steps[i];
+        const subtask = {
+          workspace_id: state.selectedId,
+          parent_id: parentId,
+          name: step.name || `Step ${i + 1}`,
+          description: step.description || '',
+          to: step.assigned_to || 'unassigned',
+          subtask_index: step.step_number || i + 1,
+          status: 'pending'
+        };
+
+        const subtaskResponse = await fetch('/api/orchestration/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subtask)
+        });
+
+        if (!subtaskResponse.ok) {
+          console.error('Failed to create subtask', step);
+        }
+      }
+    }
+
+    return parentId;
   }
 
   async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
@@ -1128,6 +1527,9 @@
             </div>
             <div class="hub-task-actions">
               <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
+              ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="view-canvas" title="View workflow in canvas">View</button>` : ''}
+              ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="save-workflow" title="Save to Workflows library">Save</button>` : ''}
+              ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="export" title="Export workflow to file">Export</button>` : ''}
               <button class="modern-btn modern-btn-primary" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}">${escapeHtml(executeLabel)}</button>
             </div>
             ${resultData ? `
@@ -1228,6 +1630,33 @@
           event.stopPropagation();
           if (task && !btn.disabled) {
             executeTask(taskId);
+          }
+        });
+      });
+
+      card.querySelectorAll('[data-action="export"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (task) {
+            exportWorkflowTask(task, taskId);
+          }
+        });
+      });
+
+      card.querySelectorAll('[data-action="save-workflow"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (task) {
+            saveTaskAsWorkflow(task, taskId);
+          }
+        });
+      });
+
+      card.querySelectorAll('[data-action="view-canvas"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          if (task && state.selectedId) {
+            window.location.href = `/workspaces/${state.selectedId}/canvas?workflow=${taskId}`;
           }
         });
       });
@@ -1481,6 +1910,181 @@
     if (!state.selectedId) return;
     if (window.sessionManager && typeof window.sessionManager.openNoteCreateModal === 'function') {
       window.sessionManager.openNoteCreateModal(state.selectedId);
+    }
+  }
+
+  async function createQuickNote(content) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Creating note...');
+
+    try {
+      // Generate a title from the first line or first few words
+      const firstLine = content.split('\n')[0];
+      const title = firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
+
+      const response = await fetch(`/api/workspaces/${state.selectedId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: title || 'Quick Note',
+          content: content
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create note');
+      }
+
+      // Clear input and show success
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      if (window.Toast) {
+        window.Toast.success('Note created');
+      }
+
+      // Refresh notes list
+      await loadWorkspaceNotes(state.selectedId);
+
+    } catch (error) {
+      console.error('Failed to create quick note:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to create note', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to create note');
+      }
+    }
+  }
+
+  async function createQuickTask(description) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Creating task...');
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: state.selectedId,
+          description: description,
+          name: description.length > 100 ? description.slice(0, 97) + '...' : description,
+          status: 'pending'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create task');
+      }
+
+      // Clear input and show success
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      if (window.Toast) {
+        window.Toast.success('Task created');
+      }
+
+      // Refresh tasks list
+      await loadWorkspaceTasks(state.selectedId);
+
+    } catch (error) {
+      console.error('Failed to create quick task:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to create task', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to create task');
+      }
+    }
+  }
+
+  async function createQuickChat(initialMessage) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Starting chat...');
+
+    try {
+      // Use sessionManager to create chat if available
+      if (window.sessionManager && typeof window.sessionManager.createChatSession === 'function') {
+        const session = await window.sessionManager.createChatSession(state.selectedId, {
+          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat',
+          initialMessage: initialMessage || null
+        });
+
+        // Clear input
+        if (elements.smartInputField) {
+          elements.smartInputField.value = '';
+        }
+        setSmartInputBusy(false);
+        setSmartInputStatus('');
+
+        if (session && session.id) {
+          // Navigate to chat
+          window.location.href = `/chat/${session.id}`;
+        }
+        return;
+      }
+
+      // Fallback: create session via API directly
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: state.selectedId,
+          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create chat');
+      }
+
+      const data = await response.json();
+
+      // Clear input
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      // Navigate to chat
+      if (data.session && data.session.id) {
+        window.location.href = `/chat/${data.session.id}`;
+      } else if (data.id) {
+        window.location.href = `/chat/${data.id}`;
+      }
+
+    } catch (error) {
+      console.error('Failed to create quick chat:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to start chat', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to start chat');
+      }
+    }
+  }
+
+  function openFileAttachmentModal() {
+    // Clear the input field
+    if (elements.smartInputField) {
+      elements.smartInputField.value = '';
+    }
+    setSmartInputStatus('');
+
+    // Open the add file modal
+    if (elements.addFileModal && window.bootstrap) {
+      const modal = new bootstrap.Modal(elements.addFileModal);
+      modal.show();
+    } else if (window.Toast) {
+      window.Toast.info('Use the + button in the Files panel to add files');
     }
   }
 
@@ -2265,6 +2869,11 @@
   }
 
   async function handleSmartInputDecision(decision, classification = null) {
+    // Check if cancelled
+    if (state.smartInputCancelled) {
+      return;
+    }
+
     const meta = classification || state.smartInput || {};
     const input = meta.input || (elements.smartInputField ? elements.smartInputField.value.trim() : '');
     if (!input) return;
@@ -2331,6 +2940,47 @@
       setSmartInputStatus('Select a workspace first.', { busy: false });
       return;
     }
+
+    // Handle slash commands
+    const lowerInput = input.toLowerCase();
+
+    // /note command - create a quick note
+    if (lowerInput.startsWith('/note ') || lowerInput === '/note') {
+      const noteContent = input.slice(6).trim();
+      if (!noteContent) {
+        setSmartInputStatus('Usage: /note <your note content>', { busy: false });
+        return;
+      }
+      await createQuickNote(noteContent);
+      return;
+    }
+
+    // /task command - create a task directly
+    if (lowerInput.startsWith('/task ') || lowerInput === '/task') {
+      const taskContent = input.slice(6).trim();
+      if (!taskContent) {
+        setSmartInputStatus('Usage: /task <task description>', { busy: false });
+        return;
+      }
+      await createQuickTask(taskContent);
+      return;
+    }
+
+    // /chat command - start a new chat
+    if (lowerInput.startsWith('/chat ') || lowerInput === '/chat') {
+      const chatMessage = input.slice(6).trim();
+      await createQuickChat(chatMessage);
+      return;
+    }
+
+    // @file command - open file attachment modal
+    if (lowerInput === '@file' || lowerInput.startsWith('@file ')) {
+      openFileAttachmentModal();
+      return;
+    }
+
+    // Reset cancelled flag for new operation
+    state.smartInputCancelled = false;
 
     resetSmartInputPrompt();
     setSmartInputBusy(true, 'Deciding...');
@@ -2408,6 +3058,10 @@
       });
     }
 
+    if (elements.importWorkflowBtn) {
+      elements.importWorkflowBtn.addEventListener('click', openImportWorkflowModal);
+    }
+
     if (elements.viewSchedulesBtn) {
       elements.viewSchedulesBtn.addEventListener('click', openSchedulePanel);
     }
@@ -2477,6 +3131,13 @@
       elements.smartInputPromptCancel.addEventListener('click', () => {
         resetSmartInputPrompt();
         setSmartInputStatus('', { busy: false });
+      });
+    }
+
+    // Cancel button in progress modal
+    if (elements.smartInputCancelBtn) {
+      elements.smartInputCancelBtn.addEventListener('click', () => {
+        cancelSmartInput();
       });
     }
 
