@@ -18,7 +18,7 @@
 .workspace-hub-header .hub-title-eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 0.65rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: var(--text-muted);
 }

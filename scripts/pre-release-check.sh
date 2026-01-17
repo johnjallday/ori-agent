@@ -446,10 +446,10 @@ Please fix these test failures by modifying the source files (not test files, un
   fi
 CLAUDE_AUTOFIX_DISABLED
 
-  # Tests failed - automatically invoke Codex to fix
-  # Check if codex CLI is available
-  if command -v codex &> /dev/null; then
-    echo -e "${BLUE}Automatically invoking Codex to fix test errors...${NC}"
+  # Tests failed - automatically invoke OpenCode to fix
+  # Check if opencode CLI is available
+  if command -v opencode &> /dev/null; then
+    echo -e "${BLUE}Automatically invoking OpenCode to fix test errors...${NC}"
     echo ""
 
     # Feedback loop: keep fixing until tests pass or max iterations
@@ -460,17 +460,17 @@ CLAUDE_AUTOFIX_DISABLED
     while [ $ITERATION -le $MAX_ITERATIONS ] && [ "$TESTS_PASSED" = false ]; do
       echo ""
       echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${BLUE}║     CODEX FIX ITERATION $ITERATION/$MAX_ITERATIONS              ║${NC}"
+      echo -e "${BLUE}║     OPENCODE FIX ITERATION $ITERATION/$MAX_ITERATIONS            ║${NC}"
       echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
       echo ""
 
       # Extract the failing test output (more lines for race conditions which are verbose)
       TEST_ERRORS=$(cat "$TEST_OUTPUT_FILE" | tail -300)
 
-      echo -e "${BLUE}Invoking Codex to fix test errors...${NC}"
+      echo -e "${BLUE}Invoking OpenCode to fix test errors...${NC}"
       echo ""
 
-      # Create prompt for Codex
+      # Create prompt for OpenCode
       PROMPT="The following Go tests are failing. Please analyze the errors and fix them.
 
 IMPORTANT: If you see 'DATA RACE' or 'race detected' errors, this means concurrent goroutines are accessing shared data without synchronization. Look at the file paths and line numbers in the race output - you'll need to add mutex locking (sync.Mutex or sync.RWMutex) around the shared data access.
@@ -481,17 +481,17 @@ $TEST_ERRORS
 
 Please fix these test failures by modifying the source files (not test files, unless the test itself is wrong)."
 
-      # Call Codex with the test errors
-      if printf '%s\n' "$PROMPT" | codex exec --full-auto -C "$(pwd)" -; then
+      # Call OpenCode with the test errors
+      if opencode run "$PROMPT"; then
         echo ""
-        echo -e "${GREEN}✓ Codex finished processing${NC}"
+        echo -e "${GREEN}✓ OpenCode finished processing${NC}"
       else
         echo ""
-        echo -e "${YELLOW}⚠️  Codex encountered an issue${NC}"
+        echo -e "${YELLOW}⚠️  OpenCode encountered an issue${NC}"
       fi
 
       echo ""
-      echo -e "${BLUE}Re-running tests after Codex fixes...${NC}"
+      echo -e "${BLUE}Re-running tests after OpenCode fixes...${NC}"
       echo ""
       echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
       echo -e "${BLUE}Running: All Tests (iteration $ITERATION)${NC}"
@@ -522,7 +522,7 @@ Please fix these test failures by modifying the source files (not test files, un
     if [ "$TESTS_PASSED" = true ]; then
       echo ""
       echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
-      echo -e "${GREEN}║         TESTS FIXED BY CODEX               ║${NC}"
+      echo -e "${GREEN}║         TESTS FIXED BY OPENCODE            ║${NC}"
       echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
       echo ""
       echo -e "${GREEN}✅ All test errors fixed successfully!${NC}"
@@ -533,12 +533,12 @@ Please fix these test failures by modifying the source files (not test files, un
       echo -e "${RED}║         MANUAL FIXES REQUIRED              ║${NC}"
       echo -e "${RED}╚════════════════════════════════════════════╝${NC}"
       echo ""
-      echo -e "${RED}❌ Codex could not resolve all test errors.${NC}"
+      echo -e "${RED}❌ OpenCode could not resolve all test errors.${NC}"
       echo -e "${YELLOW}   Please review the errors above and fix manually.${NC}"
       echo ""
     fi
   else
-    echo -e "${RED}❌ Codex CLI not found. Install from: https://github.com/openai/codex${NC}"
+    echo -e "${RED}❌ OpenCode CLI not found. Install from: https://opencode.ai${NC}"
     echo ""
     echo -e "${YELLOW}Falling back to diagnostic tool...${NC}"
     echo ""
