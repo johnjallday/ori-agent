@@ -457,6 +457,12 @@ async function generateCreateAutoConfig() {
 
 // Apply auto-generated config to form fields
 function applyCreateAutoConfig(config) {
+  // Apply agent name
+  const nameField = document.getElementById('agentName');
+  if (nameField && config.agent_name) {
+    nameField.value = config.agent_name;
+  }
+
   // Apply agent type
   const typeSelect = document.getElementById('agentType');
   if (typeSelect && config.agent_type) {
@@ -499,13 +505,38 @@ function applyCreateAutoConfig(config) {
     promptTextarea.value = config.system_prompt;
   }
 
+  // Apply recommended plugins
+  if (config.recommended_plugins && config.recommended_plugins.length > 0) {
+    applyRecommendedPlugins(config.recommended_plugins);
+  }
+
   // Highlight fields that were auto-configured
   highlightCreateAutoConfiguredFields();
 }
 
+// Apply recommended plugins by checking matching plugin checkboxes
+function applyRecommendedPlugins(recommendedPlugins) {
+  const checkboxes = document.querySelectorAll('.plugin-checkbox');
+
+  checkboxes.forEach(checkbox => {
+    const pluginName = checkbox.value.toLowerCase();
+
+    // Check if any recommended plugin keyword matches this plugin name
+    const shouldCheck = recommendedPlugins.some(keyword => {
+      const lowerKeyword = keyword.toLowerCase();
+      // Match if plugin name contains the keyword or keyword contains plugin name
+      return pluginName.includes(lowerKeyword) || lowerKeyword.includes(pluginName);
+    });
+
+    if (shouldCheck) {
+      checkbox.checked = true;
+    }
+  });
+}
+
 // Briefly highlight fields that were auto-configured
 function highlightCreateAutoConfiguredFields() {
-  const fields = ['agentType', 'llmModel', 'temperature', 'systemPrompt'];
+  const fields = ['agentName', 'agentType', 'llmModel', 'temperature', 'systemPrompt', 'pluginsList'];
 
   fields.forEach(id => {
     const element = document.getElementById(id);

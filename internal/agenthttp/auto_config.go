@@ -36,12 +36,14 @@ type AutoConfigRequest struct {
 
 // AutoConfigResponse represents the auto-generated configuration
 type AutoConfigResponse struct {
-	AgentType    string  `json:"agent_type"`
-	Model        string  `json:"model"`
-	Provider     string  `json:"provider"`
-	Temperature  float64 `json:"temperature"`
-	SystemPrompt string  `json:"system_prompt"`
-	Reasoning    string  `json:"reasoning,omitempty"`
+	AgentName          string   `json:"agent_name"`
+	AgentType          string   `json:"agent_type"`
+	Model              string   `json:"model"`
+	Provider           string   `json:"provider"`
+	Temperature        float64  `json:"temperature"`
+	SystemPrompt       string   `json:"system_prompt"`
+	RecommendedPlugins []string `json:"recommended_plugins,omitempty"`
+	Reasoning          string   `json:"reasoning,omitempty"`
 }
 
 // LLMAvailabilityResponse represents the response for LLM availability check
@@ -141,39 +143,29 @@ func (h *AutoConfigHandler) AutoConfigHandler(w http.ResponseWriter, r *http.Req
 
 // generateAutoConfig uses LLM to analyze the description and generate configuration
 func (h *AutoConfigHandler) generateAutoConfig(ctx context.Context, provider llm.Provider, model, description string) (*AutoConfigResponse, error) {
-	systemPrompt := `You are an AI agent configuration assistant. Based on the user's description of what they want their agent to do, recommend the optimal configuration.
+	systemPrompt := `You are an AI agent configuration assistant. Based on the user's description, generate optimal configuration as a JSON object.
 
-You must respond with a valid JSON object (and nothing else) with these fields:
-- agent_type: One of "tool-calling", "general", or "research"
-  - "tool-calling": Best for agents that primarily execute tools/plugins (e.g., file operations, API calls, automation tasks). Cheapest option.
-  - "general": Best for balanced agents that need both conversation and tool use (e.g., assistants, chatbots with capabilities).
-  - "research": Best for complex reasoning, analysis, and research tasks. Most capable but most expensive.
-- model: The recommended model based on the agent type and task complexity
-  - For tool-calling: "gpt-4o-mini" or "claude-3-haiku-20240307"
-  - For general: "gpt-4o-mini", "gpt-4o", or "claude-3-5-sonnet-20241022"
-  - For research: "gpt-4o", "claude-3-5-sonnet-20241022", or "claude-sonnet-4-5"
-- provider: "openai" or "claude" based on the model chosen
-- temperature: A float between 0.0 and 1.0
-  - Use 0.0-0.3 for precise, deterministic tasks (coding, data processing)
-  - Use 0.4-0.7 for balanced tasks (general assistance)
-  - Use 0.7-1.0 for creative tasks (writing, brainstorming)
-- system_prompt: A tailored system prompt for this agent based on its intended purpose
-- reasoning: Brief explanation of why you chose these settings
+IMPORTANT: All string values must be on a single line. Do not use literal newlines in strings - use \n for line breaks if needed.
 
-Example response:
-{
-  "agent_type": "tool-calling",
-  "model": "gpt-4o-mini",
-  "provider": "openai",
-  "temperature": 0.2,
-  "system_prompt": "You are a helpful assistant that executes file operations efficiently.",
-  "reasoning": "Tool-calling type selected because the task involves file automation. Low temperature for consistent results."
-}`
+Required JSON fields:
+- agent_name: A short, descriptive name for the agent (e.g., "Weather Assistant", "Code Reviewer")
+- agent_type: One of "tool-calling" (for tool/plugin tasks), "general" (balanced), or "research" (complex reasoning)
+- model: "gpt-4.1-nano" for tool-calling, "gpt-5" for general/research, or "claude-sonnet-4-20250514"
+- provider: "openai" or "claude" based on model
+- temperature: 0.0-0.3 for precise tasks, 0.4-0.7 for balanced, 0.7-1.0 for creative
+- system_prompt: A concise system prompt for this agent (single line, use \n for breaks)
+- recommended_plugins: Array of plugin keywords that would be useful (e.g., ["weather", "math", "file", "web", "calendar"])
+- reasoning: Brief explanation (single line)
+
+Example:
+{"agent_name":"Weather Assistant","agent_type":"tool-calling","model":"gpt-4.1-nano","provider":"openai","temperature":0.2,"system_prompt":"You are a weather assistant that provides accurate weather information.","recommended_plugins":["weather"],"reasoning":"Tool-calling for API-based weather lookups."}`
 
 	userMessage := fmt.Sprintf("Configure an agent for the following purpose:\n\n%s", description)
 
 	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Use a longer timeout for local LLM providers (Ollama) which may need to load models
+	// and perform inference locally, which is slower than cloud APIs
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
@@ -212,7 +204,11 @@ Example response:
 	}
 
 	if err := json.Unmarshal([]byte(responseText), &config); err != nil {
-		return nil, fmt.Errorf("failed to parse LLM response as JSON: %w (response: %s)", err, responseText)
+		// Try to fix common LLM JSON issues (literal newlines in strings)
+		fixedJSON := fixMalformedJSON(responseText)
+		if err2 := json.Unmarshal([]byte(fixedJSON), &config); err2 != nil {
+			return nil, fmt.Errorf("failed to parse LLM response as JSON: %w (response: %s)", err, responseText)
+		}
 	}
 
 	// Validate and sanitize the response
@@ -246,11 +242,11 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 	if config.Model == "" {
 		switch config.AgentType {
 		case "tool-calling":
-			config.Model = "gpt-4o-mini"
+			config.Model = "gpt-4.1-nano"
 		case "general":
-			config.Model = "gpt-4o"
+			config.Model = "gpt-5"
 		case "research":
-			config.Model = "gpt-4o"
+			config.Model = "gpt-5"
 		}
 	}
 
@@ -265,10 +261,54 @@ func (h *AutoConfigHandler) validateAndSanitizeConfig(config AutoConfigResponse)
 // getDefaultConfig returns default configuration when auto-config fails
 func (h *AutoConfigHandler) getDefaultConfig() *AutoConfigResponse {
 	return &AutoConfigResponse{
+		AgentName:    "New Agent",
 		AgentType:    "tool-calling",
-		Model:        "gpt-4o-mini",
+		Model:        "gpt-4.1-nano",
 		Provider:     "openai",
 		Temperature:  0.7,
 		SystemPrompt: "You are a helpful AI assistant.",
 	}
+}
+
+// fixMalformedJSON attempts to fix common LLM JSON issues like literal newlines in strings
+func fixMalformedJSON(input string) string {
+	var result strings.Builder
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(input); i++ {
+		c := input[i]
+
+		if escaped {
+			result.WriteByte(c)
+			escaped = false
+			continue
+		}
+
+		if c == '\\' && inString {
+			result.WriteByte(c)
+			escaped = true
+			continue
+		}
+
+		if c == '"' {
+			inString = !inString
+			result.WriteByte(c)
+			continue
+		}
+
+		// If we're inside a string and encounter a literal newline, escape it
+		if inString && (c == '\n' || c == '\r') {
+			if c == '\r' {
+				// Skip \r, handle \n separately
+				continue
+			}
+			result.WriteString("\\n")
+			continue
+		}
+
+		result.WriteByte(c)
+	}
+
+	return result.String()
 }

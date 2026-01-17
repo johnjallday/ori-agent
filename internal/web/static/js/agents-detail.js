@@ -4,6 +4,7 @@ let currentAgent = null;
 let agentName = '';
 let isEditingConfig = false;
 let isEditingPrompt = false;
+let isEditingDescription = false;
 let availableProviders = []; // Cache for available providers and models from API
 
 // Get agent name from URL - supports both /agents/{name} and ?name={name}
@@ -278,6 +279,8 @@ function renderAgentDetails() {
   setConfigEditMode(isEditingConfig);
   populatePromptForm();
   setPromptEditMode(isEditingPrompt);
+  populateDescriptionForm();
+  setDescriptionEditMode(isEditingDescription);
 }
 
 function setConfigEditMode(enabled) {
@@ -533,6 +536,100 @@ function setPromptSavingState(isSaving) {
 
 function setPromptStatus(message, type = 'info') {
   const statusEl = document.getElementById('promptEditStatus');
+  if (!statusEl) return;
+  statusEl.textContent = message || '';
+  if (!message) return;
+
+  if (type === 'error') {
+    statusEl.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    statusEl.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    statusEl.style.color = 'var(--text-secondary)';
+  }
+}
+
+// Description editing functions
+function setDescriptionEditMode(enabled) {
+  const display = document.getElementById('agentDescription');
+  const form = document.getElementById('descriptionEditForm');
+  const editBtn = document.getElementById('editDescriptionBtn');
+
+  isEditingDescription = enabled;
+
+  if (display) display.style.display = enabled ? 'none' : 'block';
+  if (form) form.style.display = enabled ? 'block' : 'none';
+  if (editBtn) editBtn.style.display = enabled ? 'none' : 'inline-flex';
+
+  if (enabled) {
+    populateDescriptionForm();
+    setDescriptionStatus('');
+  }
+}
+
+function toggleDescriptionEditMode() {
+  if (isEditingDescription) {
+    setDescriptionEditMode(false);
+    setDescriptionStatus('');
+    populateDescriptionForm();
+  } else {
+    setDescriptionEditMode(true);
+  }
+}
+
+function populateDescriptionForm() {
+  if (!currentAgent) return;
+  const descInput = document.getElementById('editDescription');
+  if (descInput) descInput.value = currentAgent.metadata?.description || '';
+}
+
+async function saveDescriptionChanges() {
+  if (!currentAgent) return;
+  const descInput = document.getElementById('editDescription');
+  const description = descInput ? descInput.value.trim() : '';
+
+  try {
+    setDescriptionSavingState(true);
+    setDescriptionStatus('Saving description...');
+
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ description: description })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || 'Failed to save description');
+    }
+
+    await refreshAgentDetails();
+    setDescriptionStatus('Description updated successfully.', 'success');
+    setDescriptionEditMode(false);
+  } catch (error) {
+    console.error('Failed to save description:', error);
+    setDescriptionStatus(error.message || 'Failed to save description', 'error');
+  } finally {
+    setDescriptionSavingState(false);
+  }
+}
+
+function setDescriptionSavingState(isSaving) {
+  const saveBtn = document.getElementById('saveDescriptionBtn');
+  if (saveBtn) {
+    saveBtn.disabled = isSaving;
+    if (isSaving) {
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+    } else {
+      saveBtn.innerHTML = 'Save';
+    }
+  }
+}
+
+function setDescriptionStatus(message, type = 'info') {
+  const statusEl = document.getElementById('descriptionEditStatus');
   if (!statusEl) return;
   statusEl.textContent = message || '';
   if (!message) return;
