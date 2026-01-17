@@ -349,6 +349,78 @@
     }
   }
 
+  async function executeTask(taskId) {
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+    if (!assignedAgent) {
+      if (window.Toast) {
+        window.Toast.error('Assign an agent before executing this task.');
+      } else {
+        alert('Assign an agent before executing this task.');
+      }
+      return;
+    }
+
+    const confirmed = confirm('Execute this task now?');
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+
+      if (window.Toast) window.Toast.success('Task started');
+      await loadWorkspaceTasks(state.selectedId);
+      pollTaskCompletion(taskId);
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      if (window.Toast) {
+        window.Toast.error('Failed to execute task');
+      } else {
+        alert('Failed to execute task');
+      }
+    }
+  }
+
+  async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+      if (attempts > maxAttempts) return;
+
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) {
+          setTimeout(poll, intervalMs);
+          return;
+        }
+
+        const task = await response.json();
+        const status = task.status;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+          await loadWorkspaceTasks(state.selectedId);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to poll task status:', error);
+      }
+
+      setTimeout(poll, intervalMs);
+    };
+
+    setTimeout(poll, intervalMs);
+  }
+
   async function deleteSession(sessionId) {
     const confirmed = await showDeleteConfirm({
       title: 'Delete Chat Session',
@@ -703,8 +775,20 @@
     const items = tasks.map((task) => {
       const status = task.status || 'pending';
       const scheduleLabel = task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
-      const assignment = task.to || 'unassigned';
+      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+      const assignment = assignedAgent || 'unassigned';
       const isSelected = selectedSet.has(task.id);
+      const canExecute = Boolean(assignedAgent) && status !== 'in_progress';
+      const executeLabel = status === 'completed' || status === 'failed' ? 'Re-run' : 'Execute';
+      const executeTitle = !assignedAgent
+        ? 'Assign an agent before executing'
+        : status === 'in_progress'
+          ? 'Task is already running'
+          : executeLabel === 'Re-run'
+            ? 'Re-execute task'
+            : 'Execute task now';
+      const resultText = task.error ? task.error : (task.result || '');
+      const resultLabel = task.error ? 'Error' : 'Result';
 
       return `
         <div class="hub-task-card${isSelected ? ' selected' : ''}" data-task-id="${escapeHtml(task.id)}">
@@ -722,8 +806,14 @@
             </div>
             <div class="hub-task-actions">
               <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
-              <button class="modern-btn modern-btn-secondary" data-action="chat">Open Chat</button>
+              <button class="modern-btn modern-btn-primary" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}">${escapeHtml(executeLabel)}</button>
             </div>
+            ${resultText ? `
+            <details class="hub-task-result">
+              <summary>${escapeHtml(resultLabel)}</summary>
+              <pre>${escapeHtml(resultText)}</pre>
+            </details>
+            ` : ''}
           </div>
           <button class="hub-item-delete-btn" data-action="delete" title="Delete task">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -773,10 +863,12 @@
         });
       });
 
-      card.querySelectorAll('[data-action="chat"]').forEach((btn) => {
+      card.querySelectorAll('[data-action="execute"]').forEach((btn) => {
         btn.addEventListener('click', (event) => {
           event.stopPropagation();
-          openChatForWorkspace(state.selectedId);
+          if (task && !btn.disabled) {
+            executeTask(taskId);
+          }
         });
       });
     });
@@ -1531,19 +1623,6 @@
     } catch (error) {
       console.error('Workspace hub failed to load workspaces:', error);
       showLauncher();
-    }
-  }
-
-  function openChatForWorkspace(workspaceId) {
-    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
-      window.chatPanel.open();
-    }
-
-    if (workspaceId && window.sessionManager && typeof window.sessionManager.getActiveSessionId === 'function') {
-      const activeSession = window.sessionManager.getActiveSessionId();
-      if (!activeSession && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
-        window.sessionManager.showCreateChatModalForWorkspace(workspaceId);
-      }
     }
   }
 

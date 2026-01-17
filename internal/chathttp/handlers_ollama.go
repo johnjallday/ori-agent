@@ -13,11 +13,12 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // handleOllamaChat handles chat requests for Ollama models using the provider system
-func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment) {
+func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -68,7 +69,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID)
+		h.handleOllamaToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, sessionID, plannerDecision)
 		return
 	}
 
@@ -80,7 +81,7 @@ func (h *Handler) handleOllamaChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, map[string]any{"response": text})
+	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
 }
 
 // handleOllamaToolCalls handles tool execution for Ollama
@@ -96,6 +97,7 @@ func (h *Handler) handleOllamaToolCalls(
 	provider llm.Provider,
 	baseCtx context.Context,
 	sessionID string,
+	plannerDecision *types.PlannerDecision,
 ) {
 	logger.Info("Ollama requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -151,8 +153,8 @@ func (h *Handler) handleOllamaToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", finalText)
 
-	orihttp.WriteJSON(w, map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
 		"response":  finalText,
 		"toolCalls": execResult.Results,
-	})
+	}, plannerDecision))
 }

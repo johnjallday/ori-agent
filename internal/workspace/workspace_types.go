@@ -3,6 +3,8 @@ package workspace
 import (
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // WorkspaceStatus represents the current state of a workspace
@@ -36,24 +38,27 @@ type AgentInstance struct {
 
 // Workspace stores shared context between collaborating agents
 type Workspace struct {
-	ID             string                 `json:"id"`
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description,omitempty"`
-	Agents         []string               `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
-	AgentInstances []AgentInstance        `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
-	SharedData     map[string]interface{} `json:"shared_data"`
-	Messages       []AgentMessage         `json:"messages"`
-	Tasks          []Task                 `json:"tasks"`
-	Attachments    []Attachment           `json:"attachments,omitempty"`
-	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
-	StoreNodes     []StoreNode            `json:"store_nodes,omitempty"`
-	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
-	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
-	Status         WorkspaceStatus        `json:"status"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
-	mu             sync.RWMutex           `json:"-"`
-	taskIndex      map[string]int         `json:"-"` // Index for O(1) task lookups by ID
+	ID                   string                      `json:"id"`
+	Name                 string                      `json:"name"`
+	Description          string                      `json:"description,omitempty"`
+	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
+	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
+	SharedData           map[string]interface{}      `json:"shared_data"`
+	Messages             []AgentMessage              `json:"messages"`
+	Tasks                []Task                      `json:"tasks"`
+	PlannerDecision      *types.PlannerDecision      `json:"planner_decision,omitempty"`
+	PendingPlan          *types.PendingPlan          `json:"pending_plan,omitempty"`
+	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
+	Attachments          []Attachment                `json:"attachments,omitempty"`
+	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
+	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
+	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
+	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
+	Status               WorkspaceStatus             `json:"status"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+	mu                   sync.RWMutex                `json:"-"`
+	taskIndex            map[string]int              `json:"-"` // Index for O(1) task lookups by ID
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas

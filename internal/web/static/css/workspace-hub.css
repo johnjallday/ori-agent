@@ -409,6 +409,44 @@
   flex-wrap: wrap;
 }
 
+.hub-task-result {
+  margin-top: 0.35rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.hub-task-result summary {
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  list-style: none;
+}
+
+.hub-task-result summary::-webkit-details-marker {
+  display: none;
+}
+
+.hub-task-result[open] summary {
+  color: var(--text-primary);
+}
+
+.hub-task-result pre {
+  margin: 0;
+  padding: 0.6rem;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  background: rgba(15, 23, 42, 0.35);
+  border-top: 1px solid var(--border-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
 .hub-schedule-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);

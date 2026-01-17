@@ -705,6 +705,83 @@ function formatToolCallsForChat(toolCalls) {
     .join('\n\n');
 }
 
+function updatePlannerIndicator(decision) {
+  const indicator = document.getElementById('chatPlannerIndicator');
+  const badge = document.getElementById('chatPlannerBadge');
+  const text = document.getElementById('chatPlannerDecisionText');
+  if (!indicator || !badge || !text) return;
+
+  if (!decision) {
+    indicator.style.display = 'none';
+    return;
+  }
+
+  const mode = decision.mode || 'auto';
+  const score = typeof decision.complexity_score === 'number' ? decision.complexity_score.toFixed(1) : '--';
+  const threshold = typeof decision.threshold === 'number' ? decision.threshold.toFixed(1) : '--';
+  const status = decision.multi_agent ? 'ON' : 'OFF';
+
+  badge.textContent = `Multi-agent: ${mode}`;
+  text.textContent = `Score ${score} vs ${threshold} => ${status}`;
+  text.title = decision.rationale || '';
+  indicator.style.display = 'block';
+}
+
+function renderPlannerPlanSummary(data) {
+  if (!data || !data.orchestrated || !data.planner_plan) return;
+  const tasks = data.planner_plan.tasks || [];
+  if (!Array.isArray(tasks) || tasks.length === 0) return;
+
+  const lines = tasks.map((task, idx) => `${idx + 1}. ${task.description || 'Task'}`);
+  const message = `**Plan**\n${lines.join('\n')}`;
+  addMessageToChat(message, false, false, true, true);
+}
+
+async function handleDynamicAgentApprovals(data) {
+  if (!data || !Array.isArray(data.dynamic_agent_requests) || data.dynamic_agent_requests.length === 0) {
+    return;
+  }
+  const workspaceId = data.studio_id;
+  if (!workspaceId) return;
+
+  const summary = data.dynamic_agent_requests
+    .map(req => `- ${req.name} (${req.role || 'general'})`)
+    .join('\n');
+
+  const approve = window.confirm(
+    `Dynamic agent creation requested:\n\n${summary}\n\nApprove?`
+  );
+
+  let resumeResult = null;
+  for (const req of data.dynamic_agent_requests) {
+    const response = await fetch('/api/orchestration/dynamic-agents/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        request_id: req.id,
+        approve,
+        approved_by: 'user'
+      })
+    });
+    if (response.ok) {
+      const respData = await response.json();
+      if (respData.resume_result) {
+        resumeResult = respData.resume_result;
+      }
+    }
+  }
+
+  if (approve) {
+    addMessageToChat('✅ Approved dynamic agent creation.', false, false, true, true);
+    if (resumeResult && resumeResult.final_output) {
+      addMessageToChat(resumeResult.final_output, false, false, true, true);
+    }
+  } else {
+    addMessageToChat('❌ Dynamic agent creation denied.', false, false, true, true);
+  }
+}
+
 // Chat state machine reference (initialized in initializeApp)
 let chatStateMachine = null;
 
@@ -1013,6 +1090,10 @@ async function sendMessage(message) {
     if (activeSession?.agent_name) {
       requestBody.agent_name = activeSession.agent_name;
     }
+    const multiAgentModeSelect = document.getElementById('multiAgentMode');
+    if (multiAgentModeSelect && multiAgentModeSelect.value) {
+      requestBody.multi_agent_mode = multiAgentModeSelect.value;
+    }
 
     // Build headers with session ID for multi-tab support
     const chatHeaders = {
@@ -1048,6 +1129,7 @@ async function sendMessage(message) {
     const data = await response.json();
 
     appLog.debug('Received chat response:', data);
+    updatePlannerIndicator(data?.planner_decision);
 
     // Clear uploaded files after successful send
     if (window.clearFilesAfterSend) {
@@ -1100,6 +1182,9 @@ async function sendMessage(message) {
       }
 
       EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
+
+      renderPlannerPlanSummary(data);
+      await handleDynamicAgentApprovals(data);
     } else {
       appLog.error('No response field found. Available fields:', Object.keys(data));
       const details = escapeHtml(JSON.stringify(data, null, 2));

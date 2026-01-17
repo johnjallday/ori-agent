@@ -67,6 +67,12 @@ const (
 	// Progress events
 	EventWorkspaceProgress EventType = "workspace.progress"
 
+	// Planner and dynamic agent events
+	EventPlannerDecision       EventType = "planner.decision"
+	EventDynamicAgentRequested EventType = "dynamic_agent.requested"
+	EventDynamicAgentApproved  EventType = "dynamic_agent.approved"
+	EventDynamicAgentDenied    EventType = "dynamic_agent.denied"
+
 	// System events
 	EventError   EventType = "error"
 	EventWarning EventType = "warning"

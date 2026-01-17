@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -99,6 +100,7 @@ type Handler struct {
 	notificationHandler *NotificationHandler
 	streamingHandler    *StreamingHandler
 	taskHandlerSub      *TaskHandler
+	dynamicAgentHandler *DynamicAgentHandler
 }
 
 // NewHandler creates a new orchestration handler with all dependencies.
@@ -146,6 +148,7 @@ func (h *Handler) initializeSubHandlers() {
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
 		h.streamingHandler = NewStreamingHandler(h.workspaceStore, h.orchestrator, h.eventBus)
+		h.dynamicAgentHandler = NewDynamicAgentHandler(h.workspaceStore, h.orchestrator, h.eventBus)
 	}
 
 	if h.templateManager != nil && h.orchestrator != nil {
@@ -227,6 +230,9 @@ func (h *Handler) SetOrchestrator(orch *orchestration.Orchestrator) {
 	h.orchestrator = orch
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
+	if h.orchestrator != nil && h.dynamicAgentHandler == nil {
+		h.dynamicAgentHandler = NewDynamicAgentHandler(h.workspaceStore, h.orchestrator, h.eventBus)
+	}
 }
 
 // initializeTemplateHandlerLegacy initializes the template handler if all dependencies are available (legacy)
@@ -272,6 +278,15 @@ func (h *Handler) MessagesHandler(w http.ResponseWriter, r *http.Request) {
 // Delegates to CapabilitiesHandler for modular organization
 func (h *Handler) AgentCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	h.capabilitiesHandler.AgentCapabilitiesHandler(w, r)
+}
+
+// DynamicAgentApprovalHandler handles dynamic agent approvals.
+func (h *Handler) DynamicAgentApprovalHandler(w http.ResponseWriter, r *http.Request) {
+	if h.dynamicAgentHandler == nil {
+		orihttp.ServiceUnavailable(w, "dynamic agent approvals not available")
+		return
+	}
+	h.dynamicAgentHandler.DynamicAgentApprovalHandler(w, r)
 }
 
 // DelegateHandler handles task delegation between agents

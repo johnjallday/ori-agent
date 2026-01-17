@@ -67,6 +67,10 @@
           </div>
         </div>
       </div>
+      <div id="chatPlannerIndicator" class="mb-2" style="display: none; font-size: 0.75rem; color: var(--text-muted);">
+        <span class="badge bg-secondary me-2" id="chatPlannerBadge">Multi-agent</span>
+        <span id="chatPlannerDecisionText"></span>
+      </div>
       <div id="chatArea" class="overflow-auto flex-grow-1" style="padding-right: 0.5rem;" role="log" aria-label="Chat messages" aria-live="polite">
         <!-- Chat messages will be populated here -->
       </div>
@@ -104,6 +108,16 @@
                 <label class="form-check-label chat-label" for="enterToSend" style="font-size: 12px;">
                   Enter to send
                 </label>
+              </div>
+              <div class="d-flex align-items-center gap-1">
+                <label class="chat-label mb-0" for="multiAgentMode" style="font-size: 12px;">
+                  Multi-agent
+                </label>
+                <select id="multiAgentMode" class="form-select form-select-sm" style="font-size: 12px; width: auto;">
+                  <option value="auto" selected>Auto</option>
+                  <option value="force">Force</option>
+                  <option value="off">Off</option>
+                </select>
               </div>
               <label for="fileUpload" class="btn btn-sm attach-files-btn" style="margin: 0; padding: 4px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); cursor: pointer; font-size: 12px; border-radius: 6px; transition: all 0.2s ease;" aria-label="Attach files to message">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">

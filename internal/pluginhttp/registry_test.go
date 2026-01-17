@@ -24,6 +24,10 @@ func (m *mockStore) ListAgents() (names []string, current string) {
 	return []string{}, ""
 }
 
+func (m *mockStore) SetCurrentAgent(name string) error {
+	return nil
+}
+
 func (m *mockStore) CreateAgent(name string, config *store.CreateAgentConfig) error {
 	return nil
 }

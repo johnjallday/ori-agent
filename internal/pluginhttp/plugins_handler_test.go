@@ -37,6 +37,11 @@ func (ts *testStore) ListAgents() (names []string, current string) {
 	return names, ts.currentAgent
 }
 
+func (ts *testStore) SetCurrentAgent(name string) error {
+	ts.currentAgent = name
+	return nil
+}
+
 func (ts *testStore) CreateAgent(name string, config *store.CreateAgentConfig) error {
 	ts.agents[name] = &agent.Agent{
 		Plugins: make(map[string]types.LoadedPlugin),

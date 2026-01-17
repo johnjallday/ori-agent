@@ -12,11 +12,12 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
 // handleClaudeChat handles chat requests for Claude models using the provider system
-func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment) {
+func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *agent.Agent, userMessage string, tools []llm.Tool, agentName string, baseCtx context.Context, files []pluginapi.FileAttachment, images []llm.ImageAttachment, plannerDecision *types.PlannerDecision) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
 	defer cancel()
@@ -61,7 +62,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 
 	// Tool-call branch
 	if len(resp.ToolCalls) > 0 {
-		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID)
+		h.handleClaudeToolCalls(w, ctx, ag, agentName, messages, resp, tools, files, provider, baseCtx, start, sessionID, plannerDecision)
 		return
 	}
 
@@ -75,7 +76,7 @@ func (h *Handler) handleClaudeChat(w http.ResponseWriter, r *http.Request, ag *a
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, map[string]any{"response": text})
+	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
 }
 
 // handleClaudeToolCalls handles tool execution for Claude
@@ -92,6 +93,7 @@ func (h *Handler) handleClaudeToolCalls(
 	baseCtx context.Context,
 	start time.Time,
 	sessionID string,
+	plannerDecision *types.PlannerDecision,
 ) {
 	logger.Info("Claude requested tool calls", logger.Fields{"count": len(resp.ToolCalls)})
 
@@ -117,7 +119,11 @@ func (h *Handler) handleClaudeToolCalls(
 		// Store assistant response in session
 		h.storeMessageInSession(baseCtx, sessionID, "assistant", execResult.CombinedResult)
 
-		writeToolCallResponse(w, execResult)
+		response := map[string]any{
+			"response":  execResult.CombinedResult,
+			"toolCalls": execResult.Results,
+		}
+		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
 		return
 	}
 
@@ -132,10 +138,10 @@ func (h *Handler) handleClaudeToolCalls(
 
 	if err != nil || resp2 == nil {
 		// If second turn fails, return the tool results as best-effort reply
-		orihttp.WriteJSON(w, map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
 			"response":  execResult.CombinedResult,
 			"toolCalls": execResult.Results,
-		})
+		}, plannerDecision))
 		return
 	}
 
@@ -151,8 +157,8 @@ func (h *Handler) handleClaudeToolCalls(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", resp2.Content)
 
-	orihttp.WriteJSON(w, map[string]any{
+	orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
 		"response":  resp2.Content,
 		"toolCalls": execResult.Results,
-	})
+	}, plannerDecision))
 }

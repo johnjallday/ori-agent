@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
+	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -19,14 +21,20 @@ type Orchestrator struct {
 	agentStore     store.Store
 	workspaceStore workspace.Store
 	communicator   *agentcomm.Communicator
+	llmFactory     *llm.Factory
+	configManager  *config.Manager
+	eventBus       *workspace.EventBus
 }
 
 // NewOrchestrator creates a new orchestrator
-func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator) *Orchestrator {
+func NewOrchestrator(agentStore store.Store, workspaceStore workspace.Store, communicator *agentcomm.Communicator, llmFactory *llm.Factory, configManager *config.Manager, eventBus *workspace.EventBus) *Orchestrator {
 	return &Orchestrator{
 		agentStore:     agentStore,
 		workspaceStore: workspaceStore,
 		communicator:   communicator,
+		llmFactory:     llmFactory,
+		configManager:  configManager,
+		eventBus:       eventBus,
 	}
 }
 
@@ -40,12 +48,15 @@ type CollaborativeTask struct {
 
 // CollaborativeResult represents the result of a collaborative task
 type CollaborativeResult struct {
-	WorkspaceID string                 `json:"studio_id"`
-	FinalOutput string                 `json:"final_output"`
-	SubResults  map[string]interface{} `json:"sub_results"`
-	Duration    time.Duration          `json:"duration"`
-	Status      string                 `json:"status"`
-	Error       string                 `json:"error,omitempty"`
+	WorkspaceID          string                      `json:"studio_id"`
+	FinalOutput          string                      `json:"final_output"`
+	SubResults           map[string]interface{}      `json:"sub_results"`
+	Duration             time.Duration               `json:"duration"`
+	Status               string                      `json:"status"`
+	Error                string                      `json:"error,omitempty"`
+	PendingPlanID        string                      `json:"pending_plan_id,omitempty"`
+	PlannerDecision      *types.PlannerDecision      `json:"planner_decision,omitempty"`
+	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
 }
 
 // ExecuteCollaborativeTask coordinates multiple agents to complete a task

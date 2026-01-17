@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -517,11 +517,20 @@ func (o *Orchestrator) executeToolCall(ctx context.Context, ag *agent.Agent, too
 // - Extract capabilities from agent.Capabilities slice
 // - Include agent role (agent.Role) in the output
 func (o *Orchestrator) formatAgentCapabilities(agents []string) string {
-	result := ""
-	for _, agent := range agents {
-		result += fmt.Sprintf("- %s: General purpose agent\n", agent)
+	var sb strings.Builder
+	for _, agentName := range agents {
+		ag, ok := o.agentStore.GetAgent(agentName)
+		if !ok || ag == nil {
+			sb.WriteString(fmt.Sprintf("- %s: General purpose agent\n", agentName))
+			continue
+		}
+		caps := strings.Join(ag.Capabilities, ", ")
+		if caps == "" {
+			caps = "none"
+		}
+		sb.WriteString(fmt.Sprintf("- %s (role: %s; capabilities: %s)\n", agentName, ag.Role, caps))
 	}
-	return result
+	return sb.String()
 }
 
 // publishEvent publishes an event to the event bus
