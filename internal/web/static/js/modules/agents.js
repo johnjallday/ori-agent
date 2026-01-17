@@ -530,6 +530,20 @@ function createAgentElement(agentName, agentType, currentAgent) {
           <div class="d-flex flex-column">
             <h6 class="fw-semibold mb-2" style="color: var(--text-primary); font-size: 0.85rem;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                <path d="M20.5,11H19V7C19,5.89 18.1,5 17,5H13V3.5A2.5,2.5 0 0,0 10.5,1A2.5,2.5 0 0,0 8,3.5V5H4C2.89,5 2,5.89 2,7V10.8H3.5C5,10.8 6.2,12 6.2,13.5C6.2,15 5,16.2 3.5,16.2H2V20C2,21.11 2.89,22 4,22H7.8V20.5C7.8,19 9,17.8 10.5,17.8C12,17.8 13.2,19 13.2,20.5V22H17C18.11,22 19,21.11 19,20V16H20.5A2.5,2.5 0 0,0 23,13.5A2.5,2.5 0 0,0 20.5,11Z"/>
+              </svg>
+              Plugins
+            </h6>
+            <div id="pluginsList-${accordionId}" style="font-size: 0.85rem;">
+              <div class="text-muted small">Loading plugins...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-item mb-3">
+          <div class="d-flex flex-column">
+            <h6 class="fw-semibold mb-2" style="color: var(--text-primary); font-size: 0.85rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M20,2H4A2,2 0 0,0 2,4V22L6,18H20A2,2 0 0,0 22,16V4A2,2 0 0,0 20,2M6,9H18V11H6M14,14H6V12H14M18,8H6V6H18"/>
               </svg>
               MCP Servers
@@ -1190,11 +1204,129 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
       systemPromptInput.value = systemPromptValue;
     }
 
+    // Load plugins for this agent
+    await loadAgentPlugins(agentName, accordionId);
+
     // Load MCP servers for this agent
     await loadAgentMCPServers(agentName, accordionId);
 
   } catch (error) {
     agentsLog.error('Error loading settings for agent', { agent: agentName, error });
+  }
+}
+
+// Load plugins for a specific agent
+async function loadAgentPlugins(agentName, accordionId) {
+  const pluginsList = document.getElementById(`pluginsList-${accordionId}`);
+  if (!pluginsList) return;
+
+  try {
+    // Fetch all available plugins from registry
+    const registry = await API.get('/api/plugin-registry');
+
+    // Fetch currently loaded plugins for this agent
+    const activePlugins = await API.get(`/api/plugins?agent=${encodeURIComponent(agentName)}`);
+
+    // Create a set of active plugin names for quick lookup (only enabled ones)
+    const activePluginNames = new Set(
+      activePlugins.plugins
+        .filter(p => p.enabled === true)
+        .map(p => p.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim())
+    );
+
+    // Filter to only show installed plugins (those with a local path in uploaded_plugins)
+    const localPlugins = registry.plugins
+      .filter(plugin => plugin.path && plugin.path.includes('uploaded_plugins'))
+      .map(plugin => ({
+        ...plugin,
+        displayName: plugin.metadata?.name || plugin.name.replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '')
+      }));
+
+    if (localPlugins.length === 0) {
+      pluginsList.innerHTML = '<div class="text-muted small">No plugins installed</div>';
+      return;
+    }
+
+    // Render plugins list
+    let html = '';
+    localPlugins.forEach(plugin => {
+      const normalizedName = plugin.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim();
+      const isActive = activePluginNames.has(normalizedName);
+
+      html += `
+        <div class="d-flex align-items-center justify-content-between mb-2 p-2"
+             style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;">
+          <div class="d-flex flex-column flex-grow-1">
+            <span style="color: var(--text-primary); font-weight: 500;">${escapeHtml(plugin.displayName)}</span>
+            ${plugin.description ? `<span class="text-muted small">${escapeHtml(plugin.description)}</span>` : ''}
+          </div>
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   id="plugin-${normalizedName}-${accordionId}"
+                   ${isActive ? 'checked' : ''}
+                   onchange="toggleAgentPlugin('${escapeJs(agentName)}', '${escapeJs(plugin.name)}', '${escapeJs(plugin.path)}', this.checked, '${accordionId}')"
+                   style="cursor: pointer;">
+          </div>
+        </div>
+      `;
+    });
+
+    pluginsList.innerHTML = html;
+
+  } catch (error) {
+    agentsLog.error('Error loading plugins for agent', { agent: agentName, error });
+    pluginsList.innerHTML = '<div class="text-danger small">Failed to load plugins</div>';
+  }
+}
+
+// Toggle plugin for an agent
+async function toggleAgentPlugin(agentName, pluginName, pluginPath, enabled, accordionId) {
+  const normalizedName = pluginName.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w\.]+)?$/, '').trim();
+  const checkbox = document.getElementById(`plugin-${normalizedName}-${accordionId}`);
+  const originalState = !enabled;
+
+  try {
+    if (enabled) {
+      // Enable the plugin for this agent
+      const formData = new FormData();
+      formData.append('name', pluginName);
+      formData.append('path', pluginPath);
+      formData.append('agent', agentName);
+
+      const response = await fetch(`/api/plugins?agent=${encodeURIComponent(agentName)}`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to enable plugin');
+      }
+    } else {
+      // Disable the plugin for this agent
+      await API.delete(`/api/plugins?name=${encodeURIComponent(pluginName)}&agent=${encodeURIComponent(agentName)}`);
+    }
+
+    // Show success notification
+    if (typeof showNotification === 'function') {
+      showNotification(`Plugin ${enabled ? 'enabled' : 'disabled'} for ${agentName}`, 'success');
+    }
+
+    // Reload plugins list to update state
+    await loadAgentPlugins(agentName, accordionId);
+
+  } catch (error) {
+    agentsLog.error('Error toggling plugin', error);
+
+    // Rollback checkbox state on error
+    if (checkbox) {
+      checkbox.checked = originalState;
+    }
+
+    // Show error notification
+    if (typeof showNotification === 'function') {
+      showNotification(`Failed to ${enabled ? 'enable' : 'disable'} plugin: ${error.message}`, 'error');
+    }
   }
 }
 
