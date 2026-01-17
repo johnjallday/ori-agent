@@ -58,9 +58,12 @@ export class DashboardState {
         this.updateWorkspaceStatus(event.data);
         break;
 
+      case 'task.created':
+      case 'task.assigned':
       case 'task.started':
       case 'task.completed':
       case 'task.failed':
+      case 'task.deleted':
         this.handleTaskUpdate(event);
         break;
 

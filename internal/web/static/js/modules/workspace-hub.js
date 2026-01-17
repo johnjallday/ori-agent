@@ -48,6 +48,10 @@
     smartInputPromptChat: document.getElementById('hubSmartInputPromptChat'),
     smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel'),
     smartInputAttachBtn: document.getElementById('hubSmartInputAttachBtn'),
+    smartInputProgressModal: document.getElementById('hubSmartInputProgressModal'),
+    smartInputProgressHeadline: document.getElementById('hubSmartInputProgressHeadline'),
+    smartInputProgressMessage: document.getElementById('hubSmartInputProgressMessage'),
+    smartInputProgressSteps: document.getElementById('hubSmartInputProgressSteps'),
     // Selection mode elements
     tasksPanel: document.getElementById('hubTasksPanel'),
     sessionsPanel: document.getElementById('hubSessionsPanel'),
@@ -103,6 +107,9 @@
     pendingFiles: []
   };
 
+  let workspaceRealtimeUnsub = null;
+  let workspaceRealtimeTimer = null;
+
   function escapeHtml(text) {
     return String(text || '').replace(/[&<>"]/g, (ch) => ({
       '&': '&amp;',
@@ -153,6 +160,84 @@
     } else {
       setSmartInputStatus('', { busy: false });
     }
+  }
+
+  function shouldRefreshForRealtimeEvent(type) {
+    if (!type) return false;
+    return type.startsWith('task.') ||
+      type.startsWith('workspace.') ||
+      type.startsWith('workflow.') ||
+      type.startsWith('step.') ||
+      type === 'connection.opened';
+  }
+
+  function scheduleWorkspaceTasksRefresh(delayMs = 500) {
+    if (!state.selectedId) return;
+    if (workspaceRealtimeTimer) {
+      clearTimeout(workspaceRealtimeTimer);
+    }
+    workspaceRealtimeTimer = setTimeout(() => {
+      workspaceRealtimeTimer = null;
+      if (state.selectedId) {
+        loadWorkspaceTasks(state.selectedId);
+      }
+    }, delayMs);
+  }
+
+  function stopWorkspaceRealtime() {
+    if (workspaceRealtimeUnsub) {
+      workspaceRealtimeUnsub();
+      workspaceRealtimeUnsub = null;
+    }
+    if (workspaceRealtimeTimer) {
+      clearTimeout(workspaceRealtimeTimer);
+      workspaceRealtimeTimer = null;
+    }
+  }
+
+  const SMART_INPUT_PROGRESS_STEPS = ['analyze', 'decide', 'execute'];
+  let smartInputProgressModal = null;
+
+  function getSmartInputProgressModal() {
+    if (!elements.smartInputProgressModal || !window.bootstrap) return null;
+    if (!smartInputProgressModal) {
+      smartInputProgressModal = new bootstrap.Modal(elements.smartInputProgressModal);
+    }
+    return smartInputProgressModal;
+  }
+
+  function updateSmartInputProgress(step, { headline, message } = {}) {
+    if (elements.smartInputProgressHeadline && headline) {
+      elements.smartInputProgressHeadline.textContent = headline;
+    }
+    if (elements.smartInputProgressMessage && message) {
+      elements.smartInputProgressMessage.textContent = message;
+    }
+    if (!elements.smartInputProgressSteps) return;
+
+    const stepIndex = SMART_INPUT_PROGRESS_STEPS.indexOf(step);
+    const items = Array.from(elements.smartInputProgressSteps.querySelectorAll('li'));
+    items.forEach((item) => {
+      const itemStep = item.dataset.step;
+      const itemIndex = SMART_INPUT_PROGRESS_STEPS.indexOf(itemStep);
+      item.classList.remove('is-active', 'is-complete');
+      if (itemIndex === -1 || stepIndex === -1) return;
+      if (itemIndex < stepIndex) item.classList.add('is-complete');
+      if (itemIndex === stepIndex) item.classList.add('is-active');
+    });
+  }
+
+  function showSmartInputProgress(step, { headline, message } = {}) {
+    const modal = getSmartInputProgressModal();
+    if (!modal) return;
+    updateSmartInputProgress(step, { headline, message });
+    modal.show();
+  }
+
+  function hideSmartInputProgress() {
+    const modal = getSmartInputProgressModal();
+    if (!modal) return;
+    modal.hide();
   }
 
   function setSmartInputDefaultDecision(decision) {
@@ -1793,6 +1878,7 @@
     const workspace = state.workspaceMap.get(workspaceId);
     if (!workspace) return;
 
+    stopWorkspaceRealtime();
     state.selectedId = workspaceId;
     sessionStorage.setItem(STORAGE_KEY, workspaceId);
 
@@ -1809,6 +1895,15 @@
     loadWorkspaceSessions(workspaceId);
     loadWorkspaceNotes(workspaceId);
     loadWorkspaceFiles(workspaceId);
+
+    if (window.workspaceRealtime && typeof window.workspaceRealtime.subscribeToWorkspace === 'function') {
+      workspaceRealtimeUnsub = window.workspaceRealtime.subscribeToWorkspace(workspaceId, (event) => {
+        if (!event || event.workspaceId !== state.selectedId) return;
+        if (shouldRefreshForRealtimeEvent(event.type)) {
+          scheduleWorkspaceTasksRefresh();
+        }
+      });
+    }
 
     if (focus && elements.workspaceSelect) {
       elements.workspaceSelect.blur();
@@ -1840,6 +1935,7 @@
   }
 
   function showLauncher() {
+    stopWorkspaceRealtime();
     setState('launcher');
     if (elements.workspaceSelect) {
       elements.workspaceSelect.value = '';
@@ -2179,6 +2275,10 @@
 
     hideSmartInputPrompt();
     setSmartInputBusy(true, decision === 'task' ? 'Creating task...' : 'Starting chat...');
+    showSmartInputProgress('execute', {
+      headline: decision === 'task' ? 'Creating task' : 'Starting chat',
+      message: decision === 'task' ? 'Building tasks in your workspace.' : 'Opening a new session.'
+    });
 
     try {
       if (decision === 'task') {
@@ -2200,6 +2300,8 @@
       if (window.Toast) {
         window.Toast.error(decision === 'task' ? 'Failed to create task' : 'Failed to start chat');
       }
+    } finally {
+      hideSmartInputProgress();
     }
 
     if (predictedDecision && predictedDecision !== decision) {
@@ -2232,6 +2334,10 @@
 
     resetSmartInputPrompt();
     setSmartInputBusy(true, 'Deciding...');
+    showSmartInputProgress('analyze', {
+      headline: 'Analyzing input',
+      message: 'Reviewing your request.'
+    });
 
     let classification;
     try {
@@ -2239,6 +2345,7 @@
     } catch (error) {
       console.error('Smart input classification failed:', error);
       setSmartInputBusy(false);
+      hideSmartInputProgress();
       showSmartInputPrompt({
         input,
         decision: 'task',
@@ -2249,6 +2356,10 @@
       return;
     }
 
+    updateSmartInputProgress('decide', {
+      headline: 'Routing',
+      message: 'Choosing the best path.'
+    });
     setSmartInputBusy(false);
 
     const decision = classification.decision || 'task';
@@ -2261,6 +2372,7 @@
     };
 
     if (classification.needs_confirmation) {
+      hideSmartInputProgress();
       showSmartInputPrompt(payload);
       return;
     }

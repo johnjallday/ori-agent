@@ -17,6 +17,7 @@ class TaskModalController {
     this.autoMode = false;
     this.llmAvailable = false;
     this.systemModelConfigured = false;
+    this.progressSteps = ['parse', 'prepare', 'apply'];
     // File attachment state
     this.pendingFiles = [];
     // Current task being edited (for auto edit mode)
@@ -577,10 +578,57 @@ class TaskModalController {
     if (modal) {
       modal.style.display = 'none';
     }
+    this.hideProgress();
     this.editingTaskId = null;
     this.workspaceId = null;
     this.onSaveCallback = null;
     this.currentTask = null;
+  }
+
+  getProgressElements() {
+    return {
+      container: document.getElementById('taskModalProgress'),
+      headline: document.getElementById('taskModalProgressHeadline'),
+      message: document.getElementById('taskModalProgressMessage'),
+      steps: document.getElementById('taskModalProgressSteps')
+    };
+  }
+
+  updateProgress(step, { headline, message } = {}) {
+    const elements = this.getProgressElements();
+    if (!elements.container) return;
+
+    if (elements.headline && headline) {
+      elements.headline.textContent = headline;
+    }
+    if (elements.message && message) {
+      elements.message.textContent = message;
+    }
+
+    if (!elements.steps) return;
+    const stepIndex = this.progressSteps.indexOf(step);
+    const items = Array.from(elements.steps.querySelectorAll('li'));
+    items.forEach((item) => {
+      const itemStep = item.dataset.step;
+      const itemIndex = this.progressSteps.indexOf(itemStep);
+      item.classList.remove('is-active', 'is-complete');
+      if (itemIndex === -1 || stepIndex === -1) return;
+      if (itemIndex < stepIndex) item.classList.add('is-complete');
+      if (itemIndex === stepIndex) item.classList.add('is-active');
+    });
+  }
+
+  showProgress(step, { headline, message } = {}) {
+    const elements = this.getProgressElements();
+    if (!elements.container) return;
+    elements.container.hidden = false;
+    this.updateProgress(step, { headline, message });
+  }
+
+  hideProgress() {
+    const elements = this.getProgressElements();
+    if (!elements.container) return;
+    elements.container.hidden = true;
   }
 
   /**
@@ -739,6 +787,11 @@ class TaskModalController {
       return;
     }
 
+    this.showProgress('parse', {
+      headline: 'Parsing request',
+      message: 'Analyzing your task description.'
+    });
+
     // Show loading state
     const saveButton = document.getElementById('taskModalSave');
     const saveText = document.getElementById('taskModalSaveText');
@@ -763,6 +816,11 @@ class TaskModalController {
       }
 
       const parsed = await parseResponse.json();
+
+      this.updateProgress('prepare', {
+        headline: 'Planning tasks',
+        message: 'Preparing the task details.'
+      });
 
       // Build schedule data from parsed response
       let scheduleData = { schedule_enabled: false };
@@ -798,6 +856,10 @@ class TaskModalController {
 
       const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
       if (workflowSteps.length > 0) {
+        this.updateProgress('apply', {
+          headline: 'Creating tasks',
+          message: 'Saving the workflow to your workspace.'
+        });
         const parentTitle = parsed.title || workflowSteps[0]?.title || 'New Workflow';
         const parentDetails = parsed.details || '';
         const parentPriority = parsed.priority || 3;
@@ -901,6 +963,10 @@ class TaskModalController {
       }
 
       // Build task data from parsed response
+      this.updateProgress('apply', {
+        headline: 'Creating task',
+        message: 'Saving the task to your workspace.'
+      });
       let to = '';
       let assignedNodeId = '';
       if (parsed.agent_name) {
@@ -950,6 +1016,7 @@ class TaskModalController {
       console.error('Failed to save task in auto mode:', error);
       this.showToast(error.message || 'Failed to create task', 'error');
     } finally {
+      this.hideProgress();
       // Restore button state
       if (saveButton) saveButton.disabled = false;
       if (saveText) saveText.textContent = originalText || 'Create Task';
@@ -973,6 +1040,11 @@ class TaskModalController {
       this.showToast('No task selected for editing', 'error');
       return;
     }
+
+    this.showProgress('parse', {
+      headline: 'Parsing changes',
+      message: 'Analyzing your update request.'
+    });
 
     // Show loading state
     const saveButton = document.getElementById('taskModalSave');
@@ -1010,6 +1082,11 @@ class TaskModalController {
 
       const parsed = await parseResponse.json();
 
+      this.updateProgress('prepare', {
+        headline: 'Planning updates',
+        message: 'Reviewing the changes.'
+      });
+
       // Build update data from parsed response
       let to = '';
       let assignedNodeId = '';
@@ -1045,6 +1122,11 @@ class TaskModalController {
           }
         };
       }
+
+      this.updateProgress('apply', {
+        headline: 'Updating task',
+        message: 'Saving your changes.'
+      });
 
       // Update the task
       const updateResponse = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
@@ -1086,6 +1168,7 @@ class TaskModalController {
       console.error('Failed to update task in auto mode:', error);
       this.showToast(error.message || 'Failed to update task', 'error');
     } finally {
+      this.hideProgress();
       // Restore button state
       if (saveButton) saveButton.disabled = false;
       if (saveText) saveText.textContent = originalText || 'Update Task';
