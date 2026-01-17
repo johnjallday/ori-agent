@@ -99,7 +99,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	s := b.server
 
 	communicator := agentcomm.NewCommunicator(s.workspaceStore)
-	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator)
+	orch := orchestration.NewOrchestrator(s.st, s.workspaceStore, communicator, s.llmFactory, s.configManager, s.eventBus)
 	taskHandler := workspace.NewLLMTaskHandler(s.st, s.llmFactory, s.workspaceStore)
 
 	// Create session store adapter for orchestration handler

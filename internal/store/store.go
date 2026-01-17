@@ -15,6 +15,7 @@ type CreateAgentConfig struct {
 type Store interface {
 	// Agents
 	ListAgents() (names []string, current string)
+	SetCurrentAgent(name string) error
 	CreateAgent(name string, config *CreateAgentConfig) error
 	DeleteAgent(name string) error
 

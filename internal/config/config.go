@@ -19,6 +19,10 @@ type Settings struct {
 	SystemProvider string `json:"system_provider,omitempty"` // Provider for system tasks (e.g., "openai", "claude", "ollama")
 	SystemModel    string `json:"system_model,omitempty"`    // Model for system tasks (e.g., "gpt-4o-mini", "claude-3-haiku-20240307")
 
+	// Multi-agent orchestration defaults
+	MultiAgentMode      string  `json:"multi_agent_mode,omitempty"`      // auto, force, off
+	MultiAgentThreshold float64 `json:"multi_agent_threshold,omitempty"` // Complexity threshold (0-10)
+
 	// Session cleanup settings
 	SessionCleanupEnabled bool `json:"session_cleanup_enabled"` // Enable automatic cleanup of old sessions (default: true)
 	SessionCleanupDays    int  `json:"session_cleanup_days"`    // Days of inactivity before session cleanup (default: 30)
@@ -84,6 +88,8 @@ func defaultSettings() Settings {
 		SessionCleanupEnabled: true,
 		SessionCleanupDays:    30,
 		SessionMaxCount:       1000,
+		MultiAgentMode:        "auto",
+		MultiAgentThreshold:   6.0,
 	}
 }
 
@@ -211,6 +217,20 @@ func (m *Manager) validate() error {
 	if m.settings.CurrentAgent == "" {
 		m.settings.CurrentAgent = "default"
 	}
+	if m.settings.MultiAgentMode == "" {
+		m.settings.MultiAgentMode = "auto"
+	}
+	switch m.settings.MultiAgentMode {
+	case "auto", "force", "off":
+	default:
+		m.settings.MultiAgentMode = "auto"
+	}
+	if m.settings.MultiAgentThreshold <= 0 {
+		m.settings.MultiAgentThreshold = 6.0
+	}
+	if m.settings.MultiAgentThreshold > 10 {
+		m.settings.MultiAgentThreshold = 10
+	}
 
 	return m.validateAPIKey(m.settings.OpenAIAPIKey)
 }
@@ -311,6 +331,25 @@ func (m *Manager) GetSystemModel() (provider, model string) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.settings.SystemProvider, m.settings.SystemModel
+}
+
+// GetMultiAgentDefaults returns the default multi-agent mode and threshold.
+func (m *Manager) GetMultiAgentDefaults() (mode string, threshold float64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.MultiAgentMode, m.settings.MultiAgentThreshold
+}
+
+// SetMultiAgentDefaults updates the default multi-agent mode and threshold.
+func (m *Manager) SetMultiAgentDefaults(mode string, threshold float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mode != "" {
+		m.settings.MultiAgentMode = mode
+	}
+	if threshold > 0 {
+		m.settings.MultiAgentThreshold = threshold
+	}
 }
 
 // SetSystemModel updates the system model configuration

@@ -66,6 +66,11 @@
     deleteConfirmTitle: document.getElementById('hubDeleteConfirmTitle'),
     deleteConfirmBody: document.getElementById('hubDeleteConfirmBody'),
     deleteConfirmBtn: document.getElementById('hubDeleteConfirmBtn'),
+    parentDeleteModal: document.getElementById('hubParentDeleteModal'),
+    parentDeleteTitle: document.getElementById('hubParentDeleteTitle'),
+    parentDeleteBody: document.getElementById('hubParentDeleteBody'),
+    parentDeleteUngroupBtn: document.getElementById('hubParentDeleteUngroupBtn'),
+    parentDeleteAllBtn: document.getElementById('hubParentDeleteAllBtn'),
     // Add file modal
     addFileModal: document.getElementById('hubAddFileModal'),
     fileDropZone: document.getElementById('hubFileDropZone'),
@@ -86,6 +91,7 @@
     selectedId: null,
     tasks: [],
     stats: null,
+    taskHierarchy: null,
     sessions: [],
     notes: [],
     files: [],
@@ -247,6 +253,48 @@
   }
 
   // =============================================================================
+  // Parent Task Delete Modal
+  // =============================================================================
+
+  let parentDeleteResolve = null;
+
+  function showParentDeletePrompt(options) {
+    return new Promise((resolve) => {
+      parentDeleteResolve = resolve;
+
+      if (elements.parentDeleteTitle) {
+        elements.parentDeleteTitle.textContent = options.title || 'Delete Workflow';
+      }
+      if (elements.parentDeleteBody) {
+        elements.parentDeleteBody.textContent = options.message || 'This workflow has subtasks. What would you like to do?';
+      }
+
+      if (elements.parentDeleteModal && window.bootstrap) {
+        const modal = new bootstrap.Modal(elements.parentDeleteModal);
+        modal.show();
+      }
+    });
+  }
+
+  function handleParentDeleteChoice(choice) {
+    if (parentDeleteResolve) {
+      parentDeleteResolve(choice);
+      parentDeleteResolve = null;
+    }
+    if (elements.parentDeleteModal && window.bootstrap) {
+      const modal = bootstrap.Modal.getInstance(elements.parentDeleteModal);
+      if (modal) modal.hide();
+    }
+  }
+
+  function handleParentDeleteCancel() {
+    if (parentDeleteResolve) {
+      parentDeleteResolve(null);
+      parentDeleteResolve = null;
+    }
+  }
+
+  // =============================================================================
   // Selection Mode Functions
   // =============================================================================
 
@@ -329,13 +377,50 @@
   // =============================================================================
 
   async function deleteTask(taskId) {
-    const confirmed = await showDeleteConfirm({
-      title: 'Delete Task',
-      message: 'Are you sure you want to delete this task? This action cannot be undone.'
-    });
-    if (!confirmed) return;
-
     try {
+      const subtasks = getSubtasksForParent(taskId);
+      const isParent = subtasks.length > 0;
+
+      if (isParent) {
+        const choice = await showParentDeletePrompt({
+          title: 'Delete Workflow',
+          message: `This workflow has ${subtasks.length} subtask${subtasks.length === 1 ? '' : 's'}. What would you like to do?`
+        });
+
+        if (!choice) return;
+
+        if (choice === 'delete_all') {
+          for (const subtask of subtasks) {
+            const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(subtask.id)}`, {
+              method: 'DELETE'
+            });
+            if (!response.ok) {
+              throw new Error('Failed to delete a subtask');
+            }
+          }
+        } else if (choice === 'ungroup') {
+          for (const subtask of subtasks) {
+            const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(subtask.id)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                parent_task_id: '',
+                subtask_index: 0
+              })
+            });
+            if (!response.ok) {
+              throw new Error('Failed to ungroup a subtask');
+            }
+          }
+        }
+      } else {
+        const confirmed = await showDeleteConfirm({
+          title: 'Delete Task',
+          message: 'Are you sure you want to delete this task? This action cannot be undone.'
+        });
+        if (!confirmed) return;
+      }
+
       const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`, {
         method: 'DELETE'
       });
@@ -347,6 +432,106 @@
       console.error('Failed to delete task:', error);
       if (window.Toast) window.Toast.error('Failed to delete task');
     }
+  }
+
+  async function executeTask(taskId) {
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const subtasks = getSubtasksForParent(taskId);
+    const isParent = subtasks.length > 0;
+
+    if (isParent) {
+      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      if (hasUnassigned) {
+        if (window.Toast) {
+          window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+        } else {
+          alert('Assign agents to all subtasks before executing this workflow.');
+        }
+        return;
+      }
+
+      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      if (hasRunning) {
+        if (window.Toast) {
+          window.Toast.error('A subtask is already running.');
+        } else {
+          alert('A subtask is already running.');
+        }
+        return;
+      }
+    } else {
+      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+      if (!assignedAgent) {
+        if (window.Toast) {
+          window.Toast.error('Assign an agent before executing this task.');
+        } else {
+          alert('Assign an agent before executing this task.');
+        }
+        return;
+      }
+    }
+
+    const confirmMessage = isParent
+      ? `Execute this workflow (${subtasks.length} step${subtasks.length === 1 ? '' : 's'}) now?`
+      : 'Execute this task now?';
+    const confirmed = confirm(confirmMessage);
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch('/api/orchestration/tasks/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to execute task');
+      }
+
+      if (window.Toast) window.Toast.success('Task started');
+      await loadWorkspaceTasks(state.selectedId);
+      pollTaskCompletion(taskId);
+    } catch (error) {
+      console.error('Failed to execute task:', error);
+      if (window.Toast) {
+        window.Toast.error('Failed to execute task');
+      } else {
+        alert('Failed to execute task');
+      }
+    }
+  }
+
+  async function pollTaskCompletion(taskId, maxAttempts = 36, intervalMs = 5000) {
+    let attempts = 0;
+
+    const poll = async () => {
+      attempts++;
+      if (attempts > maxAttempts) return;
+
+      try {
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}`);
+        if (!response.ok) {
+          setTimeout(poll, intervalMs);
+          return;
+        }
+
+        const task = await response.json();
+        const status = task.status;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+          await loadWorkspaceTasks(state.selectedId);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to poll task status:', error);
+      }
+
+      setTimeout(poll, intervalMs);
+    };
+
+    setTimeout(poll, intervalMs);
   }
 
   async function deleteSession(sessionId) {
@@ -682,6 +867,76 @@
     if (elements.statScheduled) elements.statScheduled.textContent = stats.scheduled || 0;
   }
 
+  function buildTaskHierarchy(tasks) {
+    const taskById = new Map();
+    const subtasksByParent = new Map();
+    const rootTasks = [];
+
+    (tasks || []).forEach((task) => {
+      if (task && task.id) {
+        taskById.set(task.id, task);
+      }
+    });
+
+    (tasks || []).forEach((task) => {
+      if (!task || !task.id) return;
+      const parentId = task.parent_task_id;
+      if (parentId && taskById.has(parentId)) {
+        if (!subtasksByParent.has(parentId)) {
+          subtasksByParent.set(parentId, []);
+        }
+        subtasksByParent.get(parentId).push(task);
+      } else {
+        rootTasks.push(task);
+      }
+    });
+
+    subtasksByParent.forEach((list) => {
+      list.sort((a, b) => {
+        const aIndex = Number.isFinite(a.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aTime !== bTime) return aTime - bTime;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+      });
+    });
+
+    return { taskById, subtasksByParent, rootTasks };
+  }
+
+  function getSubtasksForParent(taskId) {
+    if (!taskId) return [];
+    const hierarchy = state.taskHierarchy || buildTaskHierarchy(state.tasks || []);
+    state.taskHierarchy = hierarchy;
+    return hierarchy.subtasksByParent.get(taskId) || [];
+  }
+
+  function getDisplayStatus(task, subtasks) {
+    if (!subtasks || subtasks.length === 0) return task.status || 'pending';
+
+    const statuses = subtasks.map((subtask) => subtask.status || 'pending');
+    if (statuses.some((status) => status === 'in_progress')) return 'in_progress';
+    if (statuses.some((status) => status === 'failed')) return 'failed';
+    if (statuses.some((status) => status === 'timeout')) return 'timeout';
+    if (statuses.some((status) => status === 'cancelled')) return 'cancelled';
+    if (statuses.every((status) => status === 'completed')) return 'completed';
+    if (statuses.some((status) => status === 'assigned')) return 'assigned';
+    return task.status || 'pending';
+  }
+
+  function getDisplayResult(task, subtasks) {
+    if (task.error) return { label: 'Error', text: task.error };
+    if (task.result) return { label: 'Result', text: task.result };
+    if (subtasks && subtasks.length > 0) {
+      const lastSubtask = subtasks[subtasks.length - 1];
+      if (lastSubtask.error) return { label: 'Error', text: lastSubtask.error };
+      if (lastSubtask.result) return { label: 'Result', text: lastSubtask.result };
+    }
+    return null;
+  }
+
   function renderTasksList(tasks) {
     if (!elements.tasksList) return;
 
@@ -693,28 +948,94 @@
       return;
     }
 
+    state.taskHierarchy = buildTaskHierarchy(tasks);
+    const { rootTasks, subtasksByParent, taskById } = state.taskHierarchy;
+    const parentCount = rootTasks.filter((task) => subtasksByParent.has(task.id)).length;
+    const subtaskCount = Array.from(subtasksByParent.values()).reduce((total, list) => total + list.length, 0);
+    const standaloneCount = rootTasks.length - parentCount;
+
     if (elements.tasksSubtitle) {
-      elements.tasksSubtitle.textContent = `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
+      const parts = [];
+      if (parentCount) {
+        parts.push(`${parentCount} workflow${parentCount === 1 ? '' : 's'}`);
+      }
+      if (standaloneCount) {
+        parts.push(`${standaloneCount} task${standaloneCount === 1 ? '' : 's'}`);
+      }
+      if (subtaskCount) {
+        parts.push(`${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`);
+      }
+      elements.tasksSubtitle.textContent = parts.length > 0
+        ? `${parts.join(' | ')} in this workspace.`
+        : `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
     }
 
     const inSelectionMode = state.selectionMode.tasks;
     const selectedSet = state.selectedItems.tasks;
 
-    const items = tasks.map((task) => {
-      const status = task.status || 'pending';
-      const scheduleLabel = task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
-      const assignment = task.to || 'unassigned';
+    const renderTaskCard = (task, {
+      isParent = false,
+      isSubtask = false,
+      subtasks = [],
+      stepNumber = null,
+      parentId = ''
+    } = {}) => {
+      const status = isParent ? getDisplayStatus(task, subtasks) : (task.status || 'pending');
+      const statusLabel = status.replace('_', ' ');
+      const scheduleLabel = isParent
+        ? 'Workflow container'
+        : task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
+      const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
+      const assignment = isParent ? `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}` : (assignedAgent || 'unassigned');
       const isSelected = selectedSet.has(task.id);
+      const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
+      const canExecute = isParent
+        ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
+        : Boolean(assignedAgent) && status !== 'in_progress';
+      const executeLabel = status === 'completed' || status === 'failed' ? 'Re-run' : (isParent ? 'Run All' : 'Execute');
+      const executeTitle = isParent
+        ? hasUnassignedSubtasks
+          ? 'Assign agents to all subtasks before executing'
+          : hasRunningSubtasks
+            ? 'A subtask is already running'
+            : executeLabel === 'Re-run'
+              ? 'Re-run workflow'
+              : 'Execute workflow now'
+        : !assignedAgent
+          ? 'Assign an agent before executing'
+          : status === 'in_progress'
+            ? 'Task is already running'
+            : executeLabel === 'Re-run'
+              ? 'Re-execute task'
+              : 'Execute task now';
+      const resultData = getDisplayResult(task, isParent ? subtasks : null);
+      const stepBadge = isSubtask
+        ? `<span class="hub-task-step">Step ${escapeHtml(stepNumber || '')}</span>`
+        : isParent ? '<span class="hub-task-badge">Workflow</span>' : '';
+      const toggleButton = isParent
+        ? `
+          <button class="hub-task-toggle" data-action="toggle-subtasks" aria-label="Toggle subtasks">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7,10L12,15L17,10H7Z"/>
+            </svg>
+          </button>
+        `
+        : '';
 
       return `
-        <div class="hub-task-card${isSelected ? ' selected' : ''}" data-task-id="${escapeHtml(task.id)}">
+        <div class="hub-task-card${isSelected ? ' selected' : ''}${isParent ? ' hub-task-parent' : ''}${isSubtask ? ' hub-task-subtask' : ''}" data-task-id="${escapeHtml(task.id)}"${parentId ? ` data-parent-id="${escapeHtml(parentId)}"` : ''}>
           <div class="hub-item-checkbox">
             <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Select task">
           </div>
           <div class="hub-task-content">
             <div class="hub-task-header">
-              <div class="hub-task-title">${escapeHtml(task.name || task.description || task.id)}</div>
-              <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(status.replace('_', ' '))}</span>
+              <div class="hub-task-title">
+                ${toggleButton}
+                ${stepBadge}
+                <span>${escapeHtml(task.name || task.description || task.id)}</span>
+              </div>
+              <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
             </div>
             <div class="hub-task-meta">
               <span>${escapeHtml(assignment)}</span>
@@ -722,8 +1043,14 @@
             </div>
             <div class="hub-task-actions">
               <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
-              <button class="modern-btn modern-btn-secondary" data-action="chat">Open Chat</button>
+              <button class="modern-btn modern-btn-primary" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}">${escapeHtml(executeLabel)}</button>
             </div>
+            ${resultData ? `
+            <details class="hub-task-result">
+              <summary>${escapeHtml(resultData.label)}</summary>
+              <pre>${escapeHtml(resultData.text)}</pre>
+            </details>
+            ` : ''}
           </div>
           <button class="hub-item-delete-btn" data-action="delete" title="Delete task">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -732,13 +1059,41 @@
           </button>
         </div>
       `;
+    };
+
+    const items = rootTasks.map((task) => {
+      const subtasks = subtasksByParent.get(task.id) || [];
+      const isParent = subtasks.length > 0;
+      const parentCard = renderTaskCard(task, { isParent, subtasks });
+
+      if (!isParent) {
+        return parentCard;
+      }
+
+      const subtaskCards = subtasks.map((subtask, index) => {
+        const stepNumber = subtask.subtask_index || index + 1;
+        return renderTaskCard(subtask, {
+          isSubtask: true,
+          stepNumber,
+          parentId: task.id
+        });
+      });
+
+      return `
+        <div class="hub-task-group" data-parent-id="${escapeHtml(task.id)}">
+          ${parentCard}
+          <div class="hub-subtask-list">
+            ${subtaskCards.join('')}
+          </div>
+        </div>
+      `;
     });
 
     elements.tasksList.innerHTML = items.join('');
 
     elements.tasksList.querySelectorAll('.hub-task-card').forEach((card) => {
       const taskId = card.dataset.taskId;
-      const task = tasks.find((item) => item.id === taskId);
+      const task = taskById.get(taskId);
 
       // Handle checkbox click in selection mode
       const checkbox = card.querySelector('input[type="checkbox"]');
@@ -764,6 +1119,16 @@
         });
       });
 
+      card.querySelectorAll('[data-action="toggle-subtasks"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const group = card.closest('.hub-task-group');
+          if (group) {
+            group.classList.toggle('is-collapsed');
+          }
+        });
+      });
+
       card.querySelectorAll('[data-action="edit"]').forEach((btn) => {
         btn.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -773,10 +1138,12 @@
         });
       });
 
-      card.querySelectorAll('[data-action="chat"]').forEach((btn) => {
+      card.querySelectorAll('[data-action="execute"]').forEach((btn) => {
         btn.addEventListener('click', (event) => {
           event.stopPropagation();
-          openChatForWorkspace(state.selectedId);
+          if (task && !btn.disabled) {
+            executeTask(taskId);
+          }
         });
       });
     });
@@ -1534,19 +1901,6 @@
     }
   }
 
-  function openChatForWorkspace(workspaceId) {
-    if (window.chatPanel && typeof window.chatPanel.open === 'function') {
-      window.chatPanel.open();
-    }
-
-    if (workspaceId && window.sessionManager && typeof window.sessionManager.getActiveSessionId === 'function') {
-      const activeSession = window.sessionManager.getActiveSessionId();
-      if (!activeSession && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
-        window.sessionManager.showCreateChatModalForWorkspace(workspaceId);
-      }
-    }
-  }
-
   function openSchedulePanel() {
     if (!state.selectedId) return;
     if (window.sessionManager && typeof window.sessionManager.openScheduledTasksPanel === 'function') {
@@ -1880,6 +2234,16 @@
     }
     if (elements.deleteConfirmModal) {
       elements.deleteConfirmModal.addEventListener('hidden.bs.modal', handleDeleteCancel);
+    }
+
+    if (elements.parentDeleteUngroupBtn) {
+      elements.parentDeleteUngroupBtn.addEventListener('click', () => handleParentDeleteChoice('ungroup'));
+    }
+    if (elements.parentDeleteAllBtn) {
+      elements.parentDeleteAllBtn.addEventListener('click', () => handleParentDeleteChoice('delete_all'));
+    }
+    if (elements.parentDeleteModal) {
+      elements.parentDeleteModal.addEventListener('hidden.bs.modal', handleParentDeleteCancel);
     }
 
     // File upload modal

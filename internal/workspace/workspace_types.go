@@ -3,6 +3,8 @@ package workspace
 import (
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // WorkspaceStatus represents the current state of a workspace
@@ -36,24 +38,27 @@ type AgentInstance struct {
 
 // Workspace stores shared context between collaborating agents
 type Workspace struct {
-	ID             string                 `json:"id"`
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description,omitempty"`
-	Agents         []string               `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
-	AgentInstances []AgentInstance        `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
-	SharedData     map[string]interface{} `json:"shared_data"`
-	Messages       []AgentMessage         `json:"messages"`
-	Tasks          []Task                 `json:"tasks"`
-	Attachments    []Attachment           `json:"attachments,omitempty"`
-	ScheduledTasks []ScheduledTask        `json:"scheduled_tasks,omitempty"`
-	StoreNodes     []StoreNode            `json:"store_nodes,omitempty"`
-	Workflows      map[string]Workflow    `json:"workflows,omitempty"`
-	Layout         *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
-	Status         WorkspaceStatus        `json:"status"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
-	mu             sync.RWMutex           `json:"-"`
-	taskIndex      map[string]int         `json:"-"` // Index for O(1) task lookups by ID
+	ID                   string                      `json:"id"`
+	Name                 string                      `json:"name"`
+	Description          string                      `json:"description,omitempty"`
+	Agents               []string                    `json:"agents,omitempty"`          // Deprecated: Use AgentInstances instead. Auto-migrated by MigrateToAgentInstances().
+	AgentInstances       []AgentInstance             `json:"agent_instances,omitempty"` // NEW: Stable agent instances with persistent IDs
+	SharedData           map[string]interface{}      `json:"shared_data"`
+	Messages             []AgentMessage              `json:"messages"`
+	Tasks                []Task                      `json:"tasks"`
+	PlannerDecision      *types.PlannerDecision      `json:"planner_decision,omitempty"`
+	PendingPlan          *types.PendingPlan          `json:"pending_plan,omitempty"`
+	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
+	Attachments          []Attachment                `json:"attachments,omitempty"`
+	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
+	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
+	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
+	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
+	Status               WorkspaceStatus             `json:"status"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+	mu                   sync.RWMutex                `json:"-"`
+	taskIndex            map[string]int              `json:"-"` // Index for O(1) task lookups by ID
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas
@@ -148,7 +153,11 @@ type Task struct {
 	Error          string                 `json:"error,omitempty"`
 	Progress       *TaskProgress          `json:"progress,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
-	InputTaskIDs []string   `json:"input_task_ids,omitempty"`
+	InputTaskIDs []string `json:"input_task_ids,omitempty"`
+	// ParentTaskID groups this task under a parent workflow task when set.
+	ParentTaskID string `json:"parent_task_id,omitempty"`
+	// SubtaskIndex is a 1-based ordering hint within the parent workflow.
+	SubtaskIndex int        `json:"subtask_index,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`

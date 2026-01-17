@@ -14,10 +14,12 @@ import (
 
 // CreateTaskRequest represents the request to create a task
 type CreateTaskRequest struct {
-	Description string `json:"description"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	Priority    int    `json:"priority"`
+	Description  string `json:"description"`
+	From         string `json:"from"`
+	To           string `json:"to"`
+	Priority     int    `json:"priority"`
+	ParentTaskID string `json:"parent_task_id"`
+	SubtaskIndex int    `json:"subtask_index"`
 }
 
 // CreateTask handles POST /api/studios/:id/tasks
@@ -61,15 +63,17 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Create task
 	task := Task{
-		ID:          uuid.New().String(),
-		WorkspaceID: studioID,
-		From:        req.From,
-		To:          req.To,
-		Description: req.Description,
-		Priority:    req.Priority,
-		Context:     make(map[string]interface{}),
-		Status:      TaskStatusPending,
-		CreatedAt:   time.Now(),
+		ID:           uuid.New().String(),
+		WorkspaceID:  studioID,
+		From:         req.From,
+		To:           req.To,
+		Description:  req.Description,
+		Priority:     req.Priority,
+		Context:      make(map[string]interface{}),
+		ParentTaskID: req.ParentTaskID,
+		SubtaskIndex: req.SubtaskIndex,
+		Status:       TaskStatusPending,
+		CreatedAt:    time.Now(),
 	}
 
 	// Add task to studio
@@ -126,6 +130,8 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		From           *string   `json:"from,omitempty"`
 		InputTaskIDs   *[]string `json:"input_task_ids,omitempty"`
 		AssignedNodeID *string   `json:"assigned_node_id,omitempty"`
+		ParentTaskID   *string   `json:"parent_task_id,omitempty"`
+		SubtaskIndex   *int      `json:"subtask_index,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -157,6 +163,15 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			}
 			if req.InputTaskIDs != nil {
 				studio.Tasks[i].InputTaskIDs = *req.InputTaskIDs
+			}
+			if req.ParentTaskID != nil {
+				studio.Tasks[i].ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
+				if studio.Tasks[i].ParentTaskID == "" {
+					studio.Tasks[i].SubtaskIndex = 0
+				}
+			}
+			if req.SubtaskIndex != nil {
+				studio.Tasks[i].SubtaskIndex = *req.SubtaskIndex
 			}
 			found = true
 			break
@@ -212,24 +227,10 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find and remove task
-	found := false
-	newTasks := make([]Task, 0)
-	for _, task := range studio.Tasks {
-		if task.ID != taskID {
-			newTasks = append(newTasks, task)
-		} else {
-			found = true
-		}
-	}
-
-	if !found {
+	if err := studio.DeleteTask(taskID); err != nil {
 		orihttp.NotFound(w, "Task not found")
 		return
 	}
-
-	// Save updated studio
-	studio.Tasks = newTasks
 
 	if err := h.store.Save(studio); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to update studio: %v", err))

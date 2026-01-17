@@ -35,6 +35,8 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser on startup")
 	allowNetwork := flag.Bool("allow-network", false, "Allow connections from network (default: localhost only)")
 	versionOverride := flag.String("version", "", "Override version for testing (e.g., v0.0.24)")
+	multiAgentMode := flag.String("multi-agent-mode", "", "Multi-agent default mode: auto, force, off")
+	multiAgentThreshold := flag.Float64("multi-agent-threshold", 0, "Multi-agent complexity threshold (0-10)")
 	flag.Parse()
 
 	// Check for version as positional argument (e.g., go run ./cmd/server v0.0.24)
@@ -78,6 +80,11 @@ func main() {
 	srv, err := server.New()
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
+	}
+	if srv.Core != nil && srv.Core.ConfigManager != nil {
+		if *multiAgentMode != "" || *multiAgentThreshold > 0 {
+			srv.Core.ConfigManager.SetMultiAgentDefaults(*multiAgentMode, *multiAgentThreshold)
+		}
 	}
 
 	// Start HTTP server with configured port

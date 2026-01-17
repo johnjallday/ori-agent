@@ -53,36 +53,21 @@ export class RendererConnections {
   drawResultConnections() {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
-    let hasUnpositionedTasks = false;
-
     this.state.tasks.forEach(task => {
       // Check if this task has input tasks
       if (!task.input_task_ids || task.input_task_ids.length === 0) return;
 
-      // Draw connection from agent that executed each input task to this task
+      // Draw connection from each input task to this task
       task.input_task_ids.forEach(inputTaskId => {
         const inputTask = this.state.tasks.find(t => t.id === inputTaskId);
-        if (!inputTask || !task.x || !task.y) {
-          hasUnpositionedTasks = true;
-          return;
-        }
-
-        // Find the agent that executed the input task
-        // First try to match by nodeId, then fall back to id (for backward compatibility)
-        const sourceAgent = this.state.agents.find(agent =>
-          (agent.nodeId === inputTask.assigned_node_id || agent.id === inputTask.assigned_node_id) &&
-          agent.name === inputTask.to
-        );
-
-        if (!sourceAgent || !sourceAgent.x || !sourceAgent.y) {
-          hasUnpositionedTasks = true;
+        if (!inputTask || inputTask.x == null || inputTask.y == null || task.x == null || task.y == null) {
           return;
         }
 
         // Draw a more prominent line with glow effect to indicate result flow
         this.ctx.save();
 
-        const fromData = { type: 'agent', node: sourceAgent };
+        const fromData = { type: 'task', node: inputTask };
         const toData = { type: 'task', node: task };
         const fromCenter = this.getNodeCenter(fromData);
         const toCenter = this.getNodeCenter(toData);
@@ -95,18 +80,13 @@ export class RendererConnections {
         const toRect = this.getNodeRect(toData);
 
         const startPoint = this.getEdgePoint(fromRect, fromCenter, toCenter) ||
-          this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData) + 10);
+          this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData) + 6);
         const endPoint = this.getEdgePoint(toRect, fromCenter, toCenter) ||
-          this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData) + 6);
+          this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData) + 8);
 
-        // Draw softened line (no arrowhead) for result flow
-        this.ctx.strokeStyle = 'rgba(155, 89, 182, 0.35)';
-        this.ctx.lineWidth = 2;
+        // Draw softened line with arrowhead for result flow
         this.ctx.setLineDash([6, 10]);
-        this.ctx.beginPath();
-        this.ctx.moveTo(startPoint.x, startPoint.y);
-        this.ctx.lineTo(endPoint.x, endPoint.y);
-        this.ctx.stroke();
+        this.primitives.drawArrow(startPoint.x, startPoint.y, endPoint.x, endPoint.y, 'rgba(155, 89, 182, 0.45)', 2, true);
         this.ctx.setLineDash([]);
         this.ctx.restore();
       });

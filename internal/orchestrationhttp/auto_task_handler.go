@@ -76,11 +76,22 @@ type AutoTaskResponse struct {
 	Details         string               `json:"details" jsonschema_description:"Additional details or context, can be empty"`
 	AgentName       string               `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
 	Priority        int                  `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
+	Tasks           []AutoTaskStep       `json:"tasks,omitempty" jsonschema_description:"Optional multi-step workflow tasks. When provided, create tasks in order and honor depends_on relationships."`
 	Schedule        *ScheduleConfig      `json:"schedule" jsonschema_description:"Schedule configuration, null if no schedule"`
 	ScheduleEnabled bool                 `json:"schedule_enabled" jsonschema_description:"True if a schedule was specified"`
 	ScheduleName    string               `json:"schedule_name" jsonschema_description:"Descriptive name for the schedule like 'Daily at 9am'"`
 	ResultStorage   *ResultStorageConfig `json:"result_storage" jsonschema_description:"Result storage configuration, null if no storage requested"`
 	Reasoning       string               `json:"reasoning" jsonschema_description:"Brief explanation of how the request was interpreted"`
+}
+
+// AutoTaskStep represents a single step in a multi-task workflow.
+type AutoTaskStep struct {
+	ID        string   `json:"id" jsonschema_description:"Short unique ID for this step (e.g., weather_fetch)"`
+	Title     string   `json:"title" jsonschema_description:"Short task title for this step"`
+	Details   string   `json:"details" jsonschema_description:"Additional context for this step, can be empty"`
+	AgentName string   `json:"agent_name" jsonschema_description:"Name of the agent to assign from the available list, or empty string"`
+	Priority  int      `json:"priority" jsonschema:"minimum=1,maximum=5" jsonschema_description:"Priority level 1-5, where 1 is highest"`
+	DependsOn []string `json:"depends_on,omitempty" jsonschema_description:"List of step IDs this step depends on"`
 }
 
 // ScheduleConfig for auto task with jsonschema tags
@@ -194,6 +205,7 @@ func (h *AutoTaskHandler) parseTaskDescription(
   "details": "additional context or empty string",
   "agent_name": "name of matching agent or empty string",
   "priority": 3,
+  "tasks": [],
   "schedule_enabled": false,
   "schedule_name": "",
   "schedule": null,
@@ -214,6 +226,14 @@ Schedule parsing rules:
 Result storage: set result_storage={"enabled":true,"format":"text|json|markdown"} only if user mentions saving results.
 
 Agent assignment: Match the task to an agent based on their description. If no agent matches, use empty string.
+
+Multi-step tasks:
+- If the request has multiple distinct steps (e.g., "do X then Y"), populate "tasks" with each step.
+- Each task must include: id, title, details, agent_name, priority, depends_on.
+- Use depends_on to indicate ordering (e.g., step2 depends_on ["step1"]).
+- When tasks are provided, keep the top-level fields as a brief summary (title/details) or mirror the first step.
+- Apply schedule fields to the first step only.
+- Apply result_storage to the final step only.
 
 IMPORTANT: Always return the exact JSON structure shown above. Never return error messages or different formats.`, currentTime, currentDay, agentList)
 
@@ -355,14 +375,61 @@ func (h *AutoTaskHandler) parseWithRegularChat(
 
 // validateTaskConfig ensures the task config values are valid
 func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []string) AutoTaskResponse {
+	// Validate multi-step tasks if provided
+	if len(config.Tasks) > 0 {
+		seen := make(map[string]bool, len(config.Tasks))
+		for i := range config.Tasks {
+			step := &config.Tasks[i]
+
+			if strings.TrimSpace(step.Title) == "" {
+				step.Title = fmt.Sprintf("Task %d", i+1)
+			}
+
+			if strings.TrimSpace(step.ID) == "" {
+				step.ID = fmt.Sprintf("step-%d", i+1)
+			}
+
+			if seen[step.ID] {
+				step.ID = fmt.Sprintf("%s-%d", step.ID, i+1)
+			}
+			seen[step.ID] = true
+
+			if step.Priority < 1 || step.Priority > 5 {
+				step.Priority = 3
+			}
+
+			if step.AgentName != "" {
+				found := false
+				for _, agent := range agents {
+					if strings.EqualFold(agent, step.AgentName) {
+						step.AgentName = agent
+						found = true
+						break
+					}
+				}
+				if !found {
+					step.AgentName = ""
+				}
+			}
+		}
+	}
+
 	// Ensure title is not empty
 	if strings.TrimSpace(config.Title) == "" {
-		config.Title = "New Task"
+		if len(config.Tasks) > 0 {
+			config.Title = config.Tasks[0].Title
+		} else {
+			config.Title = "New Task"
+		}
 	}
 
 	// Validate priority (1-5)
 	if config.Priority < 1 || config.Priority > 5 {
-		config.Priority = 3
+		if len(config.Tasks) > 0 {
+			config.Priority = config.Tasks[0].Priority
+		} else {
+			config.Priority = 3
+		}
 	}
 
 	// Validate agent name exists

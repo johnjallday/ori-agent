@@ -333,9 +333,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req struct {
-		Question  string         `json:"question"`
-		AgentName string         `json:"agent_name,omitempty"` // Allow specifying target agent
-		Files     []UploadedFile `json:"files,omitempty"`
+		Question            string         `json:"question"`
+		AgentName           string         `json:"agent_name,omitempty"` // Allow specifying target agent
+		Files               []UploadedFile `json:"files,omitempty"`
+		MultiAgentMode      string         `json:"multi_agent_mode,omitempty"`
+		MultiAgentThreshold float64        `json:"multi_agent_threshold,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -540,36 +542,68 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if orchestration is needed for this message
-	if h.orchestrator != nil && h.orchestrator.DetectOrchestrationNeed(q) {
-		logger.Info("Orchestration detected for message", logger.Fields{"message": q})
+	var plannerDecision *types.PlannerDecision
 
-		// Identify required roles
-		roles := h.orchestrator.IdentifyRequiredRoles(q)
-
-		// Create collaborative task
-		task := orchestration.CollaborativeTask{
-			Goal:          q,
-			RequiredRoles: roles,
-			MaxDuration:   10 * time.Minute,
-			Context:       map[string]interface{}{},
+	// Planner-first orchestration routing
+	if h.orchestrator != nil {
+		mode, threshold := h.orchestrator.GetMultiAgentDefaults()
+		if req.MultiAgentMode != "" {
+			if parsed, ok := types.ParseMultiAgentMode(strings.ToLower(strings.TrimSpace(req.MultiAgentMode))); ok {
+				mode = parsed
+			}
+		}
+		if req.MultiAgentThreshold > 0 {
+			threshold = req.MultiAgentThreshold
 		}
 
-		// Execute collaborative task
-		result, err := h.orchestrator.ExecuteCollaborativeTask(ctx, current, task)
-		if err != nil {
-			logger.Error("Orchestration failed", logger.Fields{"error": err})
-			// Fall through to normal chat handling
+		if mode != types.MultiAgentModeOff {
+			plan, err := h.orchestrator.PlanTask(ctx, q)
+			if err != nil {
+				logger.Error("Planner failed", logger.Fields{"error": err})
+			} else {
+				decision := h.orchestrator.DecideMultiAgent(plan, mode, threshold)
+				plannerDecision = &decision
+				logger.Info("Planner routing decision", logger.Fields{
+					"mode":        decision.Mode,
+					"complexity":  decision.ComplexityScore,
+					"threshold":   decision.Threshold,
+					"multi_agent": decision.MultiAgent,
+				})
+
+				if decision.MultiAgent {
+					result, err := h.orchestrator.ExecutePlannedTask(ctx, current, q, plan, decision, 10*time.Minute)
+					if err != nil {
+						logger.Error("Orchestration failed", logger.Fields{"error": err})
+					} else {
+						logger.Info("Orchestration completed successfully", logger.Fields{})
+						responseText := result.FinalOutput
+						if responseText == "" && result.Status == "pending_approval" {
+							responseText = "Dynamic agent approval required to continue."
+						}
+						orihttp.WriteJSON(w, map[string]any{
+							"response":               responseText,
+							"orchestrated":           true,
+							"studio_id":              result.WorkspaceID,
+							"status":                 result.Status,
+							"pending_plan_id":        result.PendingPlanID,
+							"planner_decision":       result.PlannerDecision,
+							"planner_plan":           plan,
+							"dynamic_agent_requests": result.DynamicAgentRequests,
+						})
+						return
+					}
+				}
+			}
 		} else {
-			// Return orchestration result
-			logger.Info("Orchestration completed successfully", logger.Fields{})
-			orihttp.WriteJSON(w, map[string]any{
-				"response":     result.FinalOutput,
-				"orchestrated": true,
-				"studio_id":    result.WorkspaceID,
-				"status":       result.Status,
-			})
-			return
+			decision := types.PlannerDecision{
+				ComplexityScore: 0,
+				Threshold:       threshold,
+				Mode:            string(mode),
+				MultiAgent:      false,
+				Rationale:       "Multi-agent disabled",
+				CreatedAt:       time.Now(),
+			}
+			plannerDecision = &decision
 		}
 	}
 
@@ -702,7 +736,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a Claude model - if so, use provider system
 	if strings.HasPrefix(ag.Settings.Model, "claude-") && h.llmFactory != nil {
 		// Use Claude provider
-		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages)
+		h.handleClaudeChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
 		return
 	}
 
@@ -712,7 +746,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			if ollamaProv, ok := ollamaProvider.(*llm.OllamaProvider); ok {
 				if ollamaProv.HasModel(ag.Settings.Model) {
 					logger.Info("Model found in Ollama, routing to Ollama provider", logger.Fields{"model": ag.Settings.Model})
-					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages)
+					h.handleOllamaChat(w, r, ag, q, tools, current, base, fileAttachments, llmImages, plannerDecision)
 					return
 				}
 			}
@@ -728,7 +762,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle OpenAI models
-	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient)
+	h.handleOpenAIChat(w, r, ag, q, tools, current, base, fileAttachments, agentClient, plannerDecision)
 }
 
 // isImageMimeType checks if a MIME type represents an image

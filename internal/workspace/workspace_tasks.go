@@ -121,6 +121,13 @@ func (w *Workspace) DeleteTask(id string) error {
 		}
 	}
 
+	for i := range w.Tasks {
+		if w.Tasks[i].ParentTaskID == id {
+			w.Tasks[i].ParentTaskID = ""
+			w.Tasks[i].SubtaskIndex = 0
+		}
+	}
+
 	if w.Layout != nil && w.Layout.TaskPositions != nil {
 		delete(w.Layout.TaskPositions, id)
 	}
@@ -208,6 +215,24 @@ func (w *Workspace) GetTaskStats() map[string]int {
 	}
 
 	return stats
+}
+
+// GetSubtasks returns tasks that reference a parent task ID.
+func (w *Workspace) GetSubtasks(parentTaskID string) []Task {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if parentTaskID == "" {
+		return nil
+	}
+
+	subtasks := make([]Task, 0, 4)
+	for _, task := range w.Tasks {
+		if task.ParentTaskID == parentTaskID {
+			subtasks = append(subtasks, task)
+		}
+	}
+	return subtasks
 }
 
 // GetTaskResults returns the results of tasks by their IDs

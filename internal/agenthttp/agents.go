@@ -191,6 +191,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": "Agent '" + req.Name + "' created successfully",
 		})
 
+	case http.MethodPut:
+		agentName := r.URL.Query().Get("name")
+		if agentName == "" {
+			orihttp.BadRequest(w, "name required")
+			return
+		}
+
+		if _, ok := h.State.GetAgent(agentName); !ok {
+			orihttp.NotFound(w, "Agent not found")
+			return
+		}
+
+		if err := h.State.SetCurrentAgent(agentName); err != nil {
+			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to switch agent", err)
+			return
+		}
+
+		orihttp.Success(w, map[string]any{
+			"success": true,
+			"message": "Switched to agent '" + agentName + "'",
+		})
+
 	case http.MethodPatch:
 		// PATCH /api/agents/:name - Update agent metadata
 		agentName := orihttp.RequirePathParamOrQuery(w, r, "/api/agents/", "name")

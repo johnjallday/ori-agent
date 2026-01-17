@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/pluginapi"
 )
 
@@ -28,6 +29,7 @@ func (h *Handler) handleOpenAIChat(
 	baseCtx context.Context,
 	files []pluginapi.FileAttachment,
 	agentClient openai.Client,
+	plannerDecision *types.PlannerDecision,
 ) {
 	sessionID := h.getSessionID(r)
 	ctx, cancel := context.WithTimeout(baseCtx, ChatRequestTimeout)
@@ -54,16 +56,16 @@ func (h *Handler) handleOpenAIChat(
 	start := time.Now()
 	resp, err := agentClient.Chat.Completions.New(ctx, params)
 	if err != nil {
-		errorResponse := map[string]any{
+		errorResponse := attachPlannerDecision(map[string]any{
 			"response": fmt.Sprintf("❌ **Error**: %v", err),
-		}
+		}, plannerDecision)
 		writeJSONResponse(w, errorResponse)
 		return
 	}
 	if resp == nil || len(resp.Choices) == 0 {
-		orihttp.WriteJSON(w, map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
 			"response": "I couldn't generate a reply just now. Please try again.",
-		})
+		}, plannerDecision))
 		return
 	}
 
@@ -113,7 +115,7 @@ func (h *Handler) handleOpenAIChat(
 
 	// Tool-call branch
 	if len(choice.ToolCalls) > 0 {
-		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, start, sessionID)
+		h.handleOpenAIToolCalls(w, ag, agentName, baseCtx, ctx, files, agentClient, choice, start, sessionID, plannerDecision)
 		return
 	}
 
@@ -130,7 +132,7 @@ func (h *Handler) handleOpenAIChat(
 	// Store assistant response in session
 	h.storeMessageInSession(baseCtx, sessionID, "assistant", text)
 
-	writeJSONResponse(w, map[string]any{"response": text})
+	writeJSONResponse(w, attachPlannerDecision(map[string]any{"response": text}, plannerDecision))
 }
 
 // handleOpenAIToolCalls handles the tool execution loop for OpenAI models
@@ -145,6 +147,7 @@ func (h *Handler) handleOpenAIToolCalls(
 	choice openai.ChatCompletionMessage,
 	start time.Time,
 	sessionID string,
+	plannerDecision *types.PlannerDecision,
 ) {
 	// Append the assistant message with tool calls first
 	ag.Messages = append(ag.Messages, choice.ToParam())
@@ -227,7 +230,7 @@ func (h *Handler) handleOpenAIToolCalls(
 			response["description"] = structuredResultData.Description
 		}
 
-		writeJSONResponse(w, response)
+		writeJSONResponse(w, attachPlannerDecision(response, plannerDecision))
 		return
 	}
 
@@ -240,10 +243,10 @@ func (h *Handler) handleOpenAIToolCalls(
 		),
 	})
 	if err != nil || resp2 == nil || len(resp2.Choices) == 0 {
-		orihttp.WriteJSON(w, map[string]any{
+		orihttp.WriteJSON(w, attachPlannerDecision(map[string]any{
 			"response":  combinedResult,
 			"toolCalls": toolResults,
-		})
+		}, plannerDecision))
 		return
 	}
 
