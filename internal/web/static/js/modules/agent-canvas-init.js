@@ -61,7 +61,25 @@ export class AgentCanvasInitialization {
 
       // Load tasks from studio
       if (this.parent.studio.tasks) {
-        const tasks = this.parent.studio.tasks.map(task => {
+        // Check for workflow filter parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        const workflowId = urlParams.get('workflow');
+
+        let tasksToProcess = this.parent.studio.tasks;
+
+        // Filter to just the workflow and its subtasks if workflow param is present
+        if (workflowId) {
+          tasksToProcess = this.parent.studio.tasks.filter(task =>
+            task.id === workflowId || task.parent_id === workflowId
+          );
+          console.log('🔍 Filtering canvas to workflow:', workflowId, 'Tasks:', tasksToProcess.length);
+
+          // Store workflow mode flag for UI adjustments
+          this.state.workflowViewMode = true;
+          this.state.workflowId = workflowId;
+        }
+
+        const tasks = tasksToProcess.map(task => {
           // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
           const normalized = {
             ...task,
