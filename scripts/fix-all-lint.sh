@@ -103,7 +103,7 @@ echo -e "${BLUE}Step 3: AI-Powered Fix${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Create prompt for Codex
+# Create prompt for OpenCode
 PROMPT_FILE=$(mktemp)
 trap "rm -f $TEMP_ERRORS $PROMPT_FILE" EXIT
 
@@ -184,20 +184,20 @@ else
 fi
 CLAUDE_AUTOFIX_DISABLED
 
-echo -e "${BLUE}Launching Codex to fix issues...${NC}"
+echo -e "${BLUE}Launching OpenCode to fix issues...${NC}"
 echo ""
 
-# Check if codex CLI is available
-if ! command -v codex &> /dev/null; then
-  echo -e "${RED}❌ Codex CLI not found${NC}"
-  echo -e "${YELLOW}Please install Codex from: https://github.com/openai/codex${NC}"
+# Check if opencode CLI is available
+if ! command -v opencode &> /dev/null; then
+  echo -e "${RED}❌ OpenCode CLI not found${NC}"
+  echo -e "${YELLOW}Please install OpenCode from: https://opencode.ai${NC}"
   exit 1
 fi
 
-# Launch Codex with the prompt
-if codex exec --full-auto -C "$(pwd)" - < "$PROMPT_FILE"; then
+# Launch OpenCode with the prompt
+if opencode run "$(cat "$PROMPT_FILE")"; then
   echo ""
-  echo -e "${GREEN}✓ Codex finished${NC}"
+  echo -e "${GREEN}✓ OpenCode finished${NC}"
   echo ""
 
   # Step 5: Verify fixes
@@ -230,7 +230,7 @@ if codex exec --full-auto -C "$(pwd)" - < "$PROMPT_FILE"; then
   fi
 else
   echo ""
-  echo -e "${RED}❌ Codex execution failed${NC}"
+  echo -e "${RED}❌ OpenCode execution failed${NC}"
   exit 1
 fi
 
