@@ -53,6 +53,7 @@
     smartInputProgressHeadline: document.getElementById('hubSmartInputProgressHeadline'),
     smartInputProgressMessage: document.getElementById('hubSmartInputProgressMessage'),
     smartInputProgressSteps: document.getElementById('hubSmartInputProgressSteps'),
+    smartInputCancelBtn: document.getElementById('hubSmartInputCancelBtn'),
     // Selection mode elements
     tasksPanel: document.getElementById('hubTasksPanel'),
     sessionsPanel: document.getElementById('hubSessionsPanel'),
@@ -101,6 +102,7 @@
     notes: [],
     files: [],
     smartInput: null,
+    smartInputCancelled: false,
     // Selection mode state
     selectionMode: { tasks: false, sessions: false, notes: false, files: false },
     selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() },
@@ -239,6 +241,25 @@
     const modal = getSmartInputProgressModal();
     if (!modal) return;
     modal.hide();
+  }
+
+  function cancelSmartInput() {
+    state.smartInputCancelled = true;
+    hideSmartInputProgress();
+    setSmartInputBusy(false);
+    resetSmartInputPrompt();
+    setSmartInputStatus('Cancelled', { busy: false });
+
+    // Clear status after a moment
+    setTimeout(() => {
+      if (elements.smartInputStatus && elements.smartInputStatus.textContent === 'Cancelled') {
+        setSmartInputStatus('');
+      }
+    }, 2000);
+
+    if (window.Toast) {
+      window.Toast.info('Operation cancelled');
+    }
   }
 
   function setSmartInputDefaultDecision(decision) {
@@ -1892,6 +1913,181 @@
     }
   }
 
+  async function createQuickNote(content) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Creating note...');
+
+    try {
+      // Generate a title from the first line or first few words
+      const firstLine = content.split('\n')[0];
+      const title = firstLine.length > 50 ? firstLine.slice(0, 47) + '...' : firstLine;
+
+      const response = await fetch(`/api/workspaces/${state.selectedId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: title || 'Quick Note',
+          content: content
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create note');
+      }
+
+      // Clear input and show success
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      if (window.Toast) {
+        window.Toast.success('Note created');
+      }
+
+      // Refresh notes list
+      await loadWorkspaceNotes(state.selectedId);
+
+    } catch (error) {
+      console.error('Failed to create quick note:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to create note', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to create note');
+      }
+    }
+  }
+
+  async function createQuickTask(description) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Creating task...');
+
+    try {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: state.selectedId,
+          description: description,
+          name: description.length > 100 ? description.slice(0, 97) + '...' : description,
+          status: 'pending'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create task');
+      }
+
+      // Clear input and show success
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      if (window.Toast) {
+        window.Toast.success('Task created');
+      }
+
+      // Refresh tasks list
+      await loadWorkspaceTasks(state.selectedId);
+
+    } catch (error) {
+      console.error('Failed to create quick task:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to create task', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to create task');
+      }
+    }
+  }
+
+  async function createQuickChat(initialMessage) {
+    if (!state.selectedId) return;
+
+    setSmartInputBusy(true, 'Starting chat...');
+
+    try {
+      // Use sessionManager to create chat if available
+      if (window.sessionManager && typeof window.sessionManager.createChatSession === 'function') {
+        const session = await window.sessionManager.createChatSession(state.selectedId, {
+          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat',
+          initialMessage: initialMessage || null
+        });
+
+        // Clear input
+        if (elements.smartInputField) {
+          elements.smartInputField.value = '';
+        }
+        setSmartInputBusy(false);
+        setSmartInputStatus('');
+
+        if (session && session.id) {
+          // Navigate to chat
+          window.location.href = `/chat/${session.id}`;
+        }
+        return;
+      }
+
+      // Fallback: create session via API directly
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: state.selectedId,
+          title: initialMessage ? initialMessage.slice(0, 50) : 'New Chat'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create chat');
+      }
+
+      const data = await response.json();
+
+      // Clear input
+      if (elements.smartInputField) {
+        elements.smartInputField.value = '';
+      }
+      setSmartInputBusy(false);
+      setSmartInputStatus('');
+
+      // Navigate to chat
+      if (data.session && data.session.id) {
+        window.location.href = `/chat/${data.session.id}`;
+      } else if (data.id) {
+        window.location.href = `/chat/${data.id}`;
+      }
+
+    } catch (error) {
+      console.error('Failed to create quick chat:', error);
+      setSmartInputBusy(false);
+      setSmartInputStatus('Failed to start chat', { busy: false });
+      if (window.Toast) {
+        window.Toast.error('Failed to start chat');
+      }
+    }
+  }
+
+  function openFileAttachmentModal() {
+    // Clear the input field
+    if (elements.smartInputField) {
+      elements.smartInputField.value = '';
+    }
+    setSmartInputStatus('');
+
+    // Open the add file modal
+    if (elements.addFileModal && window.bootstrap) {
+      const modal = new bootstrap.Modal(elements.addFileModal);
+      modal.show();
+    } else if (window.Toast) {
+      window.Toast.info('Use the + button in the Files panel to add files');
+    }
+  }
+
   function renderFiles(files) {
     if (!elements.filesList) return;
 
@@ -2673,6 +2869,11 @@
   }
 
   async function handleSmartInputDecision(decision, classification = null) {
+    // Check if cancelled
+    if (state.smartInputCancelled) {
+      return;
+    }
+
     const meta = classification || state.smartInput || {};
     const input = meta.input || (elements.smartInputField ? elements.smartInputField.value.trim() : '');
     if (!input) return;
@@ -2739,6 +2940,47 @@
       setSmartInputStatus('Select a workspace first.', { busy: false });
       return;
     }
+
+    // Handle slash commands
+    const lowerInput = input.toLowerCase();
+
+    // /note command - create a quick note
+    if (lowerInput.startsWith('/note ') || lowerInput === '/note') {
+      const noteContent = input.slice(6).trim();
+      if (!noteContent) {
+        setSmartInputStatus('Usage: /note <your note content>', { busy: false });
+        return;
+      }
+      await createQuickNote(noteContent);
+      return;
+    }
+
+    // /task command - create a task directly
+    if (lowerInput.startsWith('/task ') || lowerInput === '/task') {
+      const taskContent = input.slice(6).trim();
+      if (!taskContent) {
+        setSmartInputStatus('Usage: /task <task description>', { busy: false });
+        return;
+      }
+      await createQuickTask(taskContent);
+      return;
+    }
+
+    // /chat command - start a new chat
+    if (lowerInput.startsWith('/chat ') || lowerInput === '/chat') {
+      const chatMessage = input.slice(6).trim();
+      await createQuickChat(chatMessage);
+      return;
+    }
+
+    // @file command - open file attachment modal
+    if (lowerInput === '@file' || lowerInput.startsWith('@file ')) {
+      openFileAttachmentModal();
+      return;
+    }
+
+    // Reset cancelled flag for new operation
+    state.smartInputCancelled = false;
 
     resetSmartInputPrompt();
     setSmartInputBusy(true, 'Deciding...');
@@ -2889,6 +3131,13 @@
       elements.smartInputPromptCancel.addEventListener('click', () => {
         resetSmartInputPrompt();
         setSmartInputStatus('', { busy: false });
+      });
+    }
+
+    // Cancel button in progress modal
+    if (elements.smartInputCancelBtn) {
+      elements.smartInputCancelBtn.addEventListener('click', () => {
+        cancelSmartInput();
       });
     }
 

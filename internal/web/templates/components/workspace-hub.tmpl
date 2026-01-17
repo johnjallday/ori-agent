@@ -59,7 +59,7 @@
       </div>
       <div class="hub-smart-input-main">
         <label for="hubSmartInputField" class="visually-hidden">Describe a task or question</label>
-        <input id="hubSmartInputField" class="modern-input" type="text" placeholder="Add a task or ask a question..." autocomplete="off">
+        <input id="hubSmartInputField" class="modern-input" type="text" placeholder="Type a message or use /task, /chat, /note, @file..." autocomplete="off">
         <button id="hubSmartInputAttachBtn" class="modern-btn modern-btn-secondary hub-smart-input-attach" type="button" title="Attach file">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M16.5,6.5V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V8A3.5,3.5 0 0,1 11,4.5A3.5,3.5 0 0,1 14.5,8V16.5A2.5,2.5 0 0,1 12,19A2.5,2.5 0 0,1 9.5,16.5V7.5H11V16.5A1,1 0 0,0 12,17.5A1,1 0 0,0 13,16.5V8A2,2 0 0,0 11,6A2,2 0 0,0 9,8V17.5A3.5,3.5 0 0,0 12.5,21A3.5,3.5 0 0,0 16,17.5V6.5H16.5Z"/>
@@ -276,6 +276,11 @@
             <li data-step="decide">Decide route</li>
             <li data-step="execute">Create task or start chat</li>
           </ul>
+        </div>
+        <div class="modal-footer justify-content-center border-0 pt-0">
+          <button type="button" id="hubSmartInputCancelBtn" class="modern-btn modern-btn-secondary">
+            Cancel
+          </button>
         </div>
       </div>
     </div>
