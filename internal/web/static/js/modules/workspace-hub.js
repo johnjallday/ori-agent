@@ -1952,15 +1952,186 @@
     }
   }
 
+  function extractTaskFromResponse(payload) {
+    if (!payload) return null;
+    if (payload.task) return payload.task;
+    if (payload.id) return payload;
+    return null;
+  }
+
   async function createTaskFromSmartInput(input) {
+    const fallbackCreate = async (fallbackError) => {
+      const response = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studio_id: state.selectedId,
+          description: input,
+          details: '',
+          priority: 3
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || 'Failed to create task');
+      }
+
+      await loadWorkspaceTasks(state.selectedId);
+      return { kind: 'task', fallback: true, error: fallbackError };
+    };
+
+    const parseResponse = await fetch('/api/orchestration/tasks/auto-parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: input,
+        workspace_id: state.selectedId
+      })
+    });
+
+    if (!parseResponse.ok) {
+      const errText = await parseResponse.text();
+      return fallbackCreate(errText || 'Auto-parse unavailable');
+    }
+
+    const parsed = await parseResponse.json();
+
+    let scheduleData = { schedule_enabled: false };
+    if (parsed.schedule_enabled && parsed.schedule) {
+      const schedule = { ...parsed.schedule };
+      if (schedule.once_at && !schedule.run_at) {
+        schedule.run_at = schedule.once_at;
+        delete schedule.once_at;
+      }
+      scheduleData = {
+        schedule: schedule,
+        schedule_enabled: true,
+        schedule_name: parsed.schedule_name || ''
+      };
+    }
+
+    let resultStorageData = {};
+    if (parsed.result_storage && parsed.result_storage.enabled) {
+      resultStorageData = {
+        result_storage: {
+          enabled: true,
+          format: parsed.result_storage.format || 'text',
+          store_node_id: parsed.result_storage.store_node_id || undefined,
+          file_path: parsed.result_storage.file_path || undefined
+        }
+      };
+    }
+
+    const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
+    if (workflowSteps.length > 0) {
+      const parentTitle = parsed.title || workflowSteps[0]?.title || 'New Workflow';
+      const parentDetails = parsed.details || '';
+      const parentPriority = parsed.priority || 3;
+
+      const parentResponse = await fetch('/api/orchestration/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studio_id: state.selectedId,
+          description: parentTitle,
+          details: parentDetails,
+          priority: parentPriority
+        })
+      });
+
+      if (!parentResponse.ok) {
+        const errText = await parentResponse.text();
+        return fallbackCreate(errText || 'Failed to create parent task');
+      }
+
+      const parentPayload = await parentResponse.json();
+      const parentTask = extractTaskFromResponse(parentPayload);
+      const parentTaskId = parentTask?.id;
+
+      if (!parentTaskId) {
+        throw new Error('Parent task created but ID is missing');
+      }
+
+      const stepIdToTaskId = new Map();
+
+      for (let i = 0; i < workflowSteps.length; i++) {
+        const step = workflowSteps[i] || {};
+        const stepId = step.id || `step-${i + 1}`;
+        const stepTitle = step.title || step.description || parsed.title || `Task ${i + 1}`;
+        const stepDetails = step.details || '';
+        const stepPriority = Number.isInteger(step.priority) ? step.priority : (parsed.priority || 3);
+
+        let to = '';
+        let assignedNodeId = '';
+        if (step.agent_name) {
+          assignedNodeId = `${step.agent_name}-node-1`;
+          to = step.agent_name;
+        }
+
+        let dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+        if (dependsOn.length === 0 && i > 0) {
+          const fallbackId = workflowSteps[i - 1]?.id || `step-${i}`;
+          dependsOn = [fallbackId];
+        }
+        const inputTaskIds = dependsOn.map((id) => stepIdToTaskId.get(id)).filter(Boolean);
+
+        const stepScheduleData = i === 0 ? scheduleData : { schedule_enabled: false };
+        const stepResultStorageData = i === workflowSteps.length - 1 ? resultStorageData : {};
+
+        const createResponse = await fetch('/api/orchestration/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studio_id: state.selectedId,
+            description: stepTitle,
+            details: stepDetails,
+            priority: stepPriority,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
+            input_task_ids: inputTaskIds,
+            parent_task_id: parentTaskId,
+            subtask_index: i + 1,
+            ...stepScheduleData,
+            ...stepResultStorageData
+          })
+        });
+
+        if (!createResponse.ok) {
+          const errText = await createResponse.text();
+          throw new Error(errText || 'Failed to create task');
+        }
+
+        const createdPayload = await createResponse.json();
+        const createdTask = extractTaskFromResponse(createdPayload);
+        if (createdTask?.id) {
+          stepIdToTaskId.set(stepId, createdTask.id);
+        }
+      }
+
+      await loadWorkspaceTasks(state.selectedId);
+      return { kind: 'workflow', fallback: false };
+    }
+
+    let to = '';
+    let assignedNodeId = '';
+    if (parsed.agent_name) {
+      assignedNodeId = `${parsed.agent_name}-node-1`;
+      to = parsed.agent_name;
+    }
+
     const response = await fetch('/api/orchestration/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         studio_id: state.selectedId,
-        description: input,
-        details: '',
-        priority: 3
+        description: parsed.title || input,
+        details: parsed.details || '',
+        priority: parsed.priority || 3,
+        to: to || undefined,
+        assigned_node_id: assignedNodeId || undefined,
+        ...scheduleData,
+        ...resultStorageData
       })
     });
 
@@ -1970,6 +2141,7 @@
     }
 
     await loadWorkspaceTasks(state.selectedId);
+    return { kind: 'task', fallback: false };
   }
 
   async function createChatFromSmartInput(input) {
@@ -2010,8 +2182,12 @@
 
     try {
       if (decision === 'task') {
-        await createTaskFromSmartInput(input);
-        setSmartInputBusy(false, 'Task created.');
+        const createResult = await createTaskFromSmartInput(input);
+        if (createResult?.fallback && window.Toast) {
+          window.Toast.warning('Auto-parse unavailable. Created a basic task instead.');
+        }
+        const createdLabel = createResult?.kind === 'workflow' ? 'Workflow created.' : 'Task created.';
+        setSmartInputBusy(false, createdLabel);
       } else {
         await createChatFromSmartInput(input);
         setSmartInputBusy(false, 'Chat started.');
