@@ -35,9 +35,6 @@ async function initializeSidebar() {
       await loadAgentsForSidebar();
     }
 
-    if (typeof loadPluginsForSidebar === 'function') {
-      await loadPluginsForSidebar();
-    }
 
     sidebarLog.info('All sidebar modules initialized successfully');
     EventBus.emit('sidebar:initialized');

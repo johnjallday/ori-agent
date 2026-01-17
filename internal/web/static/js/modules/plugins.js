@@ -56,6 +56,10 @@ async function checkPluginConfigurationStatus(activePluginNames) {
 
 // Load available plugins for sidebar
 async function loadPluginsForSidebar() {
+  // Early return if sidebar plugins section doesn't exist (removed from sidebar)
+  const pluginsList = document.getElementById('pluginsList');
+  if (!pluginsList) return;
+
   try {
     // Fetch all available plugins from registry
     const registry = await API.get('/api/plugin-registry');
@@ -595,15 +599,6 @@ function showUploadResult(type, message) {
 
 // Setup plugin management event listeners
 function setupPluginManagement() {
-  // Plugin management buttons
-  const browsePluginsBtn = document.getElementById('browsePluginsBtn');
-  if (browsePluginsBtn) {
-    browsePluginsBtn.addEventListener('click', () => {
-      pluginsLog.debug('Browse plugins clicked');
-      showPluginUploadModal();
-    });
-  }
-
   const pluginStoreBtn = document.getElementById('pluginStoreBtn');
   if (pluginStoreBtn) {
     pluginStoreBtn.addEventListener('click', () => {
