@@ -274,6 +274,22 @@
         <span id="taskModalSaveText">Save Task</span>
       </button>
     </div>
+    <div class="task-modal-progress" id="taskModalProgress" hidden>
+      <div class="task-modal-progress-card">
+        <div class="task-modal-progress-status">
+          <div class="task-modal-progress-spinner" aria-hidden="true"></div>
+          <div>
+            <div class="task-modal-progress-title" id="taskModalProgressHeadline">Working...</div>
+            <div class="task-modal-progress-message" id="taskModalProgressMessage">Analyzing your request.</div>
+          </div>
+        </div>
+        <ul class="task-modal-progress-steps" id="taskModalProgressSteps">
+          <li data-step="parse">Parse request</li>
+          <li data-step="prepare">Prepare details</li>
+          <li data-step="apply">Apply changes</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </div>
 {{end}}

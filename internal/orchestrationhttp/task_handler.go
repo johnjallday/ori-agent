@@ -341,6 +341,24 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if th.eventBus != nil {
+		th.eventBus.Publish(workspace.Event{
+			Type:        workspace.EventTaskCreated,
+			WorkspaceID: createdTask.WorkspaceID,
+			Source:      "api",
+			Data: map[string]interface{}{
+				"task_id":     createdTask.ID,
+				"description": createdTask.Description,
+				"to":          createdTask.To,
+				"status":      createdTask.Status,
+			},
+			Metadata: map[string]string{},
+		})
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, createdTask.WorkspaceID, "task.create", map[string]interface{}{
+			"task_id": createdTask.ID,
+		}))
+	}
+
 	if len(req.InputTaskIDs) > 0 {
 		logger.Info("Created connected task in workspace (receiving input from task(s))", logger.Fields{
 			"task_id":          createdTask.ID,
@@ -707,6 +725,21 @@ func (th *TaskHandler) handleDeleteTask(w http.ResponseWriter, r *http.Request) 
 			logger.Error("Failed to save workspace", logger.Fields{"error": err})
 			orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save workspace", err)
 			return
+		}
+
+		if th.eventBus != nil {
+			th.eventBus.Publish(workspace.Event{
+				Type:        workspace.EventTaskDeleted,
+				WorkspaceID: workspaceID,
+				Source:      "api",
+				Data: map[string]interface{}{
+					"task_id": taskID,
+				},
+				Metadata: map[string]string{},
+			})
+			th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, workspaceID, "task.delete", map[string]interface{}{
+				"task_id": taskID,
+			}))
 		}
 
 		logger.Info("Deleted task", logger.Fields{"task_id": taskID, "workspace_id": workspaceID})

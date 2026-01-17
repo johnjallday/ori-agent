@@ -52,7 +52,7 @@ class WorkspaceRealtime {
    * Connect to workspace event stream
    */
   connectToWorkspace(workspaceId) {
-    const url = `/api/orchestration/workflow/stream?workspace_id=${encodeURIComponent(workspaceId)}`;
+    const url = `/api/orchestration/workflow/stream?studio_id=${encodeURIComponent(workspaceId)}`;
     const eventSource = new EventSource(url);
 
     eventSource.addEventListener('open', () => {
@@ -104,6 +104,14 @@ class WorkspaceRealtime {
     });
 
     // Listen for task events
+    eventSource.addEventListener('task.created', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.created', e);
+    });
+
+    eventSource.addEventListener('task.assigned', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.assigned', e);
+    });
+
     eventSource.addEventListener('task.started', (e) => {
       this.handleTaskEvent(workspaceId, 'task.started', e);
     });
@@ -116,8 +124,16 @@ class WorkspaceRealtime {
       this.handleTaskEvent(workspaceId, 'task.failed', e);
     });
 
+    eventSource.addEventListener('task.deleted', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.deleted', e);
+    });
+
     // Listen for workspace events
     eventSource.addEventListener('workspace.updated', (e) => {
+      this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
+    });
+
+    eventSource.addEventListener('studio.updated', (e) => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
     });
 

@@ -251,6 +251,31 @@
     <span>Loading workspace data...</span>
   </div>
 
+  <!-- Quick Add Progress Modal -->
+  <div class="modal fade" id="hubSmartInputProgressModal" tabindex="-1" aria-labelledby="hubSmartInputProgressTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content hub-progress-modal">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hubSmartInputProgressTitle">Quick Add</h5>
+        </div>
+        <div class="modal-body">
+          <div class="hub-progress-status">
+            <div class="hub-loading-spinner" aria-hidden="true"></div>
+            <div>
+              <div class="hub-progress-title" id="hubSmartInputProgressHeadline">Working...</div>
+              <div class="hub-progress-subtitle" id="hubSmartInputProgressMessage">Analyzing your request.</div>
+            </div>
+          </div>
+          <ul class="hub-progress-steps" id="hubSmartInputProgressSteps">
+            <li data-step="analyze">Analyze input</li>
+            <li data-step="decide">Decide route</li>
+            <li data-step="execute">Create task or start chat</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Confirmation Modal -->
   <div class="modal fade" id="hubDeleteConfirmModal" tabindex="-1" aria-labelledby="hubDeleteConfirmTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
