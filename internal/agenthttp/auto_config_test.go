@@ -295,7 +295,7 @@ func TestAutoConfigHandler_validateAndSanitizeConfig(t *testing.T) {
 			},
 			expected: AutoConfigResponse{
 				AgentType:    "tool-calling",
-				Model:        "gpt-4o-mini",
+				Model:        "gpt-4.1-nano",
 				Provider:     "openai",
 				Temperature:  0.7,
 				SystemPrompt: "Test",
@@ -369,8 +369,8 @@ func TestAutoConfigHandler_getDefaultConfig(t *testing.T) {
 	if config.AgentType != "tool-calling" {
 		t.Errorf("Expected default agent type 'tool-calling', got %q", config.AgentType)
 	}
-	if config.Model != "gpt-4o-mini" {
-		t.Errorf("Expected default model 'gpt-4o-mini', got %q", config.Model)
+	if config.Model != "gpt-4.1-nano" {
+		t.Errorf("Expected default model 'gpt-4.1-nano', got %q", config.Model)
 	}
 	if config.Provider != "openai" {
 		t.Errorf("Expected default provider 'openai', got %q", config.Provider)
