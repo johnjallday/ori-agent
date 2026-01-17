@@ -695,7 +695,8 @@ class TaskModalController {
         }
 
         // Upload files to newly created task
-        const createdTask = await response.json();
+        const createdPayload = await response.json();
+        const createdTask = this.extractTaskFromResponse(createdPayload);
         if (createdTask?.id && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(createdTask.id);
         }
@@ -763,14 +764,6 @@ class TaskModalController {
 
       const parsed = await parseResponse.json();
 
-      // Build task data from parsed response
-      let to = '';
-      let assignedNodeId = '';
-      if (parsed.agent_name) {
-        assignedNodeId = `${parsed.agent_name}-node-1`;
-        to = parsed.agent_name;
-      }
-
       // Build schedule data from parsed response
       let scheduleData = { schedule_enabled: false };
       if (parsed.schedule_enabled && parsed.schedule) {
@@ -803,6 +796,118 @@ class TaskModalController {
         };
       }
 
+      const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
+      if (workflowSteps.length > 0) {
+        const parentTitle = parsed.title || workflowSteps[0]?.title || 'New Workflow';
+        const parentDetails = parsed.details || '';
+        const parentPriority = parsed.priority || 3;
+
+        const parentResponse = await fetch('/api/orchestration/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studio_id: this.workspaceId,
+            description: parentTitle,
+            details: parentDetails,
+            priority: parentPriority
+          })
+        });
+
+        if (!parentResponse.ok) {
+          const errText = await parentResponse.text();
+          throw new Error(errText || 'Failed to create parent task');
+        }
+
+        const parentPayload = await parentResponse.json();
+        const parentTask = this.extractTaskFromResponse(parentPayload);
+        const parentTaskId = parentTask?.id;
+
+        if (!parentTaskId) {
+          throw new Error('Parent task created but ID is missing');
+        }
+
+        const stepIdToTaskId = new Map();
+        let lastCreatedTaskId = '';
+
+        for (let i = 0; i < workflowSteps.length; i++) {
+          const step = workflowSteps[i] || {};
+          const stepId = step.id || `step-${i + 1}`;
+          const stepTitle = step.title || step.description || parsed.title || `Task ${i + 1}`;
+          const stepDetails = step.details || '';
+          const stepPriority = Number.isInteger(step.priority) ? step.priority : (parsed.priority || 3);
+
+          let to = '';
+          let assignedNodeId = '';
+          if (step.agent_name) {
+            assignedNodeId = `${step.agent_name}-node-1`;
+            to = step.agent_name;
+          }
+
+          let dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+          if (dependsOn.length === 0 && i > 0) {
+            const fallbackId = workflowSteps[i - 1]?.id || `step-${i}`;
+            dependsOn = [fallbackId];
+          }
+          const inputTaskIds = dependsOn.map((id) => stepIdToTaskId.get(id)).filter(Boolean);
+
+          const stepScheduleData = i === 0 ? scheduleData : { schedule_enabled: false };
+          const stepResultStorageData = i === workflowSteps.length - 1 ? resultStorageData : {};
+
+          const createResponse = await fetch('/api/orchestration/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              studio_id: this.workspaceId,
+              description: stepTitle,
+              details: stepDetails,
+              priority: stepPriority,
+              to: to || undefined,
+              assigned_node_id: assignedNodeId || undefined,
+              input_task_ids: inputTaskIds,
+              parent_task_id: parentTaskId,
+              subtask_index: i + 1,
+              ...stepScheduleData,
+              ...stepResultStorageData
+            })
+          });
+
+          if (!createResponse.ok) {
+            const errText = await createResponse.text();
+            throw new Error(errText || 'Failed to create task');
+          }
+
+          const createdPayload = await createResponse.json();
+          const createdTask = this.extractTaskFromResponse(createdPayload);
+          if (createdTask?.id) {
+            stepIdToTaskId.set(stepId, createdTask.id);
+            lastCreatedTaskId = createdTask.id;
+          }
+        }
+
+        if (lastCreatedTaskId && this.pendingFiles.length > 0) {
+          await this.uploadFilesToTask(lastCreatedTaskId);
+        }
+
+        // Clear pending files
+        this.pendingFiles = [];
+
+        this.showToast(workflowSteps.length > 1 ? 'Workflow created' : 'Task created', 'success');
+        this.close();
+
+        if (this.onSaveCallback) {
+          this.onSaveCallback();
+        }
+        return;
+      }
+
+      // Build task data from parsed response
+      let to = '';
+      let assignedNodeId = '';
+      if (parsed.agent_name) {
+        assignedNodeId = `${parsed.agent_name}-node-1`;
+        to = parsed.agent_name;
+      }
+
       // Create the task
       const createResponse = await fetch('/api/orchestration/tasks', {
         method: 'POST',
@@ -825,7 +930,8 @@ class TaskModalController {
       }
 
       // Upload files to newly created task
-      const createdTask = await createResponse.json();
+      const createdPayload = await createResponse.json();
+      const createdTask = this.extractTaskFromResponse(createdPayload);
       if (createdTask?.id && this.pendingFiles.length > 0) {
         await this.uploadFilesToTask(createdTask.id);
       }
@@ -1471,6 +1577,16 @@ class TaskModalController {
         this.updateFilesPreview();
       });
     });
+  }
+
+  /**
+   * Extract a task object from API responses with different shapes.
+   */
+  extractTaskFromResponse(payload) {
+    if (!payload) return null;
+    if (payload.task) return payload.task;
+    if (payload.id) return payload;
+    return null;
   }
 
   /**

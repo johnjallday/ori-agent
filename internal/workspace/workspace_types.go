@@ -153,7 +153,11 @@ type Task struct {
 	Error          string                 `json:"error,omitempty"`
 	Progress       *TaskProgress          `json:"progress,omitempty"`
 	// InputTaskIDs specifies task IDs whose results should be included as input context
-	InputTaskIDs []string   `json:"input_task_ids,omitempty"`
+	InputTaskIDs []string `json:"input_task_ids,omitempty"`
+	// ParentTaskID groups this task under a parent workflow task when set.
+	ParentTaskID string `json:"parent_task_id,omitempty"`
+	// SubtaskIndex is a 1-based ordering hint within the parent workflow.
+	SubtaskIndex int        `json:"subtask_index,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`

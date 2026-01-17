@@ -234,6 +234,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Details                string                         `json:"details"`
 		Priority               int                            `json:"priority"`
 		InputTaskIDs           []string                       `json:"input_task_ids"`
+		ParentTaskID           string                         `json:"parent_task_id"`
+		SubtaskIndex           int                            `json:"subtask_index"`
 		ResultCombinationMode  string                         `json:"result_combination_mode"`
 		CombinationInstruction string                         `json:"combination_instruction"`
 		Schedule               json.RawMessage                `json:"schedule"`
@@ -280,6 +282,8 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		Details:         req.Details,
 		Priority:        req.Priority,
 		InputTaskIDs:    req.InputTaskIDs,
+		ParentTaskID:    req.ParentTaskID,
+		SubtaskIndex:    req.SubtaskIndex,
 		Status:          workspace.TaskStatusPending,
 		Schedule:        schedule,
 		ScheduleEnabled: req.ScheduleEnabled,
@@ -367,6 +371,8 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		To                     *string                        `json:"to"`                      // Optional: reassign task to different agent
 		AssignedNodeID         *string                        `json:"assigned_node_id"`        // Optional: target specific agent instance/node
 		InputTaskIDs           []string                       `json:"input_task_ids"`          // Optional: update input task connections
+		ParentTaskID           *string                        `json:"parent_task_id"`          // Optional: update parent task relationship
+		SubtaskIndex           *int                           `json:"subtask_index"`           // Optional: update subtask ordering
 		ResultCombinationMode  *string                        `json:"result_combination_mode"` // Optional: update combination mode
 		CombinationInstruction *string                        `json:"combination_instruction"` // Optional: update combination instruction
 		Schedule               json.RawMessage                `json:"schedule"`                // Optional: schedule configuration (frontend format)
@@ -403,7 +409,7 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Handle task updates (description, details, input connections, reassignment, combination mode, schedule, or result storage)
-	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ResultCombinationMode != nil || schedule != nil || clearSchedule || req.ScheduleEnabled != nil || req.ScheduleName != nil || req.ResultStorage != nil {
+	if req.Description != nil || req.Details != nil || req.InputTaskIDs != nil || req.To != nil || req.ParentTaskID != nil || req.SubtaskIndex != nil || req.ResultCombinationMode != nil || schedule != nil || clearSchedule || req.ScheduleEnabled != nil || req.ScheduleName != nil || req.ResultStorage != nil {
 		logger.Debug("Updating task", logger.Fields{"task_id": req.TaskID})
 
 		// Get task and workspace using helper
@@ -436,6 +442,21 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 				if req.InputTaskIDs != nil {
 					ws.Tasks[i].InputTaskIDs = req.InputTaskIDs
 					logger.Debug("Updated task input connections", logger.Fields{"task_id": req.TaskID, "inputtaskids": req.InputTaskIDs})
+				}
+
+				// Update parent task relationship
+				if req.ParentTaskID != nil {
+					ws.Tasks[i].ParentTaskID = strings.TrimSpace(*req.ParentTaskID)
+					if ws.Tasks[i].ParentTaskID == "" {
+						ws.Tasks[i].SubtaskIndex = 0
+					}
+					logger.Debug("Updated task parent", logger.Fields{"task_id": req.TaskID, "parent_task_id": ws.Tasks[i].ParentTaskID})
+				}
+
+				// Update subtask ordering
+				if req.SubtaskIndex != nil {
+					ws.Tasks[i].SubtaskIndex = *req.SubtaskIndex
+					logger.Debug("Updated task subtask index", logger.Fields{"task_id": req.TaskID, "subtask_index": *req.SubtaskIndex})
 				}
 
 				// Update assignment using helper

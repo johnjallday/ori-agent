@@ -5,6 +5,7 @@ import (
 
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -127,6 +128,43 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	if foundTask == nil {
 		orihttp.NotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
+		return
+	}
+
+	subtasks := foundWorkspace.GetSubtasks(foundTask.ID)
+	if len(subtasks) > 0 {
+		if foundTask.Status == workspace.TaskStatusInProgress {
+			orihttp.BadRequest(w, "Task is already in progress")
+			return
+		}
+
+		for _, subtask := range subtasks {
+			if subtask.Status == workspace.TaskStatusInProgress {
+				orihttp.BadRequest(w, "A subtask is already in progress")
+				return
+			}
+			if subtask.To == "" || subtask.To == "unassigned" {
+				orihttp.BadRequest(w, "All subtasks must be assigned to an agent before execution")
+				return
+			}
+		}
+
+		if th.taskHandler == nil {
+			logger.Error("Task handler not set", logger.Fields{})
+			orihttp.InternalError(w, "Task execution not available")
+			return
+		}
+
+		go th.executeParentTaskSequence(foundWorkspace.ID, foundTask.ID)
+
+		logger.Info("Started manual execution of task sequence", logger.Fields{"task_id": req.TaskID})
+
+		w.WriteHeader(http.StatusAccepted)
+		orihttp.WriteJSON(w, map[string]interface{}{
+			"success": true,
+			"message": "Task sequence started",
+			"task_id": req.TaskID,
+		})
 		return
 	}
 
@@ -329,6 +367,295 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 		"message": "Task execution started",
 		"task_id": req.TaskID,
 	})
+}
+
+func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID string) {
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		logger.Error("Failed to load workspace for task sequence", logger.Fields{"workspace_id": workspaceID, "error": err})
+		return
+	}
+
+	parentTask, err := ws.GetTask(parentTaskID)
+	if err != nil {
+		logger.Error("Parent task not found for task sequence", logger.Fields{"task_id": parentTaskID, "error": err})
+		return
+	}
+
+	subtasks := ws.GetSubtasks(parentTaskID)
+	if len(subtasks) == 0 {
+		logger.Warn("No subtasks found for parent task sequence", logger.Fields{"task_id": parentTaskID})
+		return
+	}
+
+	sort.SliceStable(subtasks, func(i, j int) bool {
+		if subtasks[i].SubtaskIndex > 0 && subtasks[j].SubtaskIndex > 0 && subtasks[i].SubtaskIndex != subtasks[j].SubtaskIndex {
+			return subtasks[i].SubtaskIndex < subtasks[j].SubtaskIndex
+		}
+		if !subtasks[i].CreatedAt.Equal(subtasks[j].CreatedAt) {
+			return subtasks[i].CreatedAt.Before(subtasks[j].CreatedAt)
+		}
+		return subtasks[i].ID < subtasks[j].ID
+	})
+
+	startedAt := time.Now()
+	parentTask.Status = workspace.TaskStatusInProgress
+	parentTask.StartedAt = &startedAt
+	parentTask.CompletedAt = nil
+	parentTask.Result = ""
+	parentTask.Error = ""
+
+	if err := ws.UpdateTask(*parentTask); err != nil {
+		logger.Error("Failed to update parent task status", logger.Fields{"task_id": parentTaskID, "error": err})
+		return
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace for parent task start", logger.Fields{"workspace_id": workspaceID, "error": err})
+		return
+	}
+
+	if th.eventBus != nil {
+		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+			"description": parentTask.Description,
+			"manual":      true,
+		})
+		th.eventBus.Publish(event)
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-start", map[string]interface{}{
+			"task_id": parentTask.ID,
+			"status":  parentTask.Status,
+		}))
+	}
+
+	var lastResult string
+	var execErr error
+
+	for _, subtaskInfo := range subtasks {
+		subtask, err := ws.GetTask(subtaskInfo.ID)
+		if err != nil {
+			execErr = fmt.Errorf("subtask %s not found", subtaskInfo.ID)
+			break
+		}
+
+		if subtask.Status == workspace.TaskStatusInProgress {
+			execErr = fmt.Errorf("subtask %s already in progress", subtask.Description)
+			break
+		}
+		if subtask.To == "" || subtask.To == "unassigned" {
+			execErr = fmt.Errorf("subtask %s has no assigned agent", subtask.Description)
+			break
+		}
+
+		if subtask.Status == workspace.TaskStatusCompleted ||
+			subtask.Status == workspace.TaskStatusFailed ||
+			subtask.Status == workspace.TaskStatusCancelled ||
+			subtask.Status == workspace.TaskStatusTimeout {
+			subtask.Status = workspace.TaskStatusPending
+			subtask.Result = ""
+			subtask.Error = ""
+			subtask.StartedAt = nil
+			subtask.CompletedAt = nil
+
+			if err := ws.UpdateTask(*subtask); err != nil {
+				execErr = fmt.Errorf("failed to reset subtask %s: %w", subtask.ID, err)
+				break
+			}
+			if err := th.workspaceStore.Save(ws); err != nil {
+				execErr = fmt.Errorf("failed to save workspace before subtask: %w", err)
+				break
+			}
+		}
+
+		result, err := th.executeTaskWithDependencies(ws, subtask, true)
+		if err != nil {
+			execErr = err
+			break
+		}
+		lastResult = result
+	}
+
+	parentTask, err = ws.GetTask(parentTaskID)
+	if err != nil {
+		logger.Error("Failed to reload parent task after sequence", logger.Fields{"task_id": parentTaskID, "error": err})
+		return
+	}
+
+	completedAt := time.Now()
+	parentTask.CompletedAt = &completedAt
+
+	if execErr != nil {
+		logger.Error("Task sequence failed", logger.Fields{"task_id": parentTaskID, "error": execErr})
+		parentTask.Status = workspace.TaskStatusFailed
+		parentTask.Error = execErr.Error()
+		parentTask.Result = ""
+
+		if th.eventBus != nil {
+			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+				"description": parentTask.Description,
+				"error":       execErr.Error(),
+				"manual":      true,
+			})
+			th.eventBus.Publish(event)
+		}
+	} else {
+		logger.Info("Task sequence completed successfully", logger.Fields{"task_id": parentTaskID})
+		parentTask.Status = workspace.TaskStatusCompleted
+		parentTask.Result = lastResult
+		parentTask.Error = ""
+
+		if th.eventBus != nil {
+			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, parentTask.ID, parentTask.To, map[string]interface{}{
+				"description": parentTask.Description,
+				"result":      lastResult,
+				"manual":      true,
+			})
+			th.eventBus.Publish(event)
+		}
+	}
+
+	if err := ws.UpdateTask(*parentTask); err != nil {
+		logger.Error("Failed to update parent task after sequence", logger.Fields{"task_id": parentTaskID, "error": err})
+		return
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		logger.Error("Failed to save workspace after task sequence", logger.Fields{"workspace_id": workspaceID, "error": err})
+		return
+	}
+
+	if th.eventBus != nil {
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-sequence-complete", map[string]interface{}{
+			"task_id": parentTask.ID,
+			"status":  parentTask.Status,
+		}))
+	}
+}
+
+func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task *workspace.Task, manual bool) (string, error) {
+	if task.To == "" || task.To == "unassigned" {
+		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
+	}
+
+	if len(task.InputTaskIDs) > 0 {
+		logger.Info("Task has input tasks, checking if they need execution first", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
+		if err := th.executeInputTasksIfNeeded(ws, task); err != nil {
+			logger.Error("Failed to execute input tasks", logger.Fields{"task_id": task.ID, "error": err})
+			return "", err
+		}
+	}
+
+	timeout := 30 * time.Minute
+	if task.Timeout > 0 {
+		timeout = task.Timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	task.Status = workspace.TaskStatusInProgress
+	now := time.Now()
+	task.StartedAt = &now
+	task.Result = ""
+	task.Error = ""
+
+	if err := ws.UpdateTask(*task); err != nil {
+		return "", fmt.Errorf("failed to update task status: %w", err)
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		return "", fmt.Errorf("failed to save workspace: %w", err)
+	}
+
+	if th.eventBus != nil {
+		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, task.ID, task.To, map[string]interface{}{
+			"description": task.Description,
+			"manual":      manual,
+		})
+		th.eventBus.Publish(event)
+	}
+
+	taskForExecution := *task
+	var inputResults []string
+	if len(task.InputTaskIDs) > 0 {
+		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "inputtaskids)": len(task.InputTaskIDs), "inputtaskids": task.InputTaskIDs})
+
+		enrichedContext := ws.GetInputContext(task)
+		taskForExecution.Context = enrichedContext
+
+		if inputResultsMap, ok := enrichedContext["input_task_results"]; ok {
+			resultsMap := inputResultsMap.(map[string]string)
+			logger.Debug("Injected input task results into task context", logger.Fields{"task_id": len(resultsMap), "id": task.ID})
+
+			for _, inputTaskID := range task.InputTaskIDs {
+				if result, exists := resultsMap[inputTaskID]; exists {
+					inputResults = append(inputResults, result)
+					preview := result
+					if len(preview) > 100 {
+						preview = preview[:100] + "..."
+					}
+					logger.Debug("- Task result", logger.Fields{"result": inputTaskID, "preview": preview})
+				}
+			}
+		} else {
+			logger.Warn("Warning: No input results found for task despite having InputTaskIDs", logger.Fields{"task_id": task.ID})
+		}
+
+		if len(inputResults) > 0 {
+			originalDesc := taskForExecution.Description
+			taskForExecution.Description = substituteInputPlaceholders(taskForExecution.Description, inputResults)
+			if originalDesc != taskForExecution.Description {
+				logger.Debug("Substituted placeholders in description", logger.Fields{})
+				logger.Debug("Original", logger.Fields{"originalDesc": originalDesc})
+				logger.Debug("Processed", logger.Fields{"description": taskForExecution.Description})
+			}
+		}
+	}
+
+	result, execErr := th.taskHandler.ExecuteTask(ctx, task.To, taskForExecution)
+
+	completedAt := time.Now()
+	task.CompletedAt = &completedAt
+
+	if execErr != nil {
+		logger.Error("Task failed", logger.Fields{"task_id": task.ID, "execErr": execErr})
+		task.Status = workspace.TaskStatusFailed
+		task.Error = execErr.Error()
+	} else {
+		logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
+		task.Status = workspace.TaskStatusCompleted
+		task.Result = result
+		task.Error = ""
+
+		workspace.AutoStoreResult(ws, task, result, th.workspaceStore)
+	}
+
+	if err := ws.UpdateTask(*task); err != nil {
+		return result, fmt.Errorf("failed to update task: %w", err)
+	}
+	if err := th.workspaceStore.Save(ws); err != nil {
+		return result, fmt.Errorf("failed to save workspace: %w", err)
+	}
+
+	if th.eventBus != nil {
+		if execErr != nil {
+			event := workspace.NewTaskEvent(workspace.EventTaskFailed, ws.ID, task.ID, task.To, map[string]interface{}{
+				"description": task.Description,
+				"error":       execErr.Error(),
+				"manual":      manual,
+			})
+			th.eventBus.Publish(event)
+		} else {
+			event := workspace.NewTaskEvent(workspace.EventTaskCompleted, ws.ID, task.ID, task.To, map[string]interface{}{
+				"description": task.Description,
+				"result":      result,
+				"manual":      manual,
+			})
+			th.eventBus.Publish(event)
+		}
+
+		th.eventBus.Publish(workspace.NewWorkspaceEvent(workspace.EventWorkspaceUpdated, ws.ID, "manual-execution", map[string]interface{}{
+			"task_id": task.ID,
+			"status":  task.Status,
+		}))
+	}
+
+	return result, execErr
 }
 
 // executeInputTasksIfNeeded recursively executes any pending/unassigned input tasks
