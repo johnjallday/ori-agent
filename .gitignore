@@ -49,6 +49,7 @@ cache/
 tmp/
 temp/
 .gocache/
+.gocache-build/
 .gobuild/
 
 # Agent data and configuration
@@ -149,3 +150,9 @@ workflow_templates/
 
 # Misplaced generated protobuf files
 github.com/
+
+# Test plugins (local development only)
+test_plugins/
+
+# Local plugin binaries at root
+elite-grading-tool

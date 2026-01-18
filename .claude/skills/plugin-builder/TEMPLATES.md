@@ -48,10 +48,20 @@ func main() {
 name: my-plugin
 version: 1.0.0
 description: Brief description of what this plugin does
+license: MIT
+repository: https://github.com/youruser/my-plugin
 
 maintainers:
   - name: Your Name
     email: you@example.com
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
 
 requirements:
   min_ori_version: "0.0.9"
@@ -135,10 +145,20 @@ func main() {
 name: my-crud-plugin
 version: 1.0.0
 description: Plugin with create, list, and delete operations
+license: MIT
+repository: https://github.com/youruser/my-crud-plugin
 
 maintainers:
   - name: Your Name
     email: you@example.com
+
+platforms:
+  - os: darwin
+    architectures: [amd64, arm64]
+  - os: linux
+    architectures: [amd64, arm64]
+  - os: windows
+    architectures: [amd64]
 
 requirements:
   min_ori_version: "0.0.9"
@@ -163,6 +183,28 @@ tool_definition:
       type: string
       description: "Item value"
       required: false
+
+  # Operations section defines per-operation required parameters
+  # This enables proper validation - e.g., 'name' is only required for create/delete
+  operations:
+    create:
+      parameters:
+        - name: name
+          type: string
+          description: "Item name to create"
+          required: true
+        - name: value
+          type: string
+          description: "Item value"
+          required: true
+    list:
+      parameters: []
+    delete:
+      parameters:
+        - name: name
+          type: string
+          description: "Item name to delete"
+          required: true
 ```
 
 ---
@@ -378,4 +420,59 @@ result := pluginapi.NewListResult([]string{
 	"Second item",
 })
 return result.ToJSON()
+```
+
+---
+
+## Parameter Types Reference
+
+### tool_definition.parameters
+
+Valid types for tool parameters (used by LLM):
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `string` | Text value | `type: string` |
+| `integer` | Whole number (**NOT `int`**) | `type: integer` |
+| `number` | Decimal number | `type: number` |
+| `boolean` | True/false | `type: boolean` |
+| `enum` | String with enum values | `type: string` + `enum: [a, b, c]` |
+| `array` | List of items | `type: array` + `items: {type: string}` |
+| `object` | Nested object | `type: object` + `properties: {...}` |
+
+**Important:** Use `integer`, NOT `int` for tool parameters. Using `int` will cause empty Parameters.
+
+### config.variables
+
+Valid types for config variables (used by settings UI):
+
+| Type | Description |
+|------|-------------|
+| `string` | Text input |
+| `int` | Integer input (note: `int` is valid here, unlike tool params) |
+| `bool` | Checkbox |
+| `password` | Masked text input |
+| `dirpath` | Directory path picker |
+| `filepath` | File path picker |
+
+---
+
+## Required plugin.yaml Fields
+
+Every plugin.yaml must have these fields:
+
+```yaml
+name: plugin-name          # Required: plugin identifier
+version: 1.0.0             # Required: semver format
+description: What it does  # Required: brief description
+license: MIT               # Required: license type
+repository: https://...    # Required: valid URL
+
+maintainers:               # Required: at least one
+  - name: Your Name
+    email: you@example.com
+
+platforms:                 # Required: at least one
+  - os: darwin
+    architectures: [amd64, arm64]
 ```

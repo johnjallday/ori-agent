@@ -113,6 +113,76 @@ if sm == nil {
 
 ---
 
+## 9. Empty Parameters / No Tools Showing
+
+**Symptoms:** Plugin loads but shows empty `Parameters: {}` or no tools appear.
+
+**Common Causes:**
+
+1. **Invalid parameter type** - Using `int` instead of `integer`:
+   ```yaml
+   # WRONG - causes empty Parameters
+   - name: limit
+     type: int
+
+   # CORRECT
+   - name: limit
+     type: integer
+   ```
+
+2. **Missing required plugin.yaml fields**:
+   ```
+   missing required field: license
+   missing required field: repository
+   missing required field: platforms
+   ```
+
+   **Fix:** Add all required fields to plugin.yaml:
+   ```yaml
+   license: MIT
+   repository: https://github.com/user/plugin
+   platforms:
+     - os: darwin
+       architectures: [amd64, arm64]
+   ```
+
+3. **Missing operations section** - For multi-operation plugins with enum:
+   ```yaml
+   # Add operations section after parameters
+   operations:
+     create:
+       parameters:
+         - name: value
+           type: string
+           required: true
+     list:
+       parameters: []
+   ```
+
+**Valid tool parameter types:** `string`, `integer`, `number`, `boolean`, `array`, `object`
+
+**NOT valid:** `int`, `bool`, `float` (use `integer`, `boolean`, `number` instead)
+
+---
+
+## 10. Plugin Panic on Startup
+
+**Error:**
+```
+panic: ServePlugin failed to parse config: invalid plugin config: missing required field: X
+```
+
+**Fix:** Ensure plugin.yaml has ALL required fields:
+- `name`
+- `version` (semver format: "1.0.0")
+- `description`
+- `license`
+- `repository` (valid URL)
+- `platforms` (at least one)
+- `maintainers` (at least one with name and email)
+
+---
+
 ## Build Commands Reference
 
 ```bash
@@ -126,6 +196,9 @@ go build -o plugin-name .
 
 # Verify build
 ls -la plugin-name
+
+# Test plugin starts (should show go-plugin message)
+./plugin-name
 ```
 
 **Important:** Plugins are built as executables, NOT using `-buildmode=plugin`.
