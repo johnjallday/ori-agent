@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // Item represents a simple item in our list

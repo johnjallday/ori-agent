@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 //go:embed plugin.yaml

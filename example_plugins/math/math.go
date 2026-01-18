@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // MathTool implements pluginapi.Tool for basic arithmetic operations.

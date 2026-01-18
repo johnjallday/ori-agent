@@ -11,7 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // ToolCallResult holds the result of a tool execution

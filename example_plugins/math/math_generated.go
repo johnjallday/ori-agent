@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // Compile-time interface checks

@@ -12,8 +12,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/pluginapi"
 	"github.com/openai/openai-go/v3"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // Orchestrator manages autonomous task delegation and agent coordination

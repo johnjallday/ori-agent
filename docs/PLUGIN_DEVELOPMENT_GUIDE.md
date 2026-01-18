@@ -53,7 +53,7 @@ cd my-plugin
 
 # 2. Initialize Go module
 go mod init github.com/yourusername/my-plugin
-go get github.com/johnjallday/ori-agent/pluginapi
+go get github.com/oriagent/ori-pluginapi
 
 # 3. Create plugin.yaml (see below)
 # 4. Create main.go (see below)
@@ -140,7 +140,7 @@ import (
 	_ "embed"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 //go:embed plugin.yaml
@@ -665,7 +665,7 @@ func (m *myPluginTool) Execute(ctx context.Context, params *MyPluginParams) (str
 Use the result helpers for rich UI rendering:
 
 ```go
-import "github.com/johnjallday/ori-agent/pluginapi"
+import "github.com/oriagent/ori-pluginapi"
 
 func (m *myPluginTool) listUsers() (string, error) {
 	users := []User{...}
@@ -768,7 +768,7 @@ Ask the agent:
 
 Make sure you have the pluginapi dependency:
 ```bash
-go get github.com/johnjallday/ori-agent/pluginapi
+go get github.com/oriagent/ori-pluginapi
 go mod tidy
 ```
 

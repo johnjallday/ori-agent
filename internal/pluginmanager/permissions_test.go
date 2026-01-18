@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 func TestNewPermissionManager(t *testing.T) {

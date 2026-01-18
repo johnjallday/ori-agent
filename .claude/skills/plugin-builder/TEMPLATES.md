@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 //go:embed plugin.yaml
@@ -72,9 +72,7 @@ module my-plugin
 
 go 1.21
 
-require github.com/johnjallday/ori-agent v0.0.0
-
-replace github.com/johnjallday/ori-agent => /path/to/ori-agent
+require github.com/oriagent/ori-pluginapi v1.0.1
 ```
 
 ---
@@ -93,7 +91,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 //go:embed plugin.yaml
@@ -186,7 +184,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 //go:embed plugin.yaml

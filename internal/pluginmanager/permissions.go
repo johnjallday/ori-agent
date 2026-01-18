@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // PermissionStatus represents the approval status of plugin permissions.

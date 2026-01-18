@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // GetWeatherTool implements pluginapi.Tool for fetching weather.

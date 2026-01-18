@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // ExecuteToolWithFiles executes a tool with optional file attachment support.
