@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // StoreTool implements pluginapi.Tool for file storage operations.

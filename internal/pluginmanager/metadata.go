@@ -3,7 +3,7 @@ package pluginmanager
 import (
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // PluginMetadata represents extended metadata for a plugin in the management system.

@@ -9,7 +9,7 @@ cannot find package "github.com/oriagent/ori-pluginapi"
 
 **Fix:** Ensure `go.mod` has the correct require:
 ```
-require github.com/oriagent/ori-pluginapi v1.0.0
+require github.com/oriagent/ori-pluginapi v1.0.1
 ```
 Then run `go mod tidy`.
 

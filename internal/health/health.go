@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/version"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // PluginHealth represents the health status of a plugin

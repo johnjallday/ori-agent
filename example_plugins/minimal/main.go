@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // MinimalPluginTool demonstrates the optimized plugin development experience

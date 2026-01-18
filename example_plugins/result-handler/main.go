@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // ResultHandlerTool implements pluginapi.Tool for handling chat result actions

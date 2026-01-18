@@ -14,6 +14,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/openai/openai-go/v3 v3.16.0
+	github.com/oriagent/ori-pluginapi v1.0.1
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/sys v0.40.0
 	google.golang.org/grpc v1.78.0

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // Settings represents LLM configuration shared across agents

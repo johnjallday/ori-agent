@@ -72,7 +72,7 @@ module my-plugin
 
 go 1.21
 
-require github.com/oriagent/ori-pluginapi v1.0.0
+require github.com/oriagent/ori-pluginapi v1.0.1
 ```
 
 ---
