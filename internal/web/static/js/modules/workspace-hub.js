@@ -167,10 +167,12 @@
 
   function shouldRefreshForRealtimeEvent(type) {
     if (!type) return false;
+    if (type === 'workspace.status') return false;
     return type.startsWith('task.') ||
-      type.startsWith('workspace.') ||
       type.startsWith('workflow.') ||
       type.startsWith('step.') ||
+      type === 'workspace.updated' ||
+      type === 'workspace.completed' ||
       type === 'connection.opened';
   }
 
@@ -1471,6 +1473,10 @@
         : task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
       const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
       const assignment = isParent ? `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}` : (assignedAgent || 'unassigned');
+      const inputCount = Array.isArray(task.input_task_ids) ? task.input_task_ids.length : 0;
+      const inputBadge = inputCount > 0
+        ? `<span class="hub-task-inputs" title="Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}">Inputs: ${inputCount}</span>`
+        : '';
       const isSelected = selectedSet.has(task.id);
       const hasUnassignedSubtasks = isParent && subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
       const hasRunningSubtasks = isParent && subtasks.some((subtask) => subtask.status === 'in_progress');
@@ -1518,6 +1524,7 @@
                 ${toggleButton}
                 ${stepBadge}
                 <span>${escapeHtml(task.name || task.description || task.id)}</span>
+                ${inputBadge}
               </div>
               <span class="hub-task-status status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
             </div>

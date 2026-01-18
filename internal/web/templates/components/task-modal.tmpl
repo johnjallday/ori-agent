@@ -134,6 +134,31 @@
           </select>
         </div>
       </div>
+      <div class="task-modal-field" id="taskModalInputTasksField">
+        <label for="taskModalInputTasks" class="task-modal-label">Input Tasks <span class="task-modal-optional">(optional)</span></label>
+        <select id="taskModalInputTasks" class="task-modal-input task-modal-input-multi" multiple size="4"></select>
+        <div id="taskModalInputTasksEmpty" class="task-modal-input-empty" style="display: none;">No other tasks available yet.</div>
+        <div id="taskModalInputTasksNotice" class="task-modal-input-hint" style="display: none;">Inputs are set per subtask when this is a workflow.</div>
+        <div class="task-modal-input-hint">Use <code>{previous}</code> or <code>{result}</code> for the most recent input.</div>
+        <div class="task-modal-input-hint">Use <code>{input1}</code>, <code>{input2}</code>, ... for specific inputs.</div>
+      </div>
+      <!-- Subtasks Section -->
+      <div id="taskModalSubtaskSection" class="task-modal-subtask-section">
+        <div class="task-modal-subtask-header">
+          <div>
+            <label class="task-modal-label">Subtasks <span class="task-modal-optional">(optional)</span></label>
+            <div class="task-modal-subtask-hint" id="taskModalSubtaskHint">Add steps to turn this task into a workflow.</div>
+          </div>
+          <button type="button" class="task-modal-btn task-modal-btn-secondary" id="taskModalAddSubtask">
+            Add Subtask
+          </button>
+        </div>
+        <div id="taskModalSubtaskDisabled" class="task-modal-subtask-disabled" style="display: none;">
+          This task is already part of a workflow. Subtasks can only be added to top-level tasks.
+        </div>
+        <div id="taskModalSubtaskList" class="task-modal-subtask-list"></div>
+        <div id="taskModalSubtaskEmpty" class="task-modal-subtask-empty">No subtasks yet.</div>
+      </div>
       <!-- Schedule Section -->
       <div class="task-modal-field" style="margin-top: 16px;">
         <div style="display: flex; align-items: center; gap: 8px;">

@@ -20,6 +20,12 @@ class TaskModalController {
     this.progressSteps = ['parse', 'prepare', 'apply'];
     // File attachment state
     this.pendingFiles = [];
+    // Subtask state
+    this.subtaskCounter = 0;
+    this.subtasksToDelete = new Set();
+    this.loadedSubtasks = [];
+    this.subtaskSectionDisabled = false;
+    this.workspaceTasks = [];
     // Current task being edited (for auto edit mode)
     this.currentTask = null;
   }
@@ -97,13 +103,17 @@ class TaskModalController {
       this.showWorkspaceSelector();
     });
 
-    document.getElementById('taskModalWorkspaceSelect')?.addEventListener('change', (e) => {
+    document.getElementById('taskModalWorkspaceSelect')?.addEventListener('change', async (e) => {
       const newWorkspaceId = e.target.value;
       if (newWorkspaceId) {
         this.workspaceId = newWorkspaceId;
         this.showWorkspaceBadge(newWorkspaceId);
         // Re-populate agent dropdown for new workspace
-        this.populateAgentDropdown(newWorkspaceId);
+        await this.populateAgentDropdown(newWorkspaceId);
+        this.refreshSubtaskAssignmentOptions();
+        await this.loadWorkspaceTasks();
+        this.populateMainInputTasks(this.currentTask);
+        this.refreshSubtaskInputOptions();
       }
     });
 
@@ -112,6 +122,8 @@ class TaskModalController {
 
     // File attachment handlers
     this.bindFileEvents();
+    // Subtask handlers
+    this.bindSubtaskEvents();
 
     this.initialized = true;
   }
@@ -375,6 +387,7 @@ class TaskModalController {
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
     this.onSaveCallback = onSave;
+    this.currentTask = null;
 
     const modal = document.getElementById('taskModal');
     if (!modal) return;
@@ -426,8 +439,15 @@ class TaskModalController {
     if (priorityInput) priorityInput.value = '3';
 
     // Populate agent assignment dropdown
-    this.populateAgentDropdown(workspaceId);
+    await this.populateAgentDropdown(workspaceId);
+    this.refreshSubtaskAssignmentOptions();
+    await this.loadWorkspaceTasks();
+    this.populateMainInputTasks();
+    this.refreshSubtaskInputOptions();
     if (assignmentInput) assignmentInput.value = '';
+
+    // Reset subtasks
+    this.resetSubtasks();
 
     // Reset schedule fields
     this.resetScheduleFields();
@@ -493,7 +513,16 @@ class TaskModalController {
     if (autoEditDescription) autoEditDescription.value = '';
 
     // Populate agent assignment dropdown first
-    this.populateAgentDropdown(this.workspaceId, task);
+    await this.populateAgentDropdown(this.workspaceId, task);
+    this.refreshSubtaskAssignmentOptions();
+    await this.loadWorkspaceTasks();
+
+    // Reset subtasks
+    this.resetSubtasks();
+    const isSubtask = Boolean(task.parent_task_id && String(task.parent_task_id).trim() !== '');
+    if (isSubtask) {
+      this.setSubtaskSectionDisabled(true, 'This task is already part of a workflow. Subtasks can only be added to top-level tasks.');
+    }
 
     // Set priority
     const priorityInput = document.getElementById('taskModalPriority');
@@ -507,11 +536,35 @@ class TaskModalController {
     if (descriptionInput) descriptionInput.value = task.description || '';
     if (detailsInput) detailsInput.value = task.details || '';
 
-    // Populate schedule fields
-    this.populateScheduleFields(task);
+    let loadedSubtasks = [];
+    if (!isSubtask) {
+      loadedSubtasks = await this.loadSubtasks(task.id);
+      this.loadedSubtasks = loadedSubtasks;
+      loadedSubtasks.forEach((subtask) => {
+        const inputRefs = this.mapInputTaskIdsToRefs(subtask.input_task_ids || [], loadedSubtasks);
+        const inputCount = inputRefs.length;
+        this.addSubtaskRow({
+          id: subtask.id,
+          description: subtask.description || '',
+          details: subtask.details || '',
+          assignmentValue: this.getAssignmentValueFromTask(subtask),
+          inputCount: inputCount,
+          inputTaskIds: inputRefs
+        });
+      });
+    }
 
-    // Populate auto-save fields
-    this.populateAutoSaveFields(task);
+    // Populate schedule and auto-save fields
+    if (!isSubtask && loadedSubtasks.length > 0) {
+      this.populateScheduleFields(loadedSubtasks[0]);
+      this.populateAutoSaveFields(loadedSubtasks[loadedSubtasks.length - 1]);
+    } else {
+      this.populateScheduleFields(task);
+      this.populateAutoSaveFields(task);
+    }
+
+    this.populateMainInputTasks(task);
+    this.refreshSubtaskInputOptions();
 
     // Fetch workspace-specific output path
     await this.fetchWorkspaceOutputPath(this.workspaceId);
@@ -676,14 +729,24 @@ class TaskModalController {
       return;
     }
 
-    // Parse assignment to get 'to' and 'assigned_node_id'
-    let to = '';
-    let assignedNodeId = '';
-    if (assignment && assignment.startsWith('node:')) {
-      assignedNodeId = assignment.slice('node:'.length);
-      // Derive agent name from node ID (e.g., "agent-name-node-1" -> "agent-name")
-      const match = assignedNodeId.match(/^(.+)-node-\d+$/);
-      to = match ? match[1] : assignedNodeId;
+    const assignmentData = this.parseAssignmentValue(assignment);
+    const to = assignmentData.to || '';
+    const assignedNodeId = assignmentData.assignedNodeId || '';
+
+    const mainInputRefs = this.getSelectedInputRefs(document.getElementById('taskModalInputTasks'));
+    const mainInputIds = this.resolveInputRefs(mainInputRefs);
+
+    const { subtasks, invalidInput } = this.collectSubtasks();
+    if (invalidInput) {
+      this.showToast('Subtask title is required', 'error');
+      invalidInput.focus();
+      return;
+    }
+
+    const canManageSubtasks = !(this.currentTask?.parent_task_id && String(this.currentTask.parent_task_id).trim() !== '');
+    if (!canManageSubtasks && subtasks.length > 0) {
+      this.showToast('Subtasks can only be added to top-level tasks', 'error');
+      return;
     }
 
     try {
@@ -693,48 +756,11 @@ class TaskModalController {
       // Get auto-save data
       const autoSaveData = this.getAutoSaveData();
 
-      if (this.editingTaskId) {
-        // Update existing task
-        const response = await fetch(`/api/orchestration/tasks/${this.editingTaskId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            task_id: this.editingTaskId,
-            description,
-            details,
-            to: to || undefined,
-            assigned_node_id: assignedNodeId || undefined,
-            ...scheduleData,
-            ...autoSaveData
-          })
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(errText || 'Failed to update task');
-        }
-
-        // Upload files to existing task
-        if (this.pendingFiles.length > 0) {
-          await this.uploadFilesToTask(this.editingTaskId);
-        }
-
-        this.showToast('Task updated', 'success');
-      } else {
-        // Create new task
+      const createTask = async (payload) => {
         const response = await fetch('/api/orchestration/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            studio_id: this.workspaceId,
-            description,
-            details,
-            priority,
-            to: to || undefined,
-            assigned_node_id: assignedNodeId || undefined,
-            ...scheduleData,
-            ...autoSaveData
-          })
+          body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
@@ -742,9 +768,209 @@ class TaskModalController {
           throw new Error(errText || 'Failed to create task');
         }
 
-        // Upload files to newly created task
         const createdPayload = await response.json();
-        const createdTask = this.extractTaskFromResponse(createdPayload);
+        return this.extractTaskFromResponse(createdPayload);
+      };
+
+      const updateTask = async (taskId, payload) => {
+        const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task_id: taskId,
+            ...payload
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(errText || 'Failed to update task');
+        }
+      };
+
+      const deleteTask = async (taskId) => {
+        if (!taskId) return;
+        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}&studio_id=${encodeURIComponent(this.workspaceId)}`, {
+          method: 'DELETE'
+        });
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(errText || 'Failed to delete subtask');
+        }
+      };
+
+      const hasExistingSubtasks = Array.isArray(this.loadedSubtasks) && this.loadedSubtasks.length > 0;
+      const hasSubtaskDeletes = this.subtasksToDelete && this.subtasksToDelete.size > 0;
+      const isWorkflow = canManageSubtasks && (subtasks.length > 0 || hasExistingSubtasks || hasSubtaskDeletes);
+
+      if (subtasks.length > 0 && scheduleData.schedule_enabled) {
+        const firstSubtask = subtasks[0];
+        if (!firstSubtask?.to || firstSubtask.to === 'unassigned') {
+          this.showToast('Assign an agent to the first subtask before enabling a schedule', 'error');
+          return;
+        }
+      }
+
+      if (this.editingTaskId) {
+        if (isWorkflow && subtasks.length === 0) {
+          for (const subtaskId of this.subtasksToDelete) {
+            await deleteTask(subtaskId);
+          }
+
+          await updateTask(this.editingTaskId, {
+            description,
+            details,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
+            input_task_ids: mainInputIds,
+            ...scheduleData,
+            ...autoSaveData
+          });
+
+          if (this.pendingFiles.length > 0) {
+            await this.uploadFilesToTask(this.editingTaskId);
+          }
+
+          this.showToast('Task updated', 'success');
+        } else if (isWorkflow) {
+          await updateTask(this.editingTaskId, {
+            description,
+            details,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
+            input_task_ids: [],
+            schedule: null,
+            schedule_enabled: false,
+            schedule_name: '',
+            result_storage: null
+          });
+
+          const totalSubtasks = subtasks.length;
+          let lastSubtaskId = totalSubtasks > 0 ? (subtasks[totalSubtasks - 1].id || '') : '';
+          const stepIdsByIndex = subtasks.map((subtask) => subtask.id || '');
+
+          for (let i = 0; i < totalSubtasks; i++) {
+            const subtask = subtasks[i];
+            const inputTaskIds = this.resolveInputRefs(subtask.input_task_ids, stepIdsByIndex);
+            if (subtask.id) {
+              await updateTask(subtask.id, {
+                description: subtask.description,
+                details: subtask.details,
+                to: subtask.to || undefined,
+                assigned_node_id: subtask.assigned_node_id || undefined,
+                input_task_ids: inputTaskIds,
+                parent_task_id: this.editingTaskId,
+                subtask_index: i + 1,
+                ...this.getWorkflowSchedulePayload(scheduleData, i, totalSubtasks, true),
+                ...this.getWorkflowAutoSavePayload(autoSaveData, i, totalSubtasks, true)
+              });
+            } else {
+              const createdSubtask = await createTask({
+                studio_id: this.workspaceId,
+                description: subtask.description,
+                details: subtask.details,
+                priority,
+                to: subtask.to || undefined,
+                assigned_node_id: subtask.assigned_node_id || undefined,
+                input_task_ids: inputTaskIds,
+                parent_task_id: this.editingTaskId,
+                subtask_index: i + 1,
+                ...this.getWorkflowSchedulePayload(scheduleData, i, totalSubtasks, false),
+                ...this.getWorkflowAutoSavePayload(autoSaveData, i, totalSubtasks, false)
+              });
+              if (createdSubtask?.id && i === totalSubtasks - 1) {
+                lastSubtaskId = createdSubtask.id;
+              }
+              if (createdSubtask?.id) {
+                stepIdsByIndex[i] = createdSubtask.id;
+              }
+            }
+          }
+
+          for (const subtaskId of this.subtasksToDelete) {
+            await deleteTask(subtaskId);
+          }
+
+          const attachmentTarget = lastSubtaskId || this.editingTaskId;
+          if (this.pendingFiles.length > 0 && attachmentTarget) {
+            await this.uploadFilesToTask(attachmentTarget);
+          }
+
+          this.showToast('Workflow updated', 'success');
+        } else {
+          await updateTask(this.editingTaskId, {
+            description,
+            details,
+            to: to || undefined,
+            assigned_node_id: assignedNodeId || undefined,
+            input_task_ids: mainInputIds,
+            ...scheduleData,
+            ...autoSaveData
+          });
+
+          // Upload files to existing task
+          if (this.pendingFiles.length > 0) {
+            await this.uploadFilesToTask(this.editingTaskId);
+          }
+
+          this.showToast('Task updated', 'success');
+        }
+      } else if (subtasks.length > 0) {
+        const parentTask = await createTask({
+          studio_id: this.workspaceId,
+          description,
+          details,
+          priority,
+          to: to || undefined,
+          assigned_node_id: assignedNodeId || undefined
+        });
+
+        if (!parentTask?.id) {
+          throw new Error('Parent task created but ID is missing');
+        }
+
+        let lastSubtaskId = '';
+        const stepIdsByIndex = subtasks.map(() => '');
+        for (let i = 0; i < subtasks.length; i++) {
+          const subtask = subtasks[i];
+          const inputTaskIds = this.resolveInputRefs(subtask.input_task_ids, stepIdsByIndex);
+          const createdSubtask = await createTask({
+            studio_id: this.workspaceId,
+            description: subtask.description,
+            details: subtask.details,
+            priority,
+            to: subtask.to || undefined,
+            assigned_node_id: subtask.assigned_node_id || undefined,
+            input_task_ids: inputTaskIds,
+            parent_task_id: parentTask.id,
+            subtask_index: i + 1,
+            ...this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false),
+            ...this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false)
+          });
+          if (createdSubtask?.id) {
+            lastSubtaskId = createdSubtask.id;
+            stepIdsByIndex[i] = createdSubtask.id;
+          }
+        }
+
+        if (lastSubtaskId && this.pendingFiles.length > 0) {
+          await this.uploadFilesToTask(lastSubtaskId);
+        }
+
+        this.showToast('Workflow created', 'success');
+      } else {
+        const createdTask = await createTask({
+          studio_id: this.workspaceId,
+          description,
+          details,
+          priority,
+          to: to || undefined,
+          assigned_node_id: assignedNodeId || undefined,
+          input_task_ids: mainInputIds,
+          ...scheduleData,
+          ...autoSaveData
+        });
+
         if (createdTask?.id && this.pendingFiles.length > 0) {
           await this.uploadFilesToTask(createdTask.id);
         }
@@ -1465,6 +1691,742 @@ class TaskModalController {
     }
 
     return { result_storage: resultStorage };
+  }
+
+  /**
+   * Load tasks for the current workspace (used for input connections).
+   */
+  async loadWorkspaceTasks() {
+    if (!this.workspaceId) {
+      this.workspaceTasks = [];
+      return [];
+    }
+
+    try {
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(this.workspaceId)}`);
+      if (!response.ok) {
+        throw new Error('Failed to load tasks');
+      }
+      const data = await response.json();
+      this.workspaceTasks = data.tasks || [];
+      return this.workspaceTasks;
+    } catch (error) {
+      console.error('Failed to load workspace tasks:', error);
+      this.workspaceTasks = [];
+      return [];
+    }
+  }
+
+  /**
+   * Format a task label for input selection.
+   */
+  formatTaskOptionLabel(task) {
+    if (!task) return '';
+    const title = task.description || task.name || task.id || 'Untitled Task';
+    const idSuffix = task.id ? task.id.slice(0, 6) : '';
+    return idSuffix ? `${title} (${idSuffix})` : title;
+  }
+
+  /**
+   * Build workspace task options for input selection.
+   */
+  getWorkspaceTaskOptions({ excludeIds = new Set() } = {}) {
+    const tasks = Array.isArray(this.workspaceTasks) ? this.workspaceTasks : [];
+    return tasks
+      .filter((task) => task && task.id && !excludeIds.has(task.id))
+      .map((task) => ({
+        value: `task:${task.id}`,
+        label: this.formatTaskOptionLabel(task)
+      }));
+  }
+
+  /**
+   * Resolve input references to task IDs.
+   */
+  resolveInputRefs(inputRefs, stepIdsByIndex = []) {
+    const resolved = [];
+    const seen = new Set();
+
+    (inputRefs || []).forEach((ref) => {
+      if (!ref) return;
+      let taskId = '';
+      if (ref.startsWith('step:')) {
+        const index = parseInt(ref.slice('step:'.length), 10) - 1;
+        taskId = stepIdsByIndex[index] || '';
+      } else if (ref.startsWith('task:')) {
+        taskId = ref.slice('task:'.length);
+      } else {
+        taskId = ref;
+      }
+      if (taskId && !seen.has(taskId)) {
+        seen.add(taskId);
+        resolved.push(taskId);
+      }
+    });
+
+    return resolved;
+  }
+
+  /**
+   * Map stored input task IDs to input reference values.
+   */
+  mapInputTaskIdsToRefs(inputTaskIds, workflowSubtasks = []) {
+    const refs = [];
+    if (!Array.isArray(inputTaskIds) || inputTaskIds.length === 0) {
+      return refs;
+    }
+
+    const idToStep = new Map();
+    workflowSubtasks.forEach((subtask, index) => {
+      if (subtask?.id) {
+        idToStep.set(subtask.id, index + 1);
+      }
+    });
+
+    inputTaskIds.forEach((taskId) => {
+      const stepIndex = idToStep.get(taskId);
+      if (stepIndex) {
+        refs.push(`step:${stepIndex}`);
+      } else if (taskId) {
+        refs.push(`task:${taskId}`);
+      }
+    });
+
+    return refs;
+  }
+
+  /**
+   * Get selected input references from a select element.
+   */
+  getSelectedInputRefs(selectEl) {
+    if (!selectEl) return [];
+    return Array.from(selectEl.selectedOptions)
+      .map((option) => option.value)
+      .filter((value) => value && value.trim() !== '');
+  }
+
+  /**
+   * Enable click-to-toggle behavior for multi-select inputs.
+   */
+  bindMultiSelectToggle(selectEl) {
+    if (!selectEl || selectEl.dataset.toggleBound === 'true') return;
+    selectEl.dataset.toggleBound = 'true';
+
+    selectEl.addEventListener('mousedown', (event) => {
+      if (selectEl.disabled) return;
+      const option = event.target;
+      if (!option || option.tagName !== 'OPTION' || option.disabled) return;
+      event.preventDefault();
+      option.selected = !option.selected;
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  /**
+   * Populate the main task input selection list.
+   */
+  populateMainInputTasks(task = null) {
+    const selectEl = document.getElementById('taskModalInputTasks');
+    if (!selectEl) return;
+
+    const currentTaskId = this.editingTaskId || '';
+    const excludeIds = new Set();
+    if (currentTaskId) excludeIds.add(currentTaskId);
+
+    const options = this.getWorkspaceTaskOptions({ excludeIds });
+    const selectedRefs = (task?.input_task_ids || []).map((id) => `task:${id}`);
+
+    selectEl.innerHTML = '';
+    options.forEach((opt) => {
+      const optionEl = document.createElement('option');
+      optionEl.value = opt.value;
+      optionEl.textContent = opt.label;
+      optionEl.selected = selectedRefs.includes(opt.value);
+      selectEl.appendChild(optionEl);
+    });
+    this.bindMultiSelectToggle(selectEl);
+    if (selectedRefs.length === 0) {
+      selectEl.selectedIndex = -1;
+    }
+
+    const emptyEl = document.getElementById('taskModalInputTasksEmpty');
+    if (emptyEl) {
+      emptyEl.style.display = options.length > 0 ? 'none' : 'block';
+    }
+  }
+
+  /**
+   * Update main input selection state when subtasks exist.
+   */
+  updateMainInputTasksState() {
+    const selectEl = document.getElementById('taskModalInputTasks');
+    const noticeEl = document.getElementById('taskModalInputTasksNotice');
+    if (!selectEl || !noticeEl) return;
+
+    const list = document.getElementById('taskModalSubtaskList');
+    const hasSubtasks = list && list.children.length > 0;
+    selectEl.disabled = hasSubtasks;
+    noticeEl.style.display = hasSubtasks ? 'block' : 'none';
+
+    if (hasSubtasks) {
+      Array.from(selectEl.options).forEach((option) => {
+        option.selected = false;
+      });
+    }
+  }
+
+  /**
+   * Refresh input options for all subtask input selects.
+   */
+  refreshSubtaskInputOptions() {
+    const list = document.getElementById('taskModalSubtaskList');
+    if (!list) return;
+
+    const cards = Array.from(list.querySelectorAll('.task-modal-subtask-card'));
+    if (cards.length === 0) return;
+
+    const stepOptions = cards.map((card, index) => {
+      const title = card.querySelector('.task-modal-subtask-title')?.value?.trim();
+      const label = title ? `Step ${index + 1}: ${title}` : `Step ${index + 1}`;
+      return { value: `step:${index + 1}`, label };
+    });
+
+    const workflowTaskIds = new Set();
+    if (Array.isArray(this.loadedSubtasks)) {
+      this.loadedSubtasks.forEach((task) => {
+        if (task?.id) workflowTaskIds.add(task.id);
+      });
+    }
+    if (this.editingTaskId) {
+      workflowTaskIds.add(this.editingTaskId);
+    }
+
+    const externalOptions = this.getWorkspaceTaskOptions({ excludeIds: workflowTaskIds });
+
+    cards.forEach((card, index) => {
+      const selectEl = card.querySelector('.task-modal-subtask-inputs');
+      if (!selectEl) return;
+
+      let selectedRefs = [];
+      if (selectEl.dataset.selectedInputs) {
+        try {
+          selectedRefs = JSON.parse(selectEl.dataset.selectedInputs) || [];
+        } catch (error) {
+          selectedRefs = [];
+        }
+      } else {
+        selectedRefs = this.getSelectedInputRefs(selectEl);
+      }
+
+      selectEl.innerHTML = '';
+
+      const availableSteps = stepOptions.slice(0, index);
+      if (availableSteps.length > 0) {
+        const stepGroup = document.createElement('optgroup');
+        stepGroup.label = 'Workflow steps';
+        availableSteps.forEach((opt) => {
+          const optionEl = document.createElement('option');
+          optionEl.value = opt.value;
+          optionEl.textContent = opt.label;
+          stepGroup.appendChild(optionEl);
+        });
+        selectEl.appendChild(stepGroup);
+      }
+
+      if (externalOptions.length > 0) {
+        const taskGroup = document.createElement('optgroup');
+        taskGroup.label = 'Workspace tasks';
+        externalOptions.forEach((opt) => {
+          const optionEl = document.createElement('option');
+          optionEl.value = opt.value;
+          optionEl.textContent = opt.label;
+          taskGroup.appendChild(optionEl);
+        });
+        selectEl.appendChild(taskGroup);
+      }
+
+      if (availableSteps.length === 0 && externalOptions.length === 0) {
+        const optionEl = document.createElement('option');
+        optionEl.value = '';
+        optionEl.textContent = '-- No input tasks available --';
+        optionEl.disabled = true;
+        selectEl.appendChild(optionEl);
+      }
+
+      const appliedSelections = [];
+      Array.from(selectEl.options).forEach((option) => {
+        if (selectedRefs.includes(option.value)) {
+          option.selected = true;
+          appliedSelections.push(option.value);
+        }
+      });
+      if (appliedSelections.length === 0) {
+        selectEl.selectedIndex = -1;
+      }
+      selectEl.dataset.selectedInputs = JSON.stringify(appliedSelections);
+
+      this.updateSubtaskInputsBadge(card, appliedSelections.length);
+    });
+
+    this.updateMainInputTasksState();
+  }
+
+  /**
+   * Update the inputs badge for a subtask card.
+   */
+  updateSubtaskInputsBadge(card, count) {
+    if (!card) return;
+    const badge = card.querySelector('.task-modal-subtask-inputs-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = `Inputs: ${count}`;
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  /**
+   * Parse assignment select value into to + assigned node id.
+   */
+  parseAssignmentValue(assignment) {
+    let to = '';
+    let assignedNodeId = '';
+    if (assignment && assignment.startsWith('node:')) {
+      assignedNodeId = assignment.slice('node:'.length);
+      const match = assignedNodeId.match(/^(.+)-node-\d+$/);
+      to = match ? match[1] : assignedNodeId;
+    }
+    return { to, assignedNodeId };
+  }
+
+  /**
+   * Get assignment select options from the main dropdown.
+   */
+  getAssignmentOptions() {
+    const selectEl = document.getElementById('taskModalAssignment');
+    if (!selectEl) return [];
+    return Array.from(selectEl.options).map((opt) => ({
+      value: opt.value,
+      label: opt.textContent || ''
+    }));
+  }
+
+  /**
+   * Get assignment value for an existing task.
+   */
+  getAssignmentValueFromTask(task) {
+    if (task?.assigned_node_id) {
+      return `node:${task.assigned_node_id}`;
+    }
+    if (task?.to) {
+      return `node:${task.to}-node-1`;
+    }
+    return '';
+  }
+
+  /**
+   * Refresh assignment dropdowns for all subtask rows.
+   */
+  refreshSubtaskAssignmentOptions() {
+    const options = this.getAssignmentOptions();
+    if (options.length === 0) return;
+
+    document.querySelectorAll('.task-modal-subtask-assignment').forEach((select) => {
+      const currentValue = select.value;
+      select.innerHTML = '';
+      options.forEach((opt) => {
+        const optionEl = document.createElement('option');
+        optionEl.value = opt.value;
+        optionEl.textContent = opt.label;
+        select.appendChild(optionEl);
+      });
+      if (currentValue) {
+        select.value = currentValue;
+      }
+    });
+  }
+
+  /**
+   * Bind subtask events.
+   */
+  bindSubtaskEvents() {
+    const addBtn = document.getElementById('taskModalAddSubtask');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        if (this.subtaskSectionDisabled) return;
+        this.addSubtaskRow();
+      });
+    }
+
+    const list = document.getElementById('taskModalSubtaskList');
+    if (list) {
+      list.addEventListener('click', (event) => {
+        const removeBtn = event.target.closest('[data-action="remove-subtask"]');
+        if (!removeBtn) return;
+        const card = removeBtn.closest('.task-modal-subtask-card');
+        if (!card) return;
+        const subtaskId = card.dataset.subtaskId;
+        if (subtaskId) {
+          this.subtasksToDelete.add(subtaskId);
+        }
+        card.remove();
+        this.updateSubtaskSteps();
+        this.updateSubtaskEmptyState();
+        this.updateSubtaskHint();
+        this.refreshSubtaskInputOptions();
+      });
+    }
+  }
+
+  /**
+   * Reset subtask state and UI.
+   */
+  resetSubtasks() {
+    this.subtaskCounter = 0;
+    this.subtasksToDelete = new Set();
+    this.loadedSubtasks = [];
+    const list = document.getElementById('taskModalSubtaskList');
+    if (list) list.innerHTML = '';
+    this.setSubtaskSectionDisabled(false);
+    this.updateSubtaskSteps();
+    this.updateSubtaskEmptyState();
+    this.updateSubtaskHint();
+    this.refreshSubtaskInputOptions();
+  }
+
+  /**
+   * Disable or enable the subtask section.
+   */
+  setSubtaskSectionDisabled(disabled, message = '') {
+    this.subtaskSectionDisabled = disabled;
+    const list = document.getElementById('taskModalSubtaskList');
+    const empty = document.getElementById('taskModalSubtaskEmpty');
+    const addBtn = document.getElementById('taskModalAddSubtask');
+    const disabledEl = document.getElementById('taskModalSubtaskDisabled');
+
+    if (disabledEl) {
+      disabledEl.style.display = disabled ? 'block' : 'none';
+      if (disabled && message) disabledEl.textContent = message;
+    }
+    if (list) list.style.display = disabled ? 'none' : 'flex';
+    if (empty) empty.style.display = disabled ? 'none' : (list && list.children.length > 0 ? 'none' : 'block');
+    if (addBtn) addBtn.disabled = disabled;
+    this.updateSubtaskHint();
+  }
+
+  /**
+   * Update empty state for subtasks.
+   */
+  updateSubtaskEmptyState() {
+    const list = document.getElementById('taskModalSubtaskList');
+    const empty = document.getElementById('taskModalSubtaskEmpty');
+    if (!list || !empty) return;
+    if (this.subtaskSectionDisabled) {
+      empty.style.display = 'none';
+      this.updateMainInputTasksState();
+      return;
+    }
+    empty.style.display = list.children.length > 0 ? 'none' : 'block';
+    this.updateMainInputTasksState();
+  }
+
+  /**
+   * Update subtask hint text.
+   */
+  updateSubtaskHint() {
+    const hint = document.getElementById('taskModalSubtaskHint');
+    const list = document.getElementById('taskModalSubtaskList');
+    if (!hint) return;
+    if (this.subtaskSectionDisabled) {
+      hint.textContent = '';
+      return;
+    }
+    const hasSubtasks = list && list.children.length > 0;
+    hint.textContent = hasSubtasks
+      ? 'Schedules run the first step. Auto-save stores the final step.'
+      : 'Add steps to turn this task into a workflow.';
+  }
+
+  /**
+   * Update subtask step labels.
+   */
+  updateSubtaskSteps() {
+    const list = document.getElementById('taskModalSubtaskList');
+    if (!list) return;
+    Array.from(list.children).forEach((card, index) => {
+      const step = card.querySelector('.task-modal-subtask-step');
+      if (step) step.textContent = `Step ${index + 1}`;
+    });
+  }
+
+  /**
+   * Add a subtask row to the UI.
+   */
+  addSubtaskRow(data = {}) {
+    const list = document.getElementById('taskModalSubtaskList');
+    if (!list || this.subtaskSectionDisabled) return;
+
+    this.subtaskCounter += 1;
+    const rowId = `taskModalSubtask${this.subtaskCounter}`;
+    const assignmentValue = data.assignmentValue || '';
+
+    const card = document.createElement('div');
+    card.className = 'task-modal-subtask-card';
+    if (data.id) {
+      card.dataset.subtaskId = data.id;
+    }
+
+    const topRow = document.createElement('div');
+    topRow.className = 'task-modal-subtask-top';
+
+    const stepLabel = document.createElement('span');
+    stepLabel.className = 'task-modal-subtask-step';
+    stepLabel.textContent = 'Step';
+
+    const inputsBadge = document.createElement('span');
+    inputsBadge.className = 'task-modal-subtask-inputs-badge';
+    const inputCount = Number.isFinite(data.inputCount) ? data.inputCount : 0;
+    if (inputCount > 0) {
+      inputsBadge.textContent = `Inputs: ${inputCount}`;
+      inputsBadge.title = `Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}`;
+    } else {
+      inputsBadge.style.display = 'none';
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'task-modal-subtask-actions';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'task-modal-subtask-remove';
+    removeBtn.setAttribute('data-action', 'remove-subtask');
+    removeBtn.setAttribute('title', 'Remove subtask');
+    removeBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+      </svg>
+    `;
+
+    actions.appendChild(removeBtn);
+    topRow.appendChild(stepLabel);
+    topRow.appendChild(inputsBadge);
+    topRow.appendChild(actions);
+    card.appendChild(topRow);
+
+    const titleField = document.createElement('div');
+    titleField.className = 'task-modal-field';
+    const titleLabel = document.createElement('label');
+    titleLabel.className = 'task-modal-label';
+    titleLabel.setAttribute('for', `${rowId}-title`);
+    titleLabel.textContent = 'Title';
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.id = `${rowId}-title`;
+    titleInput.className = 'task-modal-input task-modal-subtask-title';
+    titleInput.placeholder = 'Describe this step...';
+    titleInput.value = data.description || '';
+    titleField.appendChild(titleLabel);
+    titleField.appendChild(titleInput);
+
+    const row = document.createElement('div');
+    row.className = 'task-modal-subtask-row';
+
+    row.appendChild(titleField);
+
+    const assignField = document.createElement('div');
+    assignField.className = 'task-modal-field';
+    const assignLabel = document.createElement('label');
+    assignLabel.className = 'task-modal-label';
+    assignLabel.setAttribute('for', `${rowId}-assignment`);
+    assignLabel.textContent = 'Assign to Agent';
+    const assignmentSelect = document.createElement('select');
+    assignmentSelect.id = `${rowId}-assignment`;
+    assignmentSelect.className = 'task-modal-input task-modal-subtask-assignment';
+
+    const options = this.getAssignmentOptions();
+    if (options.length === 0) {
+      const optionEl = document.createElement('option');
+      optionEl.value = '';
+      optionEl.textContent = '-- No agent (manual task) --';
+      assignmentSelect.appendChild(optionEl);
+    } else {
+      options.forEach((opt) => {
+        const optionEl = document.createElement('option');
+        optionEl.value = opt.value;
+        optionEl.textContent = opt.label;
+        assignmentSelect.appendChild(optionEl);
+      });
+    }
+    if (assignmentValue) {
+      assignmentSelect.value = assignmentValue;
+    }
+
+    assignField.appendChild(assignLabel);
+    assignField.appendChild(assignmentSelect);
+    row.appendChild(assignField);
+
+    const detailsField = document.createElement('div');
+    detailsField.className = 'task-modal-field';
+    const detailsLabel = document.createElement('label');
+    detailsLabel.className = 'task-modal-label';
+    detailsLabel.setAttribute('for', `${rowId}-details`);
+    detailsLabel.textContent = 'Details';
+    const detailsInput = document.createElement('textarea');
+    detailsInput.id = `${rowId}-details`;
+    detailsInput.className = 'task-modal-textarea task-modal-subtask-details';
+    detailsInput.rows = 2;
+    detailsInput.placeholder = 'Add optional context or instructions...';
+    detailsInput.value = data.details || '';
+    detailsField.appendChild(detailsLabel);
+    detailsField.appendChild(detailsInput);
+
+    const inputsField = document.createElement('div');
+    inputsField.className = 'task-modal-field';
+    const inputsLabel = document.createElement('label');
+    inputsLabel.className = 'task-modal-label';
+    inputsLabel.setAttribute('for', `${rowId}-inputs`);
+    inputsLabel.textContent = 'Input Tasks';
+    const inputsSelect = document.createElement('select');
+    inputsSelect.id = `${rowId}-inputs`;
+    inputsSelect.className = 'task-modal-input task-modal-subtask-inputs';
+    inputsSelect.multiple = true;
+    inputsSelect.size = 3;
+    inputsSelect.dataset.selectedInputs = JSON.stringify(data.inputTaskIds || []);
+    this.bindMultiSelectToggle(inputsSelect);
+    inputsField.appendChild(inputsLabel);
+    inputsField.appendChild(inputsSelect);
+
+    const inputsHint = document.createElement('div');
+    inputsHint.className = 'task-modal-subtask-inputs-hint';
+    inputsHint.textContent = 'Use {input1}, {input2}, {previous}, or {result} in the task title.';
+    inputsField.appendChild(inputsHint);
+
+    inputsSelect.addEventListener('change', () => {
+      const selectedRefs = this.getSelectedInputRefs(inputsSelect);
+      inputsSelect.dataset.selectedInputs = JSON.stringify(selectedRefs);
+      this.updateSubtaskInputsBadge(card, selectedRefs.length);
+    });
+
+    titleInput.addEventListener('input', () => {
+      this.refreshSubtaskInputOptions();
+    });
+
+    card.appendChild(row);
+    card.appendChild(detailsField);
+    card.appendChild(inputsField);
+
+    list.appendChild(card);
+    this.updateSubtaskSteps();
+    this.updateSubtaskEmptyState();
+    this.updateSubtaskHint();
+    this.refreshSubtaskInputOptions();
+
+    if (!data.description) {
+      titleInput.focus();
+    }
+  }
+
+  /**
+   * Collect subtask data from the form.
+   */
+  collectSubtasks() {
+    const list = document.getElementById('taskModalSubtaskList');
+    if (!list) return { subtasks: [] };
+
+    const cards = Array.from(list.querySelectorAll('.task-modal-subtask-card'));
+    const subtasks = [];
+    let invalidInput = null;
+
+    for (const card of cards) {
+      const titleInput = card.querySelector('.task-modal-subtask-title');
+      const detailsInput = card.querySelector('.task-modal-subtask-details');
+      const assignmentSelect = card.querySelector('.task-modal-subtask-assignment');
+      const inputsSelect = card.querySelector('.task-modal-subtask-inputs');
+
+      const description = titleInput?.value?.trim() || '';
+      const details = detailsInput?.value?.trim() || '';
+      const assignment = assignmentSelect?.value || '';
+      const inputRefs = this.getSelectedInputRefs(inputsSelect);
+
+      if (!description) {
+        invalidInput = titleInput || detailsInput || assignmentSelect;
+        break;
+      }
+
+      const assignmentData = this.parseAssignmentValue(assignment);
+      subtasks.push({
+        id: card.dataset.subtaskId || '',
+        description,
+        details,
+        to: assignmentData.to || '',
+        assigned_node_id: assignmentData.assignedNodeId || '',
+        input_task_ids: inputRefs
+      });
+    }
+
+    return { subtasks, invalidInput };
+  }
+
+  /**
+   * Resolve schedule payload for workflow subtasks.
+   */
+  getWorkflowSchedulePayload(scheduleData, index, total, forUpdate) {
+    if (total <= 0) return {};
+    const isFirst = index === 0;
+    if (isFirst) {
+      if (scheduleData?.schedule_enabled) {
+        return scheduleData;
+      }
+      return forUpdate ? { schedule: null, schedule_enabled: false, schedule_name: '' } : {};
+    }
+    return forUpdate ? { schedule: null, schedule_enabled: false, schedule_name: '' } : {};
+  }
+
+  /**
+   * Resolve result storage payload for workflow subtasks.
+   */
+  getWorkflowAutoSavePayload(autoSaveData, index, total, forUpdate) {
+    if (total <= 0) return {};
+    const isLast = index === total - 1;
+    const enabled = autoSaveData?.result_storage?.enabled;
+    if (isLast) {
+      if (enabled) {
+        return autoSaveData;
+      }
+      return forUpdate ? { result_storage: null } : {};
+    }
+    return forUpdate ? { result_storage: null } : {};
+  }
+
+  /**
+   * Load subtasks for a parent task.
+   */
+  async loadSubtasks(parentTaskId) {
+    if (!parentTaskId || !this.workspaceId) return [];
+
+    try {
+      let tasks = Array.isArray(this.workspaceTasks) ? this.workspaceTasks : [];
+      if (tasks.length === 0) {
+        tasks = await this.loadWorkspaceTasks();
+      }
+      const subtasks = tasks.filter((task) => task.parent_task_id === parentTaskId);
+
+      subtasks.sort((a, b) => {
+        const aIndex = Number.isFinite(a.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
+        const bIndex = Number.isFinite(b.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (aTime !== bTime) return aTime - bTime;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+      });
+
+      return subtasks;
+    } catch (error) {
+      console.error('Failed to load subtasks:', error);
+      return [];
+    }
   }
 
   /**
