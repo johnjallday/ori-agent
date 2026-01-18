@@ -4,13 +4,14 @@
 
 **Error:**
 ```
-cannot find package "github.com/johnjallday/ori-agent/pluginapi"
+cannot find package "github.com/oriagent/ori-pluginapi"
 ```
 
-**Fix:** Ensure `go.mod` has the correct replace directive with absolute path:
+**Fix:** Ensure `go.mod` has the correct require:
 ```
-replace github.com/johnjallday/ori-agent => /absolute/path/to/ori-agent
+require github.com/oriagent/ori-pluginapi v1.0.0
 ```
+Then run `go mod tidy`.
 
 ---
 
@@ -23,7 +24,7 @@ undefined: pluginapi.BasePlugin
 
 **Fix:** Check the import statement:
 ```go
-import "github.com/johnjallday/ori-agent/pluginapi"
+import "github.com/oriagent/ori-pluginapi"
 ```
 
 ---
