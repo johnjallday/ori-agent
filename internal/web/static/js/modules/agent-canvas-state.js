@@ -305,6 +305,7 @@ export class AgentCanvasState {
 
     // Workflow Selection State
     this.selectedWorkflowId = null;  // null = show all tasks
+    this.allTasks = [];  // Unfiltered tasks for workflow detection
   }
 
   /**
@@ -964,13 +965,16 @@ export class AgentCanvasState {
    * @returns {Array<{id: string, name: string, taskCount: number}>}
    */
   getAvailableWorkflows() {
-    if (!this.tasks || this.tasks.length === 0) {
+    // Use allTasks for workflow detection (includes parent tasks even when filtered)
+    const tasksToSearch = this.allTasks.length > 0 ? this.allTasks : this.tasks;
+
+    if (!tasksToSearch || tasksToSearch.length === 0) {
       return [];
     }
 
     // Find all unique parent_ids that exist in tasks (check both field names)
     const parentIds = new Set();
-    for (const task of this.tasks) {
+    for (const task of tasksToSearch) {
       const parentId = task.parent_id || task.parent_task_id;
       if (parentId) {
         parentIds.add(parentId);
@@ -980,16 +984,16 @@ export class AgentCanvasState {
     // Get workflow info for each parent task
     const workflows = [];
     for (const parentId of parentIds) {
-      const parentTask = this.tasks.find(t => t.id === parentId);
+      const parentTask = tasksToSearch.find(t => t.id === parentId);
       if (parentTask) {
         // Count subtasks (check both field names)
-        const subtaskCount = this.tasks.filter(t =>
+        const subtaskCount = tasksToSearch.filter(t =>
           t.parent_id === parentId || t.parent_task_id === parentId
         ).length;
         workflows.push({
           id: parentTask.id,
           name: parentTask.name || parentTask.description || 'Unnamed Workflow',
-          taskCount: subtaskCount + 1  // Include parent task itself
+          taskCount: subtaskCount  // Just the subtask count (parent is the canvas now)
         });
       }
     }
@@ -1008,7 +1012,17 @@ export class AgentCanvasState {
     if (!this.selectedWorkflowId) {
       return null;
     }
-    return this.tasks.find(t => t.id === this.selectedWorkflowId) || null;
+    // Look in allTasks since the parent workflow task is filtered out of tasks
+    const tasksToSearch = this.allTasks.length > 0 ? this.allTasks : this.tasks;
+    return tasksToSearch.find(t => t.id === this.selectedWorkflowId) || null;
+  }
+
+  /**
+   * Set all tasks (unfiltered) for workflow detection
+   * @param {Array} tasks - All tasks before filtering
+   */
+  setAllTasks(tasks) {
+    this.allTasks = tasks || [];
   }
 
   /**
@@ -1021,8 +1035,9 @@ export class AgentCanvasState {
       return tasks || [];
     }
 
+    // When viewing a workflow, only show its subtasks (not the parent workflow task itself)
+    // The canvas title will show the workflow name instead
     return tasks.filter(task =>
-      task.id === this.selectedWorkflowId ||
       task.parent_id === this.selectedWorkflowId ||
       task.parent_task_id === this.selectedWorkflowId
     );

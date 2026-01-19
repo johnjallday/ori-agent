@@ -116,6 +116,7 @@ export class AgentCanvasEventHandler {
     if (data.tasks && Array.isArray(data.tasks)) {
       // Store all tasks for workflow detection
       this.parent.allTasks = data.tasks;
+      this.state.setAllTasks(data.tasks);
 
       // Filter tasks based on selected workflow
       const filteredTasksRaw = this.state.filterTasksByWorkflow(data.tasks);

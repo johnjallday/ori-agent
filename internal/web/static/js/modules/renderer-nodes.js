@@ -780,9 +780,6 @@ export class RendererNodes {
           this.ctx.fillText(stepText, cardX + 8, cardY + cardHeight - 4);
         }
       }
-    });
-
-    // (Result-to-task connections hidden for clarity)
   }
 
   drawAgents() {

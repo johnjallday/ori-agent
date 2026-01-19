@@ -67,6 +67,7 @@ export class AgentCanvasInitialization {
       if (this.parent.studio.tasks) {
         // Store all tasks in state (unfiltered) for workflow detection
         this.parent.allTasks = this.parent.studio.tasks;
+        this.state.setAllTasks(this.parent.studio.tasks);
 
         // Check for workflow filter parameter and set in state
         const urlParams = new URLSearchParams(window.location.search);
@@ -499,6 +500,7 @@ export class AgentCanvasInitialization {
       if (data.tasks) {
         // Store all tasks for workflow detection
         this.parent.allTasks = data.tasks;
+        this.state.setAllTasks(data.tasks);
 
         // Filter tasks based on selected workflow
         const filteredTasks = this.state.filterTasksByWorkflow(data.tasks);
