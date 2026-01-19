@@ -427,7 +427,6 @@ function createAgentElement(agentName, agentType, currentAgent) {
   agentDiv.style.background = 'var(--bg-secondary)';
   agentDiv.style.border = `1px solid var(--border-color)`;
   agentDiv.style.borderRadius = '8px';
-  agentDiv.style.overflow = 'hidden';
 
   // Escape agent name for safe HTML rendering (XSS prevention)
   const safeAgentName = escapeHtml(agentName);
@@ -445,7 +444,6 @@ function createAgentElement(agentName, agentType, currentAgent) {
               aria-controls="collapse-${accordionId}"
               style="background: ${isCurrentAgent ? 'var(--primary-color-light)' : 'var(--bg-secondary)'}; color: var(--text-primary); text-align: left;">
         <div class="d-flex align-items-center gap-2 flex-grow-1">
-          ${isCurrentAgent ? '<div class="status-indicator status-online"></div>' : ''}
           <div class="d-flex flex-column">
             <span style="color: var(--text-primary); font-weight: 500;">${safeAgentName}</span>
             <span style="color: var(--text-secondary); font-size: 0.7rem;">${safeTypeLabel}</span>
