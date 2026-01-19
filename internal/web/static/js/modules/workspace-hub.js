@@ -1534,7 +1534,7 @@
             </div>
             <div class="hub-task-actions">
               <button class="modern-btn modern-btn-secondary" data-action="edit">Edit</button>
-              ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="view-canvas" title="View workflow in canvas">View</button>` : ''}
+              ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="view-canvas" title="View workflow in canvas">Canvas</button>` : ''}
               ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="save-workflow" title="Save to Workflows library">Save</button>` : ''}
               ${isParent ? `<button class="modern-btn modern-btn-secondary" data-action="export" title="Export workflow to file">Export</button>` : ''}
               <button class="modern-btn modern-btn-primary" data-action="execute" ${canExecute ? '' : 'disabled'} title="${escapeHtml(executeTitle)}">${escapeHtml(executeLabel)}</button>

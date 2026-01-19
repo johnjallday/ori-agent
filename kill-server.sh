@@ -26,8 +26,9 @@ fi
 echo ""
 echo "Looking for orphaned plugin processes..."
 
-# Find plugin processes from common plugin directories
-PLUGIN_PIDS=$(ps aux | grep -E "(uploaded_plugins|example_plugins|plugin_cache)/.*" | grep -v grep | awk '{print $2}')
+# Find plugin processes from common plugin directories (only for current user)
+CURRENT_USER=$(whoami)
+PLUGIN_PIDS=$(ps aux | grep -E "(uploaded_plugins|example_plugins|plugin_cache)/.*" | grep -v grep | awk -v user="$CURRENT_USER" '$1 == user {print $2}')
 
 if [ -z "$PLUGIN_PIDS" ]; then
     echo "No orphaned plugin processes found"

@@ -56,10 +56,246 @@ export class RendererNodes {
     this.ctx.restore();
   }
 
+  /**
+   * Check if a task is a workflow container (has subtasks)
+   * @param {Object} task - Task to check
+   * @returns {{isContainer: boolean, subtaskCount: number}}
+   */
+  getWorkflowContainerInfo(task) {
+    if (!task || !this.state.tasks) {
+      return { isContainer: false, subtaskCount: 0 };
+    }
+
+    // Count subtasks (check both field names)
+    const subtaskCount = this.state.tasks.filter(t =>
+      t.parent_id === task.id || t.parent_task_id === task.id
+    ).length;
+
+    return {
+      isContainer: subtaskCount > 0,
+      subtaskCount
+    };
+  }
+
   drawTaskFlows() {
     if (!this.state.tasks || this.state.tasks.length === 0) return;
 
+    // First pass: draw workflow containers (so they appear behind subtasks)
     this.state.tasks.forEach((task, index) => {
+      const containerInfo = this.getWorkflowContainerInfo(task);
+      if (containerInfo.isContainer) {
+        this.drawWorkflowContainer(task, containerInfo.subtaskCount, index);
+      }
+    });
+
+    // Second pass: draw regular tasks and subtasks
+    this.state.tasks.forEach((task, index) => {
+      const containerInfo = this.getWorkflowContainerInfo(task);
+      // Skip workflow containers - they were drawn in first pass
+      if (containerInfo.isContainer) {
+        return;
+      }
+
+      this.drawTaskCard(task, index);
+    });
+  }
+
+  /**
+   * Draw a workflow container node
+   */
+  drawWorkflowContainer(task, subtaskCount, index) {
+    // Calculate default position if task doesn't have one
+    if (task.x == null || task.y == null) {
+      const viewCenterX = (this.parent.width / 2 - this.state.offsetX) / this.state.scale;
+      const viewCenterY = (this.parent.height / 2 - this.state.offsetY) / this.state.scale;
+      const offsetX = (index % 2 === 0 ? -100 : 100);
+      const offsetY = (Math.floor(index / 2) % 3 - 1) * 80;
+      task.x = viewCenterX + offsetX;
+      task.y = viewCenterY + offsetY;
+    }
+
+    // Workflow container dimensions (larger than regular tasks)
+    const cardWidth = 200;
+    const cardHeight = 80;
+    const cardX = task.x - cardWidth / 2;
+    const cardY = task.y - cardHeight / 2;
+
+    // Store card bounds for hit testing
+    task.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+    task.bounds = task.cardBounds;
+
+    // Draw selection highlight if selected
+    if (this.state.isNodeSelected(task.id)) {
+      const isPrimary = this.state.isFirstSelected(task.id);
+      this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 10, isPrimary);
+    }
+
+    // Container background with gradient
+    this.ctx.save();
+    const gradient = this.ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardHeight);
+    gradient.addColorStop(0, '#1e3a5f');  // Dark blue
+    gradient.addColorStop(1, '#0f2744');  // Darker blue
+    this.ctx.fillStyle = gradient;
+    this.ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    this.ctx.shadowBlur = 15;
+    this.ctx.shadowOffsetY = 4;
+    this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 10);
+    this.ctx.fill();
+    this.ctx.restore();
+
+    // Border with status color
+    let borderColor = '#3b82f6'; // Default blue for workflow
+    if (task.status === 'completed') borderColor = '#10b981'; // Green
+    else if (task.status === 'in_progress') borderColor = '#f59e0b'; // Orange
+    else if (task.status === 'failed') borderColor = '#ef4444'; // Red
+
+    this.ctx.strokeStyle = borderColor;
+    this.ctx.lineWidth = 3;
+    this.ctx.beginPath();
+    this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 10);
+    this.ctx.stroke();
+
+    // Workflow icon (stacked layers icon)
+    const iconX = cardX + 14;
+    const iconY = cardY + 20;
+    this.ctx.strokeStyle = '#60a5fa';
+    this.ctx.lineWidth = 2;
+
+    // Draw stack icon
+    this.ctx.beginPath();
+    this.ctx.moveTo(iconX, iconY + 8);
+    this.ctx.lineTo(iconX + 8, iconY + 4);
+    this.ctx.lineTo(iconX + 16, iconY + 8);
+    this.ctx.lineTo(iconX + 8, iconY + 12);
+    this.ctx.closePath();
+    this.ctx.stroke();
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(iconX, iconY + 12);
+    this.ctx.lineTo(iconX + 8, iconY + 16);
+    this.ctx.lineTo(iconX + 16, iconY + 12);
+    this.ctx.stroke();
+
+    // Workflow badge
+    const badgeText = 'WORKFLOW';
+    this.ctx.fillStyle = '#3b82f6';
+    const badgeWidth = 70;
+    const badgeX = cardX + cardWidth - badgeWidth - 10;
+    const badgeY = cardY + 8;
+    this.primitives.roundRect(badgeX, badgeY, badgeWidth, 16, 4);
+    this.ctx.fill();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 9px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(badgeText, badgeX + badgeWidth / 2, badgeY + 11);
+    this.ctx.textAlign = 'left';
+
+    // Workflow title
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 12px system-ui';
+    const maxTextWidth = cardWidth - 100;
+    let title = task.name || task.description || 'Workflow';
+    let textWidth = this.ctx.measureText(title).width;
+    if (textWidth > maxTextWidth) {
+      while (textWidth > maxTextWidth && title.length > 3) {
+        title = title.substring(0, title.length - 1);
+        textWidth = this.ctx.measureText(title + '...').width;
+      }
+      title = title + '...';
+    }
+    this.ctx.fillText(title, cardX + 36, cardY + 24);
+
+    // Step count
+    this.ctx.fillStyle = '#94a3b8';
+    this.ctx.font = '11px system-ui';
+    this.ctx.fillText(`${subtaskCount} step${subtaskCount !== 1 ? 's' : ''}`, cardX + 36, cardY + 42);
+
+    // Status badge (bottom left)
+    const status = (task.status || 'pending').toUpperCase();
+    let statusBgColor = '#6b7280';
+    if (task.status === 'pending') statusBgColor = '#f59e0b';
+    else if (task.status === 'in_progress') statusBgColor = '#3b82f6';
+    else if (task.status === 'completed') statusBgColor = '#10b981';
+    else if (task.status === 'failed') statusBgColor = '#ef4444';
+
+    this.ctx.fillStyle = statusBgColor;
+    const statusBadgeWidth = this.ctx.measureText(status).width + 12;
+    this.ctx.font = 'bold 9px system-ui';
+    this.primitives.roundRect(cardX + 10, cardY + 54, statusBadgeWidth, 16, 4);
+    this.ctx.fill();
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.fillText(status, cardX + 16, cardY + 65);
+
+    // Run/Rerun button (bottom right)
+    const btnWidth = 60;
+    const btnHeight = 18;
+    const btnX = cardX + cardWidth - btnWidth - 10;
+    const btnY = cardY + cardHeight - btnHeight - 10;
+
+    const isCompleted = task.status === 'completed' || task.status === 'failed';
+    const btnLabel = isCompleted ? '↻ RERUN' : '▶ RUN ALL';
+    const btnColor = isCompleted ? '#f59e0b' : '#10b981';
+
+    this.ctx.fillStyle = btnColor;
+    this.primitives.roundRect(btnX, btnY, btnWidth, btnHeight, 4);
+    this.ctx.fill();
+
+    this.ctx.fillStyle = '#ffffff';
+    this.ctx.font = 'bold 9px system-ui';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText(btnLabel, btnX + btnWidth / 2, btnY + 12);
+    this.ctx.textAlign = 'left';
+
+    task.executeBtnBounds = { x: btnX, y: btnY, width: btnWidth, height: btnHeight };
+
+    // Delete button (top-right corner)
+    const deleteBtnSize = 20;
+    const deleteBtnX = cardX + cardWidth - deleteBtnSize - 6;
+    const deleteBtnY = cardY + 6;
+
+    task.deleteBtnBounds = { x: deleteBtnX, y: deleteBtnY, width: deleteBtnSize, height: deleteBtnSize };
+
+    this.ctx.fillStyle = '#ef4444';
+    this.ctx.beginPath();
+    this.ctx.arc(deleteBtnX + deleteBtnSize / 2, deleteBtnY + deleteBtnSize / 2, deleteBtnSize / 2, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 2;
+    this.ctx.lineCap = 'round';
+    const xOffset = 6;
+    this.ctx.beginPath();
+    this.ctx.moveTo(deleteBtnX + xOffset, deleteBtnY + xOffset);
+    this.ctx.lineTo(deleteBtnX + deleteBtnSize - xOffset, deleteBtnY + deleteBtnSize - xOffset);
+    this.ctx.moveTo(deleteBtnX + deleteBtnSize - xOffset, deleteBtnY + xOffset);
+    this.ctx.lineTo(deleteBtnX + xOffset, deleteBtnY + deleteBtnSize - xOffset);
+    this.ctx.stroke();
+
+    // Output port for connecting to other nodes
+    const outputPortRadius = 6;
+    const outputPortX = task.x;
+    const outputPortY = cardY + cardHeight + 5;
+
+    this.ctx.fillStyle = '#3b82f6';
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(outputPortX, outputPortY, outputPortRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    task.outputPortBounds = {
+      x: outputPortX - outputPortRadius,
+      y: outputPortY - outputPortRadius,
+      width: outputPortRadius * 2,
+      height: outputPortRadius * 2
+    };
+  }
+
+  /**
+   * Draw a regular task card
+   */
+  drawTaskCard(task, index) {
       const fromCandidates = this.state.agents.filter(a => a.name === task.from);
       const toCandidates = this.state.agents.filter(a => a.name === task.to);
 
