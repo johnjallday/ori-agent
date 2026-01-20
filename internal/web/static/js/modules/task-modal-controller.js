@@ -20,6 +20,7 @@ class TaskModalController {
     this.progressSteps = ['parse', 'prepare', 'apply'];
     // File attachment state
     this.pendingFiles = [];
+    this.pendingDirectories = [];
     // Subtask state
     this.subtaskCounter = 0;
     this.subtasksToDelete = new Set();
@@ -2549,6 +2550,52 @@ class TaskModalController {
         }
       });
     }
+
+    // Directory button
+    const directoryBtn = document.getElementById('taskModalAddDirectoryBtn');
+    if (directoryBtn) {
+      directoryBtn.addEventListener('click', () => this.openFolderPicker());
+    }
+  }
+
+  /**
+   * Open folder picker to add a directory reference
+   */
+  async openFolderPicker() {
+    if (!this.workspaceId) {
+      this.showToast('Please select a workspace first', 'warning');
+      return;
+    }
+
+    const btn = document.getElementById('taskModalAddDirectoryBtn');
+    const originalHtml = btn?.innerHTML;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+
+    try {
+      const response = await fetch('/api/launch-folder-picker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId })
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        this.showToast('Folder picker opened. Select a folder to add it.', 'info');
+      } else {
+        this.showToast(result.error || 'Failed to open folder picker', 'error');
+      }
+    } catch (error) {
+      console.error('Failed to open folder picker:', error);
+      this.showToast('Failed to open folder picker', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
   }
 
   /**
@@ -2639,6 +2686,7 @@ class TaskModalController {
    */
   resetFiles() {
     this.pendingFiles = [];
+    this.pendingDirectories = [];
     this.updateFilesPreview();
   }
 
