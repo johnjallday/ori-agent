@@ -276,6 +276,9 @@
             try {
                 workspaces = await window.go.main.App.GetWorkspaces();
 
+                // Clear any server warning since we successfully connected
+                clearStatus();
+
                 if (workspaces.length === 0) {
                     select.innerHTML = '<option value="">No workspaces found</option>';
                     return;

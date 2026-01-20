@@ -239,7 +239,7 @@ func (a *App) ValidatePath(path string) DirectoryResult {
 // CheckServerConnection checks if ori-agent server is running
 func (a *App) CheckServerConnection() bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(a.baseURL + "/api/health")
+	resp, err := client.Get(a.baseURL + "/health")
 	if err != nil {
 		return false
 	}
