@@ -1556,3 +1556,12 @@ body.chat-panel-open .chat-panel-backdrop {
 .hub-panel.is-expanded .hub-panel-title {
   font-size: 1rem;
 }
+
+/* Ensure modals appear above expanded panels */
+.modal {
+  z-index: 10100 !important;
+}
+
+.modal-backdrop {
+  z-index: 10099 !important;
+}
