@@ -171,7 +171,12 @@
         </div>
       </div>
 
-      <div class="hub-panel modern-card hub-panel-notes" id="hubNotesPanel">
+      <div class="hub-panel modern-card hub-panel-notes is-expandable" id="hubNotesPanel">
+        <button class="hub-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
         <div class="hub-panel-header">
           <div>
             <h2 class="hub-panel-title">Notes</h2>
@@ -201,7 +206,12 @@
         </div>
       </div>
 
-      <div class="hub-panel modern-card hub-panel-files" id="hubFilesPanel">
+      <div class="hub-panel modern-card hub-panel-files is-expandable" id="hubFilesPanel">
+        <button class="hub-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
         <div class="hub-panel-header">
           <div>
             <h2 class="hub-panel-title">Files</h2>
@@ -231,7 +241,12 @@
         </div>
       </div>
 
-      <div class="hub-panel modern-card hub-panel-directories" id="hubDirectoriesPanel">
+      <div class="hub-panel modern-card hub-panel-directories is-expandable" id="hubDirectoriesPanel">
+        <button class="hub-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
         <div class="hub-panel-header">
           <div>
             <h2 class="hub-panel-title">Directories</h2>
@@ -251,7 +266,12 @@
         </div>
       </div>
 
-      <div class="hub-panel modern-card hub-panel-schedules" id="hubSchedulesPanel">
+      <div class="hub-panel modern-card hub-panel-schedules is-expandable" id="hubSchedulesPanel">
+        <button class="hub-panel-close" type="button" title="Close" aria-label="Close expanded panel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
+          </svg>
+        </button>
         <div class="hub-panel-header">
           <div>
             <h2 class="hub-panel-title">Schedules</h2>
@@ -275,6 +295,9 @@
     <div class="hub-loading-spinner"></div>
     <span>Loading workspace data...</span>
   </div>
+
+  <!-- Panel expansion backdrop -->
+  <div class="hub-panel-backdrop" id="hubPanelBackdrop"></div>
 
   <!-- Quick Add Progress Modal -->
   <div class="modal fade" id="hubSmartInputProgressModal" tabindex="-1" aria-labelledby="hubSmartInputProgressTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
