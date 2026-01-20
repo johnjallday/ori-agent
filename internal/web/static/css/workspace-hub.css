@@ -81,6 +81,15 @@
   display: none;
 }
 
+.hub-workspace-description {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  font-style: italic;
+  max-width: 400px;
+  line-height: 1.4;
+}
+
 .hub-action-row {
   display: flex;
   gap: 0.5rem;

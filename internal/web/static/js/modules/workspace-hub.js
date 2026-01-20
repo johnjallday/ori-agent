@@ -204,8 +204,16 @@
     if (!workspace) return;
 
     if (elements.workspaceMeta) {
-      const description = workspace.description ? ` ${workspace.description}` : '';
-      elements.workspaceMeta.textContent = `${workspace.name || 'Workspace'}${description ? ` - ${description}` : ''}`;
+      elements.workspaceMeta.textContent = workspace.name || 'Workspace';
+    }
+
+    if (elements.workspaceDescription) {
+      if (workspace.description) {
+        elements.workspaceDescription.textContent = workspace.description;
+        elements.workspaceDescription.style.display = 'block';
+      } else {
+        elements.workspaceDescription.style.display = 'none';
+      }
     }
 
     if (elements.workspaceStatus) {
@@ -241,7 +249,10 @@
     if (elements.workspaceStatus) elements.workspaceStatus.textContent = '--';
     if (elements.workspaceUpdated) elements.workspaceUpdated.textContent = '--';
     if (elements.workspaceAgents) elements.workspaceAgents.textContent = '--';
-    if (elements.workspaceDescription) elements.workspaceDescription.textContent = '--';
+    if (elements.workspaceDescription) {
+      elements.workspaceDescription.textContent = '';
+      elements.workspaceDescription.style.display = 'none';
+    }
 
     if (elements.workspaceCanvasBtn) elements.workspaceCanvasBtn.removeAttribute('href');
   }
