@@ -231,6 +231,26 @@
         </div>
       </div>
 
+      <div class="hub-panel modern-card hub-panel-directories" id="hubDirectoriesPanel">
+        <div class="hub-panel-header">
+          <div>
+            <h2 class="hub-panel-title">Directories</h2>
+          </div>
+          <div class="hub-panel-actions">
+            <button id="hubAddDirectoryPanelBtn" class="modern-btn modern-btn-primary hub-panel-btn" type="button" title="Add directory">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="hub-panel-body">
+          <div id="hubDirectoriesList" class="hub-directory-list">
+            <div class="hub-empty">No directories yet.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="hub-panel modern-card hub-panel-schedules" id="hubSchedulesPanel">
         <div class="hub-panel-header">
           <div>
@@ -355,21 +375,6 @@
             <div id="hubSelectedFilesPreview" class="hub-selected-files-preview" style="display: none;">
               <label class="form-label" style="color: var(--text-primary); font-weight: 500;">Selected Files</label>
               <div id="hubSelectedFilesList" class="hub-selected-files-list"></div>
-            </div>
-            <!-- Directory Reference Section -->
-            <div class="hub-directory-section my-3">
-              <div class="d-flex align-items-center mb-2">
-                <hr class="flex-grow-1" style="border-color: var(--border-color);">
-                <span class="px-2" style="color: var(--text-secondary); font-size: 0.875rem;">or add a directory reference</span>
-                <hr class="flex-grow-1" style="border-color: var(--border-color);">
-              </div>
-              <button type="button" class="btn btn-outline-secondary w-100" id="hubAddDirectoryBtn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                  <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-                </svg>
-                Browse with Folder Picker
-              </button>
-              <small class="text-muted d-block mt-1">Add a directory path that agents can read from</small>
             </div>
             <!-- Title -->
             <div class="mb-3">

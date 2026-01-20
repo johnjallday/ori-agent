@@ -197,7 +197,7 @@
 .hub-bento-grid {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr 1fr;
   gap: 0.5rem;
   flex: 1;
   /* Dynamic height based on viewport */
@@ -226,9 +226,14 @@
   grid-row: 2;
 }
 
-.hub-panel-schedules {
+.hub-panel-directories {
   grid-column: 3;
   grid-row: 3;
+}
+
+.hub-panel-schedules {
+  grid-column: 3;
+  grid-row: 4;
 }
 
 .hub-panel-btn {
@@ -698,13 +703,15 @@
   margin-top: 0.1rem;
 }
 
-.hub-file-list {
+.hub-file-list,
+.hub-directory-list {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.hub-file-item {
+.hub-file-item,
+.hub-directory-item {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 0.4rem 0.6rem;
@@ -718,22 +725,31 @@
   position: relative;
 }
 
-.hub-file-item:hover {
+.hub-directory-item {
+  padding-right: 0.6rem;
+  cursor: default;
+}
+
+.hub-file-item:hover,
+.hub-directory-item:hover {
   border-color: var(--accent-primary, #3b82f6);
   background: rgba(59, 130, 246, 0.05);
 }
 
-.hub-file-icon {
+.hub-file-icon,
+.hub-directory-icon {
   flex-shrink: 0;
   color: var(--text-muted);
 }
 
-.hub-file-info {
+.hub-file-info,
+.hub-directory-info {
   flex: 1;
   min-width: 0;
 }
 
-.hub-file-title {
+.hub-file-title,
+.hub-directory-title {
   font-weight: 600;
   font-size: 0.8rem;
   color: var(--text-primary);
@@ -742,9 +758,13 @@
   text-overflow: ellipsis;
 }
 
-.hub-file-meta {
+.hub-file-meta,
+.hub-directory-path {
   font-size: 0.65rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hub-summary-row {
@@ -1109,7 +1129,7 @@ body.chat-panel-open .chat-panel-backdrop {
 @media (max-width: 1200px) {
   .hub-bento-grid {
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto;
     height: auto;
     min-height: auto;
     max-height: none;
@@ -1131,9 +1151,14 @@ body.chat-panel-open .chat-panel-backdrop {
     grid-row: 3;
   }
 
-  .hub-panel-schedules {
+  .hub-panel-directories {
     grid-column: 1 / -1;
     grid-row: 4;
+  }
+
+  .hub-panel-schedules {
+    grid-column: 1 / -1;
+    grid-row: 5;
   }
 
   .hub-bento-grid .hub-panel-body {

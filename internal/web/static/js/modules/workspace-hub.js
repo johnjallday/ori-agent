@@ -39,6 +39,8 @@
     newNoteBtn: document.getElementById('hubNewNoteBtn'),
     filesList: document.getElementById('hubFilesList'),
     addFileBtn: document.getElementById('hubAddFileBtn'),
+    directoriesList: document.getElementById('hubDirectoriesList'),
+    addDirectoryPanelBtn: document.getElementById('hubAddDirectoryPanelBtn'),
     smartInputCard: document.getElementById('hubSmartInput'),
     smartInputField: document.getElementById('hubSmartInputField'),
     smartInputSubmit: document.getElementById('hubSmartInputSubmit'),
@@ -59,6 +61,7 @@
     sessionsPanel: document.getElementById('hubSessionsPanel'),
     notesPanel: document.getElementById('hubNotesPanel'),
     filesPanel: document.getElementById('hubFilesPanel'),
+    directoriesPanel: document.getElementById('hubDirectoriesPanel'),
     selectTasksBtn: document.getElementById('hubSelectTasksBtn'),
     bulkDeleteTasksBtn: document.getElementById('hubBulkDeleteTasksBtn'),
     selectSessionsBtn: document.getElementById('hubSelectSessionsBtn'),
@@ -88,8 +91,7 @@
     fileUploadProgress: document.getElementById('hubFileUploadProgress'),
     fileUploadPercent: document.getElementById('hubFileUploadPercent'),
     fileUploadProgressBar: document.getElementById('hubFileUploadProgressBar'),
-    addFileSubmitBtn: document.getElementById('hubAddFileSubmitBtn'),
-    addDirectoryBtn: document.getElementById('hubAddDirectoryBtn')
+    addFileSubmitBtn: document.getElementById('hubAddFileSubmitBtn')
   };
 
   const state = {
@@ -108,7 +110,8 @@
     selectionMode: { tasks: false, sessions: false, notes: false, files: false },
     selectedItems: { tasks: new Set(), sessions: new Set(), notes: new Set(), files: new Set() },
     // File upload state
-    pendingFiles: []
+    pendingFiles: [],
+    directories: []
   };
 
   let workspaceRealtimeUnsub = null;
@@ -2096,6 +2099,59 @@
     }
   }
 
+  async function launchFolderPicker({ closeModal = false, successMessage = '' } = {}) {
+    try {
+      const response = await fetch('/api/launch-folder-picker', { method: 'POST' });
+      const result = await response.json();
+
+      if (result.success) {
+        if (closeModal && elements.addFileModal && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(elements.addFileModal);
+          if (modal) modal.hide();
+        }
+        if (successMessage) {
+          window.toastManager?.showToast(successMessage, 'info');
+        }
+        return true;
+      }
+
+      window.toastManager?.showToast(result.error || 'Failed to launch folder picker', 'error');
+    } catch (error) {
+      console.error('Failed to launch folder picker:', error);
+      window.toastManager?.showToast('Failed to launch folder picker', 'error');
+    }
+    return false;
+  }
+
+  function renderDirectories(directories) {
+    if (!elements.directoriesList) return;
+
+    if (!directories || directories.length === 0) {
+      elements.directoriesList.innerHTML = '<div class="hub-empty">No directories yet.</div>';
+      return;
+    }
+
+    const items = directories.slice(0, 5).map((directory) => {
+      const title = directory.name || 'Untitled Directory';
+      const path = directory.path || 'Path unavailable';
+      return `
+        <div class="hub-directory-item">
+          <div class="hub-directory-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+          </div>
+          <div class="hub-directory-info">
+            <div class="hub-directory-title">${escapeHtml(title)}</div>
+            <div class="hub-directory-path" title="${escapeHtml(path)}">${escapeHtml(path)}</div>
+          </div>
+        </div>
+      `;
+    });
+
+    elements.directoriesList.innerHTML = items.join('');
+  }
+
   function renderFiles(files) {
     if (!elements.filesList) return;
 
@@ -2550,6 +2606,12 @@
         if (shouldRefreshForRealtimeEvent(event.type)) {
           scheduleWorkspaceTasksRefresh();
         }
+        if (event.type === 'workspace.updated' && event.data && typeof event.data === 'object') {
+          const action = event.data.action || '';
+          if (action.startsWith('directory_')) {
+            loadWorkspaceFiles(state.selectedId);
+          }
+        }
       });
     }
 
@@ -2564,6 +2626,9 @@
     if (elements.filesList) {
       elements.filesList.innerHTML = '<div class="hub-loading">Loading files...</div>';
     }
+    if (elements.directoriesList) {
+      elements.directoriesList.innerHTML = '<div class="hub-loading">Loading directories...</div>';
+    }
 
     try {
       // Fetch full workspace data to get attachments
@@ -2573,11 +2638,16 @@
       const workspace = await response.json();
       // Filter attachments that have file metadata (actual files, not just notes)
       state.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+      state.directories = workspace.directory_references || [];
       renderFiles(state.files);
+      renderDirectories(state.directories);
     } catch (error) {
       console.error('Workspace hub failed to load files:', error);
       if (elements.filesList) {
         elements.filesList.innerHTML = '<div class="hub-empty">Unable to load files.</div>';
+      }
+      if (elements.directoriesList) {
+        elements.directoriesList.innerHTML = '<div class="hub-empty">Unable to load directories.</div>';
       }
     }
   }
@@ -2618,6 +2688,9 @@
     }
     if (elements.filesList) {
       elements.filesList.innerHTML = '<div class="hub-empty">Select a workspace to view files.</div>';
+    }
+    if (elements.directoriesList) {
+      elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
   }
 
@@ -3258,39 +3331,21 @@
       elements.addFileSubmitBtn.addEventListener('click', submitAddFile);
     }
 
-    // Directory reference button - launches folder picker app
-    if (elements.addDirectoryBtn) {
-      elements.addDirectoryBtn.addEventListener('click', async () => {
+    if (elements.addDirectoryPanelBtn) {
+      elements.addDirectoryPanelBtn.addEventListener('click', async () => {
+        const button = elements.addDirectoryPanelBtn;
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         try {
-          elements.addDirectoryBtn.disabled = true;
-          elements.addDirectoryBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Launching...';
-
-          const response = await fetch('/api/launch-folder-picker', { method: 'POST' });
-          const result = await response.json();
-
-          if (result.success) {
-            // Close the modal since folder picker is now open
-            if (elements.addFileModal && window.bootstrap) {
-              const modal = bootstrap.Modal.getInstance(elements.addFileModal);
-              if (modal) modal.hide();
-            }
-          } else {
-            window.toastManager?.showToast(result.error || 'Failed to launch folder picker', 'error');
-          }
-        } catch (error) {
-          console.error('Failed to launch folder picker:', error);
-          window.toastManager?.showToast('Failed to launch folder picker', 'error');
+          await launchFolderPicker({ successMessage: 'Folder picker opened. Select a folder to add it.' });
         } finally {
-          elements.addDirectoryBtn.disabled = false;
-          elements.addDirectoryBtn.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
-            </svg>
-            Browse with Folder Picker
-          `;
+          button.disabled = false;
+          button.innerHTML = original;
         }
       });
     }
+
   }
 
   if (window.EventBus) {
