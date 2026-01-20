@@ -37,6 +37,7 @@ Thumbs.db
 
 # Local configuration files
 .claude/settings.local.json
+.claude/agents/
 .env
 .env.local
 

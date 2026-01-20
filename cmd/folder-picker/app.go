@@ -50,7 +50,7 @@ func (a *App) startLocalServer() {
 			var body struct {
 				WorkspaceID string `json:"workspace_id"`
 			}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 			workspaceID = body.WorkspaceID
 		}
 		if workspaceID != "" {
@@ -58,17 +58,17 @@ func (a *App) startLocalServer() {
 		}
 		a.ShowWindow()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"running": true})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"running": true})
 	})
 
 	mux.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		// Quit after sending response
 		go func() {
 			time.Sleep(100 * time.Millisecond)
@@ -82,7 +82,7 @@ func (a *App) startLocalServer() {
 		return
 	}
 
-	http.Serve(listener, mux)
+	_ = http.Serve(listener, mux)
 }
 
 // ShowWindow brings the window to the front
@@ -119,7 +119,7 @@ func (a *App) GetWorkspaces() ([]Workspace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to ori-agent server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
@@ -195,7 +195,7 @@ func (a *App) AddDirectory(workspaceID, name, path string) DirectoryResult {
 	if err != nil {
 		return DirectoryResult{Success: false, Error: fmt.Sprintf("Failed to connect to server: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -243,7 +243,7 @@ func (a *App) CheckServerConnection() bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == http.StatusOK
 }
 

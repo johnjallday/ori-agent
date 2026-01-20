@@ -27,14 +27,14 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		WorkspaceID string `json:"workspace_id"`
 	}
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&reqBody)
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 	}
 
 	// First, try to show existing window via local control server
 	if showExistingFolderPicker(reqBody.WorkspaceID) {
 		logger.Info("Showed existing folder picker window", logger.Fields{"workspace_id": reqBody.WorkspaceID})
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"message": "Folder picker shown",
 		})
@@ -47,7 +47,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		logger.Error("Folder picker app not found", logger.Fields{"error": err})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"error":   "Folder picker app not found. Please build it with: ./scripts/build-folder-picker.sh",
 		})
@@ -69,7 +69,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		logger.Error("Failed to launch folder picker", logger.Fields{"error": err, "path": appPath})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"error":   "Failed to launch folder picker: " + err.Error(),
 		})
@@ -79,7 +79,7 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 	logger.Info("Launched folder picker app", logger.Fields{"path": appPath})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Folder picker launched",
 	})
@@ -98,7 +98,7 @@ func showExistingFolderPicker(workspaceID string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return resp.StatusCode == http.StatusOK
 }
@@ -112,7 +112,7 @@ func ShutdownFolderPicker() {
 		// App not running, nothing to do
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		logger.Info("Folder picker app shutdown signal sent", nil)

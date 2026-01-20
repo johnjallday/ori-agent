@@ -17,7 +17,7 @@ func TestAddDirectoryReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dir := DirectoryReference{
 		Name: "Test Dir",
@@ -76,8 +76,8 @@ func TestAddDirectoryReference_NotADirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
-	tmpFile.Close()
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	_ = tmpFile.Close()
 
 	dir := DirectoryReference{
 		Name: "Test Dir",
@@ -99,7 +99,7 @@ func TestGetDirectoryReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dir := DirectoryReference{
 		ID:   "test-id",
@@ -131,7 +131,7 @@ func TestDeleteDirectoryReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dir := DirectoryReference{
 		ID:   "test-id",
@@ -164,7 +164,7 @@ func TestListDirectoryFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create test files
 	testFiles := []string{"file1.txt", "file2.go", "file3.md"}
@@ -226,7 +226,7 @@ func TestReadDirectoryFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test file with content
 	testContent := "Hello, World!"
@@ -265,7 +265,7 @@ func TestReadDirectoryFile_PathTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dir := DirectoryReference{
 		ID:   "test-id",

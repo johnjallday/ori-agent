@@ -88,7 +88,7 @@ func (h *AvatarHandler) uploadAvatar(w http.ResponseWriter, r *http.Request, age
 		orihttp.BadRequest(w, "No avatar file provided")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Validate file size
 	if header.Size > MaxAvatarSize {
@@ -140,7 +140,7 @@ func (h *AvatarHandler) uploadAvatar(w http.ResponseWriter, r *http.Request, age
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save avatar", err)
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	// Copy the uploaded file to destination
 	if _, err := io.Copy(dst, file); err != nil {

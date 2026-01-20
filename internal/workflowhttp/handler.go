@@ -266,7 +266,7 @@ func (h *Handler) handleExportWorkflow(w http.ResponseWriter, r *http.Request, w
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-	w.Write(data)
+	_, _ = w.Write(data)
 
 	logger.Info("Exported workflow", logger.Fields{"id": workflowID, "name": workflow.Name})
 }
@@ -289,7 +289,7 @@ func (h *Handler) handleImportWorkflow(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "No file provided")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Decode JSON
 	var workflow templates.CustomWorkflow
