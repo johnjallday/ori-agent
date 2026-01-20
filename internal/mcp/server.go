@@ -62,6 +62,11 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server already running")
 	}
 	s.status = StatusStarting
+
+	// Create fresh context if the previous one was cancelled
+	if s.ctx.Err() != nil {
+		s.ctx, s.cancel = context.WithCancel(context.Background())
+	}
 	s.mu.Unlock()
 
 	// Build environment variables
