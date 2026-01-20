@@ -52,6 +52,7 @@ type Workspace struct {
 	Attachments          []Attachment                `json:"attachments,omitempty"`
 	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
 	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
+	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
 	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
 	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status               WorkspaceStatus             `json:"status"`
@@ -68,6 +69,7 @@ type CanvasLayout struct {
 	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
 	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
 	StorePositions      map[string]Position        `json:"store_positions,omitempty"`      // store node ID -> position
+	DirectoryPositions  map[string]Position        `json:"directory_positions,omitempty"`  // directory reference ID -> position
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
@@ -310,6 +312,27 @@ type StoreNode struct {
 	Y             float64   `json:"y"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// DirectoryReference represents a reference to a filesystem directory for reading files
+type DirectoryReference struct {
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Name        string    `json:"name"` // Display name for the directory
+	Path        string    `json:"path"` // Absolute filesystem path to the directory
+	X           float64   `json:"x"`    // Canvas position X
+	Y           float64   `json:"y"`    // Canvas position Y
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// FileInfo represents information about a file in a directory
+type FileInfo struct {
+	Name         string    `json:"name"`          // File name
+	RelativePath string    `json:"relative_path"` // Path relative to directory root
+	Size         int64     `json:"size"`          // File size in bytes
+	IsDir        bool      `json:"is_dir"`        // True if this is a directory
+	ModTime      time.Time `json:"mod_time"`      // Last modification time
 }
 
 // CreateWorkspaceParams contains parameters for creating a new workspace

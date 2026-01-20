@@ -14,7 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	web "github.com/johnjallday/ori-agent/internal/web"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // WebPageHandler serves custom web pages from plugins

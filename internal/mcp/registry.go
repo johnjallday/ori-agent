@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // Registry manages multiple MCP servers and their tools

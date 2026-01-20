@@ -80,9 +80,7 @@ func (h *PluginsPageHandler) HandleListPlugins(w http.ResponseWriter, r *http.Re
 	}
 
 	// Get current agent to check enabled plugins
-
-	_, currentAgent := h.Store.ListAgents()
-	agent, agentExists := h.Store.GetAgent(currentAgent)
+	agent, _, agentExists := store.GetCurrentAgent(h.Store)
 
 	// Build response with extended plugin information
 	plugins := make([]map[string]interface{}, 0, len(localReg.Plugins))
@@ -226,8 +224,7 @@ func (h *PluginsPageHandler) HandleGetPluginDetails(w http.ResponseWriter, r *ht
 	}
 
 	// Get current agent to check if plugin is loaded
-	_, currentAgent := h.Store.ListAgents()
-	agent, agentExists := h.Store.GetAgent(currentAgent)
+	agent, _, agentExists := store.GetCurrentAgent(h.Store)
 
 	var loadedPlugin *types.LoadedPlugin
 	var definition interface{}
@@ -318,15 +315,13 @@ func (h *PluginsPageHandler) HandleEnablePlugin(w http.ResponseWriter, r *http.R
 	}
 
 	// Get current agent
-	_, currentAgent := h.Store.ListAgents()
-	agent, ok := h.Store.GetAgent(currentAgent)
+	agent, currentAgent, ok := store.GetCurrentAgent(h.Store)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
 		return
 	}
 
 	// Add plugin to agent
-
 	agentSpecificStorePath := filepath.Join("agents", currentAgent, "config.json")
 	if abs, err := filepath.Abs(agentSpecificStorePath); err == nil {
 		agentSpecificStorePath = abs
@@ -388,15 +383,13 @@ func (h *PluginsPageHandler) HandleDisablePlugin(w http.ResponseWriter, r *http.
 	}
 
 	// Get current agent
-	_, currentAgent := h.Store.ListAgents()
-	agent, ok := h.Store.GetAgent(currentAgent)
+	agent, currentAgent, ok := store.GetCurrentAgent(h.Store)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
 		return
 	}
 
 	// Remove plugin from agent
-
 	pluginKey := pluginName
 	if entry, err := h.RegistryManager.GetPluginByName(pluginName); err == nil && entry != nil {
 		pluginKey = entry.Name
@@ -456,7 +449,7 @@ func (h *PluginsPageHandler) HandleUpdatePluginConfig(w http.ResponseWriter, r *
 	}
 
 	// Get current agent
-	_, currentAgent := h.Store.ListAgents()
+	_, currentAgent, _ := store.GetCurrentAgent(h.Store)
 
 	// Create agent directory if it doesn't exist
 	agentDir := filepath.Join("agents", currentAgent)
@@ -538,8 +531,7 @@ func (h *PluginsPageHandler) HandleTestPlugin(w http.ResponseWriter, r *http.Req
 	}
 
 	// Get plugin from current agent
-	_, currentAgent := h.Store.ListAgents()
-	agent, ok := h.Store.GetAgent(currentAgent)
+	agent, _, ok := store.GetCurrentAgent(h.Store)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
 		return
@@ -683,8 +675,7 @@ func (h *PluginsPageHandler) HandleReloadPlugin(w http.ResponseWriter, r *http.R
 	}
 
 	// Get current agent
-	_, currentAgent := h.Store.ListAgents()
-	agent, ok := h.Store.GetAgent(currentAgent)
+	agent, currentAgent, ok := store.GetCurrentAgent(h.Store)
 	if !ok {
 		orihttp.InternalError(w, "Current agent not found")
 		return
@@ -697,7 +688,6 @@ func (h *PluginsPageHandler) HandleReloadPlugin(w http.ResponseWriter, r *http.R
 	}
 
 	// Kill old plugin process if it's an RPC plugin
-
 	if rpcPlugin, ok := plugin.Tool.(interface{ Kill() }); ok {
 		rpcPlugin.Kill()
 	}
@@ -710,7 +700,6 @@ func (h *PluginsPageHandler) HandleReloadPlugin(w http.ResponseWriter, r *http.R
 	}
 
 	// Update plugin in agent
-
 	plugin.Tool = newTool
 	plugin.Definition = newTool.Definition()
 	agent.Plugins[pluginName] = plugin
@@ -751,9 +740,7 @@ func (h *PluginsPageHandler) HandleGetPluginAgents(w http.ResponseWriter, r *htt
 	}
 
 	// Get current agent to check if plugin is loaded
-
-	_, currentAgent := h.Store.ListAgents()
-	agent, agentExists := h.Store.GetAgent(currentAgent)
+	agent, _, agentExists := store.GetCurrentAgent(h.Store)
 
 	var loadedPlugin *types.LoadedPlugin
 	if agentExists {

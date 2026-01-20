@@ -153,19 +153,18 @@ function renderTableView() {
     const row = document.createElement('tr');
     row.onclick = () => viewAgent(agent.name);
 
+    const avatarHtml = getAvatarHtml(agent, 'agent-avatar');
+
     row.innerHTML = `
             <td>
                 <div class="agent-name-cell">
-                    <div class="agent-avatar" style="background: ${getAgentColor(agent)}">
-                        ${getAgentInitials(agent.name)}
-                    </div>
+                    ${avatarHtml}
                     <div class="agent-info">
                         <div class="agent-name">${escapeHtml(agent.name)}</div>
-                        ${agent.metadata?.description ?
-    `<div class="agent-description">${escapeHtml(agent.metadata.description)}</div>` : ''}
                     </div>
                 </div>
             </td>
+            <td class="description-cell">${agent.metadata?.description ? escapeHtml(agent.metadata.description) : '<span class="text-muted">-</span>'}</td>
             <td>${capitalize(agent.type || 'tool-calling')}</td>
             <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
             <td>
@@ -190,11 +189,11 @@ function renderCardView() {
     card.className = 'agent-card';
     card.onclick = () => viewAgent(agent.name);
 
+    const avatarHtml = getAvatarHtml(agent, 'agent-card-avatar');
+
     card.innerHTML = `
             <div class="agent-card-header">
-                <div class="agent-card-avatar" style="background: ${getAgentColor(agent)}">
-                    ${getAgentInitials(agent.name)}
-                </div>
+                ${avatarHtml}
                 <div class="agent-card-info">
                     <div class="agent-card-name">${escapeHtml(agent.name)}</div>
                 </div>
@@ -343,6 +342,18 @@ function getAgentColor(agent) {
   }, 0);
   const hue = hash % 360;
   return `hsl(${hue}, 60%, 50%)`;
+}
+
+// Returns HTML for agent avatar (image if available, fallback to color/initials)
+function getAvatarHtml(agent, className = 'agent-avatar') {
+  if (agent.metadata?.avatar_image) {
+    return `<div class="${className}" style="padding: 0; overflow: hidden;">
+              <img src="/avatars/${escapeHtml(agent.metadata.avatar_image)}" alt="${escapeHtml(agent.name)}" style="width: 100%; height: 100%; object-fit: cover;">
+            </div>`;
+  }
+  return `<div class="${className}" style="background: ${getAgentColor(agent)}">
+            ${getAgentInitials(agent.name)}
+          </div>`;
 }
 
 function getAgentInitials(name) {

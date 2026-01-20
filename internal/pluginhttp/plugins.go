@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"

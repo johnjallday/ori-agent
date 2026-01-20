@@ -79,10 +79,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// =============================================================================
+	// Agent Avatars (Static File Serving)
+	// =============================================================================
+	mux.HandleFunc("/avatars/", s.serveAvatarFiles)
+
+	// =============================================================================
 	// Agent API Endpoints
 	// =============================================================================
 	agentHandler := agenthttp.New(s.st)
 	agentHandler.ActivityLogger = s.activityLogger
+	avatarHandler := agenthttp.NewAvatarHandler(s.st)
 	mux.Handle("/api/agents", agentHandler)
 
 	// Dashboard handlers
@@ -107,6 +113,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Route activity log requests
 		if strings.Contains(r.URL.Path, "/activity") && r.Method == http.MethodGet {
 			dashboardHandler.GetAgentActivity(w, r)
+			return
+		}
+		// Route avatar upload/delete requests
+		if strings.Contains(r.URL.Path, "/avatar") {
+			avatarHandler.ServeHTTP(w, r)
 			return
 		}
 		// Route agent MCP-specific requests
@@ -156,110 +167,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/plugins/notifications", s.notificationsHandler.HandleGetNotifications)
 
 	// Plugin-specific routes with pattern matching
-	mux.HandleFunc("/api/plugins/", func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is the all-pages endpoint
-		if r.URL.Path == "/api/plugins/all-pages" {
-			s.webPageHandler.ListAllPages(w, r)
-			return
-		}
-		// Check if this is a notification dismiss request
-		if strings.Contains(r.URL.Path, "/notifications/") && strings.HasSuffix(r.URL.Path, "/dismiss") {
-			s.notificationsHandler.HandleDismissNotification(w, r)
-			return
-		}
-		// Check if this is a pages list request
-		if strings.HasSuffix(r.URL.Path, "/pages") {
-			s.webPageHandler.ListPages(w, r)
-			return
-		}
-		// Check if this is a health endpoint for a specific plugin
-		if strings.HasSuffix(r.URL.Path, "/health") {
-			s.healthHandler.HandlePluginHealth(w, r)
-			return
-		}
-		// Check if this is an enable endpoint
-		if strings.HasSuffix(r.URL.Path, "/enable") {
-			s.pluginsPageHandler.HandleEnablePlugin(w, r)
-			return
-		}
-		// Check if this is a disable endpoint
-		if strings.HasSuffix(r.URL.Path, "/disable") {
-			s.pluginsPageHandler.HandleDisablePlugin(w, r)
-			return
-		}
-		// Check if this is an update endpoint
-		if strings.HasSuffix(r.URL.Path, "/update") {
-			s.pluginUpdateHandler.HandleUpdatePlugin(w, r)
-			return
-		}
-		// Check if this is a config endpoint
-		if strings.HasSuffix(r.URL.Path, "/config") {
-			if r.Method == http.MethodPut {
-				// PUT - update config
-				s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
-			} else {
-				// GET - fetch config info (delegated to init handler)
-				s.pluginInitHandler.PluginInitHandler(w, r)
-			}
-			return
-		}
-		// Check if this is a default settings endpoint
-		if strings.HasSuffix(r.URL.Path, "/default-settings") {
-			s.pluginInitHandler.PluginInitHandler(w, r)
-			return
-		}
-		// Check if this is a test endpoint
-		if strings.HasSuffix(r.URL.Path, "/test") {
-			s.pluginsPageHandler.HandleTestPlugin(w, r)
-			return
-		}
-		// Check if this is a logs endpoint
-		if strings.HasSuffix(r.URL.Path, "/logs") {
-			s.pluginsPageHandler.HandleGetPluginLogs(w, r)
-			return
-		}
-		// Check if this is a reload endpoint
-		if strings.HasSuffix(r.URL.Path, "/reload") {
-			s.pluginsPageHandler.HandleReloadPlugin(w, r)
-			return
-		}
-		// Check if this is an agents endpoint
-		if strings.HasSuffix(r.URL.Path, "/agents") {
-			s.pluginsPageHandler.HandleGetPluginAgents(w, r)
-			return
-		}
-		// Check if this is a permissions request
-		if strings.Contains(r.URL.Path, "/permissions") {
-			if strings.HasSuffix(r.URL.Path, "/approve") {
-				s.permissionsHandler.HandleApprovePermissions(w, r)
-			} else {
-				s.permissionsHandler.HandleGetPermissions(w, r)
-			}
-			return
-		}
-		// Check if this is a delete request
-		if r.Method == http.MethodDelete {
-			s.pluginsPageHandler.HandleDeletePlugin(w, r)
-			return
-		}
-		// Check if this could be a web page request (GET with path after plugin name)
-		// URL format: /api/plugins/{plugin-name}/{page-path}
-		if r.Method == http.MethodGet && !strings.HasSuffix(r.URL.Path, "/plugins/") {
-			// Extract path after /api/plugins/
-			pathAfterPlugins := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
-			// Check if there's a sub-path (e.g., "plugin-name/page-path")
-			if strings.Contains(pathAfterPlugins, "/") {
-				// This has a sub-path, try serving as web page
-				s.webPageHandler.ServeHTTP(w, r)
-				return
-			}
-			// No sub-path, serve plugin details
-			s.pluginsPageHandler.HandleGetPluginDetails(w, r)
-			return
-		}
-		// Otherwise, delegate to init handler
-		s.pluginInitHandler.PluginInitHandler(w, r)
-	})
+	mux.HandleFunc("/api/plugins/", s.routePluginRequest)
 
 	// Reuse the plugin handler instance
 	mux.HandleFunc("/api/plugins/save-settings", s.pluginHandler.ServeHTTP)
@@ -721,6 +629,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Folder Picker Launcher
+	// =============================================================================
+	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)
+
+	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
@@ -812,6 +725,36 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			} else {
 				orihttp.MethodNotAllowed(w)
 			}
+			// Handle directory reference operations
+		} else if strings.Contains(r.URL.Path, "/directories") {
+			// Check for /files/ path to read file content
+			if strings.Contains(r.URL.Path, "/files/") {
+				s.studioHandler.ReadDirectoryFile(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodGet {
+				s.studioHandler.ListDirectoryFiles(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/directories") {
+				// /api/studios/:id/directories
+				switch r.Method {
+				case http.MethodPost:
+					s.studioHandler.CreateDirectory(w, r)
+				case http.MethodGet:
+					s.studioHandler.ListDirectories(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			} else {
+				// /api/studios/:id/directories/:dir_id
+				switch r.Method {
+				case http.MethodGet:
+					s.studioHandler.GetDirectory(w, r)
+				case http.MethodPut, http.MethodPatch:
+					s.studioHandler.UpdateDirectory(w, r)
+				case http.MethodDelete:
+					s.studioHandler.DeleteDirectory(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			}
 			// Handle agent add/remove operations
 		} else if strings.Contains(r.URL.Path, "/agents") {
 
@@ -827,4 +770,84 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 			s.studioHandler.GetStudio(w, r)
 		}
 	})
+}
+
+// routePluginRequest handles routing for /api/plugins/ requests using suffix-based matching
+func (s *Server) routePluginRequest(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Exact path matches
+	if path == "/api/plugins/all-pages" {
+		s.webPageHandler.ListAllPages(w, r)
+		return
+	}
+
+	// Notification dismiss has special pattern: /notifications/{id}/dismiss
+	if strings.Contains(path, "/notifications/") && strings.HasSuffix(path, "/dismiss") {
+		s.notificationsHandler.HandleDismissNotification(w, r)
+		return
+	}
+
+	// Suffix-based routing for plugin-specific endpoints
+	suffixHandlers := map[string]http.HandlerFunc{
+		"/pages":            s.webPageHandler.ListPages,
+		"/health":           s.healthHandler.HandlePluginHealth,
+		"/enable":           s.pluginsPageHandler.HandleEnablePlugin,
+		"/disable":          s.pluginsPageHandler.HandleDisablePlugin,
+		"/update":           s.pluginUpdateHandler.HandleUpdatePlugin,
+		"/default-settings": s.pluginInitHandler.PluginInitHandler,
+		"/test":             s.pluginsPageHandler.HandleTestPlugin,
+		"/logs":             s.pluginsPageHandler.HandleGetPluginLogs,
+		"/reload":           s.pluginsPageHandler.HandleReloadPlugin,
+		"/agents":           s.pluginsPageHandler.HandleGetPluginAgents,
+	}
+
+	for suffix, handler := range suffixHandlers {
+		if strings.HasSuffix(path, suffix) {
+			handler(w, r)
+			return
+		}
+	}
+
+	// Config endpoint has method-specific handling
+	if strings.HasSuffix(path, "/config") {
+		if r.Method == http.MethodPut {
+			s.pluginsPageHandler.HandleUpdatePluginConfig(w, r)
+		} else {
+			s.pluginInitHandler.PluginInitHandler(w, r)
+		}
+		return
+	}
+
+	// Permissions endpoint has sub-route
+	if strings.Contains(path, "/permissions") {
+		if strings.HasSuffix(path, "/approve") {
+			s.permissionsHandler.HandleApprovePermissions(w, r)
+		} else {
+			s.permissionsHandler.HandleGetPermissions(w, r)
+		}
+		return
+	}
+
+	// DELETE method routes to delete handler
+	if r.Method == http.MethodDelete {
+		s.pluginsPageHandler.HandleDeletePlugin(w, r)
+		return
+	}
+
+	// GET requests: check if it's a web page or plugin details
+	if r.Method == http.MethodGet && !strings.HasSuffix(path, "/plugins/") {
+		pathAfterPlugins := strings.TrimPrefix(path, "/api/plugins/")
+		if strings.Contains(pathAfterPlugins, "/") {
+			// Has sub-path, try serving as web page
+			s.webPageHandler.ServeHTTP(w, r)
+			return
+		}
+		// No sub-path, serve plugin details
+		s.pluginsPageHandler.HandleGetPluginDetails(w, r)
+		return
+	}
+
+	// Default: delegate to init handler
+	s.pluginInitHandler.PluginInitHandler(w, r)
 }

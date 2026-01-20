@@ -3,11 +3,15 @@
  * Handles canvas setup, data loading, and agent positioning
  */
 import { apiGet } from './agent-canvas-api.js';
+import { EVENT_TYPES } from './agent-canvas-state.js';
 
 export class AgentCanvasInitialization {
   constructor(state, parent) {
     this.state = state;
     this.parent = parent;
+
+    // Bind methods
+    this.handleWorkflowSelected = this.handleWorkflowSelected.bind(this);
   }
 
   /**
@@ -59,9 +63,31 @@ export class AgentCanvasInitialization {
         this.parent.mission = this.parent.studio.shared_data.mission;
       }
 
-      // Load tasks from studio
+      // Load tasks from studio (store all tasks, filter for display)
       if (this.parent.studio.tasks) {
-        const tasks = this.parent.studio.tasks.map(task => {
+        // Store all tasks in state (unfiltered) for workflow detection
+        this.parent.allTasks = this.parent.studio.tasks;
+        this.state.setAllTasks(this.parent.studio.tasks);
+
+        // Check for workflow filter parameter and set in state
+        const urlParams = new URLSearchParams(window.location.search);
+        const workflowId = urlParams.get('workflow');
+        if (workflowId) {
+          this.state.setSelectedWorkflow(workflowId);
+          console.log('🔍 Workflow filter set from URL:', workflowId);
+        }
+
+        // Filter tasks based on selected workflow (or show all if none selected)
+        let tasksToProcess = this.state.filterTasksByWorkflow(this.parent.studio.tasks);
+
+        if (this.state.selectedWorkflowId) {
+          console.log('🔍 Filtering canvas to workflow:', this.state.selectedWorkflowId, 'Tasks:', tasksToProcess.length);
+          // Store workflow mode flag for UI adjustments
+          this.state.workflowViewMode = true;
+          this.state.workflowId = this.state.selectedWorkflowId;
+        }
+
+        const tasks = tasksToProcess.map(task => {
           // If task doesn't have position, set to null so it will be calculated in drawTaskFlows
           const normalized = {
             ...task,
@@ -149,6 +175,38 @@ export class AgentCanvasInitialization {
         console.log('💾 No store_nodes in studio data');
       }
 
+      // Load directory references from studio
+      if (this.parent.studio.directory_references) {
+        console.log('📁 Raw directory_references from API:', this.parent.studio.directory_references);
+
+        const directories = this.parent.studio.directory_references.map(dir => {
+          // Use position from dir (API), then layout, then defaults
+          let x = dir.x ?? 400;
+          let y = dir.y ?? 400;
+
+          // Override with layout position if available
+          if (this.parent.studio.layout && this.parent.studio.layout.directory_positions) {
+            const pos = this.parent.studio.layout.directory_positions[dir.id];
+            if (pos) {
+              x = pos.x;
+              y = pos.y;
+              console.log('📁 Using layout position for', dir.id, ':', pos);
+            }
+          }
+
+          return {
+            ...dir,
+            x: x,
+            y: y
+          };
+        });
+
+        console.log('📁 Loaded directory references:', directories.length, directories);
+        this.state.setDirectoryReferences(directories);
+      } else {
+        console.log('📁 No directory_references in studio data');
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 
@@ -173,10 +231,11 @@ export class AgentCanvasInitialization {
       // Start animation loop
       this.parent.animation.startAnimation();
 
-      // Update canvas info
-      document.getElementById('canvas-info').textContent =
-        `Studio: ${this.parent.studio.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
+      // Subscribe to workflow selection changes
+      this.state.on(EVENT_TYPES.WORKFLOW_SELECTED, this.handleWorkflowSelected);
 
+      // Update canvas info
+      this.updateCanvasInfo();
 
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
@@ -344,6 +403,89 @@ export class AgentCanvasInitialization {
   }
 
   /**
+   * Handle workflow selection change
+   * Re-filters tasks and redraws the canvas
+   */
+  handleWorkflowSelected({ workflowId }) {
+    console.log('🔄 Workflow selection changed:', workflowId);
+
+    // Use all tasks from the original studio data
+    const allTasks = this.parent.allTasks || this.parent.studio?.tasks || [];
+
+    // Filter tasks based on the new selection
+    const filteredTasks = this.state.filterTasksByWorkflow(allTasks);
+
+    // Preserve existing positions
+    const existingPositions = {};
+    this.state.tasks.forEach(t => {
+      if (t.x !== null && t.y !== null) {
+        existingPositions[t.id] = { x: t.x, y: t.y };
+      }
+    });
+
+    // Map and normalize tasks
+    const tasks = filteredTasks.map(task => {
+      const existing = existingPositions[task.id];
+      const normalized = {
+        ...task,
+        x: existing ? existing.x : (task.x ?? null),
+        y: existing ? existing.y : (task.y ?? null),
+        combiner_type: task.combiner_type,
+        combinerType: task.combiner_type,
+        combiner_node_id: task.combiner_node_id,
+        combinerNodeID: task.combiner_node_id
+      };
+
+      // Normalize unassigned tasks
+      if (normalized.to === 'unassigned' || !normalized.to) {
+        normalized.status = 'pending';
+        normalized.result = null;
+        normalized.error = null;
+        normalized.progress = 0;
+        normalized.completed_at = null;
+        normalized.started_at = null;
+      }
+
+      return normalized;
+    });
+
+    // Ensure tasks have positions
+    if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+      tasks.forEach(t => this.parent.eventHandler.ensureTaskPosition(t));
+    }
+
+    // Update state flags
+    this.state.workflowViewMode = !!workflowId;
+    this.state.workflowId = workflowId;
+
+    // Update tasks in state
+    this.state.setTasks(tasks);
+
+    // Update canvas info
+    this.updateCanvasInfo();
+
+    // Zoom to fit the new content
+    this.parent.layout.zoomToFitContent();
+
+    // Redraw canvas
+    this.parent.draw();
+
+    console.log('✅ Canvas updated for workflow:', workflowId || 'All Tasks', '- Tasks:', tasks.length);
+  }
+
+  /**
+   * Update the canvas info display
+   */
+  updateCanvasInfo() {
+    const infoEl = document.getElementById('canvas-info');
+    if (!infoEl) return;
+
+    const workflowLabel = this.state.selectedWorkflowId ? ' (filtered)' : '';
+    infoEl.textContent =
+      `Studio: ${this.parent.studio?.name || this.parent.studioId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
+  }
+
+  /**
    * Fetch initial progress data immediately after initialization
    * This ensures the canvas is fully functional without waiting for SSE
    */
@@ -388,6 +530,13 @@ export class AgentCanvasInitialization {
       }
 
       if (data.tasks) {
+        // Store all tasks for workflow detection
+        this.parent.allTasks = data.tasks;
+        this.state.setAllTasks(data.tasks);
+
+        // Filter tasks based on selected workflow
+        const filteredTasks = this.state.filterTasksByWorkflow(data.tasks);
+
         // Preserve existing positions
         const existingPositions = {};
         this.state.tasks.forEach(t => {
@@ -396,7 +545,7 @@ export class AgentCanvasInitialization {
           }
         });
 
-        const tasks = data.tasks.map(task => {
+        const tasks = filteredTasks.map(task => {
           const existing = existingPositions[task.id];
           const mapped = {
             ...task,

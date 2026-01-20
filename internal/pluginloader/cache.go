@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // GetPluginVersion extracts version information from a plugin tool.

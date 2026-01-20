@@ -7,6 +7,7 @@ let uploadedFiles = [];
 function initFileUpload() {
   const fileInput = document.getElementById('fileUpload');
   const clearFilesBtn = document.getElementById('clearFilesBtn');
+  const directoryBtn = document.getElementById('attachDirectoryBtn');
 
   if (fileInput) {
     fileInput.addEventListener('change', handleFileSelect);
@@ -16,8 +17,61 @@ function initFileUpload() {
     clearFilesBtn.addEventListener('click', clearAllFiles);
   }
 
+  if (directoryBtn) {
+    directoryBtn.addEventListener('click', openFolderPickerForChat);
+  }
+
   // Initialize drag and drop
   initDragAndDrop();
+}
+
+// Open folder picker to add a directory reference for chat
+async function openFolderPickerForChat() {
+  const activeSession = window.sessionManager?.getActiveSession?.();
+  const workspaceId = activeSession?.folder_id;
+
+  if (!workspaceId) {
+    if (window.Toast) {
+      Toast.warning('Please select a chat session in a workspace first');
+    }
+    return;
+  }
+
+  const btn = document.getElementById('attachDirectoryBtn');
+  const originalHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  }
+
+  try {
+    const response = await fetch('/api/launch-folder-picker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: workspaceId })
+    });
+    const result = await response.json();
+
+    if (result.success) {
+      if (window.Toast) {
+        Toast.info('Folder picker opened. Select a folder to add it to the workspace.');
+      }
+    } else {
+      if (window.Toast) {
+        Toast.error(result.error || 'Failed to open folder picker');
+      }
+    }
+  } catch (error) {
+    console.error('Failed to open folder picker:', error);
+    if (window.Toast) {
+      Toast.error('Failed to open folder picker');
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
 }
 
 // Initialize drag and drop functionality

@@ -114,9 +114,16 @@ export class AgentCanvasEventHandler {
     }
 
     if (data.tasks && Array.isArray(data.tasks)) {
+      // Store all tasks for workflow detection
+      this.parent.allTasks = data.tasks;
+      this.state.setAllTasks(data.tasks);
+
+      // Filter tasks based on selected workflow
+      const filteredTasksRaw = this.state.filterTasksByWorkflow(data.tasks);
+
       const tasks = setTasks
-        ? this.normalizeTasksForState(data.tasks)
-        : data.tasks.map(task => this.normalizeTaskWithPosition({ ...task }));
+        ? this.normalizeTasksForState(filteredTasksRaw)
+        : filteredTasksRaw.map(task => this.normalizeTaskWithPosition({ ...task }));
 
       if (setTasks) {
         this.state.setTasks(tasks);
@@ -447,9 +454,29 @@ export class AgentCanvasEventHandler {
       y: taskData.y ?? null,
       status: taskData.status || 'pending'
     };
-    this.ensureTaskPosition(task);
-    this.state.addTask(task);
-    this.parent.draw();
+
+    // Always add to allTasks for workflow detection
+    if (this.parent.allTasks) {
+      const existingIndex = this.parent.allTasks.findIndex(t => t.id === task.id);
+      if (existingIndex === -1) {
+        this.parent.allTasks.push(task);
+      } else {
+        this.parent.allTasks[existingIndex] = task;
+      }
+    }
+
+    // Check if task should be shown based on workflow filter
+    const selectedWorkflowId = this.state.selectedWorkflowId;
+    const taskParentId = task.parent_id || task.parent_task_id;
+    const shouldShowTask = !selectedWorkflowId ||
+      task.id === selectedWorkflowId ||
+      taskParentId === selectedWorkflowId;
+
+    if (shouldShowTask) {
+      this.ensureTaskPosition(task);
+      this.state.addTask(task);
+      this.parent.draw();
+    }
   }
 
   /**

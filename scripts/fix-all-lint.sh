@@ -131,7 +131,6 @@ Please:
 IMPORTANT: Only fix the specific issues mentioned. Don't refactor or add features.
 EOF
 
-: <<'CLAUDE_AUTOFIX_DISABLED'
 echo -e "${BLUE}Launching Claude Code to fix issues...${NC}"
 echo ""
 
@@ -182,8 +181,8 @@ else
   echo -e "${RED}❌ Claude Code execution failed${NC}"
   exit 1
 fi
-CLAUDE_AUTOFIX_DISABLED
 
+: <<'OPENCODE_DISABLED'
 echo -e "${BLUE}Launching OpenCode to fix issues...${NC}"
 echo ""
 
@@ -233,6 +232,7 @@ else
   echo -e "${RED}❌ OpenCode execution failed${NC}"
   exit 1
 fi
+OPENCODE_DISABLED
 
 echo ""
 echo "╔════════════════════════════════════════════╗"

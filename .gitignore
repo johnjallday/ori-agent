@@ -37,6 +37,7 @@ Thumbs.db
 
 # Local configuration files
 .claude/settings.local.json
+.claude/agents/
 .env
 .env.local
 
@@ -49,6 +50,7 @@ cache/
 tmp/
 temp/
 .gocache/
+.gocache-build/
 .gobuild/
 
 # Agent data and configuration
@@ -124,6 +126,7 @@ workspaces/
 ori-agent
 /server
 settings.json
+!.claude/settings.json
 app_state.json
 location.json
 mcp_registry.json
@@ -149,3 +152,9 @@ workflow_templates/
 
 # Misplaced generated protobuf files
 github.com/
+
+# Test plugins (local development only)
+test_plugins/
+
+# Local plugin binaries at root
+elite-grading-tool

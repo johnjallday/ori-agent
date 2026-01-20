@@ -91,6 +91,15 @@ body::before {
   flex-direction: column;
 }
 
+.sidebar .agents-list {
+  overflow: visible;
+  padding-top: 2px;
+}
+
+.sidebar .agents-list .accordion-item {
+  overflow: visible;
+}
+
 /* Custom scrollbar for sidebar */
 .sidebar-content::-webkit-scrollbar {
   width: 6px;

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/review"
 )
 
@@ -43,8 +44,7 @@ type TriggerResponse struct {
 // HandleTrigger handles POST /api/review/trigger
 // Starts a new review job with optional filters.
 func (h *Handler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -85,9 +85,8 @@ func (h *Handler) HandleTrigger(w http.ResponseWriter, r *http.Request) {
 		Message: "Review job started",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(resp)
+	orihttp.WriteJSON(w, resp)
 }
 
 // StatusResponse is the response for GET /api/review/status/{job_id}
@@ -104,8 +103,7 @@ type StatusResponse struct {
 // HandleStatus handles GET /api/review/status/{job_id}
 // Returns the current status of a review job.
 func (h *Handler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -138,8 +136,7 @@ func (h *Handler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		ErrorMessage:     run.ErrorMessage,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	orihttp.WriteJSON(w, resp)
 }
 
 // IssuesResponse is the response for GET /api/review/issues
@@ -151,8 +148,7 @@ type IssuesResponse struct {
 // HandleIssues handles GET /api/review/issues
 // Returns a list of detected issues with optional filtering.
 func (h *Handler) HandleIssues(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -198,15 +194,13 @@ func (h *Handler) HandleIssues(w http.ResponseWriter, r *http.Request) {
 		Count:  len(issues),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	orihttp.WriteJSON(w, resp)
 }
 
 // HandleExport handles GET /api/review/export
 // Exports issues in JSON or JSONL format for training purposes.
 func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -263,17 +257,15 @@ func (h *Handler) HandleExport(w http.ResponseWriter, r *http.Request) {
 		}
 
 	default: // json
-		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=review_issues.json")
-		_ = json.NewEncoder(w).Encode(issues)
+		orihttp.WriteJSON(w, issues)
 	}
 }
 
 // HandleRuns handles GET /api/review/runs
 // Returns recent review runs.
 func (h *Handler) HandleRuns(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -295,8 +287,7 @@ func (h *Handler) HandleRuns(w http.ResponseWriter, r *http.Request) {
 		runs = []review.ReviewRun{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"runs":  runs,
 		"count": len(runs),
 	})

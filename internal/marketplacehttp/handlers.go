@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/marketplace"
 	"github.com/johnjallday/ori-agent/internal/registry"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -62,26 +61,19 @@ type ListMarketplacesResponse struct {
 // ListMarketplaces returns all configured marketplaces
 // GET /api/marketplaces
 func (h *Handler) ListMarketplaces(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
 	marketplaces := h.marketplaceStore.List()
 	resp := ListMarketplacesResponse{Marketplaces: marketplaces}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	orihttp.WriteJSON(w, resp)
 }
 
 // AddMarketplace adds a new marketplace
 // POST /api/marketplaces
 func (h *Handler) AddMarketplace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -105,19 +97,14 @@ func (h *Handler) AddMarketplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	orihttp.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 // UpdateMarketplace updates marketplace settings
 // PUT /api/marketplaces/{id}
 func (h *Handler) UpdateMarketplace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPut) {
 		return
 	}
 
@@ -155,18 +142,13 @@ func (h *Handler) UpdateMarketplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	orihttp.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 // DeleteMarketplace removes a marketplace (except official)
 // DELETE /api/marketplaces/{id}
 func (h *Handler) DeleteMarketplace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodDelete) {
 		return
 	}
 
@@ -182,18 +164,13 @@ func (h *Handler) DeleteMarketplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	orihttp.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 // ReorderMarketplaces updates marketplace priority order
 // POST /api/marketplaces/reorder
 func (h *Handler) ReorderMarketplaces(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -207,18 +184,13 @@ func (h *Handler) ReorderMarketplaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	orihttp.WriteJSON(w, map[string]string{"status": "ok"})
 }
 
 // TestMarketplace validates a marketplace URL and returns preview data
 // POST /api/marketplaces/test
 func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -354,8 +326,7 @@ func (h *Handler) TestMarketplace(w http.ResponseWriter, r *http.Request) {
 // RefreshMarketplace forces a refresh of a specific marketplace
 // POST /api/marketplaces/{id}/refresh
 func (h *Handler) RefreshMarketplace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -380,14 +351,10 @@ func (h *Handler) RefreshMarketplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"status":       "ok",
 		"plugin_count": len(reg.Plugins),
-	}); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": err})
-		orihttp.InternalError(w, "Failed to encode response")
-	}
+	})
 }
 
 // extractMarketplaceID extracts the marketplace ID from URL path

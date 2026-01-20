@@ -1,14 +1,11 @@
 package locationhttp
 
 import (
-	"encoding/json"
-
 	"net/http"
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/location"
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Handler handles location-related HTTP requests
@@ -25,8 +22,7 @@ func NewHandler(manager *location.Manager) *Handler {
 
 // GetCurrentLocation handles GET /api/location/current
 func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -38,31 +34,23 @@ func (h *Handler) GetCurrentLocation(w http.ResponseWriter, r *http.Request) {
 		Location: currentLocation,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }
 
 // GetZones handles GET /api/location/zones
 func (h *Handler) GetZones(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
 	zones := h.manager.GetZones()
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(zones); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, zones)
 }
 
 // CreateZone handles POST /api/location/zones
 func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -88,17 +76,13 @@ func (h *Handler) CreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(zone); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, zone)
 }
 
 // UpdateZone handles PUT /api/location/zones/:id
 func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPut) {
 		return
 	}
 
@@ -136,16 +120,12 @@ func (h *Handler) UpdateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(zone); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, zone)
 }
 
 // DeleteZone handles DELETE /api/location/zones/:id
 func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodDelete) {
 		return
 	}
 
@@ -173,8 +153,7 @@ func (h *Handler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 
 // SetManualLocation handles POST /api/location/override
 func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -201,8 +180,5 @@ func (h *Handler) SetManualLocation(w http.ResponseWriter, r *http.Request) {
 		Message:  "Manual location set successfully",
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Error("Failed to encode response", logger.Fields{"response": err})
-	}
+	orihttp.WriteJSON(w, response)
 }

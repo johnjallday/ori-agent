@@ -1,13 +1,11 @@
 package usagehttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // Handler handles usage and cost tracking HTTP requests
@@ -26,33 +24,21 @@ func NewHandler(costTracker *llm.CostTracker) *Handler {
 // GET /api/usage/stats/all
 func (h *Handler) GetAllTimeStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetAllTimeStats()
-
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	orihttp.WriteJSON(w, stats)
 }
 
 // GetTodayStats returns today's usage statistics
 // GET /api/usage/stats/today
 func (h *Handler) GetTodayStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetTodayStats()
-
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	orihttp.WriteJSON(w, stats)
 }
 
 // GetThisMonthStats returns this month's usage statistics
 // GET /api/usage/stats/month
 func (h *Handler) GetThisMonthStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.costTracker.GetThisMonthStats()
-
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	orihttp.WriteJSON(w, stats)
 }
 
 // GetCustomRangeStats returns usage statistics for a custom time range
@@ -80,31 +66,22 @@ func (h *Handler) GetCustomRangeStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stats := h.costTracker.GetStats(start, end)
-
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(stats); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	orihttp.WriteJSON(w, stats)
 }
 
 // GetPricingModels returns all pricing models
 // GET /api/usage/pricing
 func (h *Handler) GetPricingModels(w http.ResponseWriter, r *http.Request) {
 	models := h.costTracker.GetPricingModels()
-
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"pricing_models": models,
-	}); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	})
 }
 
 // UpdatePricingModel updates a pricing model
 // PUT /api/usage/pricing
 func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
+	if !orihttp.RequireMethods(w, r, http.MethodPut, http.MethodPost) {
 		return
 	}
 
@@ -115,13 +92,10 @@ func (h *Handler) UpdatePricingModel(w http.ResponseWriter, r *http.Request) {
 
 	h.costTracker.UpdatePricingModel(model)
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+	orihttp.WriteJSON(w, map[string]interface{}{
 		"success": true,
 		"message": "Pricing model updated successfully",
-	}); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	})
 }
 
 // GetSummary returns a quick summary of usage stats
@@ -152,8 +126,5 @@ func (h *Handler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(summary); encErr != nil {
-		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
-	}
+	orihttp.WriteJSON(w, summary)
 }

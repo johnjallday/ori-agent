@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 func TestPluginMetadata_GetStatus(t *testing.T) {

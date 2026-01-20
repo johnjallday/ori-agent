@@ -180,6 +180,13 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.WorkflowsJSON = data
 		}
 	}
+	if len(ws.DirectoryReferences) > 0 {
+		if data, err := json.Marshal(ws.DirectoryReferences); err != nil {
+			logger.Warn("Failed to marshal workspace directory references", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.DirectoryReferencesJSON = data
+		}
+	}
 
 	return sessionWS
 }
@@ -265,6 +272,12 @@ func (a *WorkspaceStoreAdapter) toAgentStudioWorkspace(ws *Workspace) *workspace
 	}
 	if agentWS.Workflows == nil {
 		agentWS.Workflows = make(map[string]workspace.Workflow)
+	}
+
+	if len(ws.DirectoryReferencesJSON) > 0 {
+		if err := json.Unmarshal(ws.DirectoryReferencesJSON, &agentWS.DirectoryReferences); err != nil {
+			logger.Warn("Failed to unmarshal workspace directory references", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
 	}
 
 	if agentWS.SharedData == nil {

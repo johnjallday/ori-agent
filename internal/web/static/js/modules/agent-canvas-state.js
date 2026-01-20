@@ -126,7 +126,10 @@ export const EVENT_TYPES = {
 
   // Multi-selection events
   SELECTION_CHANGED: 'selection.changed',
-  SELECTION_CLEARED: 'selection.cleared'
+  SELECTION_CLEARED: 'selection.cleared',
+
+  // Workflow selection events
+  WORKFLOW_SELECTED: 'workflow.selected'
 };
 
 /**
@@ -151,6 +154,7 @@ export class AgentCanvasState {
     this.tasks = [];
     this.attachments = [];
     this.storeNodes = [];  // Store nodes (file storage nodes)
+    this.directoryReferences = [];  // Directory references (read-only file paths)
 
     // Data & Communication
     this.messages = [];
@@ -299,6 +303,10 @@ export class AgentCanvasState {
     // Callbacks (set by parent)
     this.onAgentClick = null;
     this.onTimelineEvent = null;
+
+    // Workflow Selection State
+    this.selectedWorkflowId = null;  // null = show all tasks
+    this.allTasks = [];  // Unfiltered tasks for workflow detection
   }
 
   /**
@@ -474,6 +482,25 @@ export class AgentCanvasState {
       const storeNode = this.storeNodes[index];
       this.storeNodes.splice(index, 1);
       this.eventBus.emit(EVENT_TYPES.STORE_NODE_DELETED, { storeNode });
+    }
+  }
+
+  /**
+   * Set directory references
+   */
+  setDirectoryReferences(directories) {
+    this.directoryReferences = directories || [];
+  }
+
+  /**
+   * Remove directory reference by ID
+   */
+  removeDirectoryReference(directoryId) {
+    const index = this.directoryReferences.findIndex(d => d.id === directoryId);
+    if (index !== -1) {
+      const directory = this.directoryReferences[index];
+      this.directoryReferences.splice(index, 1);
+      this.eventBus.emit(EVENT_TYPES.DIRECTORY_DELETED, { directory });
     }
   }
 
@@ -932,6 +959,116 @@ export class AgentCanvasState {
   hideMultiSelectContextMenu() {
     this.multiSelectContextMenu = false;
     this.multiSelectMenuItems = [];
+  }
+
+  // ==================== WORKFLOW SELECTION ====================
+
+  /**
+   * Set the selected workflow for filtering
+   * @param {string|null} workflowId - Workflow task ID to filter by, or null for all tasks
+   */
+  setSelectedWorkflow(workflowId) {
+    const previousId = this.selectedWorkflowId;
+    this.selectedWorkflowId = workflowId;
+
+    if (previousId !== workflowId) {
+      this.eventBus.emit(EVENT_TYPES.WORKFLOW_SELECTED, {
+        workflowId,
+        previousWorkflowId: previousId
+      });
+    }
+  }
+
+  /**
+   * Get available workflows from current tasks
+   * A workflow is any task that has subtasks (tasks with parent_id or parent_task_id pointing to it)
+   * @returns {Array<{id: string, name: string, taskCount: number}>}
+   */
+  getAvailableWorkflows() {
+    // Use allTasks for workflow detection (includes parent tasks even when filtered)
+    const tasksToSearch = this.allTasks.length > 0 ? this.allTasks : this.tasks;
+
+    if (!tasksToSearch || tasksToSearch.length === 0) {
+      return [];
+    }
+
+    // Find all unique parent_ids that exist in tasks (check both field names)
+    const parentIds = new Set();
+    for (const task of tasksToSearch) {
+      const parentId = task.parent_id || task.parent_task_id;
+      if (parentId) {
+        parentIds.add(parentId);
+      }
+    }
+
+    // Get workflow info for each parent task
+    const workflows = [];
+    for (const parentId of parentIds) {
+      const parentTask = tasksToSearch.find(t => t.id === parentId);
+      if (parentTask) {
+        // Count subtasks (check both field names)
+        const subtaskCount = tasksToSearch.filter(t =>
+          t.parent_id === parentId || t.parent_task_id === parentId
+        ).length;
+        workflows.push({
+          id: parentTask.id,
+          name: parentTask.name || parentTask.description || 'Unnamed Workflow',
+          taskCount: subtaskCount  // Just the subtask count (parent is the canvas now)
+        });
+      }
+    }
+
+    // Sort by name
+    workflows.sort((a, b) => a.name.localeCompare(b.name));
+
+    return workflows;
+  }
+
+  /**
+   * Get the currently selected workflow task
+   * @returns {object|null} The workflow task object or null
+   */
+  getSelectedWorkflow() {
+    if (!this.selectedWorkflowId) {
+      return null;
+    }
+    // Look in allTasks since the parent workflow task is filtered out of tasks
+    const tasksToSearch = this.allTasks.length > 0 ? this.allTasks : this.tasks;
+    return tasksToSearch.find(t => t.id === this.selectedWorkflowId) || null;
+  }
+
+  /**
+   * Set all tasks (unfiltered) for workflow detection
+   * @param {Array} tasks - All tasks before filtering
+   */
+  setAllTasks(tasks) {
+    this.allTasks = tasks || [];
+  }
+
+  /**
+   * Filter tasks by the currently selected workflow
+   * @param {Array} tasks - Array of tasks to filter
+   * @returns {Array} Filtered tasks (or all tasks if no workflow selected)
+   */
+  filterTasksByWorkflow(tasks) {
+    if (!this.selectedWorkflowId || !tasks) {
+      return tasks || [];
+    }
+
+    // When viewing a workflow, only show its subtasks (not the parent workflow task itself)
+    // The canvas title will show the workflow name instead
+    return tasks.filter(task =>
+      task.parent_id === this.selectedWorkflowId ||
+      task.parent_task_id === this.selectedWorkflowId
+    );
+  }
+
+  /**
+   * Get total task count (unfiltered)
+   * @returns {number}
+   */
+  getTotalTaskCount() {
+    return this.tasks ? this.tasks.length : 0;
   }
 
   // ==================== CLEANUP ====================

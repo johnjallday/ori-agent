@@ -3,6 +3,7 @@
 let agentName = '';
 let currentAgent = null;
 let selectedTags = [];
+let currentAvatarImage = null;
 const modelOptions = [
   'gpt-4o',
   'gpt-4o-mini',
@@ -48,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   backLink.href = `/agents/${encodeURIComponent(agentName)}`;
 
   setupTagsInput();
+  setupAvatarUpload();
   populateModelDatalist();
   loadAgentDetails();
 });
@@ -82,6 +84,10 @@ function populateForm(agent) {
   const color = metadata.avatar_color || '#4f46e5';
   document.getElementById('avatarColor').value = color;
   updateColorPreview(color);
+
+  // Handle avatar image
+  currentAvatarImage = metadata.avatar_image || null;
+  updateAvatarPreview();
 
   selectedTags = metadata.tags || [];
   renderTags();
@@ -251,4 +257,212 @@ function populateModelDatalist() {
 function capitalize(str) {
   if (!str) return '';
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// ============================================
+// Avatar Upload Functions
+// ============================================
+
+function setupAvatarUpload() {
+  const fileInput = document.getElementById('avatarFileInput');
+  const dropZone = document.getElementById('avatarDropZone');
+  const removeBtn = document.getElementById('removeAvatarBtn');
+
+  if (fileInput) {
+    fileInput.addEventListener('change', handleAvatarFileSelect);
+  }
+
+  if (dropZone) {
+    dropZone.addEventListener('dragover', handleDragOver);
+    dropZone.addEventListener('dragleave', handleDragLeave);
+    dropZone.addEventListener('drop', handleDrop);
+    dropZone.addEventListener('click', () => fileInput?.click());
+  }
+
+  if (removeBtn) {
+    removeBtn.addEventListener('click', removeAvatar);
+  }
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.style.borderColor = 'var(--primary-color)';
+  e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.style.borderColor = 'var(--border-color)';
+  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.style.borderColor = 'var(--border-color)';
+  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    uploadAvatarFile(files[0]);
+  }
+}
+
+function handleAvatarFileSelect(e) {
+  const files = e.target.files;
+  if (files.length > 0) {
+    uploadAvatarFile(files[0]);
+  }
+}
+
+async function uploadAvatarFile(file) {
+  // Validate file type
+  const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    setAvatarStatus('Invalid file type. Allowed: PNG, JPG, GIF, WebP', 'error');
+    return;
+  }
+
+  // Validate file size (5MB max)
+  const maxSize = 5 * 1024 * 1024;
+  if (file.size > maxSize) {
+    setAvatarStatus('File too large. Maximum size is 5MB.', 'error');
+    return;
+  }
+
+  // Show preview immediately
+  previewAvatarFile(file);
+
+  // Upload the file
+  const formData = new FormData();
+  formData.append('avatar', file);
+
+  try {
+    setAvatarStatus('Uploading...', 'info');
+
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const err = await safeParseError(response);
+      throw new Error(err || 'Failed to upload avatar');
+    }
+
+    const data = await response.json();
+    currentAvatarImage = data.avatar_url?.replace('/avatars/', '') || null;
+    setAvatarStatus('Avatar uploaded successfully!', 'success');
+    updateAvatarPreview();
+  } catch (error) {
+    console.error('Error uploading avatar:', error);
+    setAvatarStatus(error.message || 'Failed to upload avatar', 'error');
+    // Reset preview if upload failed
+    updateAvatarPreview();
+  }
+}
+
+function previewAvatarFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = document.getElementById('avatarImg');
+    const placeholder = document.getElementById('avatarPlaceholder');
+    if (img) {
+      img.src = e.target.result;
+      img.style.display = 'block';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function removeAvatar() {
+  if (!currentAvatarImage) return;
+
+  try {
+    setAvatarStatus('Removing...', 'info');
+
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+      method: 'DELETE'
+    });
+
+    if (!response.ok) {
+      const err = await safeParseError(response);
+      throw new Error(err || 'Failed to remove avatar');
+    }
+
+    currentAvatarImage = null;
+    setAvatarStatus('Avatar removed.', 'success');
+    updateAvatarPreview();
+  } catch (error) {
+    console.error('Error removing avatar:', error);
+    setAvatarStatus(error.message || 'Failed to remove avatar', 'error');
+  }
+}
+
+function updateAvatarPreview() {
+  const img = document.getElementById('avatarImg');
+  const placeholder = document.getElementById('avatarPlaceholder');
+  const actionsDiv = document.getElementById('avatarActions');
+  const previewContainer = document.getElementById('avatarImagePreview');
+
+  if (currentAvatarImage) {
+    // Show the image
+    if (img) {
+      img.src = `/avatars/${currentAvatarImage}`;
+      img.style.display = 'block';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    if (actionsDiv) {
+      actionsDiv.style.display = 'block';
+    }
+    if (previewContainer) {
+      previewContainer.style.borderStyle = 'solid';
+    }
+  } else {
+    // Show placeholder
+    if (img) {
+      img.src = '';
+      img.style.display = 'none';
+    }
+    if (placeholder) {
+      placeholder.style.display = 'block';
+    }
+    if (actionsDiv) {
+      actionsDiv.style.display = 'none';
+    }
+    if (previewContainer) {
+      previewContainer.style.borderStyle = 'dashed';
+    }
+  }
+}
+
+function setAvatarStatus(message, type = 'info') {
+  const statusEl = document.getElementById('avatarUploadStatus');
+  if (!statusEl) return;
+
+  statusEl.textContent = message;
+
+  if (type === 'error') {
+    statusEl.style.color = 'var(--danger-color)';
+  } else if (type === 'success') {
+    statusEl.style.color = 'var(--success-color, #22c55e)';
+  } else {
+    statusEl.style.color = 'var(--text-secondary)';
+  }
+
+  // Clear status after 3 seconds for success/info messages
+  if (type !== 'error') {
+    setTimeout(() => {
+      if (statusEl.textContent === message) {
+        statusEl.textContent = '';
+      }
+    }, 3000);
+  }
 }

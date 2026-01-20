@@ -2940,6 +2940,135 @@ async function submitStoreNode() {
   }
 }
 
+// =============================================================================
+// Directory Reference Functions
+// =============================================================================
+
+/**
+ * Show the add directory reference modal
+ */
+async function showAddDirectoryModal() {
+  const modal = new bootstrap.Modal(document.getElementById('addDirectoryModal'));
+
+  // Reset form
+  document.getElementById('directoryForm').reset();
+
+  modal.show();
+}
+
+/**
+ * Submit the directory reference form
+ */
+async function submitDirectory() {
+  const name = document.getElementById('directory-name').value.trim();
+  const path = document.getElementById('directory-path').value.trim();
+
+  if (!name || !path) {
+    alert('Please fill in all required fields');
+    return;
+  }
+
+  const studioId = window.currentStudioId || (window.agentCanvas && window.agentCanvas.studioId);
+
+  if (!studioId) {
+    alert('Error: Workspace ID not found. Please refresh the page.');
+    console.error('Cannot create directory reference: studioId is missing');
+    return;
+  }
+
+  console.log('Creating directory reference for studioId:', studioId);
+
+  try {
+    // Calculate center of visible viewport
+    let x = 400, y = 400;
+    if (window.agentCanvas) {
+      const canvas = window.agentCanvas;
+      const scale = canvas.state?.scale || canvas.scale || 1;
+      const offsetX = canvas.state?.offsetX || canvas.offsetX || 0;
+      const offsetY = canvas.state?.offsetY || canvas.offsetY || 0;
+      const width = canvas.width || 800;
+      const height = canvas.height || 600;
+      x = (width / 2 - offsetX) / scale + (Math.random() - 0.5) * 100;
+      y = (height / 2 - offsetY) / scale + (Math.random() - 0.5) * 100;
+    }
+
+    const response = await fetch(`/api/studios/${studioId}/directories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        path: path,
+        x: x,
+        y: y
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Failed to create directory reference: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('Directory reference created:', result);
+
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addDirectoryModal'));
+    modal.hide();
+
+    // Refresh canvas to show the new directory reference
+    if (window.agentCanvas && window.agentCanvas.init) {
+      await window.agentCanvas.init();
+    }
+
+    // Show success message
+    if (window.Toast) {
+      window.Toast.success('Directory reference added successfully');
+    }
+  } catch (error) {
+    console.error('Error creating directory reference:', error);
+    alert(`Error creating directory reference: ${error.message}`);
+  }
+}
+
+/**
+ * Launch the folder picker helper app
+ */
+async function launchFolderPicker() {
+  try {
+    const response = await fetch('/api/launch-folder-picker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      // Close the modal since the folder picker will handle it
+      const modal = bootstrap.Modal.getInstance(document.getElementById('addDirectoryModal'));
+      if (modal) {
+        modal.hide();
+      }
+
+      if (window.Toast) {
+        window.Toast.info('Folder picker opened. Select a folder and it will be added to this workspace.');
+      }
+    } else {
+      if (window.Toast) {
+        window.Toast.error(result.error || 'Failed to launch folder picker');
+      } else {
+        alert(result.error || 'Failed to launch folder picker');
+      }
+    }
+  } catch (error) {
+    console.error('Error launching folder picker:', error);
+    if (window.Toast) {
+      window.Toast.error('Failed to launch folder picker. You can enter the path manually below.');
+    } else {
+      alert('Failed to launch folder picker. You can enter the path manually below.');
+    }
+  }
+}
+
 // Export functions to window
 window.setCronPreset = setCronPreset;
 window.toggleCronBuilder = toggleCronBuilder;
@@ -2947,6 +3076,9 @@ window.buildCronFromFields = buildCronFromFields;
 window.updateCronDescription = updateCronDescription;
 window.showAddStoreNodeModal = showAddStoreNodeModal;
 window.submitStoreNode = submitStoreNode;
+window.showAddDirectoryModal = showAddDirectoryModal;
+window.submitDirectory = submitDirectory;
+window.launchFolderPicker = launchFolderPicker;
 
 // ========== SAVE WORKFLOW MODAL ==========
 

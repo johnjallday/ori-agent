@@ -140,6 +140,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadAvailableProviders(),
     loadAgentDetails()
   ]);
+
+  const pluginPanel = document.getElementById('pluginManagerPanel');
+  if (pluginPanel) {
+    await loadAvailablePlugins();
+    updateAvailablePluginsToggle();
+  }
+
+  if (window.EventBus && typeof EventBus.on === 'function') {
+    EventBus.on('plugin:uploaded', async () => {
+      if (pluginManagerVisible) {
+        await loadAvailablePlugins();
+      }
+    }, 'agents-detail');
+  }
 });
 
 async function fetchAgentDetail() {
@@ -189,8 +203,15 @@ function renderAgentDetails() {
   // Header
   const avatar = document.getElementById('agentAvatar');
   if (avatar) {
-    avatar.style.background = getAgentColor(currentAgent);
-    avatar.textContent = getAgentInitials(currentAgent.name);
+    // Check for custom avatar image
+    if (currentAgent.metadata?.avatar_image) {
+      avatar.innerHTML = `<img src="/avatars/${escapeHtml(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
+      avatar.style.background = 'transparent';
+      avatar.style.overflow = 'hidden';
+    } else {
+      avatar.style.background = getAgentColor(currentAgent);
+      avatar.textContent = getAgentInitials(currentAgent.name);
+    }
   }
 
   const nameEl = document.getElementById('agentName');
@@ -757,23 +778,55 @@ function renderTags() {
   });
 }
 
+function openUploadPluginModal() {
+  if (typeof showPluginUploadModal === 'function') {
+    showPluginUploadModal();
+    return;
+  }
+  showToast('Plugin upload is not available right now', 'error');
+}
+
 // ============================================
 // Plugin Management Functions
 // ============================================
 
-let pluginManagerVisible = false;
+let pluginManagerVisible = true;
 let allAvailablePlugins = [];
 
-// Toggle plugin manager panel
-async function togglePluginManager() {
-  const panel = document.getElementById('pluginManagerPanel');
-  pluginManagerVisible = !pluginManagerVisible;
+function updateAvailablePluginsToggle() {
+  const toggleBtn = document.getElementById('toggleAvailablePluginsBtn');
+  if (!toggleBtn) return;
 
   if (pluginManagerVisible) {
-    panel.style.display = 'block';
-    await loadAvailablePlugins();
+    toggleBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+        <path d="M7.41,15.41L12,10.83L16.59,15.41L18,14L12,8L6,14L7.41,15.41Z"/>
+      </svg>
+      Hide Available
+    `;
+    toggleBtn.setAttribute('aria-expanded', 'true');
   } else {
-    panel.style.display = 'none';
+    toggleBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+        <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
+      </svg>
+      Show Available
+    `;
+    toggleBtn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+// Toggle available plugins panel
+async function toggleAvailablePluginsPanel() {
+  const panel = document.getElementById('pluginManagerPanel');
+  if (!panel) return;
+
+  pluginManagerVisible = !pluginManagerVisible;
+  panel.style.display = pluginManagerVisible ? 'block' : 'none';
+  updateAvailablePluginsToggle();
+
+  if (pluginManagerVisible) {
+    await loadAvailablePlugins();
   }
 }
 
@@ -805,7 +858,17 @@ function renderAvailablePlugins() {
   const enabledSet = new Set(enabledNames);
 
   if (allAvailablePlugins.length === 0) {
-    container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No plugins available. Upload plugins from the Plugins page.</div>';
+    container.innerHTML = `
+      <div class="text-center py-3" style="color: var(--text-secondary);">
+        <div>No plugins available yet.</div>
+        <button class="modern-btn modern-btn-secondary mt-2" type="button" onclick="openUploadPluginModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+            <path d="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z"/>
+          </svg>
+          Upload Plugin
+        </button>
+      </div>
+    `;
     return;
   }
 

@@ -405,6 +405,9 @@ class AgentCanvas {
     // Draw store nodes
     this.renderer.drawStoreNodes();
 
+    // Draw directory reference nodes
+    this.renderer.drawDirectoryNodes();
+
     // Draw agent-to-store connections
     this.renderer.drawAgentToStoreConnections();
 

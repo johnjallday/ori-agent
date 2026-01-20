@@ -3,7 +3,7 @@ package pluginhttp
 import (
 	"fmt"
 
-	"github.com/johnjallday/ori-agent/pluginapi"
+	"github.com/oriagent/ori-pluginapi"
 )
 
 // EnumExtractor provides functionality to extract enum values from OpenAI function parameters
