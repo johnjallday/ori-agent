@@ -186,7 +186,7 @@
       const title = directory.name || 'Untitled Directory';
       const path = directory.path || 'Path unavailable';
       return `
-        <div class="hub-directory-item">
+        <div class="hub-directory-item" data-directory-id="${escapeHtml(directory.id)}">
           <div class="hub-directory-icon">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
@@ -196,11 +196,17 @@
             <div class="hub-directory-title">${escapeHtml(title)}</div>
             <div class="hub-directory-path" title="${escapeHtml(path)}">${escapeHtml(path)}</div>
           </div>
+          <button class="hub-item-delete-btn" data-action="delete-directory" title="Remove directory reference">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
         </div>
       `;
     });
 
     elements.directoriesList.innerHTML = items.join('');
+    bindDirectoryEvents();
   }
 
   /**
@@ -232,6 +238,52 @@
         } else if (!inSelectionMode && !event.target.closest('button')) {
           openFile(fileId);
         }
+      });
+    });
+  }
+
+  /**
+   * Delete a directory reference
+   * @param {string} directoryId - Directory ID to delete
+   */
+  async function deleteDirectory(directoryId) {
+    const state = window.WorkspaceHubState.getState();
+
+    const confirmed = await window.WorkspaceHubModals.showDeleteConfirm({
+      title: 'Remove Directory Reference',
+      message: 'Remove this directory reference? The actual folder on disk will not be deleted.',
+      variant: 'delete'
+    });
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/studios/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Failed to remove directory reference');
+
+      if (window.Toast) window.Toast.success('Directory reference removed');
+      await loadFiles(state.selectedId);
+    } catch (error) {
+      console.error('Failed to remove directory reference:', error);
+      if (window.Toast) window.Toast.error('Failed to remove directory reference');
+    }
+  }
+
+  /**
+   * Bind event handlers to directory items
+   */
+  function bindDirectoryEvents() {
+    const elements = window.WorkspaceHubState.getElements();
+
+    if (!elements.directoriesList) return;
+
+    elements.directoriesList.querySelectorAll('.hub-directory-item').forEach((item) => {
+      const directoryId = item.dataset.directoryId;
+
+      item.querySelector('[data-action="delete-directory"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteDirectory(directoryId);
       });
     });
   }
@@ -628,6 +680,7 @@
     loadFiles,
     renderFiles,
     renderDirectories,
+    deleteDirectory,
     openAddFileModal,
     updateSelectedFilesPreview,
     addFilesToPending,
