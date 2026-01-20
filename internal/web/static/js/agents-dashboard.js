@@ -161,11 +161,10 @@ function renderTableView() {
                     </div>
                     <div class="agent-info">
                         <div class="agent-name">${escapeHtml(agent.name)}</div>
-                        ${agent.metadata?.description ?
-    `<div class="agent-description">${escapeHtml(agent.metadata.description)}</div>` : ''}
                     </div>
                 </div>
             </td>
+            <td class="description-cell">${agent.metadata?.description ? escapeHtml(agent.metadata.description) : '<span class="text-muted">-</span>'}</td>
             <td>${capitalize(agent.type || 'tool-calling')}</td>
             <td>$${(agent.statistics?.total_cost || 0).toFixed(4)}</td>
             <td>

@@ -283,6 +283,19 @@
         color: var(--text-muted);
     }
 
+    .description-cell {
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    [data-bs-theme="dark"] .description-cell {
+        color: rgba(255, 255, 255, 0.7);
+    }
+
     .actions-cell {
         display: flex;
         gap: 8px;
@@ -494,6 +507,7 @@
                 <thead>
                     <tr>
                         <th onclick="sortTable('name')">Agent <span class="sort-icon">▼</span></th>
+                        <th>Description</th>
                         <th onclick="sortTable('type')">Type</th>
                         <th onclick="sortTable('cost')">Cost</th>
                         <th>Actions</th>
