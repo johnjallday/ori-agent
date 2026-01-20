@@ -19,8 +19,9 @@ const localServerPort = "21547" // Port for local control server
 
 // App struct
 type App struct {
-	ctx     context.Context
-	baseURL string
+	ctx                  context.Context
+	baseURL              string
+	preSelectedWorkspace string
 }
 
 // NewApp creates a new App application struct
@@ -43,6 +44,18 @@ func (a *App) startLocalServer() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/show", func(w http.ResponseWriter, r *http.Request) {
+		// Check for workspace_id in query params or body
+		workspaceID := r.URL.Query().Get("workspace_id")
+		if workspaceID == "" && r.Body != nil {
+			var body struct {
+				WorkspaceID string `json:"workspace_id"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			workspaceID = body.WorkspaceID
+		}
+		if workspaceID != "" {
+			a.preSelectedWorkspace = workspaceID
+		}
 		a.ShowWindow()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -232,6 +245,13 @@ func (a *App) CheckServerConnection() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// GetPreSelectedWorkspace returns the pre-selected workspace ID and clears it
+func (a *App) GetPreSelectedWorkspace() string {
+	ws := a.preSelectedWorkspace
+	a.preSelectedWorkspace = ""
+	return ws
 }
 
 // Quit closes the application

@@ -610,13 +610,24 @@
   /**
    * Launch folder picker app
    * @param {Object} options - Options
+   * @param {string} options.workspaceId - Workspace ID to pre-select
    * @returns {Promise<boolean>} Success status
    */
   async function launchFolderPicker(options = {}) {
     const elements = window.WorkspaceHubState.getElements();
+    const state = window.WorkspaceHubState.getState();
 
     try {
-      const response = await fetch('/api/launch-folder-picker', { method: 'POST' });
+      const body = {};
+      if (options.workspaceId || state.selectedId) {
+        body.workspace_id = options.workspaceId || state.selectedId;
+      }
+
+      const response = await fetch('/api/launch-folder-picker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
       const result = await response.json();
 
       if (result.success) {

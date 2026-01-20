@@ -22,9 +22,17 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Parse optional workspace_id from request body
+	var reqBody struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&reqBody)
+	}
+
 	// First, try to show existing window via local control server
-	if showExistingFolderPicker() {
-		logger.Info("Showed existing folder picker window", nil)
+	if showExistingFolderPicker(reqBody.WorkspaceID) {
+		logger.Info("Showed existing folder picker window", logger.Fields{"workspace_id": reqBody.WorkspaceID})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -78,10 +86,15 @@ func (h *HTTPHandler) LaunchFolderPicker(w http.ResponseWriter, r *http.Request)
 }
 
 // showExistingFolderPicker tries to show the window of an already running folder picker
-func showExistingFolderPicker() bool {
+func showExistingFolderPicker(workspaceID string) bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 
-	resp, err := client.Post("http://127.0.0.1:"+folderPickerControlPort+"/show", "application/json", nil)
+	url := "http://127.0.0.1:" + folderPickerControlPort + "/show"
+	if workspaceID != "" {
+		url += "?workspace_id=" + workspaceID
+	}
+
+	resp, err := client.Post(url, "application/json", nil)
 	if err != nil {
 		return false
 	}

@@ -289,6 +289,13 @@
                     select.appendChild(option);
                 });
                 select.disabled = false;
+
+                // Check for pre-selected workspace
+                const preSelected = await window.go.main.App.GetPreSelectedWorkspace();
+                if (preSelected && workspaces.some(ws => ws.id === preSelected)) {
+                    select.value = preSelected;
+                    updateSubmitButton();
+                }
             } catch (e) {
                 select.innerHTML = '<option value="">Error loading workspaces</option>';
                 showStatus('error', 'Failed to load workspaces: ' + e.message);
