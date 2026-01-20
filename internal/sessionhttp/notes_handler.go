@@ -1,6 +1,8 @@
 package sessionhttp
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -265,6 +267,10 @@ func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request, id string) 
 func (h *Handler) listNotesByWorkspace(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	notes, err := h.store.ListNotesByWorkspace(r.Context(), workspaceID)
 	if err != nil {
+		// Don't log context canceled - it's normal when client disconnects
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		logger.Error("Failed to list notes", logger.Fields{"workspace_id": workspaceID, "error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to list notes")
 		return

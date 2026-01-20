@@ -88,7 +88,8 @@
     fileUploadProgress: document.getElementById('hubFileUploadProgress'),
     fileUploadPercent: document.getElementById('hubFileUploadPercent'),
     fileUploadProgressBar: document.getElementById('hubFileUploadProgressBar'),
-    addFileSubmitBtn: document.getElementById('hubAddFileSubmitBtn')
+    addFileSubmitBtn: document.getElementById('hubAddFileSubmitBtn'),
+    addDirectoryBtn: document.getElementById('hubAddDirectoryBtn')
   };
 
   const state = {
@@ -168,12 +169,12 @@
   function shouldRefreshForRealtimeEvent(type) {
     if (!type) return false;
     if (type === 'workspace.status') return false;
+    // Don't refresh on connection.opened - tasks are already loaded when workspace is selected
     return type.startsWith('task.') ||
       type.startsWith('workflow.') ||
       type.startsWith('step.') ||
       type === 'workspace.updated' ||
-      type === 'workspace.completed' ||
-      type === 'connection.opened';
+      type === 'workspace.completed';
   }
 
   function scheduleWorkspaceTasksRefresh(delayMs = 500) {
@@ -2295,6 +2296,22 @@
     const maxSize = 10 * 1024 * 1024;
 
     files.forEach((file) => {
+      // Check if this is a folder (folders have no type and size is 0 or very small)
+      // Also check if the file has no extension which often indicates a folder
+      const hasExtension = file.name.includes('.');
+      const isLikelyFolder = (!file.type && file.size === 0) ||
+                             (!file.type && !hasExtension && file.size < 4096);
+
+      if (isLikelyFolder) {
+        if (window.Toast) {
+          window.Toast.info(
+            'To add a folder, use the "Directory" button in the canvas toolbar instead.',
+            { title: 'Folder Detected' }
+          );
+        }
+        return;
+      }
+
       if (file.size > maxSize) {
         if (window.Toast) {
           window.Toast.warning(`${file.name} exceeds 10MB limit`);
@@ -2454,18 +2471,32 @@
     });
   }
 
+  let tasksAbortController = null;
+
   async function loadWorkspaceTasks(workspaceId) {
     if (!workspaceId) return;
+
+    // Cancel any pending request
+    if (tasksAbortController) {
+      tasksAbortController.abort();
+    }
+    tasksAbortController = new AbortController();
 
     if (elements.tasksList) {
       elements.tasksList.innerHTML = '<div class="hub-loading">Loading tasks...</div>';
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspaceId)}`);
+      const response = await fetch(`/api/orchestration/tasks?studio_id=${encodeURIComponent(workspaceId)}`, {
+        signal: tasksAbortController.signal
+      });
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
+
+      // Only update if this workspace is still selected
+      if (state.selectedId !== workspaceId) return;
+
       state.tasks = data.tasks || [];
       const computed = computeStats(state.tasks);
       state.stats = { ...computed, ...(data.stats || {}) };
@@ -2475,7 +2506,13 @@
       renderTasksList(state.tasks);
       renderSchedules(state.tasks);
     } catch (error) {
+      // Ignore abort errors - they're expected when switching workspaces quickly
+      if (error.name === 'AbortError') return;
+
       console.error('Workspace hub failed to load tasks:', error);
+      // Only update UI if this workspace is still selected
+      if (state.selectedId !== workspaceId) return;
+
       if (elements.tasksList) {
         elements.tasksList.innerHTML = '<div class="hub-empty">Unable to load tasks right now.</div>';
       }
@@ -2547,6 +2584,11 @@
 
   function showLauncher() {
     stopWorkspaceRealtime();
+    // Cancel any pending task requests
+    if (tasksAbortController) {
+      tasksAbortController.abort();
+      tasksAbortController = null;
+    }
     setState('launcher');
     if (elements.workspaceSelect) {
       elements.workspaceSelect.value = '';
@@ -3214,6 +3256,40 @@
     }
     if (elements.addFileSubmitBtn) {
       elements.addFileSubmitBtn.addEventListener('click', submitAddFile);
+    }
+
+    // Directory reference button - launches folder picker app
+    if (elements.addDirectoryBtn) {
+      elements.addDirectoryBtn.addEventListener('click', async () => {
+        try {
+          elements.addDirectoryBtn.disabled = true;
+          elements.addDirectoryBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Launching...';
+
+          const response = await fetch('/api/launch-folder-picker', { method: 'POST' });
+          const result = await response.json();
+
+          if (result.success) {
+            // Close the modal since folder picker is now open
+            if (elements.addFileModal && window.bootstrap) {
+              const modal = bootstrap.Modal.getInstance(elements.addFileModal);
+              if (modal) modal.hide();
+            }
+          } else {
+            window.toastManager?.showToast(result.error || 'Failed to launch folder picker', 'error');
+          }
+        } catch (error) {
+          console.error('Failed to launch folder picker:', error);
+          window.toastManager?.showToast('Failed to launch folder picker', 'error');
+        } finally {
+          elements.addDirectoryBtn.disabled = false;
+          elements.addDirectoryBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            Browse with Folder Picker
+          `;
+        }
+      });
     }
   }
 

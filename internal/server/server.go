@@ -190,6 +190,9 @@ func (s *Server) Shutdown() {
 		_ = s.sessionFilesWatcher.Close()
 	}
 
+	// Shutdown folder picker if running
+	workspace.ShutdownFolderPicker()
+
 	// Clean up all loaded plugins
 	s.cleanupPlugins()
 }

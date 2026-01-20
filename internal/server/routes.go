@@ -618,6 +618,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Folder Picker Launcher
+	// =============================================================================
+	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)
+
+	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
@@ -708,6 +713,36 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
+			}
+			// Handle directory reference operations
+		} else if strings.Contains(r.URL.Path, "/directories") {
+			// Check for /files/ path to read file content
+			if strings.Contains(r.URL.Path, "/files/") {
+				s.studioHandler.ReadDirectoryFile(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodGet {
+				s.studioHandler.ListDirectoryFiles(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/directories") {
+				// /api/studios/:id/directories
+				switch r.Method {
+				case http.MethodPost:
+					s.studioHandler.CreateDirectory(w, r)
+				case http.MethodGet:
+					s.studioHandler.ListDirectories(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			} else {
+				// /api/studios/:id/directories/:dir_id
+				switch r.Method {
+				case http.MethodGet:
+					s.studioHandler.GetDirectory(w, r)
+				case http.MethodPut, http.MethodPatch:
+					s.studioHandler.UpdateDirectory(w, r)
+				case http.MethodDelete:
+					s.studioHandler.DeleteDirectory(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
 			}
 			// Handle agent add/remove operations
 		} else if strings.Contains(r.URL.Path, "/agents") {

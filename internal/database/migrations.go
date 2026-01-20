@@ -9,7 +9,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -80,6 +80,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration009OrchestrationData(ctx)
 	case 10:
 		return db.migration010SmartInputOverrides(ctx)
+	case 11:
+		return db.migration011DirectoryReferences(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -975,6 +977,18 @@ func (db *DB) migration010SmartInputOverrides(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			return fmt.Errorf("failed to create smart_input_overrides index: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// migration011DirectoryReferences adds the directory_references_json column to workspaces.
+// This stores serialized directory references that allow agents to access local file paths.
+func (db *DB) migration011DirectoryReferences(ctx context.Context) error {
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN directory_references_json TEXT DEFAULT '[]'
+	`); err != nil {
+		return fmt.Errorf("failed to add directory_references_json column: %w", err)
 	}
 
 	return nil

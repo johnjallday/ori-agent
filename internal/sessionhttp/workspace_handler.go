@@ -1,6 +1,8 @@
 package sessionhttp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -205,6 +207,10 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	if tree {
 		workspaces, err := h.store.GetWorkspaceTree(r.Context())
 		if err != nil {
+			// Don't log context canceled - it's normal when client disconnects
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			logger.Error("Failed to get workspace tree", logger.Fields{"error": err})
 			_ = orihttp.RespondInternalError(w, "Failed to get workspaces")
 			return
@@ -218,6 +224,10 @@ func (h *Handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	workspaces, err := h.store.ListWorkspaces(r.Context())
 	if err != nil {
+		// Don't log context canceled - it's normal when client disconnects
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		logger.Error("Failed to list workspaces", logger.Fields{"error": err})
 		_ = orihttp.RespondInternalError(w, "Failed to list workspaces")
 		return

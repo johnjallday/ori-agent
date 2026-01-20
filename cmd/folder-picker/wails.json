@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "ori-folder-picker",
+  "outputfilename": "ori-folder-picker",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "Ori Agent",
+    "email": "support@ori-agent.com"
+  },
+  "info": {
+    "companyName": "Ori Agent",
+    "productName": "Ori Folder Picker",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2024 Ori Agent",
+    "comments": "A helper app for adding directory references to Ori Agent workspaces"
+  }
+}
