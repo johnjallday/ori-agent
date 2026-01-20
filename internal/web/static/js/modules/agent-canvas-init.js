@@ -175,6 +175,38 @@ export class AgentCanvasInitialization {
         console.log('💾 No store_nodes in studio data');
       }
 
+      // Load directory references from studio
+      if (this.parent.studio.directory_references) {
+        console.log('📁 Raw directory_references from API:', this.parent.studio.directory_references);
+
+        const directories = this.parent.studio.directory_references.map(dir => {
+          // Use position from dir (API), then layout, then defaults
+          let x = dir.x ?? 400;
+          let y = dir.y ?? 400;
+
+          // Override with layout position if available
+          if (this.parent.studio.layout && this.parent.studio.layout.directory_positions) {
+            const pos = this.parent.studio.layout.directory_positions[dir.id];
+            if (pos) {
+              x = pos.x;
+              y = pos.y;
+              console.log('📁 Using layout position for', dir.id, ':', pos);
+            }
+          }
+
+          return {
+            ...dir,
+            x: x,
+            y: y
+          };
+        });
+
+        console.log('📁 Loaded directory references:', directories.length, directories);
+        this.state.setDirectoryReferences(directories);
+      } else {
+        console.log('📁 No directory_references in studio data');
+      }
+
       // Initialize agent positions
       this.initializeAgents();
 

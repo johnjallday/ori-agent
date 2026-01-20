@@ -103,6 +103,10 @@ export class AgentCanvasRenderer {
     return this.nodes.drawStoreNodes();
   }
 
+  drawDirectoryNodes() {
+    return this.nodes.drawDirectoryNodes();
+  }
+
   drawAgentToStoreConnections() {
     return this.connections.drawAgentToStoreConnections();
   }

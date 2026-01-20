@@ -281,14 +281,22 @@
           </svg>
           <label class="task-modal-label" style="margin: 0;">Attachments <span class="task-modal-optional">(optional)</span></label>
         </div>
-        <div id="taskModalFileDropZone" class="task-file-drop-zone">
-          <div class="task-file-drop-content">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.6;">
-              <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
-            </svg>
-            <span style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach</span>
+        <div style="display: flex; gap: 8px; align-items: stretch;">
+          <div id="taskModalFileDropZone" class="task-file-drop-zone" style="flex: 1;">
+            <div class="task-file-drop-content">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); opacity: 0.6;">
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/>
+              </svg>
+              <span style="color: var(--text-secondary); font-size: 0.8rem;">Drop files or click to attach</span>
+            </div>
+            <input type="file" id="taskModalFileInput" multiple style="display: none;">
           </div>
-          <input type="file" id="taskModalFileInput" multiple style="display: none;">
+          <button type="button" id="taskModalAddDirectoryBtn" class="task-modal-btn task-modal-btn-directory" title="Add directory reference">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+            </svg>
+            <span>Directory</span>
+          </button>
         </div>
         <div id="taskModalSelectedFiles" class="task-selected-files" style="display: none;"></div>
       </div>

@@ -79,10 +79,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// =============================================================================
+	// Agent Avatars (Static File Serving)
+	// =============================================================================
+	mux.HandleFunc("/avatars/", s.serveAvatarFiles)
+
+	// =============================================================================
 	// Agent API Endpoints
 	// =============================================================================
 	agentHandler := agenthttp.New(s.st)
 	agentHandler.ActivityLogger = s.activityLogger
+	avatarHandler := agenthttp.NewAvatarHandler(s.st)
 	mux.Handle("/api/agents", agentHandler)
 
 	// Dashboard handlers
@@ -107,6 +113,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Route activity log requests
 		if strings.Contains(r.URL.Path, "/activity") && r.Method == http.MethodGet {
 			dashboardHandler.GetAgentActivity(w, r)
+			return
+		}
+		// Route avatar upload/delete requests
+		if strings.Contains(r.URL.Path, "/avatar") {
+			avatarHandler.ServeHTTP(w, r)
 			return
 		}
 		// Route agent MCP-specific requests
@@ -618,6 +629,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Folder Picker Launcher
+	// =============================================================================
+	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)
+
+	// =============================================================================
 	// Agent Studio API Endpoints
 	// =============================================================================
 	mux.HandleFunc("/api/studios", func(w http.ResponseWriter, r *http.Request) {
@@ -708,6 +724,36 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 				s.studioHandler.DeleteStoreNode(w, r)
 			} else {
 				orihttp.MethodNotAllowed(w)
+			}
+			// Handle directory reference operations
+		} else if strings.Contains(r.URL.Path, "/directories") {
+			// Check for /files/ path to read file content
+			if strings.Contains(r.URL.Path, "/files/") {
+				s.studioHandler.ReadDirectoryFile(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/files") && r.Method == http.MethodGet {
+				s.studioHandler.ListDirectoryFiles(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/directories") {
+				// /api/studios/:id/directories
+				switch r.Method {
+				case http.MethodPost:
+					s.studioHandler.CreateDirectory(w, r)
+				case http.MethodGet:
+					s.studioHandler.ListDirectories(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
+			} else {
+				// /api/studios/:id/directories/:dir_id
+				switch r.Method {
+				case http.MethodGet:
+					s.studioHandler.GetDirectory(w, r)
+				case http.MethodPut, http.MethodPatch:
+					s.studioHandler.UpdateDirectory(w, r)
+				case http.MethodDelete:
+					s.studioHandler.DeleteDirectory(w, r)
+				default:
+					orihttp.MethodNotAllowed(w)
+				}
 			}
 			// Handle agent add/remove operations
 		} else if strings.Contains(r.URL.Path, "/agents") {

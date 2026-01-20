@@ -8,10 +8,17 @@
     "lint": "eslint internal/web/static/js/",
     "lint:fix": "eslint internal/web/static/js/ --fix",
     "format": "prettier --write 'internal/web/static/**/*.{js,css,html}'",
-    "format:check": "prettier --check 'internal/web/static/**/*.{js,css,html}'"
+    "format:check": "prettier --check 'internal/web/static/**/*.{js,css,html}'",
+    "test": "playwright test",
+    "test:smoke": "playwright test tests/smoke.spec.ts",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "validate": "npm run lint && npm run test:smoke"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@playwright/test": "^1.57.0",
     "eslint": "^9.0.0",
     "globals": "^15.0.0",
     "prettier": "^3.0.0"

@@ -63,14 +63,41 @@
             <textarea id="agentDescription" class="form-textarea" placeholder="Describe the agent's purpose or behavior" style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary); resize: vertical; min-height: 120px;"></textarea>
           </div>
 
+          <!-- Avatar Image Upload Section -->
+          <div class="form-group" style="margin-bottom: 18px;">
+            <label class="form-label" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">Avatar Image</label>
+            <div id="avatarUploadArea" class="avatar-upload-area" style="display: flex; gap: 16px; align-items: flex-start;">
+              <div id="avatarPreviewContainer" style="flex-shrink: 0;">
+                <div id="avatarImagePreview" class="avatar-preview" style="width: 80px; height: 80px; border-radius: 12px; border: 2px dashed var(--border-color); display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-secondary);">
+                  <span id="avatarPlaceholder" style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 8px;">No image</span>
+                  <img id="avatarImg" src="" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                </div>
+              </div>
+              <div style="flex: 1;">
+                <div id="avatarDropZone" class="avatar-drop-zone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg-secondary);">
+                  <div style="color: var(--text-secondary); font-size: 13px;">
+                    <div style="margin-bottom: 8px;">Drag and drop an image here, or</div>
+                    <label for="avatarFileInput" class="btn btn-secondary modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; cursor: pointer;">Choose File</label>
+                    <input type="file" id="avatarFileInput" accept="image/png,image/jpeg,image/gif,image/webp" style="display: none;">
+                  </div>
+                </div>
+                <div id="avatarActions" style="margin-top: 8px; display: none;">
+                  <button type="button" id="removeAvatarBtn" class="btn btn-secondary modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; color: var(--danger-color);">Remove Image</button>
+                </div>
+                <div class="form-help" style="color: var(--text-muted); font-size: 13px; margin-top: 8px;">Supported formats: PNG, JPG, GIF, WebP. Max size: 5MB.</div>
+                <div id="avatarUploadStatus" style="margin-top: 8px; font-size: 13px;"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="form-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;">
             <div class="form-group" style="margin-bottom: 18px;">
-              <label class="form-label" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">Avatar Color</label>
+              <label class="form-label" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">Avatar Color (Fallback)</label>
               <div class="color-picker-group" style="display: flex; gap: 12px; align-items: center;">
                 <div id="colorPreview" class="color-preview" style="width: 40px; height: 40px; border-radius: 8px; border: 2px solid var(--border-color); background: #4f46e5;"></div>
                 <input type="color" id="avatarColor" class="form-input" value="#4f46e5" onchange="updateColorPreview(this.value)" style="width: 100%; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);">
               </div>
-              <div class="form-help" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Pick a color for the agent avatar.</div>
+              <div class="form-help" style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Used when no image is uploaded.</div>
             </div>
             <div class="form-group" style="margin-bottom: 18px;">
               <label class="form-label" style="display: block; font-weight: 500; margin-bottom: 8px; color: var(--text-primary);">Favorite</label>

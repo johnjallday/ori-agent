@@ -154,6 +154,7 @@ export class AgentCanvasState {
     this.tasks = [];
     this.attachments = [];
     this.storeNodes = [];  // Store nodes (file storage nodes)
+    this.directoryReferences = [];  // Directory references (read-only file paths)
 
     // Data & Communication
     this.messages = [];
@@ -481,6 +482,25 @@ export class AgentCanvasState {
       const storeNode = this.storeNodes[index];
       this.storeNodes.splice(index, 1);
       this.eventBus.emit(EVENT_TYPES.STORE_NODE_DELETED, { storeNode });
+    }
+  }
+
+  /**
+   * Set directory references
+   */
+  setDirectoryReferences(directories) {
+    this.directoryReferences = directories || [];
+  }
+
+  /**
+   * Remove directory reference by ID
+   */
+  removeDirectoryReference(directoryId) {
+    const index = this.directoryReferences.findIndex(d => d.id === directoryId);
+    if (index !== -1) {
+      const directory = this.directoryReferences[index];
+      this.directoryReferences.splice(index, 1);
+      this.eventBus.emit(EVENT_TYPES.DIRECTORY_DELETED, { directory });
     }
   }
 

@@ -1287,6 +1287,136 @@ export class RendererNodes {
   }
 
   /**
+   * Draw directory reference nodes
+   */
+  drawDirectoryNodes() {
+    if (!this.state.directoryReferences || this.state.directoryReferences.length === 0) return;
+
+    this.state.directoryReferences.forEach((directory) => {
+      if (directory.x == null || directory.y == null) return;
+
+      const cardWidth = 180;
+      const cardHeight = 90;
+      const cardX = directory.x - cardWidth / 2;
+      const cardY = directory.y - cardHeight / 2;
+
+      // Store bounds for hit testing
+      directory.cardBounds = { x: cardX, y: cardY, width: cardWidth, height: cardHeight };
+
+      // Draw selection highlight if this directory is selected
+      if (this.state.isNodeSelected(directory.id)) {
+        const isPrimary = this.state.isFirstSelected(directory.id);
+        this.drawSelectionHighlight(cardX, cardY, cardWidth, cardHeight, 8, isPrimary);
+      }
+
+      // Base color (amber/orange for directories)
+      const baseColor = '#f59e0b';
+
+      // Background
+      this.ctx.save();
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = 'rgba(0,0,0,0.1)';
+      this.ctx.shadowBlur = 8;
+      this.ctx.shadowOffsetY = 2;
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.fill();
+      this.ctx.restore();
+
+      // Border
+      this.ctx.strokeStyle = baseColor;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.primitives.roundRect(cardX, cardY, cardWidth, cardHeight, 8);
+      this.ctx.stroke();
+
+      // Folder icon
+      const iconSize = 18;
+      const iconX = cardX + 10;
+      const iconY = cardY + 14;
+
+      this.ctx.fillStyle = baseColor;
+
+      // Draw folder shape
+      this.ctx.beginPath();
+      this.ctx.moveTo(iconX, iconY + 4);
+      this.ctx.lineTo(iconX + 7, iconY + 4);
+      this.ctx.lineTo(iconX + 9, iconY);
+      this.ctx.lineTo(iconX + iconSize, iconY);
+      this.ctx.lineTo(iconX + iconSize, iconY + iconSize - 2);
+      this.ctx.lineTo(iconX, iconY + iconSize - 2);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // Title
+      this.ctx.fillStyle = '#0f172a';
+      this.ctx.font = 'bold 12px system-ui';
+      const title = directory.name || 'Directory';
+      const truncatedTitle = title.length > 15 ? title.substring(0, 15) + '...' : title;
+      this.ctx.fillText(truncatedTitle, iconX + iconSize + 8, iconY + 12);
+
+      // "READ" badge
+      const badgeX = cardX + cardWidth - 50;
+      const badgeY = cardY + 8;
+      this.ctx.fillStyle = baseColor + '20'; // 20% opacity background
+      this.primitives.roundRect(badgeX, badgeY, 40, 18, 4);
+      this.ctx.fill();
+      this.ctx.fillStyle = baseColor;
+      this.ctx.font = '10px system-ui';
+      this.ctx.fillText('READ', badgeX + 6, badgeY + 12);
+
+      // Directory path (truncated if too long)
+      this.ctx.fillStyle = '#64748b';
+      this.ctx.font = '10px system-ui';
+      let path = directory.path || '/path/to/directory';
+      if (path.length > 28) {
+        path = '...' + path.slice(-25);
+      }
+      this.ctx.fillText(path, cardX + 10, cardY + 50);
+
+      // Delete button (top-right corner)
+      const deleteSize = 18;
+      const deleteX = cardX + cardWidth - deleteSize - 6;
+      const deleteY = cardY + 6;
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+      this.ctx.beginPath();
+      this.ctx.arc(deleteX + deleteSize / 2, deleteY + deleteSize / 2, deleteSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = 2;
+      this.ctx.beginPath();
+      this.ctx.moveTo(deleteX + 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + deleteSize - 5, deleteY + deleteSize - 5);
+      this.ctx.moveTo(deleteX + deleteSize - 5, deleteY + 5);
+      this.ctx.lineTo(deleteX + 5, deleteY + deleteSize - 5);
+      this.ctx.stroke();
+
+      directory.deleteButton = {
+        x: deleteX,
+        y: deleteY,
+        width: deleteSize,
+        height: deleteSize
+      };
+
+      // Output port (for providing data to agents)
+      const outputPortSize = 10;
+      const outputPortX = cardX + cardWidth - outputPortSize / 2;
+      const outputPortY = cardY + cardHeight / 2 - outputPortSize / 2;
+
+      this.ctx.fillStyle = baseColor;
+      this.ctx.beginPath();
+      this.ctx.arc(outputPortX + outputPortSize / 2, outputPortY + outputPortSize / 2, outputPortSize / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      // Store port bounds for connections
+      directory.outPort = {
+        x: outputPortX + outputPortSize / 2,
+        y: outputPortY + outputPortSize / 2
+      };
+    });
+  }
+
+  /**
    * Get human-readable schedule summary
    */
   getScheduleSummary(config) {

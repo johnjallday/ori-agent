@@ -475,3 +475,11 @@ This project follows a feature branch workflow with squash merging.
 ### Development
 - See `docs/README.md` for complete documentation index
 - Run `make help` for available development commands
+
+## Skills
+
+When I use these words/phrases, invoke the corresponding skill:
+
+| Trigger | Skill |
+|---------|-------|
+| "commit", "commit this", "commit changes" | `/git-commit-message` (git-commit-message) |

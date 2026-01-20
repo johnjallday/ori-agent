@@ -265,6 +265,9 @@ type Workspace struct {
 
 	// WorkflowsJSON contains serialized workflow definitions.
 	WorkflowsJSON json.RawMessage `json:"workflows,omitempty"`
+
+	// DirectoryReferencesJSON contains serialized directory references.
+	DirectoryReferencesJSON json.RawMessage `json:"directory_references,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

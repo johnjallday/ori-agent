@@ -129,23 +129,24 @@ func (h *HTTPHandler) GetStudio(w http.ResponseWriter, r *http.Request) {
 	// Return studio details
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":                 studio.ID,
-		"name":               studio.Name,
-		"description":        studio.Description,
-		"agents":             studio.Agents,
-		"agent_instances":    studio.AgentInstances, // NEW: Stable agent instances
-		"agent_stats":        agentStats,
-		"workspace_progress": workspaceProgress,
-		"status":             studio.Status,
-		"tasks":              studio.Tasks,
-		"attachments":        studio.Attachments,
-		"scheduled_tasks":    studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
-		"store_nodes":        studio.StoreNodes,     // Include store nodes
-		"messages":           studio.Messages,
-		"shared_data":        studio.SharedData,
-		"layout":             studio.Layout,
-		"created_at":         studio.CreatedAt,
-		"updated_at":         studio.UpdatedAt,
+		"id":                   studio.ID,
+		"name":                 studio.Name,
+		"description":          studio.Description,
+		"agents":               studio.Agents,
+		"agent_instances":      studio.AgentInstances, // NEW: Stable agent instances
+		"agent_stats":          agentStats,
+		"workspace_progress":   workspaceProgress,
+		"status":               studio.Status,
+		"tasks":                studio.Tasks,
+		"attachments":          studio.Attachments,
+		"scheduled_tasks":      studio.ScheduledTasks, // Include scheduled tasks for scheduler nodes
+		"store_nodes":          studio.StoreNodes,     // Include store nodes
+		"directory_references": studio.DirectoryReferences,
+		"messages":             studio.Messages,
+		"shared_data":          studio.SharedData,
+		"layout":               studio.Layout,
+		"created_at":           studio.CreatedAt,
+		"updated_at":           studio.UpdatedAt,
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

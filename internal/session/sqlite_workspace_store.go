@@ -16,17 +16,18 @@ import (
 
 // workspaceJSONFields holds all serialized JSON fields for workspace storage.
 type workspaceJSONFields struct {
-	agents         []byte
-	agentInstances []byte
-	sharedData     []byte
-	layout         []byte
-	messages       []byte
-	tasks          []byte
-	attachments    []byte
-	scheduledTasks []byte
-	storeNodes     []byte
-	workflows      []byte
-	status         WorkspaceStatus
+	agents              []byte
+	agentInstances      []byte
+	sharedData          []byte
+	layout              []byte
+	messages            []byte
+	tasks               []byte
+	attachments         []byte
+	scheduledTasks      []byte
+	storeNodes          []byte
+	workflows           []byte
+	directoryReferences []byte
+	status              WorkspaceStatus
 }
 
 // serializeWorkspaceFields converts workspace fields to JSON for database storage.
@@ -93,6 +94,10 @@ func serializeWorkspaceFields(workspace *Workspace) workspaceJSONFields {
 	if fields.workflows == nil {
 		fields.workflows = []byte("{}")
 	}
+	fields.directoryReferences = workspace.DirectoryReferencesJSON
+	if fields.directoryReferences == nil {
+		fields.directoryReferences = []byte("[]")
+	}
 
 	// Default status
 	fields.status = workspace.Status
@@ -115,12 +120,12 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, description, parent_id, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
-		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows))
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences))
 
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
@@ -150,16 +155,17 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var scheduledTasksJSON sql.NullString
 	var storeNodesJSON sql.NullString
 	var workflowsJSON sql.NullString
+	var directoryReferencesJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
-			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json
+			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json
 		FROM workspaces WHERE id = ?
 	`, id).Scan(&workspace.ID, &workspace.Name, &description, &parentID, &color,
 		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
-		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON)
+		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON)
 
 	if err == sql.ErrNoRows {
 		return nil, ErrWorkspaceNotFound
@@ -211,6 +217,9 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	if workflowsJSON.Valid && workflowsJSON.String != "" {
 		workspace.WorkflowsJSON = json.RawMessage(workflowsJSON.String)
 	}
+	if directoryReferencesJSON.Valid && directoryReferencesJSON.String != "" {
+		workspace.DirectoryReferencesJSON = json.RawMessage(directoryReferencesJSON.String)
+	}
 
 	return workspace, nil
 }
@@ -224,11 +233,11 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 		UPDATE workspaces
 		SET name = ?, description = ?, parent_id = NULLIF(?, ''), color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
-			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?
+			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?
 		WHERE id = ?
 	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
-		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows),
+		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		workspace.ID)
 
 	if err != nil {
