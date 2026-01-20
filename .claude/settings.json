@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.(js|ts|html|css|tmpl)$'; then echo '[Hook] Frontend file changed - run npm run validate to test'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
