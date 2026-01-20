@@ -35,6 +35,7 @@ type AgentMetadata struct {
 	Description       string   `json:"description,omitempty"`        // Human-readable description of the agent's purpose
 	Tags              []string `json:"tags,omitempty"`               // Organizational tags for filtering and categorization
 	AvatarColor       string   `json:"avatar_color,omitempty"`       // Color for avatar display (hex color code)
+	AvatarImage       string   `json:"avatar_image,omitempty"`       // Path to custom avatar image (relative to /avatars/)
 	Favorite          bool     `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
 	ReviewEnabled     *bool    `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
 	ReviewSensitivity string   `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")

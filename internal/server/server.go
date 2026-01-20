@@ -571,6 +571,70 @@ func (s *Server) serveAgentFiles(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteBytes(w, content)
 }
 
+// serveAvatarFiles serves agent avatar images from the agent_avatars directory
+func (s *Server) serveAvatarFiles(w http.ResponseWriter, r *http.Request) {
+	// Extract the filename from the path
+	filename := strings.TrimPrefix(r.URL.Path, "/avatars/")
+	if filename == "" || filename == r.URL.Path {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Security: prevent directory traversal
+	filename = filepath.Clean(filename)
+	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
+		orihttp.BadRequest(w, "Invalid path")
+		return
+	}
+
+	// Build the full path
+	avatarPath := filepath.Join("agent_avatars", filename)
+
+	// Verify the file exists and is within the avatar directory
+	absPath, err := filepath.Abs(avatarPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	avatarsDir, err := filepath.Abs("agent_avatars")
+	if err != nil {
+		orihttp.InternalError(w, "Internal server error")
+		return
+	}
+
+	if !strings.HasPrefix(absPath, avatarsDir+string(filepath.Separator)) {
+		orihttp.BadRequest(w, "Invalid path")
+		return
+	}
+
+	// Read the file
+	content, err := os.ReadFile(avatarPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Set content type based on extension
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
+	case ".webp":
+		w.Header().Set("Content-Type", "image/webp")
+	default:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+
+	// Cache avatars for 1 hour
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	orihttp.WriteBytes(w, content)
+}
+
 // HTTPServerWrapper wraps http.Server to provide graceful shutdown capabilities
 type HTTPServerWrapper struct {
 	Server *http.Server

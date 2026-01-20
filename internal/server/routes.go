@@ -79,10 +79,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	})
 
 	// =============================================================================
+	// Agent Avatars (Static File Serving)
+	// =============================================================================
+	mux.HandleFunc("/avatars/", s.serveAvatarFiles)
+
+	// =============================================================================
 	// Agent API Endpoints
 	// =============================================================================
 	agentHandler := agenthttp.New(s.st)
 	agentHandler.ActivityLogger = s.activityLogger
+	avatarHandler := agenthttp.NewAvatarHandler(s.st)
 	mux.Handle("/api/agents", agentHandler)
 
 	// Dashboard handlers
@@ -107,6 +113,11 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		// Route activity log requests
 		if strings.Contains(r.URL.Path, "/activity") && r.Method == http.MethodGet {
 			dashboardHandler.GetAgentActivity(w, r)
+			return
+		}
+		// Route avatar upload/delete requests
+		if strings.Contains(r.URL.Path, "/avatar") {
+			avatarHandler.ServeHTTP(w, r)
 			return
 		}
 		// Route agent MCP-specific requests

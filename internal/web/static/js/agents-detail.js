@@ -189,8 +189,15 @@ function renderAgentDetails() {
   // Header
   const avatar = document.getElementById('agentAvatar');
   if (avatar) {
-    avatar.style.background = getAgentColor(currentAgent);
-    avatar.textContent = getAgentInitials(currentAgent.name);
+    // Check for custom avatar image
+    if (currentAgent.metadata?.avatar_image) {
+      avatar.innerHTML = `<img src="/avatars/${escapeHtml(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
+      avatar.style.background = 'transparent';
+      avatar.style.overflow = 'hidden';
+    } else {
+      avatar.style.background = getAgentColor(currentAgent);
+      avatar.textContent = getAgentInitials(currentAgent.name);
+    }
   }
 
   const nameEl = document.getElementById('agentName');
