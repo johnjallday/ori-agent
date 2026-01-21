@@ -1,24 +1,38 @@
 #!/bin/bash
 
-# create-release.sh - Creates a release from main branch (GitHub Flow)
+# create-release.sh - Creates a release tag on main branch
 #
 # Usage:
 #   ./scripts/create-release.sh [version]
 #   ./scripts/create-release.sh v1.3.0
 #   ./scripts/create-release.sh          # Prompts for version interactively
 #
-# Workflow:
-#   1. Ensures you're on main branch with clean working tree
-#   2. Confirms version with user (shows current VERSION file)
-#   3. Runs quick tests
-#   4. Updates VERSION file
-#   5. Creates and pushes tag (triggers GitHub Actions release)
+# Prerequisites (handled by release-manager agent or pre-release-check.sh):
+#   - Pre-release checks passed
+#   - VERSION file updated
+#   - Dev branch merged to main
+#   - Main branch pushed
+#
+# This script only:
+#   1. Verifies main branch is ready
+#   2. Creates and pushes the release tag (triggers GitHub Actions)
 
 set -e
 
 # Get the script directory and project directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Support running from any worktree - find main worktree
+MAIN_WORKTREE=""
+if git worktree list 2>/dev/null | grep -q "\[main\]"; then
+  MAIN_WORKTREE=$(git worktree list | grep "\[main\]" | awk '{print $1}')
+fi
+
+# If we found main worktree, use it; otherwise use current directory
+if [ -n "$MAIN_WORKTREE" ]; then
+  PROJECT_DIR="$MAIN_WORKTREE"
+fi
 
 # Change to project directory for all operations
 cd "$PROJECT_DIR" || exit 1
@@ -51,7 +65,7 @@ print_error() {
 show_help() {
   echo ""
   echo "╔════════════════════════════════════════════════════════════════╗"
-  echo "║              create-release.sh - Release Manager               ║"
+  echo "║              create-release.sh - Release Tag Creator           ║"
   echo "╚════════════════════════════════════════════════════════════════╝"
   echo ""
   echo -e "${BLUE}USAGE:${NC}"
@@ -59,26 +73,34 @@ show_help() {
   echo ""
   echo -e "${BLUE}ARGUMENTS:${NC}"
   echo "  [version]       Version to release (e.g., v1.3.0 or 1.3.0)"
-  echo "                  If omitted, you will be prompted to enter it"
+  echo "                  If omitted, reads from VERSION file"
   echo "                  The 'v' prefix is added automatically if missing"
   echo ""
   echo -e "${BLUE}OPTIONS:${NC}"
   echo "  --help, -h      Show this help message"
   echo ""
   echo -e "${BLUE}EXAMPLES:${NC}"
-  echo "  ./scripts/create-release.sh           # Interactive mode (prompts for version)"
+  echo "  ./scripts/create-release.sh           # Uses version from VERSION file"
   echo "  ./scripts/create-release.sh v1.3.0"
   echo "  ./scripts/create-release.sh 1.3.0"
   echo ""
-  echo -e "${BLUE}WORKFLOW:${NC}"
-  echo "  1. Ensures you're on main with clean working tree"
-  echo "  2. Pulls latest changes"
-  echo "  3. Runs quick tests"
-  echo "  4. Updates VERSION file"
-  echo "  5. Creates and pushes tag (triggers GitHub Actions release)"
+  echo -e "${BLUE}PREREQUISITES:${NC}"
+  echo "  Run these first (or use release-manager agent):"
+  echo "  1. ./scripts/pre-release-check.sh <version>  # Validates and updates VERSION"
+  echo "  2. Push dev branch"
+  echo "  3. Merge dev to main"
+  echo "  4. Push main branch"
+  echo ""
+  echo -e "${BLUE}WHAT THIS SCRIPT DOES:${NC}"
+  echo "  1. Verifies main branch is clean and up-to-date"
+  echo "  2. Creates annotated tag"
+  echo "  3. Pushes tag (triggers GitHub Actions release workflow)"
+  echo ""
+  echo -e "${BLUE}WORKTREE SUPPORT:${NC}"
+  echo "  This script can be run from any worktree - it automatically"
+  echo "  finds and operates on the main worktree."
   echo ""
   echo -e "${BLUE}RELATED COMMANDS:${NC}"
-  echo "  ./scripts/pre-release-check.sh <version>   Full validation before release"
   echo "  gh run list --workflow=release.yml         View release workflow progress"
   echo ""
   exit 0
@@ -100,23 +122,20 @@ for arg in "$@"; do
 done
 
 # Read current VERSION file
-CURRENT_VERSION=""
 VERSION_FILE="VERSION"
+CURRENT_VERSION=""
 if [ -f "$VERSION_FILE" ]; then
   CURRENT_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
 fi
 
-# If no version argument provided, prompt the user
+# If no version argument provided, use VERSION file
 if [ -z "$VERSION" ]; then
-  echo ""
   if [ -n "$CURRENT_VERSION" ]; then
-    print_status "Current VERSION file: ${YELLOW}$CURRENT_VERSION${NC}"
-  fi
-  echo -n "Enter version to release (e.g., v1.3.0): "
-  read -r VERSION
-
-  if [ -z "$VERSION" ]; then
-    print_error "No version provided. Aborting."
+    VERSION="$CURRENT_VERSION"
+    print_status "Using version from VERSION file: ${GREEN}$VERSION${NC}"
+  else
+    print_error "No version provided and VERSION file not found."
+    print_status "Usage: ./scripts/create-release.sh v1.3.0"
     exit 1
   fi
 fi
@@ -127,33 +146,11 @@ if [[ ! "$VERSION" =~ ^v ]]; then
   print_status "Added 'v' prefix: $VERSION"
 fi
 
-# Validate version format (basic check for v prefix and semantic versioning)
+# Validate version format
 if [[ ! $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   print_error "Version must be in format vX.Y.Z (e.g., v1.0.1)"
   exit 1
 fi
-
-# Confirm version with user
-echo ""
-print_status "Release version: ${GREEN}$VERSION${NC}"
-if [ -n "$CURRENT_VERSION" ]; then
-  if [ "$VERSION" = "$CURRENT_VERSION" ]; then
-    print_status "VERSION file: ${GREEN}$CURRENT_VERSION${NC} (matches)"
-  else
-    print_warning "VERSION file: ${YELLOW}$CURRENT_VERSION${NC} (will be updated to $VERSION)"
-  fi
-fi
-echo ""
-echo -n "Proceed with release $VERSION? [y/N]: "
-read -r CONFIRM
-
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-  print_status "Release cancelled."
-  exit 0
-fi
-
-echo ""
-print_status "Creating release $VERSION for Ori Agent"
 
 # Check if we're in a git repository
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
@@ -161,9 +158,16 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 1
 fi
 
+# Check current branch (should be main)
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  print_status "Operating on main worktree: $PROJECT_DIR"
+fi
+
 # Check for uncommitted changes
 if ! git diff-index --quiet HEAD --; then
-  print_error "You have uncommitted changes. Please commit or stash them first."
+  print_error "Main branch has uncommitted changes."
+  print_status "Run pre-release-check.sh first to commit all changes."
   git status --porcelain
   exit 1
 fi
@@ -174,55 +178,43 @@ if git tag -l | grep -q "^$VERSION$"; then
   exit 1
 fi
 
-# Check current branch
-CURRENT_BRANCH=$(git branch --show-current)
-
-# Must be on main branch
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  print_error "Must be on 'main' branch to create a release"
-  print_error "Current branch: '$CURRENT_BRANCH'"
-  echo ""
-  print_status "Switch to main first:"
-  echo "  cd /path/to/main/worktree"
-  echo "  # or: git switch main"
-  exit 1
+# Verify VERSION file matches
+if [ "$VERSION" != "$CURRENT_VERSION" ]; then
+  print_warning "VERSION file ($CURRENT_VERSION) doesn't match requested version ($VERSION)"
+  echo -n "Continue anyway? [y/N]: "
+  read -r CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    print_status "Release cancelled."
+    exit 0
+  fi
 fi
 
-# Pull latest changes
-print_status "Pulling latest changes..."
-git pull origin main
+# Confirm with user
+echo ""
+print_status "Ready to create release tag: ${GREEN}$VERSION${NC}"
+print_status "Working directory: $PROJECT_DIR"
+echo ""
+echo -n "Create and push tag $VERSION? [y/N]: "
+read -r CONFIRM
 
-# Run pre-release checks reminder
-if [ -f "./scripts/pre-release-check.sh" ]; then
-  print_warning "Consider running './scripts/pre-release-check.sh $VERSION' for full validation"
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  print_status "Release cancelled."
+  exit 0
 fi
-
-# Run quick tests
-print_status "Running quick tests..."
-go test -short ./... || {
-  print_error "Tests failed. Fix issues before releasing."
-  exit 1
-}
-
-# Update VERSION file
-print_status "Updating VERSION file..."
-echo "$VERSION" >"$VERSION_FILE"
-if ! git diff --quiet "$VERSION_FILE" 2>/dev/null; then
-  git add "$VERSION_FILE"
-  git commit -m "chore: bump version to $VERSION"
-fi
-
-# Push main
-print_status "Pushing main branch..."
-git push origin main
 
 # Create and push tag (triggers release.yml workflow)
-print_status "Creating and pushing tag $VERSION..."
+echo ""
+print_status "Creating annotated tag $VERSION..."
 git tag -a "$VERSION" -m "Release $VERSION"
+
+print_status "Pushing tag to origin..."
 git push origin "$VERSION"
 
+echo ""
 print_success "Release $VERSION triggered!"
 echo ""
 print_status "The release workflow is now running on GitHub Actions."
-print_status "View progress: gh run list --workflow=release.yml"
+print_status "View progress:"
+echo "  gh run list --workflow=release.yml"
+echo "  gh run watch"
 echo ""
