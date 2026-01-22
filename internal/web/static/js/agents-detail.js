@@ -122,8 +122,90 @@ function filterEditModelOptions() {
   populateEditModelOptions();
 }
 
+// Set up sidebar toggle functionality
+function setupSidebarToggle() {
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebar = document.getElementById('sidebar');
+
+  if (!sidebarToggle || !sidebar) return;
+
+  // Show sidebar on large screens by default
+  function handleSidebarResponsive() {
+    if (window.innerWidth >= 992) {
+      // Show sidebar on large screens
+      sidebar.classList.remove('d-none');
+      sidebar.classList.add('d-lg-block');
+      sidebarToggle.setAttribute('aria-expanded', 'true');
+      // Restore sidebar width
+      const savedWidth = localStorage.getItem('sidebarWidth') || '300';
+      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+    } else {
+      // Hide sidebar on small screens by default
+      sidebar.classList.add('d-none');
+      sidebar.classList.remove('d-lg-block');
+      sidebar.classList.remove('sidebar-mobile-show');
+      sidebarToggle.setAttribute('aria-expanded', 'false');
+      document.documentElement.style.setProperty('--sidebar-width', '0px');
+    }
+  }
+
+  // Toggle button click handler
+  sidebarToggle.addEventListener('click', function(event) {
+    event.preventDefault();
+
+    const isHidden = sidebar.classList.toggle('d-none');
+
+    if (isHidden) {
+      sidebar.classList.remove('d-lg-block');
+      sidebar.classList.remove('sidebar-mobile-show');
+      sidebarToggle.setAttribute('aria-expanded', 'false');
+      document.documentElement.style.setProperty('--sidebar-width', '0px');
+    } else {
+      if (window.innerWidth >= 992) {
+        sidebar.classList.add('d-lg-block');
+        sidebar.classList.remove('sidebar-mobile-show');
+      } else {
+        sidebar.classList.remove('d-lg-block');
+        sidebar.classList.add('sidebar-mobile-show');
+      }
+      sidebarToggle.setAttribute('aria-expanded', 'true');
+      const savedWidth = localStorage.getItem('sidebarWidth') || '300';
+      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+    }
+
+    if (window.EventBus) {
+      EventBus.emit('sidebar:toggled', { hidden: isHidden });
+    }
+  });
+
+  // Close sidebar when clicking outside on mobile
+  document.addEventListener('click', function(event) {
+    const isClickInSidebar = sidebar.contains(event.target);
+    const isClickOnToggle = sidebarToggle.contains(event.target);
+    const isClickInModal = event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
+
+    if (!isClickInSidebar && !isClickOnToggle && !isClickInModal &&
+        !sidebar.classList.contains('d-none') &&
+        window.innerWidth < 992) {
+      sidebar.classList.add('d-none');
+      sidebar.classList.remove('sidebar-mobile-show');
+      sidebar.classList.remove('d-lg-block');
+      document.documentElement.style.setProperty('--sidebar-width', '0px');
+    }
+  });
+
+  // Handle window resize
+  window.addEventListener('resize', handleSidebarResponsive);
+
+  // Run initial check on page load
+  handleSidebarResponsive();
+}
+
 // Initialize page
 document.addEventListener('DOMContentLoaded', async () => {
+  // Set up sidebar toggle functionality
+  setupSidebarToggle();
+
   // Get agent name from URL
   agentName = getAgentNameFromURL();
 
