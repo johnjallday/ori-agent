@@ -768,18 +768,34 @@ function startNotificationPolling() {
 function showModal(modal) {
   setTimeout(() => modal.classList.add('active'), 10);
 
+  const handleEsc = (e) => {
+    if (e.key === 'Escape') {
+      cleanupAndClose(modal);
+    }
+  };
+
+  modal._escHandler = handleEsc;
+
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
-      modal.classList.remove('active');
-      setTimeout(() => modal.remove(), 300);
+      cleanupAndClose(modal);
     }
   });
+
+  document.addEventListener('keydown', handleEsc);
+}
+
+function cleanupAndClose(modal) {
+  if (modal._escHandler) {
+    document.removeEventListener('keydown', modal._escHandler);
+  }
+  modal.classList.remove('active');
+  setTimeout(() => modal.remove(), 300);
 }
 
 function closeModal(closeBtn) {
   const modal = closeBtn.closest('.modal-overlay');
-  modal.classList.remove('active');
-  setTimeout(() => modal.remove(), 300);
+  cleanupAndClose(modal);
 }
 
 function showToast(message, type = 'info') {
