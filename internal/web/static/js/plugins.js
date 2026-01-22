@@ -767,6 +767,13 @@ function startNotificationPolling() {
 
 function showModal(modal) {
   setTimeout(() => modal.classList.add('active'), 10);
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    }
+  });
 }
 
 function closeModal(closeBtn) {
