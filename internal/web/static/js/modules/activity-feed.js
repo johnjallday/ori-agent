@@ -39,7 +39,7 @@ class ActivityFeed {
       }
     });
 
-    console.log('ActivityFeed: Initialized');
+
   }
 
   /**
@@ -97,7 +97,6 @@ class ActivityFeed {
       this.eventSource = new EventSource(url);
 
       this.eventSource.onopen = () => {
-        console.log('ActivityFeed: SSE connected');
         this.reconnectAttempts = 0;
         this.updateStatus('connected');
       };
@@ -149,8 +148,6 @@ class ActivityFeed {
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-
-    console.log(`ActivityFeed: Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     setTimeout(() => this.connect(), delay);
   }

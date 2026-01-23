@@ -31,7 +31,6 @@
       cachedPluginUpdates = data;
 
       if (data.success && data.updatesCount > 0) {
-        console.log(`Found ${data.updatesCount} plugin update(s) available`);
         // Update plugin list UI if visible
         if (typeof refreshPluginList === 'function') {
           refreshPluginList();

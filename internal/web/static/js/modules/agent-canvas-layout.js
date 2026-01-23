@@ -488,7 +488,6 @@ export class AgentCanvasLayoutManager {
         agentsWithoutPositions.forEach((agent, index) => {
           agent.x = baseX + spacing * (index + 1);
           agent.y = baseY;
-          console.log(`  Positioning new agent ${agent.nodeId || agent.name} at (${agent.x}, ${agent.y})`);
         });
       }
     }
@@ -540,7 +539,6 @@ export class AgentCanvasLayoutManager {
         attachmentsWithoutPositions.forEach((att, index) => {
           att.x = baseX + spacing * (index + 1);
           att.y = baseY;
-          console.log(`  Positioning new attachment ${att.id} at (${att.x}, ${att.y})`);
         });
       }
     }
@@ -623,7 +621,6 @@ export class AgentCanvasLayoutManager {
         storesWithoutPositions.forEach((s, index) => {
           s.x = baseX + spacing * (index + 1);
           s.y = baseY;
-          console.log(`  Positioning new store ${s.canvas_node_id || s.id} at (${s.x}, ${s.y})`);
         });
       }
     }
@@ -632,19 +629,13 @@ export class AgentCanvasLayoutManager {
     // This prevents loading extreme zoom values that break the view
     // if (layout.scale) {
     //   this.state.scale = layout.scale;
-    //   console.log(`  Restoring scale: ${layout.scale}`);
     // }
     // if (layout.offset_x !== undefined) {
     //   this.state.offsetX = layout.offset_x;
-    //   console.log(`  Restoring offsetX: ${layout.offset_x}`);
     // }
     // if (layout.offset_y !== undefined) {
     //   this.state.offsetY = layout.offset_y;
-    //   console.log(`  Restoring offsetY: ${layout.offset_y}`);
     // }
-    console.log('  Skipping zoom/pan restore - will use zoomToFit() instead');
-
-    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents, ${combinersRestored} combiners, ${connectionsRestored} connections)`);
     this.parent.draw();
   }
 }

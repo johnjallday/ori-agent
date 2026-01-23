@@ -627,8 +627,6 @@ class PluginMarketplace {
   }
 
   async installPlugin(pluginName) {
-    console.log('Installing plugin:', pluginName);
-
     // Check compatibility before installation
     const plugin = this.plugins.find(p => p.name === pluginName);
     if (plugin && !this.isPluginCompatible(plugin)) {

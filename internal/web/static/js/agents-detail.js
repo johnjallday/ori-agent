@@ -757,7 +757,6 @@ async function checkPluginHasConfig(pluginName) {
     const response = await fetch(`/api/plugins/${encodeURIComponent(pluginName)}/default-settings`);
     return response.ok;
   } catch (error) {
-    console.log(`Plugin ${pluginName} configuration check failed:`, error);
     return false;
   }
 }
@@ -1159,17 +1158,15 @@ async function toggleMCPServer(serverName, enabled) {
 // Update MCP server configuration
 async function updateMCPServerConfig(serverName, configKey, value) {
   // For now, just store the value - you can expand this to save to backend
-  console.log(`Update ${serverName} config: ${configKey} = ${value}`);
   showToast(`${serverName} path updated`, 'info');
 
   // TODO: Add API call to save per-agent MCP server config
 }
 
-// Show toast notification
-function showToast(message, type = 'info') {
-  // Simple toast implementation - you can enhance this
-  console.log(`[${type.toUpperCase()}] ${message}`);
-}
+  // Show toast notification
+  function showToast(message, type = 'info') {
+    // Simple toast implementation - you can enhance this
+  }
 
 // Actions
 function chatWithAgent() {

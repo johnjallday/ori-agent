@@ -2732,7 +2732,6 @@ class TaskModalController {
         if (!response.ok) {
           throw new Error(`Upload failed: ${response.status}`);
         }
-        console.log('Uploaded file to task:', file.name);
       } catch (error) {
         console.error('Failed to upload file:', file.name, error);
         this.showToast(`Failed to upload ${file.name}`, 'error');

@@ -111,8 +111,6 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
   const originalText = button.innerHTML;
 
   try {
-    console.log('Installing plugin:', pluginName);
-
     // Show loading state
     button.disabled = true;
     button.innerHTML = `
@@ -121,8 +119,6 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
       </div>
       Installing...
     `;
-
-    console.log('Sending request to /api/plugins/download with name:', pluginName);
 
     const response = await fetch('/api/plugins/download', {
       method: 'POST',
@@ -134,10 +130,7 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
       })
     });
 
-    console.log('Response status:', response.status);
-
     const result = await response.json();
-    console.log('Response result:', result);
 
     if (!response.ok || !result.success) {
       throw new Error(result.message || 'Failed to install plugin');
@@ -159,7 +152,6 @@ async function installOnlinePlugin(pluginName, downloadUrl) {
       await loadPluginsForSidebar();
     }
 
-    console.log(`Plugin ${pluginName} installed successfully`);
     if (window.Toast) {
       Toast.success(`Plugin "${pluginName}" installed successfully`);
     }

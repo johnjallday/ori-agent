@@ -58,7 +58,6 @@ class CollapsibleChat {
       this.handleNewMessage(e.detail);
     });
 
-    console.log('CollapsibleChat: Initialized');
   }
 
   /**

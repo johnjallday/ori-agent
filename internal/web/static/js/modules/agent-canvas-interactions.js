@@ -412,7 +412,6 @@ export class AgentCanvasInteractionHandler {
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();
           e.preventDefault();
-          console.log('Assigning task to combiner in mousedown:', combiner.id);
           this.parent.assignTaskToCombiner(combiner);
           return;
         }

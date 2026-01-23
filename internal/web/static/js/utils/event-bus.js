@@ -11,7 +11,7 @@
  * Usage:
  *   // Subscribe to events
  *   EventBus.on('agent:switched', (data) => {
- *     console.log('Agent changed to:', data.name);
+ *     console.info('Agent changed to:', data.name);
  *   });
  *
  *   // Publish events
@@ -19,12 +19,12 @@
  *
  *   // One-time listener
  *   EventBus.once('init:complete', () => {
- *     console.log('Initialization done');
+ *     console.info('Initialization done');
  *   });
  *
  *   // Wildcard subscription
  *   EventBus.on('agent:*', (data, eventName) => {
- *     console.log('Agent event:', eventName, data);
+ *     console.info('Agent event:', eventName, data);
  *   });
  *
  *   // Namespaced events for easy cleanup

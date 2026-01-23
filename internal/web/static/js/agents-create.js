@@ -499,7 +499,6 @@ async function generateCreateAutoConfig() {
     if (indicator) indicator.classList.remove('d-none');
     createAutoConfigApplied = true;
 
-    if (config.reasoning) console.log('Auto-config reasoning:', config.reasoning);
     if (fallback && window.Toast) {
       Toast.warning('Auto-config failed, using defaults. Review the settings before saving.');
     }

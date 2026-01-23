@@ -47,8 +47,6 @@ class SidebarResizer {
     // Store initial mouse position
     this.startX = this.getEventX(e);
     this.startWidth = this.sidebarWidth;
-
-    console.log('Started resizing sidebar');
   }
 
   handleResize(e) {
@@ -71,8 +69,6 @@ class SidebarResizer {
 
     // Save the width to localStorage
     localStorage.setItem('sidebarWidth', this.sidebarWidth.toString());
-
-    console.log(`Stopped resizing sidebar at width: ${this.sidebarWidth}px`);
   }
 
   setSidebarWidth(width) {

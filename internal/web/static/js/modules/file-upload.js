@@ -81,7 +81,6 @@ function initDragAndDrop() {
   const inputContainer = document.getElementById('inputContainer');
 
   if (!inputWrapper) {
-    console.log('inputWrapper not found');
     return;
   }
 
@@ -257,7 +256,6 @@ async function processFiles(files) {
         encoding: result.binaryContent ? 'base64' : 'text'
       });
 
-      console.log(`File added: ${file.name}, type: ${mimeType}, has binary: ${!!result.binaryContent}`);
       successCount++;
     } catch (error) {
       console.error(`Error reading file ${file.name}:`, error);

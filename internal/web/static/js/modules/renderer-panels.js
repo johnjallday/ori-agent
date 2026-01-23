@@ -512,12 +512,8 @@ export class RendererPanels {
 
     // Debug: Log once when panel width reaches target
     if (this.state.expandedAgentPanelWidth === this.state.expandedAgentPanelTargetWidth && !this.state._panelDrawnLogged) {
-      console.log('🎨 DRAWING AGENT PANEL:', {
-        panelX,
-        panelY,
-        panelWidth: this.state.expandedAgentPanelWidth,
-        panelHeight,
-        canvasWidth: this.canvas.width,
+      this.state._panelDrawnLogged = true;
+    }
         canvasHeight: this.canvas.height
       });
       this.state._panelDrawnLogged = true;

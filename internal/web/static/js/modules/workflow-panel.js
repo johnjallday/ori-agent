@@ -582,7 +582,6 @@ class WorkflowPanel {
     if (window.agentCanvas && window.agentCanvas.notifications) {
       window.agentCanvas.notifications.showNotification(message, type);
     } else {
-      console.log(`[${type}] ${message}`);
       // Fallback to alert for errors
       if (type === 'error') {
         alert(message);

@@ -3891,8 +3891,6 @@ const sessionManager = {
       window.showToast(message, type);
       return;
     }
-
-    console.log(`[${type.toUpperCase()}] ${message}`);
   },
 
   // ============================================================================
