@@ -131,7 +131,7 @@ function selectAgent(agentName) {
 function showAddAgentModal() {
   const modalElement = document.getElementById('addAgentModal');
   if (!modalElement) {
-    agentsLog.warn('addAgentModal element not found on this page');
+    agentsLog.debug('addAgentModal not available on this page');
     return;
   }
   const modal = new bootstrap.Modal(modalElement);
