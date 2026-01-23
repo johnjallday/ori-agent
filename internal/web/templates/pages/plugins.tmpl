@@ -1187,7 +1187,8 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
-    <!-- Modals will be added dynamically via JavaScript -->
+    <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
+    {{template "modals.tmpl" .}}
 
     <!-- Include app.js for sidebar toggle functionality -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
