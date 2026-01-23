@@ -316,7 +316,6 @@ class LocationSettingsManager {
   showAlert(message, type = 'info') {
     const alertContainer = document.getElementById('locationSettingsAlerts');
     if (!alertContainer) {
-      console.log(message);
       return;
     }
 

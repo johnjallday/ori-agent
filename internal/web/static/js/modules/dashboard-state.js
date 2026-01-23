@@ -51,8 +51,6 @@ export class DashboardState {
 
 
   handleRealtimeEvent(event) {
-    console.log('📡 Real-time event:', event.type, event);
-
     switch (event.type) {
       case 'workspace.status':
         this.updateWorkspaceStatus(event.data);

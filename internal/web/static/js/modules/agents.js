@@ -129,7 +129,12 @@ function selectAgent(agentName) {
 
 // Show add agent modal
 function showAddAgentModal() {
-  const modal = new bootstrap.Modal(document.getElementById('addAgentModal'));
+  const modalElement = document.getElementById('addAgentModal');
+  if (!modalElement) {
+    agentsLog.debug('addAgentModal not available on this page');
+    return;
+  }
+  const modal = new bootstrap.Modal(modalElement);
   const agentNameInput = document.getElementById('agentName');
   const agentTypeInput = document.getElementById('agentType');
   const agentSystemPromptInput = document.getElementById('agentSystemPrompt');

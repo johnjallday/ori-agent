@@ -180,8 +180,6 @@ function handleConnectionFailure() {
     // Implement exponential backoff for retries
     retryDelay = Math.min(retryDelay * 1.5, MAX_RETRY_DELAY);
 
-    console.log(`Server appears offline. Will retry in ${retryDelay/1000} seconds...`);
-
     // Schedule retry with exponential backoff
     setTimeout(() => {
       loadWorkspaces();
@@ -195,7 +193,6 @@ function handleConnectionFailure() {
 function handleConnectionSuccess() {
   if (!isServerConnected) {
     // Server is back online
-    console.log('Server connection restored');
     hideServerOfflineNotification();
 
     // Resume normal polling
@@ -212,7 +209,6 @@ function handleConnectionSuccess() {
  * Manual retry connection
  */
 window.manualRetryConnection = async function() {
-  console.log('Manual retry triggered');
   hideServerOfflineNotification();
 
   await loadWorkspaces({ showLoading: true });

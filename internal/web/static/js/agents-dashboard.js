@@ -7,9 +7,7 @@ const dashboardCurrentSort = 'name';
 const dashboardSortOrder = 'asc';
 let dashboardRefreshInterval = null;
 
-// Initialize dashboard
 function initializeDashboard() {
-  console.log('🚀 Initializing agents dashboard...');
   loadAgents();
   setupAutoRefresh();
 }
@@ -56,31 +54,25 @@ function setupAutoRefresh() {
   });
 }
 
-// Load agents from API
 async function loadAgents() {
   try {
-    console.log('🔄 Loading agents from API...');
     showLoading(true);
     const response = await fetch('/api/agents');
-    console.log('📡 Response received:', response.status);
 
     if (!response.ok) {
       throw new Error('Failed to load agents');
     }
 
     const data = await response.json();
-    console.log('📊 Data received:', data);
     dashboardAllAgents = data.agents || [];
     dashboardFilteredAgents = [...dashboardAllAgents];
-    console.log('✅ Loaded', dashboardAllAgents.length, 'agents');
 
     updateStatistics();
     renderDashboardAgents();
     showLoading(false);
-    console.log('✓ Rendering complete');
 
   } catch (error) {
-    console.error('❌ Error loading agents:', error);
+    console.error('Error loading agents:', error);
     showLoading(false);
     showError('Failed to load agents');
   }

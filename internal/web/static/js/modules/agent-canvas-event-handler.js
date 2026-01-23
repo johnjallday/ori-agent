@@ -23,7 +23,6 @@ export class AgentCanvasEventHandler {
 
     this.parent.eventSource = connectProgressStream(this.parent.studioId, {
       onInitial: (data) => {
-        console.log('📊 Initial progress state:', data);
         this.processWorkspacePayload(data, { setTasks: true, source: 'initial' });
       },
       onWorkspaceProgress: (data) => {
@@ -88,7 +87,6 @@ export class AgentCanvasEventHandler {
       }
     });
 
-    console.log('🔄 Connected to progress stream');
     // Emit a synthetic workspace snapshot immediately so UI reacts without waiting for server tick
     this.emitImmediateWorkspaceProgress();
   }
@@ -98,13 +96,6 @@ export class AgentCanvasEventHandler {
    */
   processWorkspacePayload(data, { setTasks = false, source = 'workspace.progress' } = {}) {
     if (!data) return;
-
-    const payloadForLog = {
-      ...data,
-      type: data.type || source || 'workspace.progress',
-      timestamp: data.timestamp || new Date().toISOString()
-    };
-    console.log('📊 Workspace progress update:', payloadForLog);
 
     if (data.workspace_progress) {
       this.parent.workspaceProgress = data.workspace_progress;
@@ -311,7 +302,6 @@ export class AgentCanvasEventHandler {
     // Find the task in state
     const task = this.state.tasks.find(t => t.id === taskId);
     if (!task) {
-      console.log('Task not found in canvas:', taskId);
       return;
     }
 
@@ -319,8 +309,6 @@ export class AgentCanvasEventHandler {
     if (eventData.type === 'scheduled_task.triggered') {
       task.last_scheduled_run = scheduledTask.last_execution || new Date().toISOString();
       task.next_run = scheduledTask.next_run;
-
-      console.log(`Task "${task.description}" schedule triggered`);
 
       this.parent.notifications?.showNotification?.(
         `Scheduled task triggered: ${task.description?.substring(0, 30) || 'Task'}`,
@@ -341,8 +329,6 @@ export class AgentCanvasEventHandler {
       task.last_scheduled_run = scheduledTask.last_execution || new Date().toISOString();
       task.schedule_error = null;
       task.next_run = scheduledTask.next_run;
-
-      console.log(`Task "${task.description}" schedule completed`);
     }
 
     // Trigger redraw to update visual state
@@ -363,7 +349,6 @@ export class AgentCanvasEventHandler {
     // Find the store node in state
     const storeNode = this.state.storeNodes.find(s => s.id === storeNodeId || s.canvas_node_id === storeNodeId);
     if (!storeNode) {
-      console.log('Store node not found in canvas:', storeNodeId);
       return;
     }
 
@@ -374,8 +359,6 @@ export class AgentCanvasEventHandler {
       storeNode.last_write_time = eventData.data.last_write_time || new Date().toISOString();
       storeNode.last_file_path = eventData.data.file_path || storeNode.last_file_path;
       storeNode.last_error = ''; // Clear error
-
-      console.log(`Store node "${storeNode.name}" write succeeded (${storeNode.write_count} writes)`);
 
       // Show success notification
       this.parent.notifications?.showNotification?.(
@@ -394,14 +377,9 @@ export class AgentCanvasEventHandler {
         `Store write failed (${storeNode.name}): ${storeNode.last_error}`,
         'error'
       );
-    } else if (eventData.type === 'store_node.created') {
-      console.log(`Store node "${storeNode.name}" created`);
-    } else if (eventData.type === 'store_node.updated') {
-      console.log(`Store node "${storeNode.name}" updated`);
     } else if (eventData.type === 'store_node.deleted') {
       // Remove from state
       this.state.removeStoreNode(storeNodeId);
-      console.log(`Store node deleted: ${storeNodeId}`);
     }
 
     // Trigger redraw to update visual state
@@ -412,8 +390,6 @@ export class AgentCanvasEventHandler {
    * Generic event handler for workspace events
    */
   handleEvent(event) {
-    console.log('Canvas event:', event);
-
     switch (event.type) {
       case 'task.created':
       case 'task_created':

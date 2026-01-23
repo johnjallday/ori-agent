@@ -24,7 +24,6 @@ export class AgentCanvasInitialization {
     this.parent.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
     this.parent.width = rect.width;
     this.parent.height = rect.height;
-    console.log('📐 Canvas resized:', rect.width, 'x', rect.height);
     // Don't call draw() here - let caller decide when to redraw
   }
 
@@ -32,18 +31,12 @@ export class AgentCanvasInitialization {
    * Initialize canvas with studio data
    */
   async init() {
-    console.log('🚀 AgentCanvas.init() called');
     try {
       // First, resize canvas to set width/height properties
       this.resize();
-      console.log('AgentCanvas.init() - canvas resized, width:', this.parent.width, 'height:', this.parent.height);
-
-      console.log('AgentCanvas.init() - studioId:', this.parent.studioId);
 
       // Load studio data
       this.parent.studio = await apiGet(`/api/studios/${this.parent.studioId}`);
-
-      console.log('AgentCanvas.init() - studio data loaded:', this.parent.studio);
 
       // Load workspace progress
       this.parent.workspaceProgress = this.parent.studio.workspace_progress || {
@@ -74,14 +67,12 @@ export class AgentCanvasInitialization {
         const workflowId = urlParams.get('workflow');
         if (workflowId) {
           this.state.setSelectedWorkflow(workflowId);
-          console.log('🔍 Workflow filter set from URL:', workflowId);
         }
 
         // Filter tasks based on selected workflow (or show all if none selected)
         let tasksToProcess = this.state.filterTasksByWorkflow(this.parent.studio.tasks);
 
         if (this.state.selectedWorkflowId) {
-          console.log('🔍 Filtering canvas to workflow:', this.state.selectedWorkflowId, 'Tasks:', tasksToProcess.length);
           // Store workflow mode flag for UI adjustments
           this.state.workflowViewMode = true;
           this.state.workflowId = this.state.selectedWorkflowId;
@@ -145,8 +136,6 @@ export class AgentCanvasInitialization {
 
       // Load store nodes from studio
       if (this.parent.studio.store_nodes) {
-        console.log('💾 Raw store_nodes from API:', this.parent.studio.store_nodes);
-
         const storeNodes = this.parent.studio.store_nodes.map(node => {
           // Use position from node (API), then layout, then defaults
           let x = node.x ?? 400;
@@ -158,7 +147,6 @@ export class AgentCanvasInitialization {
             if (pos) {
               x = pos.x;
               y = pos.y;
-              console.log('💾 Using layout position for', node.canvas_node_id, ':', pos);
             }
           }
 
@@ -169,16 +157,11 @@ export class AgentCanvasInitialization {
           };
         });
 
-        console.log('💾 Loaded store nodes:', storeNodes.length, storeNodes);
         this.state.setStoreNodes(storeNodes);
-      } else {
-        console.log('💾 No store_nodes in studio data');
       }
 
       // Load directory references from studio
       if (this.parent.studio.directory_references) {
-        console.log('📁 Raw directory_references from API:', this.parent.studio.directory_references);
-
         const directories = this.parent.studio.directory_references.map(dir => {
           // Use position from dir (API), then layout, then defaults
           let x = dir.x ?? 400;
@@ -190,7 +173,6 @@ export class AgentCanvasInitialization {
             if (pos) {
               x = pos.x;
               y = pos.y;
-              console.log('📁 Using layout position for', dir.id, ':', pos);
             }
           }
 
@@ -201,10 +183,7 @@ export class AgentCanvasInitialization {
           };
         });
 
-        console.log('📁 Loaded directory references:', directories.length, directories);
         this.state.setDirectoryReferences(directories);
-      } else {
-        console.log('📁 No directory_references in studio data');
       }
 
       // Initialize agent positions
@@ -395,9 +374,6 @@ export class AgentCanvasInitialization {
 
       if (task) {
         combiner.taskId = task.id;
-        console.log(`🔗 Linked combiner node ${combiner.id} to task ${task.id}`);
-      } else {
-        console.log(`⚠️ No task found for combiner node ${combiner.id}`);
       }
     });
   }
@@ -407,8 +383,6 @@ export class AgentCanvasInitialization {
    * Re-filters tasks and redraws the canvas
    */
   handleWorkflowSelected({ workflowId }) {
-    console.log('🔄 Workflow selection changed:', workflowId);
-
     // Use all tasks from the original studio data
     const allTasks = this.parent.allTasks || this.parent.studio?.tasks || [];
 
@@ -469,8 +443,6 @@ export class AgentCanvasInitialization {
 
     // Redraw canvas
     this.parent.draw();
-
-    console.log('✅ Canvas updated for workflow:', workflowId || 'All Tasks', '- Tasks:', tasks.length);
   }
 
   /**
@@ -491,8 +463,6 @@ export class AgentCanvasInitialization {
    */
   async fetchInitialProgressData() {
     try {
-      console.log('📊 Fetching initial progress data for studio:', this.parent.studioId);
-
       // Fetch fresh studio data with progress
       const response = await fetch(`/api/studios/${this.parent.studioId}`, {
         method: 'GET',
@@ -505,7 +475,6 @@ export class AgentCanvasInitialization {
       }
 
       const data = await response.json();
-      console.log('📊 Initial progress data fetched:', data);
 
       if (this.parent.eventHandler &&
           typeof this.parent.eventHandler.processWorkspacePayload === 'function') {
@@ -513,20 +482,17 @@ export class AgentCanvasInitialization {
           { ...data, type: data.type || 'workspace.progress' },
           { setTasks: true, source: 'initial.fetch' }
         );
-        console.log('✅ Initial progress data processed successfully');
         return;
       }
 
       // Fallback if event handler is unavailable
       if (data.workspace_progress) {
         this.parent.workspaceProgress = data.workspace_progress;
-        console.log('✅ Updated workspace progress:', data.workspace_progress);
       }
 
       if (data.agent_stats && this.parent.eventHandler &&
           typeof this.parent.eventHandler.updateAgentStats === 'function') {
         this.parent.eventHandler.updateAgentStats(data.agent_stats);
-        console.log('✅ Updated agent stats');
       }
 
       if (data.tasks) {
@@ -581,13 +547,10 @@ export class AgentCanvasInitialization {
             typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function') {
           this.parent.eventHandler.updateAgentResultsFromTasks(tasks);
         }
-
-        console.log('✅ Updated tasks:', tasks.length);
       }
 
       // Redraw canvas with updated data
       this.parent.draw();
-      console.log('✅ Initial progress data processed successfully');
 
     } catch (error) {
       console.error('❌ Failed to fetch initial progress data:', error);

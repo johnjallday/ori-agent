@@ -38,7 +38,6 @@ class CommandBar {
       }
     });
 
-    console.log('CommandBar: Initialized');
   }
 
   /**
@@ -304,8 +303,6 @@ class CommandBar {
     if (window.showToast) {
       const toastType = type === 'loading' ? 'info' : type;
       window.showToast(message, toastType);
-    } else {
-      console.log(`CommandBar [${type}]: ${message}`);
     }
   }
 }

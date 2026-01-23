@@ -32,15 +32,12 @@ export async function executeTask(canvas, task) {
   }
 
   const result = await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
-  console.log('✅ Task execution started:', result);
   task.status = 'in_progress';
   canvas.draw();
   setTimeout(() => canvas.init(), 1000);
 }
 
 export async function rerunTask(canvas, task) {
-  console.log('🔄 RERUN button clicked for task:', task.id, 'status:', task.status);
-
   if (!task || !task.id) {
     console.error('Invalid task:', task);
     return;
@@ -49,12 +46,9 @@ export async function rerunTask(canvas, task) {
     ? `Rerun this failed task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again.`
     : `Rerun this task?\n\n"${task.description || 'Task'}"\n\nThis will execute the task again with the same parameters.`;
 
-  console.log('🔄 Showing confirm dialog...');
   if (!confirm(confirmMsg)) {
-    console.log('🔄 User cancelled rerun');
     return;
   }
-  console.log('🔄 User confirmed rerun');
 
   // Update local task state
   task.status = 'pending';
@@ -62,9 +56,7 @@ export async function rerunTask(canvas, task) {
   canvas.draw();
 
   // Execute the task (backend will handle status reset)
-  console.log('🔄 Calling execute API...');
-  const result = await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
-  console.log('✅ Task rerun started:', result);
+  await apiPost('/api/orchestration/tasks/execute', { task_id: task.id });
   task.status = 'in_progress';
   canvas.draw();
   canvas.showNotification(`Task "${task.description || task.id}" is being rerun`, 'success');
@@ -100,8 +92,6 @@ export async function assignTaskToCombiner(canvas, combiner) {
       result_combination_mode: combiner.result_combination_mode || combiner.resultCombinationMode || 'merge'
     });
 
-    console.log('✅ Added task to combiner inputs:', response);
-
     // Update local state
     combiner.input_task_ids = newInputs;
 
@@ -122,8 +112,7 @@ export async function assignTaskToCombiner(canvas, combiner) {
 
     const combinerName = combiner.name || combiner.description || 'Merge';
     const sourceDesc = sourceTask.description?.substring(0, 30) || sourceTask.id;
-    canvas.showNotification(`✅ Added "${sourceDesc}" as input to ${combinerName}`, 'success');
-    console.log(`📊 Combiner now has ${newInputs.length} input task(s)`);
+    canvas.showNotification(`Added "${sourceDesc}" as input to ${combinerName}`, 'success');
   } catch (error) {
     console.error('Failed to add task to combiner:', error);
     canvas.showNotification(`Failed to add input: ${error.message}`, 'error');

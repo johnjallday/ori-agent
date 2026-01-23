@@ -79,8 +79,6 @@ export class AgentCanvasForms {
       requestBody.to = 'unassigned';
     }
 
-    console.log('Creating task with request body:', requestBody);
-
     try {
       const response = await fetch('/api/orchestration/tasks', {
         method: 'POST',
@@ -93,8 +91,7 @@ export class AgentCanvasForms {
         throw new Error(error || 'Failed to create task');
       }
 
-      const result = await response.json();
-      console.log('✅ Task created:', result);
+      await response.json();
 
       this.hideCreateTaskForm();
       await this.canvas.init();
@@ -366,8 +363,6 @@ export class AgentCanvasForms {
         const error = await response.text();
         throw new Error(error || 'Failed to add agent');
       }
-
-      console.log('✅ Agent added:', this.selectedAgentToAdd);
 
       this.hideAddAgentForm();
       await this.canvas.init();

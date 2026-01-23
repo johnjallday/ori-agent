@@ -56,7 +56,6 @@ class WorkspaceRealtime {
     const eventSource = new EventSource(url);
 
     eventSource.addEventListener('open', () => {
-      console.log(`✅ Connected to workspace ${workspaceId} event stream`);
       this.reconnectAttempts.set(workspaceId, 0);
       this.notifyListeners(workspaceId, {
         type: 'connection.opened',
@@ -71,7 +70,6 @@ class WorkspaceRealtime {
       const attempts = this.reconnectAttempts.get(workspaceId) || 0;
       if (attempts < this.maxReconnectAttempts) {
         this.reconnectAttempts.set(workspaceId, attempts + 1);
-        console.log(`🔄 Reconnecting to workspace ${workspaceId} (attempt ${attempts + 1}/${this.maxReconnectAttempts})...`);
 
         setTimeout(() => {
           if (this.eventListeners.has(workspaceId) && this.eventListeners.get(workspaceId).size > 0) {
@@ -173,7 +171,6 @@ class WorkspaceRealtime {
       eventSource.close();
       this.eventSources.delete(workspaceId);
       this.reconnectAttempts.delete(workspaceId);
-      console.log(`🔌 Disconnected from workspace ${workspaceId}`);
     }
   }
 
@@ -274,7 +271,6 @@ class WorkspaceRealtime {
     const eventSource = new EventSource(url);
 
     eventSource.addEventListener('open', () => {
-      console.log(`✅ Connected to notification stream for ${agentName}`);
     });
 
     eventSource.addEventListener('error', (e) => {
@@ -321,7 +317,6 @@ class WorkspaceRealtime {
     if (this.notificationSource) {
       this.notificationSource.close();
       this.notificationSource = null;
-      console.log('🔌 Disconnected from notification stream');
     }
   }
 

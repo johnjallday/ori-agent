@@ -37,7 +37,6 @@ class TaskQueue {
     window.addEventListener('taskUpdated', () => this.loadTasks());
     window.addEventListener('sseEvent', (e) => this.handleSSEEvent(e.detail));
 
-    console.log('TaskQueue: Initialized');
   }
 
   /**
@@ -216,7 +215,6 @@ class TaskQueue {
     if (window.taskModal && typeof window.taskModal.show === 'function') {
       window.taskModal.show(task);
     } else {
-      console.log('Task details:', task);
       // Fallback: could emit event for other handlers
       window.dispatchEvent(new CustomEvent('taskSelected', { detail: task }));
     }

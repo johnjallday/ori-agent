@@ -287,7 +287,6 @@ export class AgentCanvasLayoutManager {
    */
   async saveLayout() {
     if (!this.state.studioId) {
-      console.log('❌ Cannot save layout: no studioId');
       return;
     }
 
@@ -295,18 +294,14 @@ export class AgentCanvasLayoutManager {
       // Keep combiner input ports in sync with actual connections before persisting
       this.state.combinerNodes.forEach(node => this.parent.cleanupCombinerInputPorts(node));
 
-      // Collect task positions
       const taskPositions = {};
       this.state.tasks.forEach(task => {
-        console.log(`  📍 Task ${task.id}: (${task.x}, ${task.y})`);
         taskPositions[task.id] = { x: task.x, y: task.y };
       });
 
-      // Collect agent positions
       const agentPositions = {};
       this.state.agents.forEach(agent => {
         const key = agent.nodeId || agent.name;
-        console.log(`  📍 Agent ${key}: (${agent.x}, ${agent.y})`);
         agentPositions[key] = { x: agent.x, y: agent.y };
       });
 
@@ -357,12 +352,6 @@ export class AgentCanvasLayoutManager {
         animated: conn.animated
       }));
 
-      console.log(`💾 Saving layout for workspace ${this.state.studioId}`);
-      console.log(`  Tasks: ${Object.keys(taskPositions).length}, Agents: ${Object.keys(agentPositions).length}, Attachments: ${Object.keys(attachmentPositions).length}, Combiners: ${combinerNodes.length}, Stores: ${Object.keys(storePositions).length}, Connections: ${workflowConnections.length}`);
-      console.log(`  Scale: ${this.state.scale}, Offset: (${this.state.offsetX}, ${this.state.offsetY})`);
-      console.log(`  Task positions:`, taskPositions);
-      console.log(`  Agent positions:`, agentPositions);
-
       await apiPut('/api/orchestration/workspace/layout', {
         workspace_id: this.state.studioId,
         task_positions: taskPositions,
@@ -375,10 +364,7 @@ export class AgentCanvasLayoutManager {
         offset_x: this.state.offsetX,
         offset_y: this.state.offsetY
       });
-
-      console.log('✅ Layout saved successfully');
-    } catch (error) {
-      console.error('❌ Error saving layout:', error);
+    } catch {
     }
   }
 
@@ -387,17 +373,14 @@ export class AgentCanvasLayoutManager {
    */
   loadLayout() {
     if (!this.state.studio) {
-      console.log('❌ No studio object, cannot load layout');
       return;
     }
 
     if (!this.state.studio.layout) {
-      console.log('❌ No layout saved for this workspace');
       return;
     }
 
     const layout = this.state.studio.layout;
-    console.log('📂 Loading layout:', layout);
 
     let tasksRestored = 0;
     let agentsRestored = 0;
@@ -412,7 +395,6 @@ export class AgentCanvasLayoutManager {
       this.state.tasks.forEach(task => {
         const savedPos = layout.task_positions[task.id];
         if (savedPos) {
-          console.log(`  Restoring task ${task.id} to (${savedPos.x}, ${savedPos.y})`);
           task.x = savedPos.x;
           task.y = savedPos.y;
           tasksRestored++;
@@ -453,7 +435,6 @@ export class AgentCanvasLayoutManager {
         tasksWithoutPositions.forEach((task, index) => {
           task.x = baseX + spacing * (index + 1);
           task.y = baseY;
-          console.log(`  Positioning new task ${task.id} at (${task.x}, ${task.y})`);
         });
       }
     }
@@ -467,7 +448,6 @@ export class AgentCanvasLayoutManager {
         const key = agent.nodeId || agent.name;
         const savedPos = layout.agent_positions[key] || layout.agent_positions[agent.name];
         if (savedPos) {
-          console.log(`  Restoring agent ${key} to (${savedPos.x}, ${savedPos.y})`);
           agent.x = savedPos.x;
           agent.y = savedPos.y;
           agentsRestored++;
@@ -508,7 +488,6 @@ export class AgentCanvasLayoutManager {
         agentsWithoutPositions.forEach((agent, index) => {
           agent.x = baseX + spacing * (index + 1);
           agent.y = baseY;
-          console.log(`  Positioning new agent ${agent.nodeId || agent.name} at (${agent.x}, ${agent.y})`);
         });
       }
     }
@@ -560,7 +539,6 @@ export class AgentCanvasLayoutManager {
         attachmentsWithoutPositions.forEach((att, index) => {
           att.x = baseX + spacing * (index + 1);
           att.y = baseY;
-          console.log(`  Positioning new attachment ${att.id} at (${att.x}, ${att.y})`);
         });
       }
     }
@@ -643,7 +621,6 @@ export class AgentCanvasLayoutManager {
         storesWithoutPositions.forEach((s, index) => {
           s.x = baseX + spacing * (index + 1);
           s.y = baseY;
-          console.log(`  Positioning new store ${s.canvas_node_id || s.id} at (${s.x}, ${s.y})`);
         });
       }
     }
@@ -652,19 +629,13 @@ export class AgentCanvasLayoutManager {
     // This prevents loading extreme zoom values that break the view
     // if (layout.scale) {
     //   this.state.scale = layout.scale;
-    //   console.log(`  Restoring scale: ${layout.scale}`);
     // }
     // if (layout.offset_x !== undefined) {
     //   this.state.offsetX = layout.offset_x;
-    //   console.log(`  Restoring offsetX: ${layout.offset_x}`);
     // }
     // if (layout.offset_y !== undefined) {
     //   this.state.offsetY = layout.offset_y;
-    //   console.log(`  Restoring offsetY: ${layout.offset_y}`);
     // }
-    console.log('  Skipping zoom/pan restore - will use zoomToFit() instead');
-
-    console.log(`📂 Layout loaded successfully (${tasksRestored} tasks, ${agentsRestored} agents, ${combinersRestored} combiners, ${connectionsRestored} connections)`);
     this.parent.draw();
   }
 }

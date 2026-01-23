@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // PricingModel defines the cost structure for a model
@@ -208,7 +210,11 @@ func (ct *CostTracker) TrackUsage(provider, model, agentName string, usage Usage
 	copy(recordsCopy, ct.records)
 
 	// Save asynchronously with copied data
-	go func() { _ = ct.saveRecordsCopy(recordsCopy) }() // Async save, ignore errors
+	go func() {
+		if err := ct.saveRecordsCopy(recordsCopy); err != nil {
+			logger.Warn("Failed to save cost tracking records", logger.Fields{"error": err})
+		}
+	}()
 
 	return nil
 }

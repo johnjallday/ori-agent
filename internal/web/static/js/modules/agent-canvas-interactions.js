@@ -236,7 +236,6 @@ export class AgentCanvasInteractionHandler {
         this.state.resultConnectionMouseY = 0;
         this.canvas.style.cursor = 'grab';
         this.parent.draw();
-        console.log('Result connection mode cancelled');
       } else if (this.state.assignmentMode) {
         this.state.assignmentMode = false;
         this.state.assignmentSourceTask = null;
@@ -244,13 +243,11 @@ export class AgentCanvasInteractionHandler {
         this.state.assignmentMouseY = 0;
         this.canvas.style.cursor = 'grab';
         this.parent.draw();
-        console.log('Assignment mode cancelled');
       } else if (this.state.combinerAssignMode) {
         this.state.combinerAssignMode = false;
         this.state.combinerAssignmentSource = null;
         this.canvas.style.cursor = 'grab';
         this.parent.draw();
-        console.log('Combiner assignment cancelled');
       }
     }
 
@@ -340,7 +337,6 @@ export class AgentCanvasInteractionHandler {
           if (target && target.type === 'combiner') {
             e.stopPropagation();
             e.preventDefault();
-            console.log('Assigning task to combiner via port click:', target.node.id);
             this.parent.assignTaskToCombiner(target.node);
             return;
           }
@@ -351,7 +347,6 @@ export class AgentCanvasInteractionHandler {
           this.state.isDraggingConnection = true;
           this.state.connectionDragStart = clickedPort;
           this.canvas.style.cursor = 'crosshair';
-          console.log(`🔗 Started dragging connection from ${clickedPort.nodeId}.${clickedPort.portId}`);
           return;
         }
       }
@@ -417,7 +412,6 @@ export class AgentCanvasInteractionHandler {
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();
           e.preventDefault();
-          console.log('Assigning task to combiner in mousedown:', combiner.id);
           this.parent.assignTaskToCombiner(combiner);
           return;
         }
@@ -681,7 +675,6 @@ export class AgentCanvasInteractionHandler {
           this.state.resultConnectionStartX = x;
           this.state.resultConnectionStartY = y;
           this.canvas.style.cursor = 'crosshair';
-          console.log(`🔗 Started result connection from agent: ${agent.name}`);
           return;
         }
 
@@ -912,7 +905,6 @@ export class AgentCanvasInteractionHandler {
 
         if (agentTasks.length > 0) {
           const latestTask = agentTasks[0];
-          console.log(`🔗 Linking agent task ${latestTask.id} to target task ${targetTask.id}`);
           // Use existing linkTaskResult function from parent
           this.parent.linkTaskResult(latestTask.id, targetTask.id);
           this.parent.showNotification(`Linked ${this.state.resultSourceAgent.name}'s latest result to task`, 'success');
@@ -1557,7 +1549,6 @@ export class AgentCanvasInteractionHandler {
           if (x >= btn.x && x <= btn.x + btn.width &&
               y >= btn.y && y <= btn.y + btn.height) {
             // Rerun button clicked
-            console.log('🔄 RERUN button click detected for task:', task.id);
             this.parent.rerunTask(task);
             return;
           }
@@ -1681,10 +1672,8 @@ export class AgentCanvasInteractionHandler {
       if (x >= combiner.x && x <= combiner.x + combiner.width &&
           y >= combiner.y && y <= combiner.y + combiner.height) {
         // Combiner clicked
-        console.log('Combiner clicked:', combiner.id, 'assignmentMode:', this.state.assignmentMode, 'combinerAssignMode:', this.state.combinerAssignMode);
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           // In assignment mode - assign task to combiner
-          console.log('Assigning task to combiner:', combiner.id);
           this.parent.assignTaskToCombiner(combiner);
           return;
         }

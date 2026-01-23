@@ -595,7 +595,6 @@ function detectPlatform() {
       }
     } catch (e) {
       // WebGL detection failed, fall back to amd64
-      console.log('WebGL detection failed, defaulting to amd64');
     }
   }
 
@@ -711,8 +710,6 @@ function showUpdateToast(updateInfo) {
     return;
   }
 
-  // Simple console notification for now
-  console.log(`Update available: ${updateInfo.latestVersion}`);
 }
 
 // Show update message in chat
@@ -765,7 +762,7 @@ function ensureUpdateModalElement() {
   const wrapper = document.createElement('div');
   wrapper.innerHTML = `
     <div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-lg">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="updateModalLabel">

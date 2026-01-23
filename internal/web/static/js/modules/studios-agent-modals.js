@@ -365,9 +365,6 @@ async function generateAutoConfig() {
     studiosAutoConfigApplied = true;
 
     // Log reasoning if available
-    if (config.reasoning) {
-      console.log('Auto-config reasoning:', config.reasoning);
-    }
     if (fallback) {
       console.warn('Auto-config failed, using defaults.');
     }

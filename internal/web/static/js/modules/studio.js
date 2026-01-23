@@ -124,7 +124,6 @@ export class WorkspaceManager {
     };
 
     this.eventSource.addEventListener('complete', (event) => {
-      console.log('Workflow completed:', event.data);
       this.stopMonitoring();
       if (callback) {
         // Fetch final status

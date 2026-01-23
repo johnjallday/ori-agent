@@ -14,10 +14,8 @@ export class AgentCanvasContextMenu {
    * Toggle assignment mode for connecting tasks to agents/combiners
    */
   toggleAssignmentMode(task) {
-    console.log('toggleAssignmentMode called for task:', task.id);
     if (this.parent.assignmentMode && this.parent.assignmentSourceTask && this.parent.assignmentSourceTask.id === task.id) {
       // Cancel assignment mode
-      console.log('Exiting assignment mode');
       this.parent.assignmentMode = false;
       this.parent.assignmentSourceTask = null;
       this.parent.assignmentMouseX = 0;
@@ -25,7 +23,6 @@ export class AgentCanvasContextMenu {
       this.parent.canvas.style.cursor = 'grab';
     } else {
       // Enter assignment mode
-      console.log('Entering assignment mode for task:', task.id);
       this.parent.assignmentMode = true;
       this.parent.assignmentSourceTask = task;
       this.parent.canvas.style.cursor = 'crosshair';
@@ -37,8 +34,6 @@ export class AgentCanvasContextMenu {
    * Handle context menu actions for agents
    */
   handleContextMenuAction(action, agent) {
-    console.log(`🎯 Context menu action: ${action} for agent ${agent.name}`);
-
     switch (action) {
       case 'view':
         // View agent details - expand agent panel
@@ -105,8 +100,6 @@ export class AgentCanvasContextMenu {
    * Handle multi-select context menu actions
    */
   handleMultiSelectAction(action) {
-    console.log(`🎯 Multi-select action: ${action}`);
-
     switch (action) {
       case 'workflow':
         this.createWorkflowFromSelection();
@@ -156,8 +149,6 @@ export class AgentCanvasContextMenu {
       );
       return;
     }
-
-    console.log('📋 Creating workflow from nodes:', selectionData);
 
     // Show the save workflow modal
     if (window.showSaveWorkflowModal) {
@@ -396,7 +387,5 @@ export class AgentCanvasContextMenu {
       `Grouping ${count} nodes - Coming soon!`,
       'info'
     );
-
-    console.log('📁 Nodes selected for grouping:', selectedNodes);
   }
 }

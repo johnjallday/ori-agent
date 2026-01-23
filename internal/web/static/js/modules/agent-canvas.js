@@ -21,8 +21,6 @@ import { AgentCanvasInitialization } from './agent-canvas-init.js';
  */
 class AgentCanvas {
   constructor(canvasId, studioId) {
-    console.log('🎨 AgentCanvas constructor called', { canvasId, studioId });
-
     // Initialize state module (centralized state management)
     this.state = new AgentCanvasState();
 
@@ -552,8 +550,6 @@ class AgentCanvas {
           this.draw();
         }
       }, 2000);
-
-      console.log('✓ Result copied to clipboard');
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
       // Fallback: show error notification
@@ -621,7 +617,6 @@ class AgentCanvas {
         to: agent.name,
         assigned_node_id: agent.nodeId || agent.name
       });
-      console.log('✅ Task assigned:', result);
 
       // Exit assignment mode
       this.assignmentMode = false;
@@ -731,8 +726,6 @@ class AgentCanvas {
 
       await apiDelete(`/api/orchestration/tasks?${params.toString()}`);
 
-      console.log('✅ Task deleted:', task.id);
-
       // Remove task from local array
       const index = this.tasks.findIndex(t => t.id === task.id);
       if (index !== -1) {
@@ -776,8 +769,6 @@ class AgentCanvas {
       });
 
       if (response.ok) {
-        console.log('✅ Agent instance removed from studio:', agentIdentifier);
-
         // Remove only this specific agent instance from local state
         const agents = this.state.agents.filter(a => a.nodeId !== nodeId);
         this.state.setAgents(agents);
@@ -922,13 +913,11 @@ class AgentCanvas {
       this.state.storeAssignmentMouseX = 0;
       this.state.storeAssignmentMouseY = 0;
       this.canvas.style.cursor = 'grab';
-      console.log('Store assignment mode cancelled');
     } else {
       // Enter assignment mode
       this.state.storeAssignmentMode = true;
       this.state.storeAssignmentSource = storeNode;
       this.canvas.style.cursor = 'crosshair';
-      console.log('Store assignment mode activated for:', storeNode.name);
     }
     this.draw();
   }
@@ -1076,7 +1065,6 @@ class AgentCanvas {
 
       if (response.task) {
         const task = response.task;
-        console.log(`✅ Created combiner task ${task.id}`);
 
         // Add task to state with position
         const newTask = {
@@ -1146,7 +1134,6 @@ class AgentCanvas {
       conn.to === toNodeId
     );
     if (existing) {
-      console.log('Connection already exists between these nodes', { fromNodeId, toNodeId });
       this.notifications?.showNotification?.('A connection already exists between these nodes', 'info');
       return existing;
     }
@@ -1204,8 +1191,6 @@ class AgentCanvas {
       this.notifications?.showNotification?.('Workflow has no nodes', 'warning');
       return;
     }
-
-    console.log('📋 Instantiating workflow:', workflow.name);
 
     // Calculate viewport center for positioning
     const canvasRect = this.canvas.getBoundingClientRect();
