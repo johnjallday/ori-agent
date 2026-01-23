@@ -87,9 +87,7 @@ export class OnboardingManager {
     }
 
     if (skipBtn) {
-      console.log('✅ Skip button found, adding click listener');
       skipBtn.addEventListener('click', () => {
-        console.log('🖱️ Skip button clicked!');
         this.skipOnboarding();
       });
     } else {
@@ -439,8 +437,6 @@ export class OnboardingManager {
 
       // Update displayed info
       document.getElementById('detectedType').textContent = newType;
-
-      console.log('Device type updated to:', newType);
     } catch (error) {
       console.error('Error updating device type:', error);
       alert('Failed to update device type. Please try again.');
@@ -497,7 +493,6 @@ export class OnboardingManager {
 
       // Show success message
       document.getElementById('apiKeysSuccess').classList.remove('d-none');
-      console.log('API keys saved successfully');
       return true;
     } catch (error) {
       console.error('Error saving API keys:', error);
@@ -664,7 +659,6 @@ export class OnboardingManager {
       if (successAlert) {
         successAlert.classList.remove('d-none');
       }
-      console.log('System model saved successfully');
       return true;
     } catch (error) {
       console.error('Error saving system model:', error);
@@ -1167,17 +1161,13 @@ export class OnboardingManager {
 
   // Skip onboarding
   async skipOnboarding() {
-    console.log('🚀 skipOnboarding called!');
     try {
-      console.log('📡 Sending skip request to /api/onboarding/skip');
       const response = await fetch('/api/onboarding/skip', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         }
       });
-
-      console.log(`📊 Skip response: status=${response.status}, ok=${response.ok}`);
 
       if (!response.ok) {
         throw new Error('Failed to skip onboarding');
@@ -1186,13 +1176,11 @@ export class OnboardingManager {
       // Remove highlights before closing
       this.removeAllHighlights();
 
-      console.log('✅ Onboarding skipped successfully, hiding modal');
       if (this.modalInstance) {
         this.modalInstance.hide();
       }
 
       // Reload the page to show main UI
-      console.log('🔄 Reloading page to show main interface');
       window.location.reload();
     } catch (error) {
       console.error('❌ Error skipping onboarding:', error);

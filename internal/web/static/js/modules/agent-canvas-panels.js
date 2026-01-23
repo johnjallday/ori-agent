@@ -90,69 +90,45 @@ export class AgentCanvasPanelManager {
    * Toggle agent panel - opens panel for given agent or closes if already open
    */
   async toggleAgentPanel(agent) {
-    console.log('[PANEL] toggleAgentPanel called for:', agent.name);
-    console.log('[PANEL] Current expandedAgent:', this.state.expandedAgent);
-
-    // Close task panel if open (immediately, no animation)
     if (this.state.expandedTask) {
-      console.log('[PANEL] Closing task panel');
       this.state.expandedPanelWidth = 0;
       this.state.expandedTask = null;
       this.parent.resultScrollOffset = 0;
     }
-    // Close combiner panel if open (immediately, no animation)
     if (this.state.expandedCombiner) {
-      console.log('[PANEL] Closing combiner panel');
       this.state.expandedCombinerPanelWidth = 0;
       this.state.expandedCombiner = null;
     }
 
     if (this.state.expandedAgent && this.state.expandedAgent.name === agent.name) {
-      // Clicking the same agent - close panel
-      console.log('[PANEL] Same agent clicked, closing panel');
       this.closeAgentPanel();
     } else {
-      console.log('[PANEL] Opening panel for new agent');
-      // Reset scroll offset when opening new agent
       this.state.agentPanelScrollOffset = 0;
       this.state.agentPanelMaxScroll = 0;
 
-      // Fetch agent configuration before expanding (optional - doesn't block panel)
       try {
-        console.log('[PANEL] Fetching agent config for:', agent.name);
         const configResponse = await apiGet(`/api/agents/${agent.name}`);
         if (configResponse.ok) {
           const agentConfig = await configResponse.json();
-          console.log('[PANEL] Got agent config:', agentConfig);
-          // Merge config data with agent
           this.state.expandedAgent = {
             ...agent,
             config: agentConfig
           };
         } else {
-          // Use agent without detailed config if fetch fails (workspace agents may not be in global store)
-          console.log(`[PANEL] Agent ${agent.name} config not found in global store - using workspace data`);
           this.state.expandedAgent = {
             ...agent,
             config: null
           };
         }
-      } catch (error) {
-        console.log('[PANEL] Error fetching config, using workspace agent data:', error.message);
+      } catch {
         this.state.expandedAgent = {
           ...agent,
           config: null
         };
       }
 
-      console.log('[PANEL] Setting expandedAgent to:', this.state.expandedAgent);
-      console.log('[PANEL] About to start animation...');
-      console.log('[PANEL] expandedAgentPanelWidth:', this.state.expandedAgentPanelWidth);
-      console.log('[PANEL] expandedAgentPanelTargetWidth:', this.state.expandedAgentPanelTargetWidth);
       this.state.expandedAgentPanelAnimating = true;
-      console.log('[PANEL] Calling animateAgentPanel(true)');
       this.animateAgentPanel(true);
-      console.log('[PANEL] animateAgentPanel() called');
     }
   }
 
@@ -160,7 +136,6 @@ export class AgentCanvasPanelManager {
    * Close agent panel with animation
    */
   closeAgentPanel() {
-    console.log('[PANEL] closeAgentPanel called, current width:', this.state.expandedAgentPanelWidth);
     this.state.expandedAgentPanelAnimating = true;
     this.animateAgentPanel(false);
   }
@@ -169,9 +144,8 @@ export class AgentCanvasPanelManager {
    * Animate agent panel opening/closing
    */
   animateAgentPanel(expanding) {
-    let frameCount = 0;
     const animate = () => {
-      const speed = 30; // pixels per frame
+      const speed = 30;
 
       if (expanding) {
         this.state.expandedAgentPanelWidth = Math.min(
@@ -179,16 +153,9 @@ export class AgentCanvasPanelManager {
           this.state.expandedAgentPanelTargetWidth
         );
 
-        // Log every 5 frames
-        if (frameCount % 5 === 0) {
-          console.log('[ANIM] Frame', frameCount, 'width:', this.state.expandedAgentPanelWidth);
-        }
-        frameCount++;
-
-        this.parent.draw(); // Redraw canvas to show animation
+        this.parent.draw();
 
         if (this.state.expandedAgentPanelWidth >= this.state.expandedAgentPanelTargetWidth) {
-          console.log('[ANIM] Animation complete, width reached target:', this.state.expandedAgentPanelWidth);
           this.state.expandedAgentPanelAnimating = false;
         } else {
           requestAnimationFrame(animate);
@@ -196,13 +163,13 @@ export class AgentCanvasPanelManager {
       } else {
         this.state.expandedAgentPanelWidth = Math.max(this.state.expandedAgentPanelWidth - speed, 0);
 
-        this.parent.draw(); // Redraw canvas to show animation
+        this.parent.draw();
 
         if (this.state.expandedAgentPanelWidth <= 0) {
           this.state.expandedAgentPanelAnimating = false;
           this.state.expandedAgent = null;
-          this.state.agentPanelScrollOffset = 0; // Reset scroll when closing panel
-          this.state.agentPanelMaxScroll = 0; // Reset max scroll when closing panel
+          this.state.agentPanelScrollOffset = 0;
+          this.state.agentPanelMaxScroll = 0;
         } else {
           requestAnimationFrame(animate);
         }
@@ -273,13 +240,7 @@ export class AgentCanvasPanelManager {
    * Toggle help overlay visibility
    */
   toggleHelpOverlay() {
-    if (!this.parent.helpOverlayVisible) {
-      this.parent.helpOverlayVisible = true;
-      console.log('📖 Showing keyboard shortcuts');
-    } else {
-      this.parent.helpOverlayVisible = false;
-      console.log('📖 Hiding keyboard shortcuts');
-    }
+    this.parent.helpOverlayVisible = !this.parent.helpOverlayVisible;
     this.parent.draw();
   }
 }

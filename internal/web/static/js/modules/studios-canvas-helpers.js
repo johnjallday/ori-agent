@@ -10,14 +10,9 @@ const currentWorkspaceDashboard = null;
  * Hide agent details panel
  */
 function hideAgentDetails() {
-  console.log('[SIDEBAR] hideAgentDetails called');
   const panel = document.getElementById('agent-details-panel');
   if (panel) {
-    console.log('[SIDEBAR] Hiding agent panel, current display:', panel.style.display);
     panel.style.display = 'none';
-    console.log('[SIDEBAR] Agent panel hidden');
-  } else {
-    console.error('[SIDEBAR] Agent panel not found!');
   }
 }
 
@@ -35,15 +30,10 @@ function hideAttachmentDetails() {
  * Show task details in the sidebar
  */
 function showTaskDetails(task) {
-  console.log('[SIDEBAR] showTaskDetails called for:', task.description);
-
-  // Hide agent details if showing
   hideAgentDetails();
   hideAttachmentDetails();
 
-  // Force close all canvas panels
   if (window.agentCanvas && window.agentCanvas.state) {
-    console.log('[SIDEBAR] Closing canvas panels');
     window.agentCanvas.state.expandedPanelWidth = 0;
     window.agentCanvas.state.expandedTask = null;
     window.agentCanvas.state.expandedAgentPanelWidth = 0;
@@ -57,7 +47,6 @@ function showTaskDetails(task) {
   const content = document.getElementById('task-details-content');
 
   if (!panel || !content) {
-    console.error('[SIDEBAR] Panel or content not found!');
     return;
   }
 
@@ -435,8 +424,6 @@ function showTaskDetails(task) {
   if (window.agentCanvas && window.agentCanvas.state) {
     window.agentCanvas.state.expandedTask = task;
   }
-
-  console.log('[SIDEBAR] Task details populated');
 }
 
 function escapeHTML(str) {
@@ -542,23 +529,16 @@ function showAttachmentDetails(att) {
  * Hide task details panel
  */
 function hideTaskDetails() {
-  console.log('[SIDEBAR] hideTaskDetails called');
   const panel = document.getElementById('task-details-panel');
   if (panel) {
-    console.log('[SIDEBAR] Hiding task panel, current display:', panel.style.display);
     panel.style.display = 'none';
-    console.log('[SIDEBAR] Task panel hidden');
-  } else {
-    console.error('[SIDEBAR] Task panel not found!');
   }
 
-  // Hide task action buttons
   const actionsDiv = document.getElementById('task-actions');
   if (actionsDiv) {
     actionsDiv.style.display = 'none';
   }
 
-  // Clear the current task
   if (window.agentCanvas && window.agentCanvas.state) {
     window.agentCanvas.state.expandedTask = null;
   }
@@ -568,15 +548,10 @@ function hideTaskDetails() {
  * Show combiner details in the sidebar
  */
 function showCombinerDetails(combiner) {
-  console.log('[SIDEBAR] showCombinerDetails called for:', combiner.name);
-
-  // Hide other panels
   hideAgentDetails();
   hideTaskDetails();
 
-  // Force close all canvas panels
   if (window.agentCanvas && window.agentCanvas.state) {
-    console.log('[SIDEBAR] Closing canvas panels');
     window.agentCanvas.state.expandedPanelWidth = 0;
     window.agentCanvas.state.expandedTask = null;
     window.agentCanvas.state.expandedAgentPanelWidth = 0;
@@ -590,7 +565,6 @@ function showCombinerDetails(combiner) {
   const content = document.getElementById('combiner-details-content');
 
   if (!panel || !content) {
-    console.error('[SIDEBAR] Combiner panel or content not found!');
     return;
   }
 
@@ -650,7 +624,6 @@ function showCombinerDetails(combiner) {
   `;
 
   content.innerHTML = html;
-  console.log('[SIDEBAR] Combiner details populated');
 }
 
 /**
@@ -936,8 +909,6 @@ async function deleteCurrentTask() {
     });
 
     if (response.ok) {
-      console.log('Task deleted successfully');
-
       // Remove from local tasks array
       const taskIndex = window.agentCanvas.state.tasks.findIndex(t => t.id === task.id);
       if (taskIndex !== -1) {
@@ -999,7 +970,6 @@ async function editCurrentTask() {
     });
 
     if (response.ok) {
-      console.log('Task updated successfully');
       // Update the task locally
       task.description = newDescription.trim();
       task.to = assignTo;
@@ -1056,7 +1026,6 @@ async function unassignCurrentTask() {
     });
 
     if (response.ok) {
-      console.log('Task unassigned successfully');
       // Update the task locally
       task.to = 'unassigned';
       task.status = 'pending';
@@ -1096,20 +1065,15 @@ async function unassignCurrentTask() {
  * Show Store Details in the sidebar with edit capabilities
  */
 function showStoreDetails(storeNode) {
-  console.log('[SIDEBAR] showStoreDetails called for:', storeNode.name);
-
-  // Hide other details
   hideAgentDetails();
   hideAttachmentDetails();
   const taskPanel = document.getElementById('task-details-panel');
   if (taskPanel) taskPanel.style.display = 'none';
 
-  // Use the same task details panel but rename title
   const panel = document.getElementById('task-details-panel');
   const content = document.getElementById('task-details-content');
 
   if (!panel || !content) {
-    console.error('[SIDEBAR] Panel or content not found!');
     return;
   }
 
@@ -1611,7 +1575,7 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
       }, 100);
     }
 
-    console.log(`Removed input "${inputDesc}..." from task`);
+
   } catch (error) {
     console.error('Failed to remove input:', error);
     alert(`Failed to remove input: ${error.message}`);
@@ -2078,8 +2042,6 @@ async function createTask() {
  * Show agent details panel
  */
 async function showAgentDetails(agent) {
-  console.log('[SIDEBAR] showAgentDetails (async) called for:', agent.name);
-
   // Hide task details if showing
   hideTaskDetails();
   hideAttachmentDetails();
@@ -2281,7 +2243,6 @@ window.openPluginConfigForAgent = openPluginConfigForAgent;
  * Add timeline event (placeholder)
  */
 function addTimelineEvent(event) {
-  console.log('Add timeline event:', event);
   // Implementation depends on timeline structure
 }
 
@@ -2350,11 +2311,8 @@ async function executeExecutableNodes() {
   const executable = getExecutableTasks();
   if (executable.length === 0) {
     window.agentCanvas?.showNotification?.('No executable nodes found', 'info');
-    console.log('[CANVAS] No executable nodes to run');
     return;
   }
-
-  console.log(`[CANVAS] Executing ${executable.length} runnable node(s)`);
   for (const task of executable) {
     try {
       await window.agentCanvas.executeTask(task);
@@ -2467,19 +2425,6 @@ async function createMergeWorkflowTasks() {
 
   const targetAgentName = outputConnection.to;
 
-  console.log('📊 Creating merge workflow tasks...');
-  console.log('   Input agents:', inputConnections.map(c => c.from).join(', '));
-  console.log('   Target agent:', targetAgentName);
-  console.log('');
-  console.log('💡 Instructions:');
-  console.log('   1. Create tasks for the input agents (e.g., "1+3")');
-  console.log('   2. After those tasks complete, their results are stored');
-  console.log('   3. Create a task for the target agent that references those results');
-  console.log('   4. The task description can say: "Use the results from previous tasks"');
-  console.log('');
-  console.log('   The MERGE node visually shows how data flows,');
-  console.log('   but execution happens on the agents themselves.');
-
   alert(`✅ Merge Workflow Ready!\n\n` +
           `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
           `Target Agent: ${targetAgentName}\n\n` +
@@ -2508,7 +2453,6 @@ async function addCombinerNode(type) {
 
   try {
     await canvas.createCombinerNode(type, centerX, centerY);
-    console.log(`✨ Added ${type.toUpperCase()} combiner node to canvas`);
   } catch (error) {
     console.error('Error adding combiner node:', error);
     alert(`Failed to add ${type} combiner node: ${error.message}`);
@@ -2555,7 +2499,6 @@ function zoomToFitCanvas() {
 
   // Use zoomToFitContent which includes both tasks and agents
   window.agentCanvas.zoomToFitContent();
-  console.log('🔍 Zoomed to fit all nodes');
 }
 
 /**
@@ -2571,7 +2514,6 @@ function resetCanvasView() {
   window.agentCanvas.state.offsetY = 0;
   window.agentCanvas.state.scale = 1;
   window.agentCanvas.draw();
-  console.log('🔄 Reset canvas view to default');
 }
 
 // Export functions for global access
@@ -2582,7 +2524,6 @@ window.switchView = switchView;
  * Edit agent settings
  */
 function editAgentSettings(agentName, currentType, currentModel, currentTemp) {
-  console.log('Editing agent settings:', agentName);
   const displayDiv = document.getElementById('agent-config-display');
   const editDiv = document.getElementById('agent-config-edit');
 
@@ -2881,11 +2822,8 @@ async function submitStoreNode() {
 
   if (!studioId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
-    console.error('Cannot create store node: studioId is missing');
     return;
   }
-
-  console.log('Using studioId:', studioId);
 
   try {
     // Calculate center of visible viewport
@@ -2920,8 +2858,7 @@ async function submitStoreNode() {
       throw new Error(`Failed to create store node: ${errorText}`);
     }
 
-    const result = await response.json();
-    console.log('Store node created:', result);
+    await response.json();
 
     // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('addStoreNodeModal'));
@@ -2932,8 +2869,6 @@ async function submitStoreNode() {
       await window.agentCanvas.init();
     }
 
-    // Show success message
-    console.log('Store node created successfully!');
   } catch (error) {
     console.error('Error creating store node:', error);
     alert(`Error creating store node: ${error.message}`);
@@ -2972,11 +2907,8 @@ async function submitDirectory() {
 
   if (!studioId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
-    console.error('Cannot create directory reference: studioId is missing');
     return;
   }
-
-  console.log('Creating directory reference for studioId:', studioId);
 
   try {
     // Calculate center of visible viewport
@@ -3008,8 +2940,7 @@ async function submitDirectory() {
       throw new Error(errorData.error || `Failed to create directory reference: ${response.statusText}`);
     }
 
-    const result = await response.json();
-    console.log('Directory reference created:', result);
+    await response.json();
 
     // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('addDirectoryModal'));
@@ -3323,8 +3254,6 @@ async function submitSaveWorkflow() {
       layout: pendingWorkflowData.layout || { width: 800, height: 600, node_positions: {} }
     };
 
-    console.log('Saving workflow:', requestBody);
-
     const response = await fetch('/api/workflows', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3336,8 +3265,7 @@ async function submitSaveWorkflow() {
       throw new Error(errorText || 'Failed to save workflow');
     }
 
-    const result = await response.json();
-    console.log('Workflow saved:', result);
+    await response.json();
 
     // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('saveWorkflowModal'));

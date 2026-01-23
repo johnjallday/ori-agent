@@ -5,7 +5,7 @@
  * Main orchestrator that coordinates all dashboard modules
  */
 
-console.log('[workspace-dashboard.js] File is loading - START OF FILE');
+
 
 import { DashboardState } from './dashboard-state.js';
 import { DashboardUI } from './dashboard-ui.js';
@@ -124,7 +124,22 @@ class WorkspaceDashboard {
   saveTaskSchedule(taskId) { return this.tasks.saveTaskSchedule(taskId); }
 }
 
-// Make available globally
 window.WorkspaceDashboard = WorkspaceDashboard;
 
-console.log('[workspace-dashboard.js] WorkspaceDashboard class defined - END OF FILE');
+let activeDashboard = null;
+
+window.initWorkspaceDashboard = function(workspaceId, containerId) {
+  if (activeDashboard) {
+    activeDashboard.destroy();
+  }
+  activeDashboard = new WorkspaceDashboard(workspaceId, containerId);
+  activeDashboard.init();
+  return activeDashboard;
+};
+
+window.addEventListener('pagehide', () => {
+  if (activeDashboard) {
+    activeDashboard.destroy();
+    activeDashboard = null;
+  }
+});

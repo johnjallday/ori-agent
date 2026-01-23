@@ -1259,14 +1259,12 @@ const sessionManager = {
       if (preSelectedWorkspace) {
         // Workspace already known - create session in that workspace directly
         session = await this.createSessionWithAgentInFolder(defaultAgent, preSelectedWorkspace);
-        console.log('Auto-mode session created with pre-selected workspace:', session?.id, preSelectedWorkspace);
       } else {
         // No workspace pre-selected - let AI classify later
         session = await this.createSessionWithAgent(defaultAgent);
         if (session && session.id) {
           // Mark this session for auto-classification (workspace will be determined by AI)
           this.autoModeSessionIds.add(session.id);
-          console.log('Auto-mode session created (will classify workspace):', session.id);
         }
       }
 
@@ -1440,7 +1438,6 @@ const sessionManager = {
     for (const file of this.chatPendingFiles) {
       try {
         await this.uploadFileToSession(sessionId, file);
-        console.log('Uploaded file to session:', file.name);
       } catch (error) {
         console.error('Failed to upload file:', file.name, error);
         if (window.Toast) {
@@ -3380,8 +3377,6 @@ const sessionManager = {
         if (sessionId === this.activeSessionId) {
           this.updateCurrentAgent(newAgentName);
         }
-
-        console.log(`Session ${sessionId} agent changed to ${newAgentName}`);
       }
     } catch (error) {
       console.error('Failed to change session agent:', error);
@@ -3736,7 +3731,6 @@ const sessionManager = {
     // Trigger classification after 3 message exchanges (6 messages: 3 user + 3 assistant)
     // This gives the AI enough context to understand the conversation
     if (currentCount >= 3) {
-      console.log('Triggering auto-classification for session:', sessionId);
       await this.triggerAutoClassification(sessionId);
     }
   },
@@ -3756,7 +3750,6 @@ const sessionManager = {
       }
 
       const result = await response.json();
-      console.log('Auto-classification result:', result);
 
       if (result.applied) {
         // Remove from auto-mode tracking
@@ -3787,13 +3780,11 @@ const sessionManager = {
           }
         }
       } else if (result.reasoning) {
-        console.log('Auto-classification not applied:', result.reasoning);
         // After 3 attempts without a match, stop trying
         const count = this.autoModeMessageCounts.get(sessionId) || 0;
         if (count >= 6) {
           this.autoModeSessionIds.delete(sessionId);
           this.autoModeMessageCounts.delete(sessionId);
-          console.log('Auto-classification attempts exhausted for session:', sessionId);
         }
       }
     } catch (error) {
@@ -4337,13 +4328,10 @@ const sessionManager = {
       return;
     }
 
-    console.log('Note content for attach:', note.content.substring(note.content.length - 200));
-
     // Try new format first: FILE_PATH (server storage)
     const filePathMatch = note.content.match(/<!-- FILE_PATH:(.+?) -->/);
     if (filePathMatch) {
       const [, serverPath] = filePathMatch;
-      console.log('Found FILE_PATH:', serverPath);
       await this.attachFileFromServer(serverPath);
       return;
     }
@@ -4352,7 +4340,6 @@ const sessionManager = {
     const fileDataMatch = note.content.match(/<!-- FILE_DATA:(.+?):([^:]*):([A-Za-z0-9+/=]+) -->/);
     if (fileDataMatch) {
       const [, fileName, mimeType] = fileDataMatch;
-      console.log('Found FILE_DATA:', fileName, mimeType);
       this.attachFileDirectly(fileName, mimeType, fileDataMatch[3]);
       return;
     }

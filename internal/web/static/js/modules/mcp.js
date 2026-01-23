@@ -143,7 +143,7 @@ async function loadMcpServers() {
     container.innerHTML = html;
   } catch (error) {
     console.error('Error loading MCP servers:', error);
-    container.innerHTML = '<div class="alert alert-danger">Error loading servers: ' + error.message + '</div>';
+    container.innerHTML = '<div class="alert alert-danger">Error loading servers: ' + escapeHtml(error.message) + '</div>';
   }
 }
 
@@ -208,7 +208,7 @@ async function viewMcpServerDetails(serverName) {
     bodyEl.innerHTML = html;
   } catch (error) {
     console.error('Error loading server details:', error);
-    bodyEl.innerHTML = '<div class="alert alert-danger">Error loading details: ' + error.message + '</div>';
+    bodyEl.innerHTML = '<div class="alert alert-danger">Error loading details: ' + escapeHtml(error.message) + '</div>';
   }
 }
 

@@ -333,7 +333,10 @@ class PluginHealthManager {
 // Create global instance
 const pluginHealth = new PluginHealthManager();
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
   pluginHealth.init();
+});
+
+window.addEventListener('pagehide', () => {
+  pluginHealth.destroy();
 });

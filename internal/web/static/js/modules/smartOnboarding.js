@@ -953,7 +953,7 @@ export class SmartOnboardingManager {
     }
 
     if (failed.length > 0 && listEl) {
-      listEl.innerHTML += `<li class="text-danger mt-2">Failed: ${failed.join(', ')}</li>`;
+      listEl.innerHTML += `<li class="text-danger mt-2">Failed: ${failed.map(name => this.escapeHtml(name)).join(', ')}</li>`;
     }
 
     // Refresh plugins in sidebar if available

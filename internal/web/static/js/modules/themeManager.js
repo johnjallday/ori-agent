@@ -11,8 +11,6 @@ class ThemeManager {
   }
 
   initialize() {
-    console.log('ThemeManager.initialize() called');
-
     // Load saved theme or detect system preference
     this.loadTheme();
 
@@ -21,8 +19,6 @@ class ThemeManager {
 
     // Listen for system theme changes
     this.setupSystemThemeListener();
-
-    console.log('Theme manager initialized with theme:', this.currentTheme);
   }
 
   loadTheme() {
@@ -40,17 +36,11 @@ class ThemeManager {
   }
 
   setupThemeToggle() {
-    console.log('Setting up theme toggle...');
     const toggleButton = document.getElementById('darkModeToggle');
-    console.log('Dark mode button found:', toggleButton);
     if (toggleButton) {
       toggleButton.addEventListener('click', () => {
-        console.log('Dark mode button clicked!');
         this.toggleTheme();
       });
-      console.log('Click event listener added to dark mode button');
-    } else {
-      console.error('Dark mode button not found!');
     }
   }
 
@@ -87,8 +77,6 @@ class ThemeManager {
 
     // Notify observers
     this.notifyObservers(theme);
-
-    console.log('Theme changed to:', theme);
   }
 
   applyTheme(theme) {

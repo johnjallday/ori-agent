@@ -32,10 +32,7 @@ func (m *Manager) AddZone(zone Zone) error {
 
 	// Persist to disk if path is set
 	if m.zonesFilePath != "" {
-		m.mu.Unlock() // Unlock before SaveZones (which locks internally)
-		err := m.SaveZones(m.zonesFilePath)
-		m.mu.Lock()
-		if err != nil {
+		if err := m.saveZonesLocked(m.zonesFilePath); err != nil {
 			return err
 		}
 	}
@@ -56,10 +53,7 @@ func (m *Manager) RemoveZone(zoneID string) error {
 
 	// Persist to disk if path is set
 	if m.zonesFilePath != "" {
-		m.mu.Unlock() // Unlock before SaveZones (which locks internally)
-		err := m.SaveZones(m.zonesFilePath)
-		m.mu.Lock()
-		if err != nil {
+		if err := m.saveZonesLocked(m.zonesFilePath); err != nil {
 			return err
 		}
 	}
@@ -88,10 +82,7 @@ func (m *Manager) UpdateZone(zone Zone) error {
 
 	// Persist to disk if path is set
 	if m.zonesFilePath != "" {
-		m.mu.Unlock() // Unlock before SaveZones (which locks internally)
-		err := m.SaveZones(m.zonesFilePath)
-		m.mu.Lock()
-		if err != nil {
+		if err := m.saveZonesLocked(m.zonesFilePath); err != nil {
 			return err
 		}
 	}
@@ -132,6 +123,19 @@ func (m *Manager) SaveZones(filepath string) error {
 	}
 	m.mu.RUnlock()
 
+	return m.saveZonesToFile(zones, filepath)
+}
+
+// saveZonesLocked writes zones to a JSON file (caller must hold the lock)
+func (m *Manager) saveZonesLocked(filepath string) error {
+	zones := make([]Zone, 0, len(m.zones))
+	for _, zone := range m.zones {
+		zones = append(zones, zone)
+	}
+	return m.saveZonesToFile(zones, filepath)
+}
+
+func (m *Manager) saveZonesToFile(zones []Zone, filepath string) error {
 	// Marshal zones to JSON
 	data, err := json.MarshalIndent(zones, "", "  ")
 	if err != nil {
@@ -139,12 +143,7 @@ func (m *Manager) SaveZones(filepath string) error {
 	}
 
 	// Write to file with 600 permissions (privacy)
-	err = os.WriteFile(filepath, data, 0600)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return os.WriteFile(filepath, data, 0600)
 }
 
 // LoadZones reads zones from a JSON file

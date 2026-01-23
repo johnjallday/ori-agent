@@ -295,9 +295,6 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Debug: Log the request being sent to Ollama
-	fmt.Printf("🐛 Ollama Request: %s\n", string(reqBody))
-
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/chat", bytes.NewReader(reqBody))
 	if err != nil {
@@ -324,11 +321,6 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	var ollamaResp ollamaResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ollamaResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Debug: Log the response from Ollama
-	if respJSON, err := json.Marshal(ollamaResp); err == nil {
-		fmt.Printf("🐛 Ollama Response: %s\n", string(respJSON))
 	}
 
 	// Convert to common format

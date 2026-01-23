@@ -88,9 +88,10 @@ window.updateLocationIndicator = updateLocationIndicator;
 window.refreshLocation = refreshLocation;
 window.stopLocationIndicator = stopLocationIndicator;
 
-// Auto-initialize on page load
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initLocationIndicator);
 } else {
   initLocationIndicator();
 }
+
+window.addEventListener('pagehide', stopLocationIndicator);

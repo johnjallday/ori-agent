@@ -158,8 +158,10 @@ class ChatStateMachine {
   }
 }
 
-// Export singleton instance
 export const chatStateMachine = new ChatStateMachine();
 
-// Also export the class for testing
 export { ChatStateMachine };
+
+window.addEventListener('pagehide', () => {
+  chatStateMachine.stopElapsedTimer();
+});
