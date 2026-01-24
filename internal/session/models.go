@@ -205,6 +205,9 @@ type Workspace struct {
 	// ParentID is the ID of the parent workspace, or empty for root-level workspaces.
 	ParentID string `json:"parent_id,omitempty"`
 
+	// OrderIndex controls manual ordering within a parent workspace.
+	OrderIndex int `json:"order_index,omitempty"`
+
 	// Color is an optional hex color code for the workspace icon.
 	Color string `json:"color,omitempty"`
 

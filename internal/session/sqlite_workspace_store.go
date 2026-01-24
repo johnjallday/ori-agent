@@ -114,15 +114,23 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		return ErrInvalidID
 	}
 
+	if workspace.OrderIndex == 0 {
+		nextIndex, err := s.nextWorkspaceOrderIndex(ctx, workspace.ParentID)
+		if err != nil {
+			return err
+		}
+		workspace.OrderIndex = nextIndex
+	}
+
 	// Serialize all JSON fields using helper
 	f := serializeWorkspaceFields(workspace)
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, description, parent_id, color, session_count, created_at, updated_at,
+		INSERT INTO workspaces (id, name, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color,
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, workspace.ID, workspace.Name, workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences))
@@ -135,6 +143,25 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	}
 
 	return nil
+}
+
+func (s *SQLiteStore) nextWorkspaceOrderIndex(ctx context.Context, parentID string) (int, error) {
+	var maxIndex sql.NullInt64
+	var err error
+	if parentID == "" {
+		err = s.db.QueryRowContext(ctx, "SELECT MAX(order_index) FROM workspaces WHERE parent_id IS NULL").Scan(&maxIndex)
+	} else {
+		err = s.db.QueryRowContext(ctx, "SELECT MAX(order_index) FROM workspaces WHERE parent_id = ?", parentID).Scan(&maxIndex)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to get workspace order index: %w", err)
+	}
+
+	if !maxIndex.Valid {
+		return 1, nil
+	}
+
+	return int(maxIndex.Int64) + 1, nil
 }
 
 // GetWorkspace retrieves a workspace by ID.
@@ -158,11 +185,11 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var directoryReferencesJSON sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at,
+		SELECT id, name, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json
 		FROM workspaces WHERE id = ?
-	`, id).Scan(&workspace.ID, &workspace.Name, &description, &parentID, &color,
+	`, id).Scan(&workspace.ID, &workspace.Name, &description, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
 		&agentsJSON, &agentInstancesJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON)
@@ -231,11 +258,11 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
-		SET name = ?, description = ?, parent_id = NULLIF(?, ''), color = ?, updated_at = ?,
+		SET name = ?, description = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agents = ?, agent_instances = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?
 		WHERE id = ?
-	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.Color, workspace.UpdatedAt,
+	`, workspace.Name, workspace.Description, workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agents), string(f.agentInstances), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		workspace.ID)
@@ -289,10 +316,10 @@ func (s *SQLiteStore) DeleteWorkspace(ctx context.Context, id string) error {
 // ListWorkspaces returns all workspaces as a flat list.
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, parent_id, color, session_count, created_at, updated_at,
+		SELECT id, name, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agents, agent_instances, status
 		FROM workspaces
-		ORDER BY name ASC
+		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
@@ -305,7 +332,7 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		var parentID, color, description sql.NullString
 		var agentsJSON, agentInstancesJSON, status sql.NullString
 
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &description, &parentID, &color,
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &description, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &workspace.CreatedAt, &workspace.UpdatedAt,
 			&agentsJSON, &agentInstancesJSON, &status); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)

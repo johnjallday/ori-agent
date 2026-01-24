@@ -80,6 +80,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description,omitempty"`
 		ParentID    string `json:"parent_id,omitempty"`
+		OrderIndex  *int   `json:"order_index,omitempty"`
 		Color       string `json:"color,omitempty"`
 	}
 
@@ -97,6 +98,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
+	}
+	if req.OrderIndex != nil {
+		workspace.OrderIndex = *req.OrderIndex
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), workspace); err != nil {
@@ -145,6 +149,7 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 		Name        *string `json:"name,omitempty"`
 		Description *string `json:"description,omitempty"`
 		ParentID    *string `json:"parent_id,omitempty"`
+		OrderIndex  *int    `json:"order_index,omitempty"`
 		Color       *string `json:"color,omitempty"`
 	}
 
@@ -180,6 +185,9 @@ func (h *Handler) updateWorkspace(w http.ResponseWriter, r *http.Request, id str
 			}
 		}
 		workspace.ParentID = *req.ParentID
+	}
+	if req.OrderIndex != nil {
+		workspace.OrderIndex = *req.OrderIndex
 	}
 	if req.Color != nil {
 		workspace.Color = *req.Color

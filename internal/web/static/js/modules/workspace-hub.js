@@ -94,6 +94,7 @@
     launcherGroupDescriptionInput: document.getElementById('launcherGroupDescriptionInput'),
     launcherCreateGroupBtn: document.getElementById('launcherCreateGroupBtn'),
     launcherSelectionBar: document.getElementById('launcherSelectionBar'),
+    launcherRootDropZone: document.getElementById('launcherRootDropZone'),
     launcherDeleteGroupModal: document.getElementById('launcherDeleteGroupModal'),
     launcherDeleteGroupName: document.getElementById('launcherDeleteGroupName'),
     launcherDeleteGroupCount: document.getElementById('launcherDeleteGroupCount'),
@@ -273,6 +274,7 @@
       const row = flattenedMap.get(workspace.id) || workspace;
       const childCount = Array.isArray(workspace.children) ? workspace.children.length : 0;
       const isCollapsed = state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
+      const hasChildren = Array.isArray(workspace.children) && workspace.children.length > 0;
 
       const toggleBtn = `
         <button class="launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${escapeHtml(row.id)}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -309,12 +311,13 @@
         }
         return renderWorkspaceCard(child);
       }).join('');
+      const emptyHint = hasChildren ? '' : '<div class="launcher-group-empty">Drop workspaces here</div>';
 
       return `
         <div class="launcher-group${isCollapsed ? ' is-collapsed' : ''}">
           ${groupHeader}
-          <div class="launcher-grid launcher-group-grid" ${isCollapsed ? 'hidden' : ''} data-group-children="${escapeHtml(row.id)}">
-            ${childrenHtml}
+          <div class="launcher-grid launcher-group-grid${hasChildren ? '' : ' is-empty'}" ${isCollapsed ? 'hidden' : ''} data-group-children="${escapeHtml(row.id)}">
+            ${childrenHtml || emptyHint}
           </div>
         </div>
       `;
@@ -369,6 +372,28 @@
       });
     });
 
+    elements.launcherGrid.querySelectorAll('[data-group-children]').forEach((grid) => {
+      grid.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        grid.classList.add('is-drag-over');
+        e.dataTransfer.dropEffect = 'move';
+      });
+      grid.addEventListener('dragleave', () => {
+        grid.classList.remove('is-drag-over');
+      });
+      grid.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        grid.classList.remove('is-drag-over');
+        const draggedId = e.dataTransfer.getData('text/plain');
+        const targetId = grid.getAttribute('data-group-children');
+        if (draggedId && targetId && draggedId !== targetId) {
+          reorderWorkspace(draggedId, targetId, '');
+        }
+      });
+    });
+
     elements.launcherGrid.querySelectorAll('[data-workspace-delete]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -407,6 +432,60 @@
 
   function bindLauncherDragEvents() {
     const items = elements.launcherGrid.querySelectorAll('.launcher-card-item');
+    const rootDrop = elements.launcherRootDropZone;
+    const rootGrid = elements.launcherGrid;
+
+    const isRootGridTarget = (eventTarget) => {
+      if (!eventTarget) return false;
+      if (!rootGrid || rootGrid !== eventTarget && !rootGrid.contains(eventTarget)) return false;
+      if (eventTarget.closest('.launcher-card-item')) return false;
+      if (eventTarget.closest('.launcher-group-grid')) return false;
+      return true;
+    };
+
+    if (rootDrop) {
+      rootDrop.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        rootDrop.classList.add('is-drag-over');
+        e.dataTransfer.dropEffect = 'move';
+      });
+      rootDrop.addEventListener('dragleave', () => {
+        rootDrop.classList.remove('is-drag-over');
+      });
+      rootDrop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        rootDrop.classList.remove('is-drag-over');
+        const draggedId = e.dataTransfer.getData('text/plain');
+        if (draggedId) {
+          reorderWorkspace(draggedId, '', '');
+        }
+      });
+    }
+
+    if (rootGrid) {
+      rootGrid.addEventListener('dragover', (e) => {
+        if (!isRootGridTarget(e.target)) return;
+        e.preventDefault();
+        rootGrid.classList.add('is-drag-over-root');
+        e.dataTransfer.dropEffect = 'move';
+      });
+      rootGrid.addEventListener('dragleave', (e) => {
+        if (!isRootGridTarget(e.target)) return;
+        rootGrid.classList.remove('is-drag-over-root');
+      });
+      rootGrid.addEventListener('drop', (e) => {
+        if (!isRootGridTarget(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        rootGrid.classList.remove('is-drag-over-root');
+        const draggedId = e.dataTransfer.getData('text/plain');
+        if (draggedId) {
+          reorderWorkspace(draggedId, '', '');
+        }
+      });
+    }
+
     items.forEach(item => {
       item.addEventListener('dragstart', (e) => {
         // Only allow dragging if NOT in selection mode
@@ -418,12 +497,24 @@
         e.dataTransfer.setData('text/plain', e.currentTarget.dataset.workspaceId);
         e.currentTarget.classList.add('is-dragging');
         e.dataTransfer.effectAllowed = 'move';
+        if (rootDrop) {
+          rootDrop.hidden = false;
+          rootDrop.classList.add('is-active');
+        }
       });
 
       item.addEventListener('dragend', (e) => {
         e.currentTarget.classList.remove('is-dragging');
         // Clean up any remaining drag-over classes
         items.forEach(i => i.classList.remove('is-drag-over'));
+        if (rootDrop) {
+          rootDrop.classList.remove('is-drag-over');
+          rootDrop.classList.remove('is-active');
+          rootDrop.hidden = true;
+        }
+        if (rootGrid) {
+          rootGrid.classList.remove('is-drag-over-root');
+        }
       });
 
       item.addEventListener('dragover', (e) => {
@@ -445,59 +536,78 @@
       item.addEventListener('drop', (e) => {
         e.preventDefault();
         e.currentTarget.classList.remove('is-drag-over');
-        
+
         const draggedId = e.dataTransfer.getData('text/plain');
         const targetId = e.currentTarget.dataset.workspaceId;
 
-        if (draggedId && targetId && draggedId !== targetId) {
-          moveWorkspace(draggedId, targetId);
-        }
+        if (!draggedId || !targetId || draggedId === targetId) return;
+
+        const targetParentId = getWorkspaceParentId(targetId);
+        reorderWorkspace(draggedId, targetParentId, targetId);
       });
     });
   }
 
-  async function moveWorkspace(workspaceId, parentId) {
+  async function reorderWorkspace(draggedId, targetParentId, insertBeforeId = '') {
     const state = window.WorkspaceHubState.getState();
-    if (!workspaceId || !parentId || workspaceId === parentId) return;
+    if (!draggedId) return;
+    if (targetParentId === undefined || targetParentId === null) return;
+    if (draggedId === targetParentId) return;
 
-    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
-    if (descendants.includes(parentId)) {
-      if (window.Toast) window.Toast.error('Cannot move a workspace into its own descendant.');
-      return;
+    if (targetParentId) {
+      const descendants = collectWorkspaceDescendantIds(state.workspaces || [], draggedId, { includeRoot: false });
+      if (descendants.includes(targetParentId)) {
+        if (window.Toast) window.Toast.error('Cannot move a workspace into its own descendant.');
+        return;
+      }
     }
 
     // Keep the target group expanded so the moved workspace stays visible after reload.
-    if (parentId && state.launcherCollapsedGroups) {
-      const next = new Set(state.launcherCollapsedGroups);
-      next.delete(parentId);
-      state.launcherCollapsedGroups = next;
-    }
-    if (parentId) {
-      if (!state.launcherJustExpandedGroups) state.launcherJustExpandedGroups = new Set();
-      state.launcherJustExpandedGroups.add(parentId);
-    }
-
-    // Optimistic UI update could go here, but for now we'll just wait for reload
-    try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parent_id: parentId })
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Failed to move workspace');
+    if (targetParentId) {
+      if (state.launcherCollapsedGroups) {
+        const next = new Set(state.launcherCollapsedGroups);
+        next.delete(targetParentId);
+        state.launcherCollapsedGroups = next;
       }
+      if (!state.launcherJustExpandedGroups) state.launcherJustExpandedGroups = new Set();
+      state.launcherJustExpandedGroups.add(targetParentId);
+    }
+
+    const sourceParentId = getWorkspaceParentId(draggedId);
+    const updates = {};
+
+    const targetSiblings = getSiblingIds(targetParentId).filter((id) => id !== draggedId);
+    const insertIndex = insertBeforeId ? targetSiblings.indexOf(insertBeforeId) : -1;
+    if (insertIndex >= 0) {
+      targetSiblings.splice(insertIndex, 0, draggedId);
+    } else {
+      targetSiblings.push(draggedId);
+    }
+    buildOrderUpdates(targetParentId, targetSiblings, updates, draggedId);
+
+    if (sourceParentId !== targetParentId) {
+      const sourceSiblings = getSiblingIds(sourceParentId).filter((id) => id !== draggedId);
+      buildOrderUpdates(sourceParentId, sourceSiblings, updates, '');
+    }
+
+    try {
+      await persistWorkspaceOrder(updates);
 
       if (window.Toast) {
-        const parentLabel = getWorkspaceLabel(parentId);
-        window.Toast.success(`Workspace moved to "${parentLabel}"`);
+        if (sourceParentId === targetParentId) {
+          window.Toast.success('Workspace order updated');
+        } else if (targetParentId) {
+          const parentLabel = getWorkspaceLabel(targetParentId);
+          window.Toast.success(`Workspace moved to "${parentLabel}"`);
+        } else {
+          window.Toast.success('Workspace moved to top level');
+        }
       }
+
       await loadWorkspaces();
     } catch (err) {
-      console.error('Failed to move workspace:', err);
-      if (window.Toast) window.Toast.error('Failed to move workspace: ' + err.message);
+      console.error('Failed to reorder workspace:', err);
+      if (window.Toast) window.Toast.error('Failed to reorder workspace: ' + err.message);
     }
   }
 
@@ -578,6 +688,62 @@
     const state = window.WorkspaceHubState.getState();
     const workspace = state.workspaceMap.get(workspaceId);
     return workspace?.name || 'workspace';
+  }
+
+  function getWorkspaceParentId(workspaceId) {
+    const state = window.WorkspaceHubState.getState();
+    const workspace = state.workspaceMap.get(workspaceId);
+    return workspace?.parent_id || '';
+  }
+
+  function getSiblingIds(parentId) {
+    const state = window.WorkspaceHubState.getState();
+    if (!parentId) {
+      return (state.workspaces || []).map((ws) => ws.id).filter(Boolean);
+    }
+
+    const stack = [...(state.workspaces || [])];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.id === parentId) {
+        return (node.children || []).map((child) => child.id).filter(Boolean);
+      }
+      if (node.children && node.children.length > 0) {
+        stack.push(...node.children);
+      }
+    }
+
+    return [];
+  }
+
+  function buildOrderUpdates(parentId, orderedIds, updates, movedId) {
+    orderedIds.forEach((id, index) => {
+      if (!updates[id]) updates[id] = {};
+      updates[id].order_index = index + 1;
+      if (movedId && id === movedId) {
+        updates[id].parent_id = parentId;
+      }
+    });
+  }
+
+  async function persistWorkspaceOrder(updates) {
+    const entries = Object.entries(updates);
+    if (entries.length === 0) return;
+
+    const responses = await Promise.all(entries.map(([id, payload]) => (
+      fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+    )));
+
+    const failed = responses.find((res) => !res.ok);
+    if (failed) {
+      const text = await failed.text();
+      throw new Error(text || 'Failed to reorder workspaces');
+    }
   }
 
   function workspaceHasChildren(workspaceId) {
