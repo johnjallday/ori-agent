@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/pluginloader"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -66,7 +67,11 @@ type Handler struct {
 	costTracker    *llm.CostTracker
 	sessionStore   session.HybridStore
 	toolCallStore  session.ToolCallStore
-	mcpRegistry    interface {
+	skillsManager  interface {
+		GetSkill(string, string) (*skills.Skill, bool, error)
+		ListSkills(string) ([]skills.Skill, error)
+	}
+	mcpRegistry interface {
 		GetToolsForServer(string) ([]pluginapi.PluginTool, error)
 		GetAllTools() []pluginapi.PluginTool
 	}
@@ -167,6 +172,15 @@ func (h *Handler) SetSessionStore(store session.HybridStore) {
 // SetToolCallStore sets the tool call store for storing tool execution data
 func (h *Handler) SetToolCallStore(store session.ToolCallStore) {
 	h.toolCallStore = store
+}
+
+// SetSkillsManager sets the skills manager for chat commands and skill execution
+func (h *Handler) SetSkillsManager(manager interface {
+	GetSkill(string, string) (*skills.Skill, bool, error)
+	ListSkills(string) ([]skills.Skill, error)
+}) {
+	h.skillsManager = manager
+	h.commandHandler.SetSkillsManager(manager)
 }
 
 // storeToolCall stores a tool call record for analysis
@@ -347,6 +361,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		orihttp.BadRequest(w, "empty question")
 		return
 	}
+	originalQuery := q
 
 	// Debug: Log received files
 
@@ -429,6 +444,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		h.commandHandler.HandleToolsList(w, r)
 		return
 	}
+	if q == "/skills" {
+		h.commandHandler.HandleSkillsList(w, r)
+		return
+	}
 	if q == "/exit" {
 		h.commandHandler.HandleExit(w, r)
 		return
@@ -452,6 +471,66 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		args := strings.TrimPrefix(q, "/workspace")
 		h.commandHandler.HandleWorkspace(w, r, args)
 		return
+	}
+
+	resolveAgentName := func() string {
+		if sessionID != "" && h.sessionStore != nil {
+			if sess, err := h.sessionStore.GetSession(r.Context(), sessionID); err == nil && sess != nil && sess.AgentName != "" {
+				return sess.AgentName
+			}
+		}
+		if req.AgentName != "" {
+			return req.AgentName
+		}
+		names, current := h.store.ListAgents()
+		if current == "" && len(names) > 0 {
+			return names[0]
+		}
+		return current
+	}
+
+	var invokedSkill *skillInvocation
+	if strings.HasPrefix(q, "/skill") {
+		if h.skillsManager == nil {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": "❌ Skills are not enabled.",
+			})
+			return
+		}
+		name, args, err := parseSkillCommand(q)
+		if err != nil {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ **Invalid command**: %v\n\nFormat: `/skill <name> <args>`", err),
+			})
+			return
+		}
+		agentName := resolveAgentName()
+		skill, found, err := h.skillsManager.GetSkill(agentName, name)
+		if err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		if !found {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' not found. Use /skills to list available skills.", name),
+			})
+			return
+		}
+		invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: true}
+	}
+
+	if invokedSkill == nil {
+		if name, args, ok := parseImplicitSkillCommand(q); ok && h.skillsManager != nil {
+			agentName := resolveAgentName()
+			skill, found, err := h.skillsManager.GetSkill(agentName, name)
+			if err != nil {
+				orihttp.InternalError(w, err.Error())
+				return
+			}
+			if found {
+				invokedSkill = &skillInvocation{Skill: skill, Args: args, Explicit: false}
+			}
+		}
 	}
 	if strings.HasPrefix(q, "/tool ") {
 		// Direct tool execution - bypass LLM decision-making
@@ -498,34 +577,33 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Load agent - priority: session's agent > request agent_name > global current agent
-	var current string
-
-	// First, try to get agent from the session (sessionID already extracted above)
-	if sessionID != "" && h.sessionStore != nil {
-		if sess, err := h.sessionStore.GetSession(ctx, sessionID); err == nil && sess != nil && sess.AgentName != "" {
-			current = sess.AgentName
-			logger.Debug("Using agent from session", logger.Fields{"session_id": sessionID, "agent": current})
-		}
-	}
-
-	// If no agent from session, check request body
-	if current == "" && req.AgentName != "" {
-		current = req.AgentName
-	}
-
-	// Fallback to current agent from store
-	if current == "" {
-		names, cur := h.store.ListAgents()
-		current = cur
-		if current == "" && len(names) > 0 {
-			current = names[0] // fallback to first available agent
-		}
-	}
+	current := resolveAgentName()
 
 	ag, ok := h.store.GetAgent(current)
 	if !ok {
 		orihttp.InternalError(w, fmt.Sprintf("agent '%s' not found", current))
 		return
+	}
+
+	if invokedSkill != nil && len(invokedSkill.Skill.RequiredMCPServers) > 0 {
+		missing := missingMCPServers(ag.MCPServers, invokedSkill.Skill.RequiredMCPServers)
+		if len(missing) > 0 {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' requires MCP servers: %s. Enable them in agent settings.", invokedSkill.Skill.Name, strings.Join(missing, ", ")),
+			})
+			return
+		}
+	}
+
+	sessionQuery := originalQuery
+	if invokedSkill != nil {
+		q = buildSkillPrompt(invokedSkill.Skill, invokedSkill.Args)
+		if q == "" {
+			orihttp.WriteJSON(w, map[string]any{
+				"response": fmt.Sprintf("❌ Skill '%s' has no prompt content.", invokedSkill.Skill.Name),
+			})
+			return
+		}
 	}
 
 	logger.Debug("Agent MCP servers loaded", logger.Fields{"agent": current, "server_count": len(ag.MCPServers), "servers": ag.MCPServers})
@@ -658,6 +736,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if invokedSkill != nil {
+		tools = filterToolsForSkill(tools, invokedSkill.Skill)
+	}
+
 	// Get appropriate client for this agent
 	agentClient := h.getClientForAgent(ag)
 
@@ -676,13 +758,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		if len(tools) > 0 {
 			systemPrompt += " Available tools: "
 			var toolNames []string
-			for _, pl := range ag.Plugins {
-				// Use fresh definition to get correct tool name
-				if pl.Tool != nil {
-					toolNames = append(toolNames, pl.Tool.Definition().Name)
-				} else {
-					toolNames = append(toolNames, pl.Definition.Name)
-				}
+			for _, tool := range tools {
+				toolNames = append(toolNames, tool.Name)
 			}
 			systemPrompt += strings.Join(toolNames, ", ") + "."
 		}
@@ -715,7 +792,7 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store user message in session if session ID is provided
-	h.storeMessageInSession(r.Context(), sessionID, "user", q)
+	h.storeMessageInSession(r.Context(), sessionID, "user", sessionQuery)
 
 	// Convert uploaded files to FileAttachments for tool execution
 	fileAttachments := ConvertUploadedFilesToAttachments(req.Files)

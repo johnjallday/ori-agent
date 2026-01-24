@@ -46,6 +46,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
@@ -151,6 +153,10 @@ type Server struct {
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
 	externalAgentsHandler *externalagentshttp.Handler
+
+	// Skills (local + external)
+	skillsManager *skills.Manager
+	skillsHandler *skillshttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.
@@ -374,6 +380,14 @@ func (s *Server) servePlugins(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("plugins")
 	data.ShowSidebarToggle = true
 	s.renderAndWritePage(w, "plugins", data)
+}
+
+func (s *Server) serveSkills(w http.ResponseWriter, r *http.Request) {
+	data := s.prepareBasePageData("skills")
+	data.Title = "Skills - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	s.renderAndWritePage(w, "skills", data)
 }
 
 func (s *Server) serveModels(w http.ResponseWriter, r *http.Request) {

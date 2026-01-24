@@ -138,6 +138,20 @@
                 </svg>
                 Clear
               </button>
+              <!-- Skills dropdown -->
+              <div class="position-relative d-inline-block">
+                <button id="skillsDropdownBtn" class="btn btn-sm" style="padding: 4px 10px; font-size: 12px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); transition: all 0.2s ease;" title="Run a skill" aria-label="Skills">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: middle;" aria-hidden="true">
+                    <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
+                  </svg>
+                  Skills
+                </button>
+                <div id="skillsDropdown" class="position-absolute" style="display: none; bottom: 100%; left: 0; margin-bottom: 4px; min-width: 220px; max-height: 280px; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000;">
+                  <div id="skillsDropdownContent" style="padding: 8px 0;">
+                    <div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading...</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
