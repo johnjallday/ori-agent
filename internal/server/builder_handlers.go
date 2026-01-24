@@ -30,6 +30,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/skills"
+	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 )
@@ -180,6 +182,15 @@ func (b *ServerBuilder) initializeHandlers() error {
 	}
 	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache, s.configManager)
 	logger.Info("External agents support initialized", logger.Fields{})
+
+	// Initialize skills manager and handler (local + external)
+	s.skillsManager = skills.NewManager(skills.ManagerConfig{
+		AgentStorePath: s.agentStorePath,
+		ExternalAgents: s.externalAgentsCache,
+		ConfigManager:  s.configManager,
+	})
+	s.skillsHandler = skillshttp.New(s.skillsManager, s.st)
+	s.chatHandler.SetSkillsManager(s.skillsManager)
 
 	return nil
 }

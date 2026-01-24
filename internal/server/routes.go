@@ -640,6 +640,14 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// =============================================================================
+	// Skills Endpoints
+	// =============================================================================
+	if s.skillsHandler != nil {
+		mux.HandleFunc("/api/skills", s.skillsHandler.List)
+		mux.HandleFunc("/api/skills/", s.skillsHandler.Get)
+	}
+
+	// =============================================================================
 	// Folder Picker Launcher
 	// =============================================================================
 	mux.HandleFunc("/api/launch-folder-picker", s.studioHandler.LaunchFolderPicker)

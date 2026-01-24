@@ -255,6 +255,55 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// HandleSkillsList handles the /skills command to list available skills
+func (ch *CommandHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ch.skillsManager == nil {
+		orihttp.WriteJSON(w, map[string]any{
+			"response": "No skills are currently loaded.",
+		})
+		return
+	}
+
+	_, current, ok := store.GetCurrentAgent(ch.store)
+	if !ok {
+		orihttp.InternalError(w, "current agent not found")
+		return
+	}
+
+	skillsList, err := ch.skillsManager.ListSkills(current)
+	if err != nil {
+		orihttp.InternalError(w, err.Error())
+		return
+	}
+
+	var skillsResponse strings.Builder
+	skillsResponse.WriteString("## 🧩 Available Skills\n\n")
+
+	if len(skillsList) == 0 {
+		skillsResponse.WriteString("No skills are currently loaded.")
+	} else {
+		for _, skill := range skillsList {
+			sourceLabel := strings.Title(skill.Source)
+			description := skill.Description
+			if description == "" {
+				description = "(No description)"
+			}
+			skillsResponse.WriteString(fmt.Sprintf("- **%s** (%s) - %s\n", skill.Name, sourceLabel, description))
+		}
+		skillsResponse.WriteString("\nUse `/skill <name> <args>` or `/<name>` to run a skill.")
+	}
+
+	response := map[string]any{
+		"response": skillsResponse.String(),
+	}
+
+	if encErr := json.NewEncoder(w).Encode(response); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
 // HandleSwitch handles the /switch command - now redirects users to session-based switching
 func (ch *CommandHandler) HandleSwitch(w http.ResponseWriter, r *http.Request, agentName string) {
 	w.Header().Set("Content-Type", "application/json")
