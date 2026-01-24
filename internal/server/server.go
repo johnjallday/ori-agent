@@ -13,6 +13,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagents"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -145,6 +147,10 @@ type Server struct {
 
 	// Review system
 	reviewHandler *reviewhttp.Handler
+
+	// External agents (Claude Code, Codex)
+	externalAgentsCache   *externalagents.Cache
+	externalAgentsHandler *externalagentshttp.Handler
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

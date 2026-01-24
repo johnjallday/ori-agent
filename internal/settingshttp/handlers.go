@@ -550,3 +550,44 @@ func (h *Handler) SystemPathsHandler(w http.ResponseWriter, r *http.Request) {
 		HomeDir:          homeDir,
 	})
 }
+
+// ExternalAgentsSettingsHandler handles external agents enabled settings
+func (h *Handler) ExternalAgentsSettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		orihttp.WriteJSON(w, map[string]bool{
+			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
+			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			ClaudeEnabled *bool `json:"claude_enabled,omitempty"`
+			CodexEnabled  *bool `json:"codex_enabled,omitempty"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		// Update only the settings that were provided
+		if req.ClaudeEnabled != nil {
+			h.configManager.SetExternalAgentsClaudeEnabled(*req.ClaudeEnabled)
+		}
+		if req.CodexEnabled != nil {
+			h.configManager.SetExternalAgentsCodexEnabled(*req.CodexEnabled)
+		}
+
+		if err := h.configManager.Save(); err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+
+		orihttp.WriteJSON(w, map[string]bool{
+			"claude_enabled": h.configManager.GetExternalAgentsClaudeEnabled(),
+			"codex_enabled":  h.configManager.GetExternalAgentsCodexEnabled(),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}

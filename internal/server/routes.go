@@ -197,6 +197,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/system-model", s.settingsHandler.SystemModelHandler)
 	mux.HandleFunc("/api/settings/available-models", s.settingsHandler.AvailableModelsHandler)
 	mux.HandleFunc("/api/settings/system-paths", s.settingsHandler.SystemPathsHandler)
+	mux.HandleFunc("/api/settings/external-agents", s.settingsHandler.ExternalAgentsSettingsHandler)
 
 	// Web3 Wallet endpoints
 	if caps.Web3Wallet {
@@ -626,6 +627,16 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/review/issues", s.reviewHandler.HandleIssues)
 		mux.HandleFunc("/api/review/export", s.reviewHandler.HandleExport)
 		mux.HandleFunc("/api/review/runs", s.reviewHandler.HandleRuns)
+	}
+
+	// =============================================================================
+	// External Agents (Claude Code, Codex) Endpoints
+	// =============================================================================
+	if s.externalAgentsHandler != nil {
+		mux.HandleFunc("/api/external-agents", s.externalAgentsHandler.GetAll)
+		mux.HandleFunc("/api/external-agents/claude", s.externalAgentsHandler.GetClaude)
+		mux.HandleFunc("/api/external-agents/codex", s.externalAgentsHandler.GetCodex)
+		mux.HandleFunc("/api/external-agents/refresh", s.externalAgentsHandler.Refresh)
 	}
 
 	// =============================================================================

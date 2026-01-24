@@ -10,6 +10,8 @@ import (
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/externalagents"
+	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/healthhttp"
@@ -167,6 +169,17 @@ func (b *ServerBuilder) initializeHandlers() error {
 		s.reviewHandler = reviewhttp.NewHandler(reviewRunner, reviewStore)
 		logger.Info("Review system initialized", logger.Fields{})
 	}
+
+	// Initialize external agents (Claude Code, Codex)
+	claudeReader := externalagents.NewClaudeReader("")
+	codexReader := externalagents.NewCodexReader("")
+	s.externalAgentsCache = externalagents.NewCache(claudeReader, codexReader)
+	if err := s.externalAgentsCache.Load(); err != nil {
+		logger.Warn("Failed to load external agents cache", logger.Fields{"error": err})
+		// Non-fatal: continue without external agents
+	}
+	s.externalAgentsHandler = externalagentshttp.New(s.externalAgentsCache, s.configManager)
+	logger.Info("External agents support initialized", logger.Fields{})
 
 	return nil
 }
